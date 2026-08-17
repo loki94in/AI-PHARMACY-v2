@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { 
   X, RefreshCw, Send, AlertTriangle, CheckCircle2, Clock, 
-  WifiOff, Edit3, Play, Pause, ShieldAlert, ChevronDown, ChevronUp, Zap, Truck, Building2, MessageSquare
+  WifiOff, Edit3, Play, Pause, ShieldAlert, ChevronDown, ChevronUp, Zap, Truck, Building2, MessageSquare, Calendar, Trash2, CheckCheck
 } from 'lucide-react';
 import { api, apiClient } from '../services/api';
 import { toastEvent, whatsappQueueEvent, messageSendEvent } from '../services/events';
@@ -210,6 +210,36 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
     }
   };
 
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [clearingFailed, setClearingFailed] = useState(false);
+
+  const handleDeleteItem = async (id: number, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    try {
+      setDeletingId(id);
+      await api.deleteWhatsAppQueueItem(id);
+      toastEvent.trigger('Notification removed permanently', 'success');
+      await fetchStatus();
+    } catch (err: any) {
+      toastEvent.trigger(err?.message || 'Failed to remove notification', 'error');
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const handleClearAllFailed = async () => {
+    try {
+      setClearingFailed(true);
+      const res = await api.clearFailedWhatsAppQueue();
+      toastEvent.trigger(res.message || 'Cleared failed notifications permanently', 'success');
+      await fetchStatus();
+    } catch (err: any) {
+      toastEvent.trigger(err?.message || 'Failed to clear failed notifications', 'error');
+    } finally {
+      setClearingFailed(false);
+    }
+  };
+
   const handleSaveEditItem = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingItem || !editPhone.trim()) return;
@@ -230,6 +260,46 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
     }
   };
 
+  const [expandedDates, setExpandedDates] = useState<Record<string, boolean>>({});
+
+  const toggleDateExpand = (dateKey: string) => {
+    setExpandedDates(prev => ({ ...prev, [dateKey]: !prev[dateKey] }));
+  };
+
+  const getDateKey = (timestampMs: number | string): string => {
+    try {
+      const d = new Date(typeof timestampMs === 'number' ? timestampMs : Number(timestampMs));
+      if (isNaN(d.getTime())) return 'Older History';
+      return d.toISOString().split('T')[0];
+    } catch {
+      return 'Older History';
+    }
+  };
+
+  const formatDateHeader = (dateStr: string): string => {
+    if (dateStr === 'Older History') return 'Older Message History';
+    try {
+      const d = new Date(dateStr + 'T00:00:00');
+      if (isNaN(d.getTime())) return dateStr;
+      const today = new Date();
+      const todayStr = today.toISOString().split('T')[0];
+      
+      const yesterday = new Date(today);
+      yesterday.setDate(today.getDate() - 1);
+      const yesterdayStr = yesterday.toISOString().split('T')[0];
+
+      if (dateStr === todayStr) {
+        return `Today (${d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })})`;
+      }
+      if (dateStr === yesterdayStr) {
+        return `Yesterday (${d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })})`;
+      }
+      return d.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+    } catch {
+      return dateStr;
+    }
+  };
+
   const items: QueueItem[] = queueState?.recentItems || [];
 
   const isSpecialOrder = (t: string) => 
@@ -240,6 +310,46 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
     t === 'delivery_boy' || t === 'delivery_boy_summary' || t === 'delivery_staff' || t === 'dispatch';
   const isCustomer = (t: string) => 
     !isPurchase(t) && !isDelivery(t) && !isSpecialOrder(t);
+
+  // Helper to consolidate multiple same-day delivery boy summary dispatches into a single entry
+  const consolidateDeliveryBoyItems = (rawItems: QueueItem[]): QueueItem[] => {
+    const deliveryByDate: Record<string, QueueItem[]> = {};
+    const result: QueueItem[] = [];
+
+    for (const item of rawItems) {
+      if (isDelivery(item.type)) {
+        const dKey = getDateKey(item.created_at);
+        deliveryByDate[dKey] = deliveryByDate[dKey] || [];
+        deliveryByDate[dKey].push(item);
+      } else {
+        result.push(item);
+      }
+    }
+
+    for (const dKey of Object.keys(deliveryByDate)) {
+      const dItems = deliveryByDate[dKey];
+      if (dItems.length <= 1) {
+        result.push(...dItems);
+      } else {
+        const primary = dItems.find(i => i.type === 'delivery_boy_summary') || dItems[0];
+        const distinctMsgs = Array.from(new Set(dItems.map(i => i.message.trim()).filter(Boolean)));
+        const combinedMessage = distinctMsgs.length > 1 ? distinctMsgs.join('\n\n━━━━━━━━━━━━━━━━━━━━\n\n') : primary.message;
+        const allSent = dItems.every(i => i.status === 'sent');
+        const anyPending = dItems.some(i => i.status === 'pending' || i.status === 'sending');
+        const anyFailed = dItems.some(i => i.status.includes('failed'));
+        const aggregatedStatus = anyPending ? 'pending' : (anyFailed ? 'failed_perm' : (allSent ? 'sent' : primary.status));
+
+        result.push({
+          ...primary,
+          message: combinedMessage,
+          status: aggregatedStatus,
+          target_name: `${primary.target_name || 'Delivery Staff'} (${dItems.length} dispatches consolidated)`
+        });
+      }
+    }
+
+    return result.sort((a, b) => b.created_at - a.created_at);
+  };
 
   const filteredItems = items.filter(item => {
     // Search query check
@@ -262,14 +372,37 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
     return true; // 'all' shows everything
   });
 
-  const counts = queueState?.counts || { pending: 0, sending: 0, sent: 0, failed_offline: 0, failed_perm: 0 };
-  const pendingTotal = (counts.pending || 0) + (counts.sending || 0);
-  const failedTotal = (counts.failed_offline || 0) + (counts.failed_perm || 0);
+  const preparedItems = consolidateDeliveryBoyItems(filteredItems);
+  const todayStr = new Date().toISOString().split('T')[0];
 
-  const customerCount = items.filter(i => isCustomer(i.type)).length;
-  const deliveryCount = items.filter(i => isDelivery(i.type)).length;
-  const purchaseCount = items.filter(i => isPurchase(i.type)).length;
-  const specialCount = items.filter(i => isSpecialOrder(i.type)).length;
+  const todayItems = preparedItems.filter(i => getDateKey(i.created_at) === todayStr);
+  const olderItems = preparedItems.filter(i => getDateKey(i.created_at) !== todayStr);
+
+  const olderDateGroups: Record<string, QueueItem[]> = {};
+  for (const item of olderItems) {
+    const k = getDateKey(item.created_at);
+    olderDateGroups[k] = olderDateGroups[k] || [];
+    olderDateGroups[k].push(item);
+  }
+  const olderDates = Object.keys(olderDateGroups).sort((a, b) => b.localeCompare(a));
+
+  // Compute Today-specific counts for tab pills and stats
+  const todayRawItems = items.filter(i => getDateKey(i.created_at) === todayStr);
+  const todayConsolidatedItems = consolidateDeliveryBoyItems(todayRawItems);
+
+  const todayAllCount = todayConsolidatedItems.length;
+  const todayCustomerCount = todayConsolidatedItems.filter(i => isCustomer(i.type)).length;
+  const todayDeliveryCount = todayConsolidatedItems.filter(i => isDelivery(i.type)).length;
+  const todayPurchaseCount = todayConsolidatedItems.filter(i => isPurchase(i.type)).length;
+  const todaySpecialCount = todayConsolidatedItems.filter(i => isSpecialOrder(i.type)).length;
+  const todayPendingCount = todayConsolidatedItems.filter(i => i.status === 'pending' || i.status === 'sending').length;
+  const todaySentCount = todayConsolidatedItems.filter(i => i.status === 'sent').length;
+  const todayFailedCount = todayConsolidatedItems.filter(i => i.status === 'failed_offline' || i.status === 'failed_perm').length;
+
+  const counts = queueState?.counts || { pending: 0, sending: 0, sent: 0, failed_offline: 0, failed_perm: 0 };
+  const pendingTotal = todayPendingCount > 0 ? todayPendingCount : ((counts.pending || 0) + (counts.sending || 0));
+  const failedTotal = todayFailedCount > 0 ? todayFailedCount : ((counts.failed_offline || 0) + (counts.failed_perm || 0));
+  const sentTotal = todaySentCount > 0 ? todaySentCount : (counts.sent || 0);
 
   const renderTypeBadge = (type: string) => {
     if (isSpecialOrder(type)) {
@@ -304,6 +437,159 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
     );
   };
 
+  const renderQueueItem = (item: QueueItem) => {
+    const isExpanded = Boolean(expandedIds[item.id]);
+    const displayName = item.target_name || (isDelivery(item.type) ? 'Delivery Staff' : isPurchase(item.type) ? 'Purchase / Distributor' : 'Customer');
+
+    return (
+      <div 
+        key={item.id}
+        onClick={() => toggleExpand(item.id)}
+        className={`rounded-xl border transition-all overflow-hidden cursor-pointer ${
+          item.status === 'sending'
+            ? 'bg-sky-500/10 border-sky-500/30 ring-1 ring-sky-500/20'
+            : item.status === 'sent'
+              ? 'bg-bg2/40 border-glass-border/30 opacity-80 hover:opacity-100'
+              : item.status.includes('failed')
+                ? 'bg-rose-500/10 border-rose-500/30'
+                : 'bg-bg2/70 border-glass-border hover:border-glass-border/80'
+        }`}
+      >
+        {/* Streamlined Single Line Row */}
+        <div className="p-2.5 flex items-center justify-between gap-3 text-xs">
+          
+          {/* Left: Type Badge & Name / Phone */}
+          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+            {renderTypeBadge(item.type)}
+
+            <span className="font-bold text-text truncate max-w-[200px]" title={displayName}>
+              {displayName}
+            </span>
+
+            <span className="text-[10px] font-mono text-muted bg-bg3/80 border border-glass-border/40 px-1.5 py-0.5 rounded shrink-0">
+              +{item.number}
+            </span>
+
+            {item.retry_count > 0 && (
+              <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-mono shrink-0">
+                Retry #{item.retry_count}
+              </span>
+            )}
+
+            {(item.status.includes('failed') || item.error_message) && (
+              <span className="text-[9px] px-1.5 py-0.5 rounded bg-rose-500/15 text-rose-300 border border-rose-500/30 flex items-center gap-1 shrink-0 max-w-[200px] truncate" title={item.error_message || 'Delivery failed'}>
+                <ShieldAlert size={10} className="shrink-0 text-rose-400" />
+                <span className="truncate">Reason: {getFormattedFailureReason(item.error_message, item.status)}</span>
+              </span>
+            )}
+          </div>
+
+          {/* Right: Status Pill & Quick Expand Trigger */}
+          <div className="flex items-center gap-2 shrink-0">
+            {item.status === 'sending' && (
+              <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-sky-500/20 text-sky border border-sky-500/30 flex items-center gap-1 animate-pulse">
+                <RefreshCw size={10} className="animate-spin" /> Sending
+              </span>
+            )}
+            {item.status === 'pending' && (
+              <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1">
+                <Clock size={10} /> Pending
+              </span>
+            )}
+            {item.status === 'sent' && (
+              <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
+                <CheckCircle2 size={10} /> Sent
+              </span>
+            )}
+            {item.status === 'failed_offline' && (
+              <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1">
+                <WifiOff size={10} /> Waiting Net
+              </span>
+            )}
+            {item.status === 'failed_perm' && (
+              <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-rose-500/20 text-rose-400 border border-rose-500/30 flex items-center gap-1">
+                <ShieldAlert size={10} /> Failed
+              </span>
+            )}
+
+            <button
+              type="button"
+              onClick={(e) => handleDeleteItem(item.id, e)}
+              disabled={deletingId === item.id}
+              className="p-1 hover:bg-rose-500/20 text-muted hover:text-rose-400 rounded-md transition-colors"
+              title="Permanently remove / dismiss this notification"
+            >
+              {deletingId === item.id ? <RefreshCw size={13} className="animate-spin text-rose-400" /> : <Trash2 size={13} />}
+            </button>
+
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                toggleExpand(item.id);
+              }}
+              className="p-1 hover:bg-bg3 text-muted hover:text-text rounded-md transition-colors"
+              title={isExpanded ? 'Hide message text' : 'View message text'}
+            >
+              {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+            </button>
+          </div>
+        </div>
+
+        {/* Expanded Message Content Drawer */}
+        {isExpanded && (
+          <div className="px-3 pb-3 pt-1 border-t border-glass-border/20 bg-bg3/30 text-xs space-y-2 animate-fadeIn" onClick={(e) => e.stopPropagation()}>
+            <p className="text-[11px] text-muted font-mono whitespace-pre-wrap leading-relaxed">
+              {item.message}
+            </p>
+
+            {(item.status.includes('failed') || item.error_message) && (
+              <div className="p-2 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs space-y-1 my-1">
+                <div className="flex items-center gap-1.5 font-bold text-rose-400">
+                  <ShieldAlert size={12} className="shrink-0" />
+                  <span>Failure Cause: {getFormattedFailureReason(item.error_message, item.status)}</span>
+                </div>
+                {item.error_message && item.error_message !== getFormattedFailureReason(item.error_message, item.status) && (
+                  <p className="text-[10px] font-mono text-rose-400/80">
+                    Raw Output: {item.error_message}
+                  </p>
+                )}
+                <p className="text-[10px] text-muted leading-tight">
+                  💡 <strong>Fixing Tip:</strong> {item.error_message?.toLowerCase().includes('phone') ? 'Click Edit to update the phone number.' : 'Ensure internet is connected or click Retry Failed.'}
+                </p>
+              </div>
+            )}
+
+            <div className="pt-1 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={(e) => handleDeleteItem(item.id, e)}
+                disabled={deletingId === item.id}
+                className="px-2.5 py-1 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 font-semibold text-[10px] rounded-lg transition-all flex items-center gap-1 border border-rose-500/20"
+                title="Permanently remove notification"
+              >
+                <Trash2 size={11} /> Dismiss / Mark Read
+              </button>
+
+              {item.status.includes('failed') && (
+                <button
+                  onClick={() => {
+                    setEditingItem(item);
+                    setEditPhone(item.number);
+                    setEditMessage(item.message);
+                  }}
+                  className="px-2.5 py-1 bg-sky-500/10 hover:bg-sky-500/20 text-sky font-semibold text-[10px] rounded-lg transition-all flex items-center gap-1 border border-sky-500/20"
+                >
+                  <Edit3 size={11} /> Edit Phone & Resend
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return createPortal(
     <div className="fixed inset-0 z-global-modal flex items-center justify-center p-4 sm:p-6 bg-black/75 backdrop-blur-md transition-all duration-300 animate-in fade-in">
       <div className="relative bg-bg3 border border-glass-border shadow-[0_25px_60px_rgba(0,0,0,0.6)] rounded-3xl w-full max-w-3xl overflow-hidden flex flex-col max-h-[88vh] animate-in zoom-in-95 duration-200">
@@ -332,7 +618,13 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
                 )}
               </div>
               <p className="text-[11px] text-muted truncate">
-                {pendingTotal > 0 ? `${pendingTotal} message(s) queued for paced dispatch` : 'All queued messages sent'}
+                {pendingTotal > 0
+                  ? `${pendingTotal} message(s) queued for paced dispatch`
+                  : failedTotal > 0
+                    ? `${failedTotal} message(s) failed delivery — see details below or retry`
+                    : (counts.sent || 0) > 0
+                      ? `All ${counts.sent} queued message(s) delivered successfully`
+                      : 'Queue is empty'}
               </p>
             </div>
           </div>
@@ -352,14 +644,14 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
             {/* Status Pills */}
             <div className="flex items-center gap-2 flex-wrap">
               <span className="px-2.5 py-1 rounded-lg bg-sky-500/10 border border-sky-500/20 text-sky font-semibold">
-                Pending: {pendingTotal}
+                Today Pending: {todayPendingCount}
               </span>
               <span className="px-2.5 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-semibold">
-                Sent: {counts.sent || 0}
+                Today Sent: {todaySentCount}
               </span>
-              {failedTotal > 0 && (
+              {todayFailedCount > 0 && (
                 <span className="px-2.5 py-1 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-400 font-semibold flex items-center gap-1">
-                  <AlertTriangle size={12} /> Failed: {failedTotal}
+                  <AlertTriangle size={12} /> Today Failed: {todayFailedCount}
                 </span>
               )}
             </div>
@@ -440,12 +732,23 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
               </button>
 
               {failedTotal > 0 && (
-                <button
-                  onClick={handleRetryFailed}
-                  className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white font-semibold text-xs rounded-xl active:scale-95 transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
-                >
-                  <RefreshCw size={12} /> Retry Failed
-                </button>
+                <>
+                  <button
+                    onClick={handleRetryFailed}
+                    className="px-2.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-white font-semibold text-xs rounded-xl active:scale-95 transition-all flex items-center gap-1 shadow-sm cursor-pointer"
+                    title="Retry all failed messages"
+                  >
+                    <RefreshCw size={12} /> Retry Failed
+                  </button>
+                  <button
+                    onClick={handleClearAllFailed}
+                    disabled={clearingFailed}
+                    className="px-2.5 py-1.5 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 font-semibold text-xs rounded-xl active:scale-95 transition-all flex items-center gap-1 shadow-sm cursor-pointer"
+                    title="Permanently remove / dismiss all failed notifications"
+                  >
+                    <Trash2 size={12} /> {clearingFailed ? 'Clearing...' : 'Clear Failed'}
+                  </button>
+                </>
               )}
             </div>
           </div>
@@ -482,7 +785,7 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
                   : 'bg-bg text-muted hover:text-text border border-glass-border'
               }`}
             >
-              💬 All WhatsApp ({items.length})
+              💬 Today's All ({todayAllCount})
             </button>
             <button
               onClick={() => setActiveTab('customer')}
@@ -493,7 +796,7 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
               }`}
             >
               <MessageSquare size={11} className="text-emerald-400" />
-              <span>Customer Messages ({customerCount})</span>
+              <span>Customer ({todayCustomerCount})</span>
             </button>
             <button
               onClick={() => setActiveTab('delivery')}
@@ -504,7 +807,7 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
               }`}
             >
               <Truck size={11} className="text-cyan-400" />
-              <span>Delivery Messages ({deliveryCount})</span>
+              <span>Delivery ({todayDeliveryCount})</span>
             </button>
             <button
               onClick={() => setActiveTab('purchase')}
@@ -515,7 +818,7 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
               }`}
             >
               <Building2 size={11} className="text-amber-400" />
-              <span>Purchase Messages ({purchaseCount})</span>
+              <span>Purchase ({todayPurchaseCount})</span>
             </button>
             <button
               onClick={() => setActiveTab('special')}
@@ -526,7 +829,7 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
               }`}
             >
               <Zap size={11} className="text-purple-400" />
-              <span>Special Orders ({specialCount})</span>
+              <span>Special Orders ({todaySpecialCount})</span>
             </button>
             <button
               onClick={() => setActiveTab('pending')}
@@ -537,7 +840,7 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
               }`}
             >
               <Clock size={11} className="text-sky-400" />
-              <span>Pending ({pendingTotal})</span>
+              <span>Pending ({todayPendingCount})</span>
             </button>
             <button
               onClick={() => setActiveTab('sent')}
@@ -548,7 +851,7 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
               }`}
             >
               <CheckCircle2 size={11} className="text-emerald-400" />
-              <span>Sent ({counts.sent || 0})</span>
+              <span>Sent ({todaySentCount})</span>
             </button>
             {failedTotal > 0 && (
               <button
@@ -559,14 +862,14 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
                     : 'bg-bg text-muted hover:text-text border border-glass-border'
                 }`}
               >
-                Failed ({failedTotal})
+                Failed ({todayFailedCount > 0 ? todayFailedCount : failedTotal})
               </button>
             )}
           </div>
         </div>
 
-        {/* Streamlined One-Line Queue Items List */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-2 custom-scrollbar">
+        {/* Date-Grouped Queue Items List */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
           {loading ? (
             <div className="py-12 text-center text-xs text-muted flex items-center justify-center gap-2">
               <RefreshCw className="animate-spin text-sky" size={16} /> Fetching queue details...
@@ -577,135 +880,117 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
               No items match this queue category filter.
             </div>
           ) : (
-            filteredItems.map(item => {
-              const isExpanded = Boolean(expandedIds[item.id]);
-              const displayName = item.target_name || (isDelivery(item.type) ? 'Delivery Staff' : isPurchase(item.type) ? 'Purchase / Distributor' : 'Customer');
+            <>
+              {/* ── 1. TODAY'S LIVE QUEUE SECTION (ALWAYS VISIBLE & EXPANDED) ── */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between pb-1 px-1">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                    <h4 className="text-xs font-bold text-text uppercase tracking-wider">
+                      Today's Live Queue ({todayItems.length})
+                    </h4>
+                  </div>
+                  <span className="text-[10px] text-muted font-mono">
+                    {new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                  </span>
+                </div>
 
-              return (
-                <div 
-                  key={item.id}
-                  onClick={() => toggleExpand(item.id)}
-                  className={`rounded-xl border transition-all overflow-hidden cursor-pointer ${
-                    item.status === 'sending'
-                      ? 'bg-sky-500/10 border-sky-500/30 ring-1 ring-sky-500/20'
-                      : item.status === 'sent'
-                        ? 'bg-bg2/40 border-glass-border/30 opacity-80'
-                        : item.status.includes('failed')
-                          ? 'bg-rose-500/10 border-rose-500/30'
-                          : 'bg-bg2/70 border-glass-border hover:border-glass-border/80'
-                  }`}
-                >
-                  {/* Streamlined Single Line Row */}
-                  <div className="p-2.5 flex items-center justify-between gap-3 text-xs">
-                    
-                    {/* Left: Type Badge & Name / Phone */}
-                    <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                      {renderTypeBadge(item.type)}
+                {todayItems.length === 0 ? (
+                  <div className="py-5 px-4 text-center text-xs text-muted bg-bg2/30 border border-glass-border/30 rounded-2xl flex flex-col items-center justify-center gap-1.5">
+                    <Clock size={16} className="text-muted/60" />
+                    <span>No WhatsApp messages queued or sent yet today.</span>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {todayItems.map(item => renderQueueItem(item))}
+                  </div>
+                )}
+              </div>
 
-                      <span className="font-bold text-text truncate max-w-[200px]" title={displayName}>
-                        {displayName}
-                      </span>
-
-                      <span className="text-[10px] font-mono text-muted bg-bg3/80 border border-glass-border/40 px-1.5 py-0.5 rounded shrink-0">
-                        +{item.number}
-                      </span>
-
-                      {item.retry_count > 0 && (
-                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-mono shrink-0">
-                          Retry #{item.retry_count}
-                        </span>
-                      )}
-
-                      {(item.status.includes('failed') || item.error_message) && (
-                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-rose-500/15 text-rose-300 border border-rose-500/30 flex items-center gap-1 shrink-0 max-w-[200px] truncate" title={item.error_message || 'Delivery failed'}>
-                          <ShieldAlert size={10} className="shrink-0 text-rose-400" />
-                          <span className="truncate">Reason: {getFormattedFailureReason(item.error_message, item.status)}</span>
-                        </span>
-                      )}
+              {/* ── 2. OLDER MESSAGE HISTORY SECTION (COMPRESSED BY DATE) ── */}
+              {olderDates.length > 0 && (
+                <div className="pt-3 border-t border-glass-border/40 space-y-2.5">
+                  <div className="flex items-center justify-between pb-1 px-1">
+                    <div className="flex items-center gap-2">
+                      <Calendar size={13} className="text-muted" />
+                      <h4 className="text-xs font-bold text-muted uppercase tracking-wider">
+                        Older Message History ({olderItems.length})
+                      </h4>
                     </div>
-
-                    {/* Right: Status Pill & Quick Expand Trigger */}
-                    <div className="flex items-center gap-2 shrink-0">
-                      {item.status === 'sending' && (
-                        <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-sky-500/20 text-sky border border-sky-500/30 flex items-center gap-1 animate-pulse">
-                          <RefreshCw size={10} className="animate-spin" /> Sending
-                        </span>
-                      )}
-                      {item.status === 'pending' && (
-                        <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1">
-                          <Clock size={10} /> Pending
-                        </span>
-                      )}
-                      {item.status === 'sent' && (
-                        <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
-                          <CheckCircle2 size={10} /> Sent
-                        </span>
-                      )}
-                      {item.status === 'failed_offline' && (
-                        <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1">
-                          <WifiOff size={10} /> Waiting Net
-                        </span>
-                      )}
-                      {item.status === 'failed_perm' && (
-                        <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-rose-500/20 text-rose-400 border border-rose-500/30 flex items-center gap-1">
-                          <ShieldAlert size={10} /> Failed
-                        </span>
-                      )}
-
-                      <button
-                        type="button"
-                        onClick={() => toggleExpand(item.id)}
-                        className="p-1 hover:bg-bg3 text-muted hover:text-text rounded-md transition-colors"
-                        title={isExpanded ? 'Hide message text' : 'View message text'}
-                      >
-                        {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                      </button>
-                    </div>
+                    <span className="text-[10px] text-muted font-mono">
+                      {olderDates.length} Past Date{olderDates.length > 1 ? 's' : ''}
+                    </span>
                   </div>
 
-                  {/* Expanded Message Content Drawer */}
-                  {isExpanded && (
-                    <div className="px-3 pb-3 pt-1 border-t border-glass-border/20 bg-bg3/30 text-xs space-y-2 animate-fadeIn">
-                      <p className="text-[11px] text-muted font-mono whitespace-pre-wrap leading-relaxed">
-                        {item.message}
-                      </p>
+                  {olderDates.map(dateKey => {
+                    const dateItems = olderDateGroups[dateKey] || [];
+                    const isDateExpanded = Boolean(expandedDates[dateKey]);
+                    const dateSent = dateItems.filter(i => i.status === 'sent').length;
+                    const dateFailed = dateItems.filter(i => i.status.includes('failed')).length;
+                    const datePending = dateItems.filter(i => i.status === 'pending' || i.status === 'sending').length;
 
-                      {(item.status.includes('failed') || item.error_message) && (
-                        <div className="p-2 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs space-y-1 my-1">
-                          <div className="flex items-center gap-1.5 font-bold text-rose-400">
-                            <ShieldAlert size={12} className="shrink-0" />
-                            <span>Failure Cause: {getFormattedFailureReason(item.error_message, item.status)}</span>
+                    return (
+                      <div 
+                        key={dateKey} 
+                        className="rounded-2xl border border-glass-border/40 bg-bg2/40 overflow-hidden transition-all hover:border-glass-border/80"
+                      >
+                        {/* Collapsible Date Header Card */}
+                        <button
+                          type="button"
+                          onClick={() => toggleDateExpand(dateKey)}
+                          className="w-full p-3 flex items-center justify-between gap-3 text-xs hover:bg-bg2/80 transition-colors cursor-pointer text-left"
+                        >
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <div className="p-1.5 rounded-lg bg-bg3/80 border border-glass-border/40 text-muted shrink-0">
+                              <Calendar size={13} className="text-sky" />
+                            </div>
+                            <div className="min-w-0">
+                              <div className="font-bold text-text truncate text-xs">
+                                {formatDateHeader(dateKey)}
+                              </div>
+                              <div className="text-[10px] text-muted font-mono">
+                                {dateKey}
+                              </div>
+                            </div>
                           </div>
-                          {item.error_message && item.error_message !== getFormattedFailureReason(item.error_message, item.status) && (
-                            <p className="text-[10px] font-mono text-rose-400/80">
-                              Raw Output: {item.error_message}
-                            </p>
-                          )}
-                          <p className="text-[10px] text-muted leading-tight">
-                            💡 <strong>Fixing Tip:</strong> {item.error_message?.toLowerCase().includes('phone') ? 'Click Edit to update the phone number.' : 'Ensure internet is connected or click Retry Failed.'}
-                          </p>
-                        </div>
-                      )}
 
-                      {item.status.includes('failed') && (
-                        <div className="pt-1 flex justify-end">
-                          <button
-                            onClick={() => {
-                              setEditingItem(item);
-                              setEditPhone(item.number);
-                              setEditMessage(item.message);
-                            }}
-                            className="px-2.5 py-1 bg-sky-500/10 hover:bg-sky-500/20 text-sky font-semibold text-[10px] rounded-lg transition-all flex items-center gap-1 border border-sky-500/20"
-                          >
-                            <Edit3 size={11} /> Edit Phone & Resend
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  )}
+                          <div className="flex items-center gap-2 shrink-0">
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-bg3 text-muted border border-glass-border">
+                              {dateItems.length} msg{dateItems.length > 1 ? 's' : ''}
+                            </span>
+                            {dateSent > 0 && (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/25">
+                                ✓ {dateSent} Sent
+                              </span>
+                            )}
+                            {dateFailed > 0 && (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-500/15 text-rose-300 border border-rose-500/25">
+                                ⚠ {dateFailed} Failed
+                              </span>
+                            )}
+                            {datePending > 0 && (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/25">
+                                ⏳ {datePending} Pending
+                              </span>
+                            )}
+                            <div className="p-1 text-muted hover:text-text rounded-md">
+                              {isDateExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                            </div>
+                          </div>
+                        </button>
+
+                        {/* Expanded Date Items Sub-List */}
+                        {isDateExpanded && (
+                          <div className="p-3 pt-2 border-t border-glass-border/30 space-y-2 bg-bg/50 animate-fadeIn">
+                            {dateItems.map(item => renderQueueItem(item))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
-              );
-            })
+              )}
+            </>
           )}
         </div>
 

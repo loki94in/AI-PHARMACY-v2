@@ -13,6 +13,7 @@ import { getAppDataDir } from '../config/index.js';
 import { syncDistributorPhoneAcrossTables, resolveDistributorContact } from '../utils/distributorSyncHelper.js';
 import { syncTodayActiveDistributors } from '../services/distributorDispatchReminderWorker.js';
 import { pharmarackCatalogCache } from '../services/pharmarackCatalogCache.js';
+import { startupSyncCoordinator } from '../services/startupSyncCoordinator.js';
 
 const execAsync = promisify(exec);
 
@@ -1808,6 +1809,9 @@ router.get('/cart', async (req, res) => {
       console.error('[AutoNotif] Error running automatic cart transition checks:', dbErr);
     }
 
+    // Mark startup cart synchronization complete
+    startupSyncCoordinator.markCartLoaded();
+
     // Fire-and-forget: handle daily batch or late-order send for delivery boys
     import('../services/pharmarackDailyDispatchService.js')
       .then(m => m.handleCartPageVisit())
@@ -1818,6 +1822,11 @@ router.get('/cart', async (req, res) => {
     console.error('Pharmarack cart fetch error:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
+});
+
+// GET /api/pharmarack/startup-sync-status
+router.get('/startup-sync-status', (req, res) => {
+  res.json({ success: true, ...startupSyncCoordinator.getStatus() });
 });
 
 // GET /api/pharmarack/live-cart-summary

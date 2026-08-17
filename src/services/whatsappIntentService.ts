@@ -9,6 +9,7 @@ import { ocrScanQueue } from './ocrScanQueue.js';
 import { productNameFilterService } from './productNameFilterService.js';
 import { searchCatalog, scoreProductName } from './pharmarackCatalogCache.js';
 import { waAdminEscalationService } from './waAdminEscalationService.js';
+import { startupSyncCoordinator } from './startupSyncCoordinator.js';
 import { GATE_VARIANTS, type GateDecision } from '../../scanGateAlgorithms.js';
 
 // Confidence gate: below these similarity scores a message is discarded as
@@ -251,6 +252,9 @@ export async function handleInbound(msg: any): Promise<void> {
 
     // 1. IGNORE CHECK
     if (await isIgnored(chatId)) return;
+
+    // Await startup cart synchronization window so existing cart items are loaded
+    await startupSyncCoordinator.waitForCartSync();
 
     // 2. CUSTOMER LOOKUP
     const customer = await lookupCustomer(phone);

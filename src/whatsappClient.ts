@@ -490,9 +490,11 @@ export async function initClient(options: { forceQr?: boolean } = {}): Promise<W
         console.warn('[WhatsApp Persist] Failed to save connected phone number to app_settings:', saveErr);
       }
 
-      // Drain queued messages first (independent of chat sync)
-      drainSendQueue().catch(err => {
-        console.error('[WhatsApp] Queue drain failed (non-fatal):', err);
+      // Trigger background queue worker with proper pacing and status tracking
+      import('./services/whatsappQueueWorker.js').then(({ whatsappQueueWorker }) => {
+        whatsappQueueWorker.triggerProcessing();
+      }).catch(err => {
+        console.warn('[WhatsApp] Could not trigger queue worker on ready:', err);
       });
 
       // Sync chats separately — failure here must not block send queue drain
@@ -737,6 +739,21 @@ export interface SendMessageResult {
   suppressed?: boolean;
 }
 
+/**
+ * Normalizes any phone string to a standard WhatsApp number format (digits only, with country code).
+ * Supports: 10-digit Indian (9876543210 -> 919876543210), 11-digit with leading 0 (09876543210 -> 919876543210), 12-digit with 91 (919876543210).
+ */
+export function normalizeWhatsAppPhone(raw: string | null | undefined): string {
+  if (!raw) return '';
+  let digits = String(raw).replace(/\D/g, '');
+  if (digits.length === 11 && digits.startsWith('0')) {
+    digits = `91${digits.slice(1)}`;
+  } else if (digits.length === 10) {
+    digits = `91${digits}`;
+  }
+  return digits;
+}
+
 /** ponytail: shared hash for duplicate-suppress key and outbox verification */
 export function hashMessageBody(body: string): number {
   const fullMsg = (body || '').trim();
@@ -768,20 +785,18 @@ export async function sendMessage(
   let aggregateResult: SendMessageResult = { sent: false };
 
   for (const recipient of recipients) {
-    let chatId = recipient;
-    if (!chatId.includes('@')) {
-      let cleanPhone = chatId.replace(/\D/g, '');
-      if (cleanPhone.length === 10) {
-        cleanPhone = `91${cleanPhone}`;
-      }
-      chatId = `${cleanPhone}@c.us`;
+    let cleanPhone = recipient;
+    if (cleanPhone.includes('@')) {
+      cleanPhone = cleanPhone.split('@')[0];
     }
-    const cleanPhone = chatId.split('@')[0];
-    const rawCleanDigits = cleanPhone.replace(/\D/g, '');
-    if (!rawCleanDigits || rawCleanDigits.length < 10) {
-      console.warn(`[WhatsApp] Invalid phone number passed to sendMessage: "${recipient}" (${rawCleanDigits.length} digits). Skipping.`);
-      throw new Error(`Invalid phone number: "${recipient}" (must contain at least 10 digits).`);
+    cleanPhone = normalizeWhatsAppPhone(cleanPhone);
+
+    if (!cleanPhone || cleanPhone.length < 10) {
+      console.warn(`[WhatsApp] Invalid phone number passed to sendMessage: "${recipient}". Skipping.`);
+      throw new Error(`Invalid phone number: "${recipient}" (must contain at least 10 valid digits).`);
     }
+
+    const chatId = `${cleanPhone}@c.us`;
 
     // Anti-duplicate protection: prevent identical sends to same recipient within 30s
     // Use a simple hash of the full message to avoid false collisions between different orders
@@ -794,7 +809,6 @@ export async function sendMessage(
       aggregateResult = { sent: true, suppressed: true };
       continue;
     }
-    recentSendsCache.set(sendKey, nowTs);
 
     let success = false;
     let messageId = `msg_out_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
@@ -816,9 +830,6 @@ export async function sendMessage(
     try {
       if (!useBusiness) {
         // Live WhatsApp Web client. Send via the WA Web.js client.
-        // message_create event will fire shortly after with the real WA message id and
-        // update the DB record. We also write a provisional DB record here so the chat
-        // list and thread panel update immediately without waiting for the event.
         const doSend = async (targetClient: WAClient) => {
           let targetChatId = chatId;
 
@@ -828,26 +839,27 @@ export async function sendMessage(
               const numberDetails = await targetClient.getNumberId(cleanPhone);
               if (numberDetails && numberDetails._serialized) {
                 targetChatId = numberDetails._serialized;
-              } else {
-                throw new Error(`Phone number ${cleanPhone} is not registered on WhatsApp.`);
               }
             } catch (numErr: any) {
-              if (numErr.message?.includes('not registered')) {
-                throw numErr;
-              }
-              console.warn(`[WhatsApp] getNumberId check skipped/failed for ${cleanPhone}, trying direct JID ${chatId}:`, numErr?.message || numErr);
+              console.warn(`[WhatsApp] getNumberId resolution note for ${cleanPhone}, fallback to direct JID ${chatId}:`, numErr?.message || numErr);
             }
           }
 
+          let sentMsg: any = null;
           if (file && file.mimetype && file.data) {
             const media = new MessageMedia(file.mimetype, file.data, file.filename || 'file');
-            await targetClient.sendMessage(targetChatId, media, { caption: caption ?? '' });
+            sentMsg = await targetClient.sendMessage(targetChatId, media, { caption: caption ?? '' });
           } else if (mediaPath) {
             const media = MessageMedia.fromFilePath(mediaPath);
-            await targetClient.sendMessage(targetChatId, media, { caption: caption ?? '' });
+            sentMsg = await targetClient.sendMessage(targetChatId, media, { caption: caption ?? '' });
           } else {
-            await targetClient.sendMessage(targetChatId, caption ?? '');
+            sentMsg = await targetClient.sendMessage(targetChatId, caption ?? '');
           }
+
+          if (sentMsg?.id?._serialized) {
+            messageId = sentMsg.id._serialized;
+          }
+          return sentMsg;
         };
 
         try {
@@ -878,9 +890,10 @@ export async function sendMessage(
           }
         }
 
+        // Send confirmed — register in recent sends cache
+        recentSendsCache.set(sendKey, Date.now());
+
         // Provisional DB record — ensures chat + message appear immediately in UI.
-        // message_create event inserts the real record (different ID) so both exist
-        // briefly; they reconcile on the next 10s poll.
         try {
           const provisionalBody = file ? `[Document] ${file.filename || ''} ${caption || ''}`.trim()
             : (mediaPath ? `[Document] ${path.basename(mediaPath)} ${caption || ''}`.trim() : (caption || ''));
@@ -949,8 +962,17 @@ export async function sendMessage(
           success = result.success;
           if (result.messageId) messageId = result.messageId;
         }
+
+        if (!success) {
+          throw new Error('WhatsApp Business API rejected message transmission');
+        }
+
+        // Send confirmed — register in recent sends cache
+        recentSendsCache.set(sendKey, Date.now());
       }
     } catch (err: any) {
+      // Clear cache on error so retries are never blocked
+      recentSendsCache.delete(sendKey);
       console.error('[WhatsApp Client Wrapper] Send failed:', err?.message || err);
       throw err;
     }
@@ -1001,32 +1023,6 @@ export async function sendMessage(
   }
 
   return aggregateResult.sent ? aggregateResult : { sent: false };
-}
-
-/** Drain pending outbound messages from whatsapp_send_queue once the client is ready */
-async function drainSendQueue(): Promise<void> {
-  if (!isReady || !clientInstance) return;
-  try {
-    const db = await dbManager.getConnection();
-    const pending = await db.all(
-      'SELECT id, number, message FROM whatsapp_send_queue WHERE sent_at IS NULL ORDER BY created_at ASC'
-    );
-    if (pending.length === 0) return;
-    console.log(`[WhatsApp] Draining ${pending.length} queued message(s)...`);
-    for (const row of pending) {
-      try {
-        await sendMessage(row.number, undefined, row.message);
-        await db.run('UPDATE whatsapp_send_queue SET sent_at = ? WHERE id = ?', [Date.now(), row.id]);
-        console.log(`[WhatsApp] Queued message sent to ${row.number}`);
-      } catch (err: any) {
-        console.warn(`[WhatsApp] Failed to send queued message to ${row.number}:`, err?.message);
-        // Mark failed queue items so bad numbers do not re-try endlessly
-        await db.run('UPDATE whatsapp_send_queue SET sent_at = -1 WHERE id = ?', [row.id]);
-      }
-    }
-  } catch (err: any) {
-    console.error('[WhatsApp] drainSendQueue error:', err?.message);
-  }
 }
 
 /** Get all chats from the local SQLite cache with contact name enrichment and LID deduplication */

@@ -609,6 +609,7 @@ export const api = {
     storeName?: string;
   }) => apiClient.post('/pharmarack/delete-cart-item', data).then(res => res.data),
   getPharmarackCart: () => apiClient.get('/pharmarack/cart').then(res => res.data),
+  getStartupSyncStatus: () => apiClient.get<{ success: boolean; cartLoaded: boolean; syncPending: boolean; elapsedMs: number; timedOut: boolean }>('/pharmarack/startup-sync-status').then(res => res.data),
   sendManualCartNotification: (data: { storeId: number; storeName: string; deliveryPersons: any[]; items: any[] }) =>
     apiClient.post('/pharmarack/cart/notify-manual', data).then(res => res.data),
   getPharmarackDistributors: () => apiClient.get('/pharmarack/distributors').then(res => res.data),
@@ -921,6 +922,8 @@ export const api = {
   updateWhatsAppPacingConfig: (minSec: number, maxSec: number) => apiClient.post<{ success: boolean; minSec?: number; maxSec?: number; preset?: string; message: string }>('/whatsapp/queue/pacing', { minSec, maxSec }).then(res => res.data),
   setWhatsAppQueuePacingPreset: (preset: 'turbo' | 'fast' | 'safe') => apiClient.post<{ success: boolean; preset: string; minMs: number; maxMs: number; message: string; state: any }>('/whatsapp/queue/pacing', { preset }).then(res => res.data),
   updateWhatsAppQueueItem: (data: { id: number; number: string; message?: string }) => apiClient.put<{ success: boolean; message: string }>('/whatsapp/queue/update-item', data).then(res => res.data),
+  deleteWhatsAppQueueItem: (id: number) => apiClient.delete<{ success: boolean; deleted: boolean; message: string }>(`/whatsapp/queue/item/${id}`).then(res => res.data),
+  clearFailedWhatsAppQueue: () => apiClient.post<{ success: boolean; clearedCount: number; message: string }>('/whatsapp/queue/clear-failed').then(res => res.data),
 
   // Upcoming Automations & Triggers API
   getUpcomingTriggers: (lookahead = 5) => apiClient.get<{ success: boolean; upcoming: Array<{ id: string; name: string; category: string; secondsUntilRun: number; nextRunIso: string; isSnoozed: boolean; description: string }> }>('/triggers/upcoming', { params: { lookahead } }).then(res => res.data),

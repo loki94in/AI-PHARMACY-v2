@@ -1,5 +1,5 @@
 import { dbManager } from '../database/connection.js';
-import { sendMessage, getWhatsAppStatus, shouldRouteToBusiness, initClient, hashMessageBody } from '../whatsappClient.js';
+import { sendMessage, getWhatsAppStatus, shouldRouteToBusiness, initClient, hashMessageBody, normalizeWhatsAppPhone } from '../whatsappClient.js';
 
 export interface QueueItem {
   id: number;
@@ -132,23 +132,26 @@ class WhatsAppQueueWorker {
     return Boolean(oldestPending);
   }
 
-  /** Check outbox for a recent matching outbound message (phone + body hash within 60s) */
+  /** Check outbox for a verified outbound message (real WhatsApp message ID, excluding provisional msg_out_ entries, within 120s) */
   private async hasRecentOutboxMatch(db: any, phone: string, message: string): Promise<boolean> {
-    const last10 = phone.replace(/\D/g, '').slice(-10);
+    const cleanDigits = normalizeWhatsAppPhone(phone);
+    const last10 = cleanDigits.slice(-10);
     if (!last10 || last10.length < 7) return false;
 
-    const minTs = Math.floor((Date.now() - 60000) / 1000);
+    const minTs = Math.floor((Date.now() - 120000) / 1000);
     const msgHash = hashMessageBody(message);
     const msgLen = (message || '').trim().length;
 
     const rows = await db.all(
-      `SELECT body FROM whatsapp_messages
+      `SELECT id, body FROM whatsapp_messages
        WHERE from_me = 1
+         AND id NOT LIKE 'msg_out_%'
+         AND (id LIKE 'true_%' OR id LIKE '3EB%' OR id LIKE 'wamid%' OR LENGTH(id) > 20)
          AND (chat_id LIKE ? OR chat_id LIKE ?)
          AND timestamp >= ?
        ORDER BY timestamp DESC
        LIMIT 10`,
-      [`%${last10}%`, `%${phone.replace(/\D/g, '')}%`, minTs]
+      [`%${last10}%`, `%${cleanDigits}%`, minTs]
     );
 
     for (const row of rows || []) {
@@ -192,7 +195,7 @@ class WhatsAppQueueWorker {
     explicitScheduledAt?: number
   ): Promise<number> {
     const db = await dbManager.getConnection();
-    const cleanPhone = number.replace(/[^0-9]/g, '');
+    const cleanPhone = normalizeWhatsAppPhone(number);
     const now = Date.now();
 
     const startOfDay = new Date();
@@ -246,6 +249,30 @@ class WhatsAppQueueWorker {
         }
       } else {
         scheduledAt = now;
+      }
+    }
+
+    // For delivery boy summary: Check if an existing delivery boy summary already exists today
+    if (type === 'delivery_boy_summary' || type.includes('delivery_boy')) {
+      const existingBoyItem = await db.get(
+        `SELECT id, status, message FROM whatsapp_send_queue
+         WHERE number = ? AND type LIKE '%delivery_boy%' AND created_at >= ?
+         ORDER BY id DESC LIMIT 1`,
+        [cleanPhone, startOfDayMs]
+      );
+      if (existingBoyItem) {
+        if (existingBoyItem.status === 'pending') {
+          // Update the pending summary with latest consolidated summary message
+          await db.run(
+            `UPDATE whatsapp_send_queue SET message = ?, created_at = ?, scheduled_at = ? WHERE id = ?`,
+            [message, now, scheduledAt, existingBoyItem.id]
+          );
+          console.log(`[Queue Safeguard] Updated existing pending delivery boy summary #${existingBoyItem.id} with latest totals for ${cleanPhone}.`);
+          if (scheduledAt <= now) {
+            this.triggerProcessing();
+          }
+          return existingBoyItem.id;
+        }
       }
     }
 
@@ -529,10 +556,46 @@ class WhatsAppQueueWorker {
     return result.changes || 0;
   }
 
+  /** Delete / Dismiss individual queue or notification item permanently */
+  public async deleteItem(id: number): Promise<boolean> {
+    const db = await dbManager.getConnection();
+    try {
+      if (id >= 900000) {
+        const realNotifId = id - 900000;
+        const res = await db.run("DELETE FROM automation_notifications WHERE id = ?", [realNotifId]);
+        return (res.changes || 0) > 0;
+      } else if (id >= 800000) {
+        // Direct message placeholder — no direct row to delete or ignore
+        return true;
+      } else {
+        const res = await db.run("DELETE FROM whatsapp_send_queue WHERE id = ?", [id]);
+        return (res.changes || 0) > 0;
+      }
+    } catch (err) {
+      console.warn('[WhatsAppQueueWorker] Could not delete item:', err);
+      return false;
+    }
+  }
+
+  /** Dismiss / Clear all failed items permanently */
+  public async clearAllFailed(): Promise<number> {
+    const db = await dbManager.getConnection();
+    let totalCleared = 0;
+    try {
+      const res1 = await db.run("DELETE FROM whatsapp_send_queue WHERE status IN ('failed_offline', 'failed_perm')");
+      totalCleared += (res1.changes || 0);
+      const res2 = await db.run("DELETE FROM automation_notifications WHERE status IN ('failed', 'error')");
+      totalCleared += (res2.changes || 0);
+    } catch (err) {
+      console.warn('[WhatsAppQueueWorker] Error clearing failed items:', err);
+    }
+    return totalCleared;
+  }
+
   /** Update individual queue item */
   public async updateItem(id: number, number: string, message?: string): Promise<boolean> {
     const db = await dbManager.getConnection();
-    const cleanPhone = number.replace(/[^0-9]/g, '');
+    const cleanPhone = normalizeWhatsAppPhone(number);
 
     let sql = "UPDATE whatsapp_send_queue SET number = ?, status = 'pending', retry_count = 0, error_message = NULL";
     const params: any[] = [cleanPhone];
@@ -591,20 +654,71 @@ class WhatsAppQueueWorker {
     const existingQueueIds = new Set(queueItems.map(i => `${i.number}-${i.created_at}`));
     const mappedAutoNotifs: QueueItem[] = automationNotifs
       .filter(n => !existingQueueIds.has(`${n.number}-${new Date(n.created_at).getTime()}`))
-      .map(n => ({
-        id: 900000 + n.id,
-        number: n.number || '',
-        message: n.message || '',
-        type: n.type || 'whatsapp_saved',
-        status: n.status === 'sent_manually' ? 'sent' : (n.status === 'sent' ? 'sent' : (n.status === 'pending' ? 'pending' : 'failed_perm')),
-        retry_count: 0,
-        created_at: new Date(n.created_at).getTime() || Date.now(),
-        sent_at: n.status === 'sent' ? new Date(n.created_at).getTime() : null,
-        error_message: n.error_message || undefined,
-        target_name: n.target_name || undefined
-      }));
+      .map(n => {
+        let mappedStatus: 'pending' | 'sending' | 'sent' | 'failed_offline' | 'failed_perm' = 'sent';
+        if (n.status === 'pending' || n.status === 'queued') {
+          mappedStatus = 'pending';
+        } else if (n.status === 'failed' || n.status === 'error') {
+          mappedStatus = 'failed_perm';
+        } else if (n.status === 'sent' || n.status === 'sent_manually' || n.status === 'delivered') {
+          mappedStatus = 'sent';
+        } else {
+          mappedStatus = n.error_message ? 'failed_perm' : 'pending';
+        }
 
-    const recentItems: QueueItem[] = [...queueItems, ...mappedAutoNotifs].sort((a, b) => b.created_at - a.created_at);
+        return {
+          id: 900000 + n.id,
+          number: n.number || '',
+          message: n.message || '',
+          type: n.type || 'whatsapp_saved',
+          status: mappedStatus,
+          retry_count: 0,
+          created_at: new Date(n.created_at).getTime() || Date.now(),
+          sent_at: mappedStatus === 'sent' ? (new Date(n.created_at).getTime() || Date.now()) : null,
+          error_message: n.error_message || undefined,
+          target_name: n.target_name || undefined
+        };
+      });
+
+    // Also fetch direct outbound messages from whatsapp_messages table (chats, forwards, POS shares)
+    let directSentMessages: any[] = [];
+    try {
+      directSentMessages = await db.all(
+        `SELECT m.id, m.chat_id, m.body, m.timestamp, m.type, c.name as chat_name
+         FROM whatsapp_messages m
+         LEFT JOIN whatsapp_chats c ON m.chat_id = c.id
+         WHERE m.from_me = 1 AND m.id NOT LIKE 'msg_out_%'
+         ORDER BY m.timestamp DESC LIMIT 150`
+      );
+    } catch (_) {
+      directSentMessages = [];
+    }
+
+    const mappedDirectMsgs: QueueItem[] = [];
+    for (const dm of directSentMessages) {
+      const cleanPhone = normalizeWhatsAppPhone(dm.chat_id);
+      const createdAtMs = (dm.timestamp || Math.floor(Date.now() / 1000)) * 1000;
+      const key1 = `${cleanPhone}-${createdAtMs}`;
+      const msgHash = hashMessageBody(dm.body || '');
+      const key2 = `${cleanPhone}-${msgHash}`;
+      if (!existingQueueIds.has(key1) && !existingQueueIds.has(key2)) {
+        existingQueueIds.add(key1);
+        existingQueueIds.add(key2);
+        mappedDirectMsgs.push({
+          id: 800000 + Math.abs(hashMessageBody(dm.id || String(createdAtMs))),
+          number: cleanPhone,
+          message: dm.body || '',
+          type: dm.type === 'document' ? 'document_dispatch' : 'whatsapp_direct',
+          status: 'sent',
+          retry_count: 0,
+          created_at: createdAtMs,
+          sent_at: createdAtMs,
+          target_name: dm.chat_name || (cleanPhone ? `+${cleanPhone}` : 'WhatsApp Contact')
+        });
+      }
+    }
+
+    const recentItems: QueueItem[] = [...queueItems, ...mappedAutoNotifs, ...mappedDirectMsgs].sort((a, b) => b.created_at - a.created_at);
 
     // Determine current sending or next pending item target name for live status display
     let activeTargetName: string | null = null;

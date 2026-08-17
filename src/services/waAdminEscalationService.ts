@@ -38,7 +38,13 @@ async function resolvePhone(
   chatId: string | undefined,
   customerPhone: string | undefined
 ): Promise<{ display: string; waDigits: string | null }> {
-  const strip = (p: string) => p.replace(/@c\.us$/i, '').replace(/@lid$/i, '').replace(/@s\.whatsapp\.net$/i, '');
+  const strip = (p: string) => {
+    let s = String(p || '').trim();
+    while (s.includes('@')) {
+      s = s.split('@')[0];
+    }
+    return s;
+  };
   const stripped = strip(raw);
   const isLid = /@lid$/i.test(raw) || (/^\d+$/.test(stripped) && stripped.length > 12);
 
@@ -59,9 +65,13 @@ async function resolvePhone(
   const digits = candidate.replace(/\D/g, '');
   let waDigits: string | null = null;
   if (digits.length === 10) waDigits = `91${digits}`;
-  else if ((digits.length === 11 || digits.length === 12) && digits.startsWith('91')) waDigits = digits;
+  else if (digits.length === 11 && digits.startsWith('0')) waDigits = `91${digits.slice(1)}`;
+  else if (digits.length === 12 && digits.startsWith('91')) waDigits = digits;
+  else if (digits.length >= 10) waDigits = digits;
 
-  const display = waDigits ? `+${waDigits}` : (candidate || stripped || raw);
+  const display = waDigits 
+    ? (waDigits.length === 12 && waDigits.startsWith('91') ? `+91 ${waDigits.slice(2, 7)} ${waDigits.slice(7)}` : `+${waDigits}`)
+    : (candidate || stripped || raw);
   return { display, waDigits };
 }
 
@@ -101,7 +111,16 @@ export async function notifyAdminOfUnprocessedMedia(
   const adminWhatsapp = await resolveAdminWhatsappNumber(db);
   if (!adminWhatsapp) return false;
 
-  const caption = `⚠️ *Unprocessed WhatsApp Image*\n📞 ${opts.phone}\n${opts.reason}\nPlease check this chat manually.`;
+  const { display: displayPhone, waDigits } = await resolvePhone(db, opts.phone, opts.chatId, undefined);
+
+  let caption = `⚠️ *Unprocessed WhatsApp Image*\n`;
+  caption += `📞 *Customer:* ${displayPhone}\n`;
+  if (waDigits) {
+    caption += `🔗 *Quick Chat:* https://wa.me/${waDigits}\n`;
+  }
+  caption += `\n📝 ${opts.reason}\n`;
+  caption += `Please check this chat manually.`;
+
   await sendMessage(adminWhatsapp, opts.imagePath, caption);
   return true;
 }

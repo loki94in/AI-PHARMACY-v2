@@ -1378,6 +1378,23 @@ const Topbar = ({
     fetchDevices();
   }, [fetchDevices]);
 
+  // 1-time startup check for Pharmarack cart sync status after initial window
+  useEffect(() => {
+    const timer = setTimeout(async () => {
+      try {
+        const syncStatus = await api.getStartupSyncStatus();
+        if (syncStatus.timedOut && !syncStatus.cartLoaded) {
+          toastEvent.trigger(
+            '⚠️ Pharmarack cart sync pending — Session may need refresh from Learning page.',
+            'info'
+          );
+        }
+      } catch (_) {}
+    }, 16000);
+
+    return () => clearTimeout(timer);
+  }, []);
+
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {

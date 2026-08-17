@@ -1,6 +1,7 @@
 import express from 'express';
 import { whatsappQueueWorker } from '../services/whatsappQueueWorker.js';
 import { dbManager } from '../database/connection.js';
+import { normalizeWhatsAppPhone } from '../whatsappClient.js';
 
 const router = express.Router();
 
@@ -21,8 +22,9 @@ router.post('/enqueue-distributor-collection', async (req, res) => {
   if (!orderIds || !Array.isArray(orderIds) || orderIds.length === 0) {
     return res.status(400).json({ error: 'orderIds array is required' });
   }
-  if (!deliveryBoyPhone) {
-    return res.status(400).json({ error: 'deliveryBoyPhone is required' });
+  const cleanDeliveryBoyPhone = normalizeWhatsAppPhone(deliveryBoyPhone);
+  if (!cleanDeliveryBoyPhone || cleanDeliveryBoyPhone.length < 10) {
+    return res.status(400).json({ error: 'Valid deliveryBoyPhone is required' });
   }
 
   try {
@@ -61,7 +63,7 @@ ${order.items || 'Standard Pharmacy Order'}
 📍 *Deliver To:* AI Pharmacy Main Counter
 📝 *Notes:* ${order.notes || 'Handle with care. Verify batch expiry & invoice amount.'}`;
 
-      const queueId = await whatsappQueueWorker.enqueue(deliveryBoyPhone, msg, 'distributor_collection');
+      const queueId = await whatsappQueueWorker.enqueue(cleanDeliveryBoyPhone, msg, 'distributor_collection');
       enqueuedIds.push(queueId);
     }
 
@@ -69,7 +71,7 @@ ${order.items || 'Standard Pharmacy Order'}
       success: true,
       enqueuedCount: enqueuedIds.length,
       queueIds: enqueuedIds,
-      message: `Enqueued ${enqueuedIds.length} collection dispatch message(s) for delivery boy (${deliveryBoyPhone})`
+      message: `Enqueued ${enqueuedIds.length} collection dispatch message(s) for delivery boy (${cleanDeliveryBoyPhone})`
     });
   } catch (err: any) {
     console.error('Failed to enqueue distributor collection messages:', err);
@@ -109,45 +111,41 @@ router.post('/enqueue-pharmarack-batch', async (req, res) => {
     }
 
     // A. ENQUEUE DELIVERY BOY SUMMARY MESSAGE FIRST (Position #1)
-    let cleanBoyPhone = '';
-    if (targetBoyPhone) {
-      cleanBoyPhone = String(targetBoyPhone).replace(/\D/g, '');
-      if (cleanBoyPhone.length === 10) cleanBoyPhone = `91${cleanBoyPhone}`;
-      if (cleanBoyPhone.length >= 10) {
-        const dateLabel = new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
-        const totalItems = orders.reduce((sum: number, o: any) => sum + (o.items?.length || 0), 0);
+    let cleanBoyPhone = normalizeWhatsAppPhone(targetBoyPhone);
+    if (cleanBoyPhone && cleanBoyPhone.length >= 10) {
+      const dateLabel = new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+      const totalItems = orders.reduce((sum: number, o: any) => sum + (o.items?.length || 0), 0);
 
-        const shopRow = await db.get("SELECT value FROM app_settings WHERE key IN ('shop_name', 'pharmacy_name') AND value IS NOT NULL AND value != '' LIMIT 1");
-        const headerShopName = storeInfo?.name || storeInfo?.storeName || shopRow?.value || 'AI Pharmacy';
+      const shopRow = await db.get("SELECT value FROM app_settings WHERE key IN ('shop_name', 'pharmacy_name') AND value IS NOT NULL AND value != '' LIMIT 1");
+      const headerShopName = storeInfo?.name || storeInfo?.storeName || shopRow?.value || 'AI Pharmacy';
 
-        let summaryMsg = `🏥 *${headerShopName}*\n📋 *TODAY DISTRIBUTOR SUMMARY & TOTALS — ${dateLabel}*\n\n`;
-        orders.forEach((o: any, idx: number) => {
-          const cleanP = String(o.phone || '').replace(/\D/g, '');
-          const phoneFormatted = cleanP.length === 10 ? `+91 ${cleanP.slice(0, 5)} ${cleanP.slice(5)}` : (cleanP.length >= 10 ? `+${cleanP}` : (o.phone || 'N/A'));
-          summaryMsg += `${idx + 1}. *${o.storeName}* (${o.items?.length || 0} items)\n    📞 Contact: ${phoneFormatted}\n`;
-        });
-        summaryMsg += `\n==================================\n`;
-        summaryMsg += `🚚 *Total Today Distributors:* ${orders.length}\n`;
-        summaryMsg += `📦 *Total Today Order Items:* ${totalItems}\n`;
-        summaryMsg += `==================================`;
+      let summaryMsg = `🏥 *${headerShopName}*\n📋 *TODAY DISTRIBUTOR SUMMARY & TOTALS — ${dateLabel}*\n\n`;
+      orders.forEach((o: any, idx: number) => {
+        const cleanP = normalizeWhatsAppPhone(o.phone || '');
+        const last10 = cleanP.slice(-10);
+        const phoneFormatted = last10.length === 10 ? `+91 ${last10.slice(0, 5)} ${last10.slice(5)}` : (o.phone || 'N/A');
+        summaryMsg += `${idx + 1}. *${o.storeName}* (${o.items?.length || 0} items)\n    📞 Contact: ${phoneFormatted}\n`;
+      });
+      summaryMsg += `\n==================================\n`;
+      summaryMsg += `🚚 *Total Today Distributors:* ${orders.length}\n`;
+      summaryMsg += `📦 *Total Today Order Items:* ${totalItems}\n`;
+      summaryMsg += `==================================`;
 
-        const boyQueueId = await whatsappQueueWorker.enqueue(
-          cleanBoyPhone,
-          summaryMsg,
-          'delivery_boy_summary',
-          `Delivery Boy (${targetBoyName})`
-        );
-        if (boyQueueId) enqueuedIds.push(boyQueueId);
-      }
+      const boyQueueId = await whatsappQueueWorker.enqueue(
+        cleanBoyPhone,
+        summaryMsg,
+        'delivery_boy_summary',
+        `Delivery Boy (${targetBoyName})`
+      );
+      if (boyQueueId) enqueuedIds.push(boyQueueId);
     }
 
     // B. ENQUEUE EACH DISTRIBUTOR ORDER MESSAGE ONE BY ONE
     const today = new Date().toISOString().split('T')[0];
     for (const order of orders) {
       if (!order.phone || !order.message) continue;
-      let cleanPhone = String(order.phone).replace(/\D/g, '');
-      if (cleanPhone.length === 10) cleanPhone = `91${cleanPhone}`;
-      if (cleanPhone.length < 10) continue;
+      const cleanPhone = normalizeWhatsAppPhone(order.phone);
+      if (!cleanPhone || cleanPhone.length < 10) continue;
 
       // Skip duplicate send if delivery boy phone is identical to distributor phone
       if (cleanBoyPhone && cleanBoyPhone === cleanPhone && orders.length === 1) {
@@ -322,6 +320,44 @@ router.put('/update-item', async (req, res) => {
     res.json({ success: true, message: `Updated queue item #${id}` });
   } catch (err: any) {
     res.status(500).json({ error: err?.message || 'Failed to update queue item' });
+  }
+});
+
+// DELETE single queue or notification item permanently (Dismiss / Mark Read)
+router.all('/delete-item', async (req, res) => {
+  const id = req.body?.id || req.query?.id;
+  if (!id) {
+    return res.status(400).json({ error: 'id is required' });
+  }
+  try {
+    const deleted = await whatsappQueueWorker.deleteItem(Number(id));
+    res.json({ success: true, deleted, message: `Removed item #${id}` });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || 'Failed to remove queue item' });
+  }
+});
+
+// DELETE single queue item by param (Dismiss / Mark Read)
+router.delete('/item/:id', async (req, res) => {
+  const id = req.params.id;
+  if (!id) {
+    return res.status(400).json({ error: 'id is required' });
+  }
+  try {
+    const deleted = await whatsappQueueWorker.deleteItem(Number(id));
+    res.json({ success: true, deleted, message: `Removed item #${id}` });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || 'Failed to remove queue item' });
+  }
+});
+
+// POST clear all failed messages permanently (Dismiss All Failed)
+router.post('/clear-failed', async (_req, res) => {
+  try {
+    const cleared = await whatsappQueueWorker.clearAllFailed();
+    res.json({ success: true, clearedCount: cleared, message: `Permanently removed ${cleared} failed item(s)` });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || 'Failed to clear failed items' });
   }
 });
 
