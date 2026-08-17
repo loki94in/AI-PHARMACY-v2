@@ -1632,17 +1632,7 @@ export class EmailService {
 
       const logRefId = customRefId || orderInfo.invoiceNumber || 'distributor_invoice';
 
-      // If there are no medicines extracted, just send a basic invoice alert
-      let itemsText = 'No items could be extracted from the email text body.';
-      if (orderInfo.medicines && orderInfo.medicines.length > 0) {
-        itemsText = orderInfo.medicines
-          .map((m: any, idx: number) => `${idx + 1}. ${m.name} - Qty: ${m.quantity}`)
-          .join('\n');
-      }
-
-      const senderEmailStr = orderInfo.senderEmail || orderInfo.from || '';
-      const senderLine = senderEmailStr ? `Mail ID / Sender: ${senderEmailStr}\n` : '';
-      const message = `📦 *Distributor Invoice Stock Alert*\n\nDistributor: ${orderInfo.distributorName}\n${senderLine}Invoice No: ${orderInfo.invoiceNumber}\nTime Received: ${orderInfo.timeStr}\n\n*Items Extracted:*\n${itemsText}\n\n— AI Pharmacy OS`;
+      const message = `Distributor: ${orderInfo.distributorName}\nInvoice No: ${orderInfo.invoiceNumber}\nTime Received: ${orderInfo.timeStr}\n\n— AI Pharmacy OS`;
 
       try {
         await sendMessage(shopPhone, undefined, message);

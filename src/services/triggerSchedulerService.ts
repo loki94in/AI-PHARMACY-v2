@@ -80,6 +80,8 @@ class TriggerSchedulerService {
       trigger_dispatch_reminder_enabled: 'true',
       trigger_dispatch_reminder_time_start: '12:30',
       trigger_dispatch_reminder_time_end: '13:00',
+      trigger_afternoon_dispatch_reminder_enabled: 'true',
+      trigger_afternoon_dispatch_reminder_time: '14:00',
 
       // 4. Nightly Database Backup
       trigger_backup_enabled: 'true',

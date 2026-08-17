@@ -1450,7 +1450,12 @@ const Sells = () => {
           onSave={() => {
             // Refetch to reflect any potential naming changes if needed
             fetchInvoices(true);
-          }} 
+          }}
+          onDelete={() => {
+            setUniversalEditMedicineId(null);
+            setUniversalEditItem(null);
+            fetchInvoices(true);
+          }}
         />
       )}
 

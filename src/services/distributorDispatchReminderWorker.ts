@@ -366,6 +366,88 @@ export async function syncTodayActiveDistributors(): Promise<any[]> {
       console.warn('[DistributorReminderWorker] Error merging master saved distributors:', err.message);
     }
 
+    // Fetch placed orders and purchases for today to populate order_count, orders_list, and total_items_count
+    try {
+      const todayPlacedOrders = await db.all(
+        `SELECT id, order_date, store_id, store_name, items_json, placed_at 
+         FROM pharmarack_placed_orders 
+         WHERE order_date = ? OR DATE(placed_at / 1000, 'unixepoch') = ? OR DATE(placed_at / 1000, 'unixepoch', 'localtime') = ?
+         ORDER BY placed_at ASC`,
+        [todayStr, todayStr, todayStr]
+      );
+
+      const todayPurchases = await db.all(
+        `SELECT p.id, p.invoice_no, p.date, d.name as distributor_name, d.id as distributor_id, p.created_at
+         FROM purchases p
+         JOIN distributors d ON p.distributor_id = d.id
+         WHERE (p.date IS NOT NULL AND DATE(p.date) = ?) OR (p.created_at IS NOT NULL AND DATE(p.created_at) = ?)
+         ORDER BY p.id ASC`,
+        [todayStr, todayStr]
+      );
+
+      for (const r of todayReminders) {
+        const normDistName = (r.distributor_name || '').toLowerCase().trim();
+        const distId = r.distributor_id;
+
+        const matchingPlaced = todayPlacedOrders.filter(po => 
+          (po.store_name && po.store_name.toLowerCase().trim() === normDistName) ||
+          (distId && po.store_id === distId)
+        );
+
+        const matchingPurchases = todayPurchases.filter(p =>
+          (p.distributor_name && p.distributor_name.toLowerCase().trim() === normDistName) ||
+          (distId && p.distributor_id === distId)
+        );
+
+        const ordersList: Array<{
+          id: string | number;
+          source: 'pharmarack' | 'purchase' | 'manual';
+          order_time: string;
+          items_count: number;
+          items_preview: string[];
+        }> = [];
+
+        let totalItems = 0;
+
+        for (const po of matchingPlaced) {
+          let itemsArr: any[] = [];
+          try {
+            itemsArr = typeof po.items_json === 'string' ? JSON.parse(po.items_json) : (Array.isArray(po.items_json) ? po.items_json : []);
+          } catch (_) {}
+
+          totalItems += itemsArr.length;
+          const timeStr = po.placed_at ? new Date(Number(po.placed_at)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Today';
+          const previews = itemsArr.slice(0, 5).map(it => `${it.productName || it.name || 'Item'} (Qty: ${it.qty || it.Quantity || 1})`);
+
+          ordersList.push({
+            id: `pharma_${po.id}`,
+            source: 'pharmarack',
+            order_time: timeStr,
+            items_count: itemsArr.length,
+            items_preview: previews
+          });
+        }
+
+        for (const p of matchingPurchases) {
+          const timeStr = p.created_at ? new Date(p.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Today';
+          ordersList.push({
+            id: `purch_${p.id}`,
+            source: 'purchase',
+            order_time: timeStr,
+            items_count: 1,
+            items_preview: [`Purchase Bill #${p.invoice_no || p.id}`]
+          });
+        }
+
+        const totalCount = ordersList.length;
+        r.order_count = totalCount > 0 ? totalCount : (r.has_order_today && r.status !== 'No Order Today' ? 1 : 0);
+        r.orders_list = ordersList;
+        r.total_items_count = totalItems;
+      }
+    } catch (countErr: any) {
+      console.warn('[DistributorReminderWorker] Error calculating order counts:', countErr.message);
+    }
+
     return todayReminders || [];
   } catch (err: any) {
     console.error('[DistributorReminderWorker] Error syncing today active distributors:', err.message);
@@ -408,8 +490,8 @@ export async function checkAndSendAutoReminders() {
       console.log(`[DistributorReminderWorker] Found ${pendingReminders.length} pending reminders for 12:30-1:00 PM window.`);
 
       for (const item of pendingReminders) {
-        // Random 1-3 second delay between messages
-        const delay = Math.floor(Math.random() * 2000) + 1000;
+        // Anti-ban safe delay: 5 to 10 seconds between messages (strictly non-bulk)
+        const delay = Math.floor(Math.random() * 5000) + 5000;
         await new Promise(res => setTimeout(res, delay));
 
         await notificationService.sendDistributorDispatchReminder(item.id);
@@ -419,6 +501,55 @@ export async function checkAndSendAutoReminders() {
     console.error('[DistributorReminderWorker] Error during auto reminder run:', err.message);
   } finally {
     isWorkerRunning = false;
+  }
+}
+
+/**
+ * Check and send the consolidated Delivery Boy dispatch summary at the configured afternoon time (e.g. 14:00)
+ */
+export async function checkAndSendAfternoonDeliveryBoyReminder() {
+  try {
+    const db = await dbManager.getConnection();
+    const todayStr = getTodayDateString();
+
+    // 1. Check settings
+    const enabledSetting = await db.get("SELECT value FROM app_settings WHERE key = 'trigger_afternoon_dispatch_reminder_enabled'");
+    if (enabledSetting?.value === 'false') return;
+
+    const timeSetting = await db.get("SELECT value FROM app_settings WHERE key = 'trigger_afternoon_dispatch_reminder_time'");
+    const targetTime = timeSetting?.value || '14:00';
+
+    const [targetH, targetM] = targetTime.split(':').map(Number);
+    const now = new Date();
+    const currentH = now.getHours();
+    const currentM = now.getMinutes();
+
+    // Check if current time is within 15 minutes of the target afternoon time (e.g., 14:00 - 14:15)
+    const isTargetHour = currentH === (targetH || 14);
+    const isWithinMinutes = currentM >= (targetM || 0) && currentM <= ((targetM || 0) + 15);
+
+    if (!isTargetHour || !isWithinMinutes) {
+      return;
+    }
+
+    // 2. Deduplicate: check if already sent today
+    const alreadySent = await db.get(
+      `SELECT id FROM automation_notifications 
+       WHERE type = 'afternoon_delivery_boy_dispatch' AND DATE(created_at) = ? AND status = 'sent'
+       LIMIT 1`,
+      [todayStr]
+    );
+
+    if (alreadySent) {
+      return;
+    }
+
+    console.log(`[DistributorReminderWorker] Triggering scheduled afternoon Delivery Boy consolidated dispatch at ${targetTime}...`);
+    const todayReminders = await syncTodayActiveDistributors();
+    const result = await notificationService.sendConsolidatedDeliveryBoyDispatch(todayReminders);
+    console.log('[DistributorReminderWorker] Afternoon Delivery Boy dispatch result:', result);
+  } catch (err: any) {
+    console.error('[DistributorReminderWorker] Error in checkAndSendAfternoonDeliveryBoyReminder:', err.message);
   }
 }
 
@@ -476,12 +607,14 @@ export function startDistributorDispatchReminderWorker() {
   purgeStaleOfflineReminders().catch(() => {});
   syncTodayActiveDistributors().catch(() => {});
   checkAndSendAutoReminders().catch(() => {});
+  checkAndSendAfternoonDeliveryBoyReminder().catch(() => {});
 
   // Check every 5 minutes (300,000 ms)
   checkIntervalTimer = setInterval(() => {
     purgeStaleOfflineReminders().catch(() => {});
     checkAndSendAutoReminders().catch(() => {});
+    checkAndSendAfternoonDeliveryBoyReminder().catch(() => {});
   }, 5 * 60 * 1000);
 
-  console.log('[DistributorReminderWorker] Distributor dispatch reminder background worker initialized with PC offline protection.');
+  console.log('[DistributorReminderWorker] Distributor dispatch reminder background worker initialized with PC offline protection & afternoon Delivery Boy dispatch.');
 }

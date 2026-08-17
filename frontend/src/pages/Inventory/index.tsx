@@ -942,6 +942,11 @@ const Inventory = () => {
                 setTimeout(() => handleRowClick(selectedItem), 300);
               }
             }}
+            onDelete={() => {
+              setUniversalEditMedicineId(null);
+              setPanelOpen(false);
+              loadInventory();
+            }}
           />
         </Suspense>
       )}

@@ -1312,7 +1312,12 @@ export default function PharmarackCart() {
           items: itemsToLog,
           delivery_persons: dist.deliveryPersons
         });
+        setHasUnreadSentHistory(true);
+        specialOrdersEvent.triggerUpdated();
+        window.dispatchEvent(new CustomEvent('refresh-special-orders'));
+        await fetchPendingOrders();
         await fetchLatestSentMap();
+        await loadSentDates();
       } catch (logErr) {
         console.warn('Could not log placed order:', logErr);
       }

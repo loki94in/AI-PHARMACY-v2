@@ -289,11 +289,21 @@ router.get('/messages', async (req, res) => {
 // GET today's distributor reminders (strictly today's orders & emails only)
 router.get('/distributor-reminders/today', async (_req, res) => {
   try {
+    const db = await dbManager.getConnection();
+    const [startSetting, endSetting, afternoonEnabledSetting, afternoonTimeSetting] = await Promise.all([
+      db.get("SELECT value FROM app_settings WHERE key = 'trigger_dispatch_reminder_time_start'"),
+      db.get("SELECT value FROM app_settings WHERE key = 'trigger_dispatch_reminder_time_end'"),
+      db.get("SELECT value FROM app_settings WHERE key = 'trigger_afternoon_dispatch_reminder_enabled'"),
+      db.get("SELECT value FROM app_settings WHERE key = 'trigger_afternoon_dispatch_reminder_time'")
+    ]);
+
     const reminders = await syncTodayActiveDistributors();
     res.json({
       success: true,
-      window_start: '12:30',
-      window_end: '13:00',
+      window_start: startSetting?.value || '12:30',
+      window_end: endSetting?.value || '13:00',
+      afternoon_enabled: afternoonEnabledSetting?.value !== 'false',
+      afternoon_time: afternoonTimeSetting?.value || '14:00',
       is_recent_fallback: false,
       recent_date: null,
       reminders: reminders || []
@@ -301,6 +311,22 @@ router.get('/distributor-reminders/today', async (_req, res) => {
   } catch (error: any) {
     console.error('Fetch distributor reminders error:', error);
     res.status(500).json({ error: 'Failed to fetch distributor reminders' });
+  }
+});
+
+// POST send afternoon consolidated Delivery Boy dispatch summary
+router.post('/distributor-reminders/afternoon-delivery-boy-dispatch', async (_req, res) => {
+  try {
+    const reminders = await syncTodayActiveDistributors();
+    const result = await notificationService.sendConsolidatedDeliveryBoyDispatch(reminders);
+    if (result.ok) {
+      res.json({ success: true, message: result.message || 'Afternoon dispatch summary sent to Delivery Boy!' });
+    } else {
+      res.status(500).json({ error: result.message || 'Failed to send afternoon dispatch to Delivery Boy.' });
+    }
+  } catch (error: any) {
+    console.error('Send afternoon delivery boy dispatch error:', error);
+    res.status(500).json({ error: error?.message || 'Failed to send afternoon delivery boy dispatch' });
   }
 });
 

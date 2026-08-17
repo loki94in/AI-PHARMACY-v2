@@ -208,34 +208,70 @@ router.get('/medicines', async (req, res) => {
 });
 
 router.post('/medicines', async (req, res) => {
-  const { name, generic_name, manufacturer, marketed_by, pack_unit, pack_size, cgst_per, sgst_per, hsn_code, category, packaging, mrp, rate, sell_price } = req.body;
-  if (!name) return res.status(400).json({ error: 'Medicine name is required' });
+  const {
+    name, generic_name, manufacturer, marketed_by,
+    pack_unit, pack_size, cgst_per, sgst_per, igst_per,
+    hsn_code, category, packaging, mrp, rate, sell_price,
+    item_type, therapeutic, sub_therapeutic, schedule_type,
+    short_code, ucode, api_reference, rack, rack_location,
+    disable_auto_barcode, tb_medicine, allow_loose_sale,
+    max_stock_level, item_code, metadata, strength
+  } = req.body;
+
+  if (!name || !name.trim()) return res.status(400).json({ error: 'Medicine name is required' });
   try {
     const { normalizeMedicineName } = await import('../utils/nameNormalizer.js');
-    const adjustedName = normalizeMedicineName(name, manufacturer || '');
+    const adjustedName = normalizeMedicineName(name.trim(), manufacturer || '');
     const finalPackSize = parseInt(pack_size, 10) || parsePackSizeFromPackaging(packaging) || null;
     const db = await dbManager.getConnection();
     const rawRate = parseFloat(rate) || 0;
     const rawMrp = parseFloat(mrp) || 0;
-    const rawSellPrice = (sell_price !== undefined && sell_price !== null && sell_price !== '' && !isNaN(Number(sell_price))) ? parseFloat(sell_price) : (rawMrp > 0 ? rawMrp : null);
+    const rawSellPrice = (sell_price !== undefined && sell_price !== null && sell_price !== '' && !isNaN(Number(sell_price)))
+      ? parseFloat(sell_price)
+      : (rawMrp > 0 ? rawMrp : null);
+
+    const rackVal = rack_location || rack || null;
+    const metaStr = typeof metadata === 'object' && metadata !== null ? JSON.stringify(metadata) : (metadata || null);
+
     const result = await db.run(
-      `INSERT INTO medicines (name, generic_name, manufacturer, marketed_by, pack_unit, pack_size, cgst_per, sgst_per, hsn_code, category, packaging, mrp, rate, sell_price)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO medicines (
+        name, generic_name, manufacturer, marketed_by, pack_unit, pack_size,
+        cgst_per, sgst_per, igst_per, hsn_code, category, packaging, mrp, rate, sell_price,
+        item_type, therapeutic, sub_therapeutic, schedule_type, short_code, ucode,
+        api_reference, rack, disable_auto_barcode, tb_medicine, allow_loose_sale,
+        max_stock_level, item_code, metadata, strength
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        adjustedName, 
-        generic_name || '', 
-        manufacturer || '', 
-        marketed_by || '', 
-        pack_unit || '', 
-        finalPackSize, 
-        parseFloat(cgst_per) || 0, 
-        parseFloat(sgst_per) || 0, 
-        hsn_code || '', 
+        adjustedName,
+        generic_name || '',
+        manufacturer || '',
+        marketed_by || '',
+        pack_unit || '',
+        finalPackSize,
+        parseFloat(cgst_per) || 0,
+        parseFloat(sgst_per) || 0,
+        parseFloat(igst_per) || 0,
+        hsn_code || '',
         category || '',
         packaging || '',
         rawMrp,
         rawRate,
-        rawSellPrice
+        rawSellPrice,
+        item_type || null,
+        therapeutic || null,
+        sub_therapeutic || null,
+        schedule_type || 'None',
+        short_code || null,
+        ucode || null,
+        api_reference || '',
+        rackVal,
+        disable_auto_barcode ? 1 : 0,
+        tb_medicine ? 1 : 0,
+        allow_loose_sale !== undefined ? (allow_loose_sale ? 1 : 0) : 1,
+        parseInt(max_stock_level, 10) || null,
+        item_code || null,
+        metaStr,
+        strength || null
       ]
     );
     const id = result.lastID;
@@ -737,31 +773,6 @@ router.patch('/medicines/:id/allow-loose-sale', async (req, res) => {
   } catch (err: any) {
     console.error('Error toggling allow_loose_sale:', err);
     res.status(500).json({ error: err.message || 'Failed to toggle allow_loose_sale' });
-  }
-});
-
-// DELETE /api/medicines/:id - permanent medicine deletion & cache invalidation
-router.delete('/medicines/:id', async (req, res) => {
-  const { id } = req.params;
-  try {
-    const db = await dbManager.getConnection();
-    await db.run('BEGIN TRANSACTION');
-    
-    // Purge linked inventory, refills, and aliases
-    await db.run('DELETE FROM inventory_master WHERE medicine_id = ?', [id]);
-    await db.run('DELETE FROM patient_refills WHERE medicine_id = ?', [id]);
-    await db.run('DELETE FROM medicine_aliases WHERE medicine_id = ?', [id]);
-    await db.run('DELETE FROM medicines WHERE id = ?', [id]);
-    
-    await db.run('COMMIT');
-    
-    // Invalidate memory caches
-    inventoryCache.invalidate();
-    
-    res.json({ success: true, message: 'Medicine permanently deleted and caches invalidated' });
-  } catch (error: any) {
-    console.error('Failed to delete medicine:', error);
-    res.status(500).json({ error: 'Internal server error during medicine deletion' });
   }
 });
 

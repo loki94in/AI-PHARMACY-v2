@@ -118,11 +118,14 @@ const Dispatch = () => {
   const [sendingReminderId, setSendingReminderId] = useState<number | null>(null);
   const [loadingDistributorReminders, setLoadingDistributorReminders] = useState(false);
   const [expandedPreviewId, setExpandedPreviewId] = useState<number | null>(null);
+  const [expandedOrderDetailsId, setExpandedOrderDetailsId] = useState<number | null>(null);
   const [customMessages, setCustomMessages] = useState<Record<number, string>>({});
   const [showTemplateModal, setShowTemplateModal] = useState(false);
   const [globalTemplate, setGlobalTemplate] = useState('');
   const [savingTemplate, setSavingTemplate] = useState(false);
   const [windowSchedule, setWindowSchedule] = useState({ start: '12:30', end: '13:00' });
+  const [afternoonSchedule, setAfternoonSchedule] = useState({ enabled: true, time: '14:00' });
+  const [isSendingAfternoonDispatch, setIsSendingAfternoonDispatch] = useState(false);
   const [nowTime, setNowTime] = useState<Date>(new Date());
 
   // Manual Phone Call Order states
@@ -274,6 +277,12 @@ const Dispatch = () => {
         if (res.window_start && res.window_end) {
           setWindowSchedule({ start: res.window_start, end: res.window_end });
         }
+        if (res.afternoon_time !== undefined) {
+          setAfternoonSchedule({
+            enabled: res.afternoon_enabled !== false,
+            time: res.afternoon_time || '14:00'
+          });
+        }
       }
     } catch (err) {
       console.error('Failed to fetch distributor reminders:', err);
@@ -281,6 +290,26 @@ const Dispatch = () => {
       if (!silent) setLoadingDistributorReminders(false);
     }
   }, []);
+
+  const handleSendAfternoonDeliveryBoyDispatch = async () => {
+    setIsSendingAfternoonDispatch(true);
+    try {
+      messageSendEvent.triggerSendProgress('Delivery Staff Dispatch', 'Compiling afternoon collection summary...', 10);
+      whatsappQueueEvent.triggerOpen();
+      whatsappQueueEvent.triggerUpdated();
+      const res = await api.sendAfternoonDeliveryBoyDispatch();
+      if (res && res.success) {
+        showNotif(res.message || 'Afternoon dispatch summary sent to Delivery Staff via WhatsApp!');
+        fetchDistributorReminders(true);
+      } else {
+        showNotif(res?.message || 'Failed to send afternoon dispatch', 'error');
+      }
+    } catch (err: any) {
+      showNotif(err?.response?.data?.error || err.message || 'Failed to send afternoon dispatch', 'error');
+    } finally {
+      setIsSendingAfternoonDispatch(false);
+    }
+  };
 
   const handleToggleAutoRemind = async (id: number, currentAuto: number) => {
     const nextVal = currentAuto ? false : true;
@@ -1031,8 +1060,23 @@ const Dispatch = () => {
               </button>
             </div>
 
-            {/* Search Input */}
+            {/* Afternoon Delivery Boy Dispatch Button & Search Input */}
             <div className="flex items-center gap-3 flex-wrap flex-1 justify-end">
+              <button
+                type="button"
+                onClick={handleSendAfternoonDeliveryBoyDispatch}
+                disabled={isSendingAfternoonDispatch}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 border border-emerald-500/40 text-xs font-bold transition-all active:scale-95 cursor-pointer shadow-md disabled:opacity-50"
+                title={`Send consolidated afternoon collection summary to active delivery staff (${afternoonSchedule.time || '14:00'})`}
+              >
+                {isSendingAfternoonDispatch ? (
+                  <RefreshCw size={13} className="animate-spin" />
+                ) : (
+                  <Truck size={13} className="text-emerald-400" />
+                )}
+                <span>Send Afternoon Dispatch</span>
+              </button>
+
               <div className="relative flex-1 min-w-[200px] max-w-[320px]">
                 <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
                 <input
@@ -1107,6 +1151,7 @@ const Dispatch = () => {
 
                   return displayList.map(item => {
                     const isPreviewOpen = expandedPreviewId === item.id;
+                    const isOrdersOpen = expandedOrderDetailsId === item.id;
                     const boyName = item.delivery_boy_name || '👤 Admin / Store Owner';
                     const boyPhone = item.delivery_boy_phone ? `(${item.delivery_boy_phone})` : '';
 
@@ -1116,6 +1161,19 @@ const Dispatch = () => {
                           <td className="p-3.5 align-middle">
                             <div className="flex items-center gap-2 flex-wrap">
                               <span className="font-extrabold text-text text-xs tracking-tight">{item.distributor_name}</span>
+
+                              {/* Multiple Orders Highlight Badge */}
+                              {item.order_count && item.order_count > 1 ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setExpandedOrderDetailsId(isOrdersOpen ? null : item.id)}
+                                  className="px-2 py-0.5 rounded-full text-[9px] font-extrabold tracking-wide bg-amber-500/25 text-amber-300 border border-amber-500/50 shadow-sm flex items-center gap-1 shrink-0 animate-pulse hover:bg-amber-500/35 cursor-pointer"
+                                  title="Click to view separate order timestamps & items placed today"
+                                >
+                                  <Zap size={10} /> ✨ {item.order_count} Orders Today
+                                </button>
+                              ) : null}
+
                               {item.has_pharmarack_order_today === 1 ? (
                                 <span className="px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wide bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center gap-1 shrink-0">
                                   <ShoppingCart size={10} /> Pharmarack Cart Sent
@@ -1335,6 +1393,70 @@ const Dispatch = () => {
                                     <span>{sendingReminderId === item.id ? 'Sending...' : '⚡ Send Custom Text Now'}</span>
                                   </button>
                                 </div>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+
+                        {/* Separate Orders Details Sub-Row */}
+                        {isOrdersOpen && (
+                          <tr className="bg-bg3/20 border-b border-glass-border/50">
+                            <td colSpan={5} className="p-4">
+                              <div className="p-4 rounded-2xl bg-bg2/95 border border-glass-border/80 space-y-3 text-xs shadow-2xl backdrop-blur-xl transition-all">
+                                <div className="flex items-center justify-between border-b border-glass-border/40 pb-2">
+                                  <div className="flex items-center gap-2">
+                                    <Package size={15} className="text-amber-400" />
+                                    <span className="font-extrabold text-xs text-text">
+                                      Orders Placed Today with <span className="text-amber-300 font-black">{item.distributor_name}</span> ({item.orders_list?.length || item.order_count || 1} {((item.orders_list?.length || item.order_count || 1) === 1 ? 'Order' : 'Orders')})
+                                    </span>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => setExpandedOrderDetailsId(null)}
+                                    className="p-1 rounded-md bg-bg3 text-muted hover:text-text cursor-pointer"
+                                    title="Close Details"
+                                  >
+                                    <X size={13} />
+                                  </button>
+                                </div>
+
+                                {item.orders_list && item.orders_list.length > 0 ? (
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                                    {item.orders_list.map((ord: any, oIdx: number) => (
+                                      <div key={ord.id || oIdx} className="p-3 rounded-xl bg-bg border border-glass-border/70 space-y-2">
+                                        <div className="flex items-center justify-between text-[11px] font-bold">
+                                          <span className="px-2 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                                            Order #{oIdx + 1}
+                                          </span>
+                                          <span className="text-muted font-mono flex items-center gap-1">
+                                            <Clock size={11} /> {ord.order_time || 'Today'}
+                                          </span>
+                                        </div>
+                                        <div className="space-y-1">
+                                          <div className="text-[10px] uppercase font-bold text-muted tracking-wider">
+                                            {ord.items_count} item{ord.items_count === 1 ? '' : 's'}:
+                                          </div>
+                                          <ul className="space-y-0.5 text-xs text-text">
+                                            {ord.items_preview && ord.items_preview.length > 0 ? (
+                                              ord.items_preview.map((pText: string, pIdx: number) => (
+                                                <li key={pIdx} className="flex items-center gap-1.5 text-[11px] font-medium">
+                                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
+                                                  <span className="truncate">{pText}</span>
+                                                </li>
+                                              ))
+                                            ) : (
+                                              <li className="text-[11px] text-muted italic">Order logged from cart</li>
+                                            )}
+                                          </ul>
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <div className="p-3 rounded-xl bg-bg text-muted text-xs italic">
+                                    Standard order placed today with this distributor.
+                                  </div>
+                                )}
                               </div>
                             </td>
                           </tr>

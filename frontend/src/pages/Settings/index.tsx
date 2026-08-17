@@ -1502,6 +1502,8 @@ function TriggerSchedulesTab({ rawSettings, refetchSettings }: { rawSettings: Re
     triggerDispatchReminderEnabled: rawSettings.trigger_dispatch_reminder_enabled !== 'false',
     triggerDispatchReminderTimeStart: rawSettings.trigger_dispatch_reminder_time_start || '12:30',
     triggerDispatchReminderTimeEnd: rawSettings.trigger_dispatch_reminder_time_end || '13:00',
+    triggerAfternoonDispatchReminderEnabled: rawSettings.trigger_afternoon_dispatch_reminder_enabled !== 'false',
+    triggerAfternoonDispatchReminderTime: rawSettings.trigger_afternoon_dispatch_reminder_time || '14:00',
 
     // 4. Nightly Database Backup
     triggerBackupEnabled: rawSettings.trigger_backup_enabled !== 'false',
@@ -1549,6 +1551,8 @@ function TriggerSchedulesTab({ rawSettings, refetchSettings }: { rawSettings: Re
         trigger_dispatch_reminder_enabled: formData.triggerDispatchReminderEnabled ? 'true' : 'false',
         trigger_dispatch_reminder_time_start: formData.triggerDispatchReminderTimeStart,
         trigger_dispatch_reminder_time_end: formData.triggerDispatchReminderTimeEnd,
+        trigger_afternoon_dispatch_reminder_enabled: formData.triggerAfternoonDispatchReminderEnabled ? 'true' : 'false',
+        trigger_afternoon_dispatch_reminder_time: formData.triggerAfternoonDispatchReminderTime,
         trigger_backup_enabled: formData.triggerBackupEnabled ? 'true' : 'false',
         trigger_backup_time: formData.triggerBackupTime,
         trigger_expiry_return_enabled: formData.triggerExpiryReturnEnabled ? 'true' : 'false',
@@ -1728,6 +1732,35 @@ function TriggerSchedulesTab({ rawSettings, refetchSettings }: { rawSettings: Re
                 className="w-full px-2 py-1 text-xs bg-bg border border-border rounded-lg text-text focus:outline-none focus:border-primary"
               />
             </div>
+          </div>
+        </div>
+
+        {/* Trigger 3B: Afternoon Delivery Boy Dispatch */}
+        <div className="p-4 rounded-2xl bg-bg3/30 border border-border space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Truck size={16} className="text-emerald-500" />
+              <span className="text-xs font-bold text-text">Afternoon Delivery Boy Dispatch</span>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={formData.triggerAfternoonDispatchReminderEnabled}
+                onChange={(e) => setFormData({ ...formData, triggerAfternoonDispatchReminderEnabled: e.target.checked })}
+                className="sr-only peer"
+              />
+              <div className="w-9 h-5 bg-bg3 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div>
+            </label>
+          </div>
+          <p className="text-[11px] text-muted">Sends a consolidated WhatsApp collection summary with repeat order counts (e.g. 2x) to active Delivery Staff.</p>
+          <div className="flex items-center gap-2">
+            <label className="text-[11px] font-semibold text-text whitespace-nowrap">Dispatch Time:</label>
+            <input
+              type="time"
+              value={formData.triggerAfternoonDispatchReminderTime}
+              onChange={(e) => setFormData({ ...formData, triggerAfternoonDispatchReminderTime: e.target.value })}
+              className="px-2.5 py-1 text-xs bg-bg border border-border rounded-lg text-text focus:outline-none focus:border-primary"
+            />
           </div>
         </div>
 

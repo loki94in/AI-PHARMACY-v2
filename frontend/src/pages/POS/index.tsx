@@ -4654,7 +4654,11 @@ const POS = () => {
               } catch (err) {
                 console.error('Failed to update cart items after quick edit save:', err);
               }
-            }} 
+            }}
+            onDelete={(deletedId) => {
+              updateCart(prevCart => prevCart.filter(item => item.medicine_id !== deletedId));
+              setEditMedicineId(null);
+            }}
           />
         </Suspense>
       )}

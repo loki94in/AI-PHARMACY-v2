@@ -897,6 +897,96 @@ export class NotificationService {
       return false;
     }
   }
+
+  /**
+   * Send comprehensive afternoon consolidated dispatch summary to Delivery Boy
+   */
+  async sendConsolidatedDeliveryBoyDispatch(
+    todayReminders: any[],
+    targetBoyPhone?: string,
+    targetBoyName?: string
+  ): Promise<{ ok: boolean; message?: string }> {
+    try {
+      const db = await dbManager.getConnection();
+
+      // Resolve Delivery Boy
+      let boyPhone = targetBoyPhone || '';
+      let boyName = targetBoyName || '';
+
+      if (!boyPhone) {
+        const activeBoy = await db.get("SELECT name, whatsapp_number FROM delivery_boys WHERE is_active = 1 AND whatsapp_number IS NOT NULL AND whatsapp_number != '' LIMIT 1");
+        if (activeBoy?.whatsapp_number) {
+          boyPhone = activeBoy.whatsapp_number;
+          boyName = activeBoy.name || 'Delivery Staff';
+        } else {
+          // Admin fallback
+          const adminSetting = await db.get("SELECT value FROM app_settings WHERE key IN ('owner_whatsapp_number', 'shop_phone') AND value IS NOT NULL AND value != '' LIMIT 1");
+          if (adminSetting?.value) {
+            boyPhone = String(adminSetting.value);
+            boyName = 'Admin / Store Owner';
+          }
+        }
+      }
+
+      if (!boyPhone) {
+        console.warn('[ConsolidatedDispatch] No delivery boy or admin phone available.');
+        return { ok: false, message: 'No delivery boy or store phone configured.' };
+      }
+
+      const store = await this.getStoreSettings(db);
+      const dateStr = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+
+      // Filter only reminders that have orders today
+      const orderedReminders = todayReminders.filter(r => r.has_order_today || (r.order_count && r.order_count > 0) || (r.status && r.status !== 'No Order Today'));
+
+      if (orderedReminders.length === 0) {
+        console.log('[ConsolidatedDispatch] No orders placed today to notify delivery boy.');
+        return { ok: true, message: 'No orders placed today.' };
+      }
+
+      let msg = `🏥 *${store.storeName}*\n`;
+      msg += `📍 *Delivery Location:* ${store.address}\n`;
+      msg += `📞 *Pharmacy Contact:* ${store.phone}\n\n`;
+      msg += `🚚 *AFTERNOON DISPATCH & COLLECTION LIST*\n`;
+      msg += `📅 *Date:* ${dateStr}\n`;
+      msg += `🏢 *Total Distributors:* ${orderedReminders.length}\n\n`;
+      msg += `─────────────────────────\n`;
+
+      orderedReminders.forEach((r, idx) => {
+        const distName = r.distributor_name || 'Distributor';
+        const rawP = (r.distributor_phone || '').replace(/\D/g, '');
+        const phoneFormatted = rawP.length >= 10 ? formatDisplayPhone(rawP) : (r.distributor_phone || 'N/A');
+        const orderCount = Number(r.order_count || 1);
+        const orderCountText = orderCount > 1 ? ` 🔥 *[${orderCount} Orders Placed Today]*` : '';
+        const statusText = r.status === 'Dispatched' ? '✅ Dispatched / Ready' : (r.status === 'Collected' ? '📦 Collected' : '⏳ Pending Collection');
+        const itemsCount = r.total_items_count ? ` (${r.total_items_count} items)` : '';
+
+        msg += `${idx + 1}. *${distName}*${orderCountText}\n`;
+        msg += `   📞 ${phoneFormatted}\n`;
+        msg += `   📊 Status: ${statusText}${itemsCount}\n\n`;
+      });
+
+      msg += `─────────────────────────\n`;
+      msg += `📝 *Note:* Please verify bills with distributor counter and collect invoices for ${store.storeName}.`;
+
+      console.log(`[ConsolidatedDispatch] Sending afternoon dispatch summary to ${boyName} (${boyPhone})`);
+      const sendResult = await sendMessage(boyPhone, undefined, msg);
+      const statusStr = sendLogStatus(sendResult);
+      const isOk = isSendSuccess(sendResult);
+
+      const todayIso = new Date().toISOString().split('T')[0];
+      await db.run(
+        `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        ['afternoon_delivery_boy_dispatch', boyName, boyPhone, msg, statusStr, `afternoon_dispatch_${todayIso}_${Date.now()}`]
+      );
+
+      return { ok: isOk, message: isOk ? 'Afternoon dispatch summary sent to Delivery Boy!' : 'Failed to send WhatsApp message.' };
+    } catch (err: any) {
+      console.error('[ConsolidatedDispatch] Error sending afternoon dispatch summary:', err);
+      return { ok: false, message: err.message || 'Internal error' };
+    }
+  }
 }
 
 // Singleton instance

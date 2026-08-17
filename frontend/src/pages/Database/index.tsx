@@ -63,33 +63,16 @@ const DatabasePage = () => {
   const [sort, setSort] = useState('name_asc');
   const [letter, setLetter] = useState('');
   const [universalEditMedicineId, setUniversalEditMedicineId] = useState<number | null>(null);
+  const [universalEditMode, setUniversalEditMode] = useState<'create' | 'edit'>('edit');
   const [universalEditItem, setUniversalEditItem] = useState<any>(null);
+  const [isUniversalModalOpen, setIsUniversalModalOpen] = useState(false);
 
-  // Add / Delete features
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [addTab, setAddTab] = useState<'single' | 'bulk'>('single');
-  const [singleForm, setSingleForm] = useState({
-    name: '',
-    generic_name: '',
-    category: '',
-    manufacturer: '',
-    marketed_by: '',
-    packaging: '',
-    strength: '',
-    pack_unit: 'Tablet',
-    mrp: '',
-    hsn_code: '',
-    cgst_per: 6,
-    sgst_per: 6
-  });
+  // Bulk Multi-Add state
+  const [showBulkAddModal, setShowBulkAddModal] = useState(false);
   const [bulkText, setBulkText] = useState('');
   const [bulkCategory, setBulkCategory] = useState('');
   const [adding, setAdding] = useState(false);
   const [addMessage, setAddMessage] = useState<string | null>(null);
-  const [mfgSuggestions, setMfgSuggestions] = useState<string[]>([]);
-  const [showMfgSuggestions, setShowMfgSuggestions] = useState(false);
-  const [mrkSuggestions, setMrkSuggestions] = useState<string[]>([]);
-  const [showMrkSuggestions, setShowMrkSuggestions] = useState(false);
   const [seedingMaster, setSeedingMaster] = useState(false);
   const [syncingInventory, setSyncingInventory] = useState(false);
 
@@ -125,48 +108,6 @@ const DatabasePage = () => {
       alert(err.response?.data?.error || err.message || 'Failed to sync inventory to master');
     } finally {
       setSyncingInventory(false);
-    }
-  };
-
-  const handleMfgChange = async (val: string) => {
-    setSingleForm(prev => ({ ...prev, manufacturer: val }));
-    try {
-      const res = await api.getManufacturers(val);
-      setMfgSuggestions(res || []);
-      setShowMfgSuggestions(true);
-    } catch (err) {
-      console.error('Error fetching manufacturers:', err);
-    }
-  };
-
-  const handleMfgFocus = async (val: string) => {
-    try {
-      const res = await api.getManufacturers(val);
-      setMfgSuggestions(res || []);
-      setShowMfgSuggestions(true);
-    } catch (err) {
-      console.error('Error fetching manufacturers:', err);
-    }
-  };
-
-  const handleMrkChange = async (val: string) => {
-    setSingleForm(prev => ({ ...prev, marketed_by: val }));
-    try {
-      const res = await api.getMarketedBy(val);
-      setMrkSuggestions(res || []);
-      setShowMrkSuggestions(true);
-    } catch (err) {
-      console.error('Error fetching marketed-by list:', err);
-    }
-  };
-
-  const handleMrkFocus = async (val: string) => {
-    try {
-      const res = await api.getMarketedBy(val);
-      setMrkSuggestions(res || []);
-      setShowMrkSuggestions(true);
-    } catch (err) {
-      console.error('Error fetching marketed-by list:', err);
     }
   };
   
@@ -291,45 +232,6 @@ const DatabasePage = () => {
       const errorMsg = err.response?.data?.error || 'Failed to bulk delete medicines.';
       alert(errorMsg);
       queryClient.invalidateQueries({ queryKey: ['database-medicines'] });
-    }
-  };
-
-  const handleSingleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!singleForm.name) {
-      alert('Medicine name is required');
-      return;
-    }
-    setAdding(true);
-    setAddMessage(null);
-    try {
-      await api.createMedicine(singleForm);
-      invalidateAfterStockWrite(queryClient);
-      api.getCompactInventory().catch(() => {});
-      setAdding(false);
-      setAddMessage('Medicine registered successfully!');
-      setSingleForm({
-        name: '',
-        generic_name: '',
-        category: '',
-        manufacturer: '',
-        marketed_by: '',
-        packaging: '',
-        strength: '',
-        pack_unit: 'Tablet',
-        mrp: '',
-        hsn_code: '',
-        cgst_per: 6,
-        sgst_per: 6
-      });
-      setPage(1);
-      loadDatabase();
-      setTimeout(() => setAddMessage(null), 3000);
-    } catch (err: any) {
-      console.error(err);
-      setAdding(false);
-      const errorMsg = err.response?.data?.error || 'Failed to create medicine.';
-      alert(errorMsg);
     }
   };
 
@@ -491,6 +393,27 @@ const DatabasePage = () => {
 
           <div className="flex items-center gap-2">
             <button
+              onClick={() => {
+                setUniversalEditMedicineId(null);
+                setUniversalEditMode('create');
+                setUniversalEditItem(null);
+                setIsUniversalModalOpen(true);
+              }}
+              className="px-3 py-1.5 bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl text-[11px] font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm"
+              title="Register a new medicine to Master Database using Universal Editor"
+            >
+              <Plus size={13} />
+              <span>Add Medicine</span>
+            </button>
+            <button
+              onClick={() => setShowBulkAddModal(true)}
+              className="px-2.5 py-1.5 bg-bg3 hover:bg-bg2 text-muted hover:text-text border border-glass-border rounded-xl text-[11px] font-bold flex items-center gap-1.5 transition-all cursor-pointer"
+              title="Bulk Multi-Add medicine names"
+            >
+              <Upload size={12} />
+              <span className="hidden sm:inline">Bulk Add</span>
+            </button>
+            <button
               onClick={handleSyncFromInventory}
               disabled={syncingInventory}
               className="px-2.5 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-500/30 rounded-xl text-[11px] font-bold flex items-center gap-1.5 transition-all cursor-pointer"
@@ -548,8 +471,13 @@ const DatabasePage = () => {
         <div className="absolute bottom-8 right-8 flex flex-col gap-3 z-30">
           <button 
             className="w-12 h-12 rounded-full shadow-[0_0_15px_rgba(16,185,129,0.3)] bg-bg3 border border-glass-border hover:bg-bg2 text-green-400 flex items-center justify-center transition-all group hover:-translate-y-1"
-            onClick={() => setShowAddModal(true)} 
-            title="Add Medicines"
+            onClick={() => {
+              setUniversalEditMedicineId(null);
+              setUniversalEditMode('create');
+              setUniversalEditItem(null);
+              setIsUniversalModalOpen(true);
+            }} 
+            title="Add New Medicine (Universal Editor)"
           >
             <Plus size={20} className="group-hover:scale-110 transition-transform" />
           </button>
@@ -829,9 +757,11 @@ const DatabasePage = () => {
                           onClick={() => {
                             setUniversalEditItem(item);
                             setUniversalEditMedicineId(item.id);
+                            setUniversalEditMode('edit');
+                            setIsUniversalModalOpen(true);
                           }}
                           className="px-2.5 py-1 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400 hover:bg-amber-500 hover:text-white transition-all font-bold text-[10px] uppercase flex items-center gap-0.5"
-                          title="Edit global medicine details"
+                          title="Universal Edit Medicine"
                         >
                           <Edit size={10} />
                           Edit
@@ -965,57 +895,55 @@ const DatabasePage = () => {
         document.body
       )}
 
-      {universalEditMedicineId && (
+      {isUniversalModalOpen && (
         <UniversalMedicineEditModal 
           medicineId={universalEditMedicineId} 
+          mode={universalEditMode}
           initialData={universalEditItem}
           onClose={() => {
+            setIsUniversalModalOpen(false);
             setUniversalEditMedicineId(null);
             setUniversalEditItem(null);
           }} 
           onSave={() => {
             setPage(1);
             loadDatabase();
+            queryClient.invalidateQueries({ queryKey: ['database-medicines'] });
+            setIsUniversalModalOpen(false);
+            setUniversalEditMedicineId(null);
+            setUniversalEditItem(null);
           }} 
+          onDelete={(delId) => {
+            setMedicines(prev => prev.filter(m => m.id !== delId));
+            setTotalItems(prev => Math.max(0, prev - 1));
+            queryClient.invalidateQueries({ queryKey: ['database-medicines'] });
+            setIsUniversalModalOpen(false);
+            setUniversalEditMedicineId(null);
+            setUniversalEditItem(null);
+          }}
         />
       )}
       
-      {/* Add Medicine Modal */}
-      {showAddModal && createPortal(
+      {/* Bulk Multi-Add Medicine Modal */}
+      {showBulkAddModal && createPortal(
         <div className="fixed inset-0 z-modal flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <div className="relative bg-bg border border-glass-border rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
             {/* Header */}
             <div className="p-5 border-b border-glass-border bg-bg3 flex justify-between items-center shrink-0">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-green-500/20 border border-green-500/30 flex items-center justify-center text-green-400">
-                  <Plus size={20} />
+                  <Upload size={20} />
                 </div>
                 <div>
-                  <h3 className="text-lg font-bold text-text leading-tight">Add New Medicine</h3>
-                  <p className="text-xs text-muted mt-0.5">Register single or multiple catalog products</p>
+                  <h3 className="text-lg font-bold text-text leading-tight">Bulk Multi-Add Medicines</h3>
+                  <p className="text-xs text-muted mt-0.5">Paste multiple medicine names to batch register into master catalog</p>
                 </div>
               </div>
               <button 
-                onClick={() => { setShowAddModal(false); setAddMessage(null); }}
+                onClick={() => { setShowBulkAddModal(false); setAddMessage(null); }}
                 className="p-2 rounded-full hover:bg-bg2 text-muted hover:text-text transition-colors"
               >
                 <X size={20} />
-              </button>
-            </div>
-
-            {/* Tabs */}
-            <div className="flex border-b border-glass-border bg-bg2 shrink-0">
-              <button
-                className={`flex-1 py-3 text-xs font-bold uppercase tracking-wider border-b-2 transition-all ${addTab === 'single' ? 'border-green-500 text-green-400 bg-green-500/5' : 'border-transparent text-muted hover:text-text'}`}
-                onClick={() => setAddTab('single')}
-              >
-                Single Medicine
-              </button>
-              <button
-                className={`flex-1 py-3 text-xs font-bold uppercase tracking-wider border-b-2 transition-all ${addTab === 'bulk' ? 'border-green-500 text-green-400 bg-green-500/5' : 'border-transparent text-muted hover:text-text'}`}
-                onClick={() => setAddTab('bulk')}
-              >
-                Bulk Add
               </button>
             </div>
 
@@ -1027,231 +955,53 @@ const DatabasePage = () => {
                 </div>
               )}
 
-              {addTab === 'single' ? (
-                <form id="single-add-form" onSubmit={handleSingleSubmit} className="space-y-4 text-left">
-                  <div>
-                    <label className="block text-xs font-semibold text-muted mb-1">Medicine Name *</label>
-                    <input 
-                      type="text" 
-                      required 
-                      className="w-full px-3 py-2 bg-bg3 border border-glass-border rounded-lg text-sm text-text focus:border-green-500 focus:outline-none transition-all font-bold"
-                      value={singleForm.name}
-                      onChange={e => setSingleForm({...singleForm, name: e.target.value})}
-                      placeholder="e.g. Paracetamol 500mg"
-                    />
-                  </div>
+              <form id="bulk-add-form" onSubmit={handleBulkSubmit} className="space-y-4 text-left">
+                <div>
+                  <label className="block text-xs font-semibold text-muted mb-1">Medicine Names (One per line) *</label>
+                  <textarea 
+                    required 
+                    rows={8}
+                    className="w-full px-3 py-2 bg-bg3 border border-glass-border rounded-lg text-sm text-text focus:border-green-500 focus:outline-none transition-all font-mono resize-none"
+                    value={bulkText}
+                    onChange={e => setBulkText(e.target.value)}
+                    placeholder="Paracetamol 500mg&#10;Amoxicillin 250mg&#10;Ibuprofen 400mg&#10;Azithromycin 500mg"
+                  />
+                </div>
 
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-semibold text-muted mb-1">Generic Name (Formula)</label>
-                      <input 
-                        type="text" 
-                        className="w-full px-3 py-2 bg-bg3 border border-glass-border rounded-lg text-sm text-text focus:border-green-500 focus:outline-none transition-all"
-                        value={singleForm.generic_name}
-                        onChange={e => setSingleForm({...singleForm, generic_name: e.target.value})}
-                        placeholder="e.g. Paracetamol"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-muted mb-1">Category</label>
-                      <select 
-                        className="w-full px-3 py-2 bg-bg3 border border-glass-border rounded-lg text-sm text-text focus:border-green-500 focus:outline-none transition-all cursor-pointer"
-                        value={singleForm.category}
-                        onChange={e => setSingleForm({...singleForm, category: e.target.value})}
-                      >
-                        <option value="">Select Category</option>
-                        <option value="Allopathy">Allopathy</option>
-                        <option value="Homeopathy">Homeopathy</option>
-                        <option value="Ayurvedic">Ayurvedic</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="relative">
-                      <label className="block text-xs font-semibold text-muted mb-1">Manufacturer</label>
-                      <input 
-                        type="text" 
-                        className="w-full px-3 py-2 bg-bg3 border border-glass-border rounded-lg text-sm text-text focus:border-green-500 focus:outline-none transition-all"
-                        value={singleForm.manufacturer}
-                        onChange={(e) => handleMfgChange(e.target.value)}
-                        onFocus={(e) => handleMfgFocus(e.target.value)}
-                        onBlur={() => setTimeout(() => setShowMfgSuggestions(false), 200)}
-                        placeholder="e.g. Cipla Ltd"
-                      />
-                      {showMfgSuggestions && mfgSuggestions.length > 0 && (
-                        <div className="absolute top-full left-0 w-full mt-1 bg-bg2 border border-glass-border rounded-lg shadow-lg max-h-40 overflow-y-auto z-dropdown text-left">
-                          {mfgSuggestions.map((mfgName, idx) => (
-                            <button
-                              key={idx}
-                              type="button"
-                              onClick={() => {
-                                setSingleForm(prev => ({ ...prev, manufacturer: mfgName }));
-                                setShowMfgSuggestions(false);
-                              }}
-                              className="w-full text-left px-3 py-2 hover:bg-white/10 text-text border-b border-glass-border/10 last:border-0 flex items-center justify-between text-xs"
-                            >
-                              <span className="truncate pr-2 font-medium">{mfgName}</span>
-                              <span className="bg-green-500/10 text-green-400 border border-green-500/20 px-1 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider shrink-0">
-                                In Database
-                              </span>
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                    <div className="relative">
-                      <label className="block text-xs font-semibold text-muted mb-1">Marketed By</label>
-                      <input 
-                        type="text" 
-                        className="w-full px-3 py-2 bg-bg3 border border-glass-border rounded-lg text-sm text-text focus:border-green-500 focus:outline-none transition-all"
-                        value={singleForm.marketed_by}
-                        onChange={e => handleMrkChange(e.target.value)}
-                        onFocus={(e) => handleMrkFocus(e.target.value)}
-                        onBlur={() => setTimeout(() => setShowMrkSuggestions(false), 200)}
-                        placeholder="e.g. Cipla Pvt Ltd"
-                      />
-                      {showMrkSuggestions && mrkSuggestions.length > 0 && (
-                        <div className="absolute top-full left-0 w-full mt-1 bg-bg2 border border-glass-border rounded-lg shadow-lg max-h-40 overflow-y-auto z-dropdown text-left">
-                          {mrkSuggestions.map((mrkName, idx) => (
-                            <button
-                              key={idx}
-                              type="button"
-                              onClick={() => {
-                                setSingleForm(prev => ({ ...prev, marketed_by: mrkName }));
-                                setShowMrkSuggestions(false);
-                              }}
-                              className="w-full text-left px-3 py-2 hover:bg-white/10 text-text border-b border-glass-border/10 last:border-0 flex items-center justify-between text-xs"
-                            >
-                              <span className="truncate pr-2 font-medium">{mrkName}</span>
-                              <span className="bg-green-500/10 text-green-400 border border-green-500/20 px-1 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider shrink-0">
-                                In Database
-                              </span>
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-semibold text-muted mb-1">Pack Size (e.g., 10x10)</label>
-                      <input 
-                        type="text" 
-                        className="w-full px-3 py-2 bg-bg3 border border-glass-border rounded-lg text-sm text-text focus:border-green-500 focus:outline-none transition-all"
-                        value={singleForm.packaging}
-                        onChange={e => {
-                          const val = e.target.value;
-                          setSingleForm(prev => ({
-                            ...prev,
-                            packaging: val,
-                            name: prev.name ? updateMedicineNameWithPackSize(prev.name, val, prev.packaging) : prev.name
-                          }));
-                        }}
-                        placeholder="e.g. 10x10 Tab"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-muted mb-1">Strength</label>
-                      <input 
-                        type="text" 
-                        className="w-full px-3 py-2 bg-bg3 border border-glass-border rounded-lg text-sm text-text focus:border-green-500 focus:outline-none transition-all"
-                        value={singleForm.strength}
-                        onChange={e => setSingleForm({...singleForm, strength: e.target.value})}
-                        placeholder="e.g. 500mg"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-4">
-                    <div>
-                      <label className="block text-xs font-semibold text-muted mb-1">Type</label>
-                      <select 
-                        className="w-full px-3 py-2 bg-bg3 border border-glass-border rounded-lg text-sm text-text focus:border-green-500 focus:outline-none transition-all cursor-pointer"
-                        value={singleForm.pack_unit}
-                        onChange={e => setSingleForm({...singleForm, pack_unit: e.target.value})}
-                      >
-                        <option value="Tablet">Tablet</option>
-                        <option value="Capsule">Capsule</option>
-                        <option value="Syrup">Syrup</option>
-                        <option value="Drop">Drop</option>
-                        <option value="Injection">Injection</option>
-                        <option value="Ointment">Ointment</option>
-                        <option value="Other">Other</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-muted mb-1">MRP ₹</label>
-                      <input 
-                        type="number" 
-                        step="0.01"
-                        className="w-full px-3 py-2 bg-bg3 border border-glass-border rounded-lg text-sm text-text focus:border-green-500 focus:outline-none transition-all font-mono"
-                        value={singleForm.mrp}
-                        onChange={e => setSingleForm({...singleForm, mrp: e.target.value})}
-                        placeholder="0.00"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-muted mb-1">HSN Code</label>
-                      <input 
-                        type="text" 
-                        className="w-full px-3 py-2 bg-bg3 border border-glass-border rounded-lg text-sm text-text focus:border-green-500 focus:outline-none transition-all font-mono"
-                        value={singleForm.hsn_code}
-                        onChange={e => setSingleForm({...singleForm, hsn_code: e.target.value})}
-                        placeholder="3004"
-                      />
-                    </div>
-                  </div>
-                </form>
-              ) : (
-                <form id="bulk-add-form" onSubmit={handleBulkSubmit} className="space-y-4 text-left">
-                  <div>
-                    <label className="block text-xs font-semibold text-muted mb-1">Medicine Names (One per line) *</label>
-                    <textarea 
-                      required 
-                      rows={6}
-                      className="w-full px-3 py-2 bg-bg3 border border-glass-border rounded-lg text-sm text-text focus:border-green-500 focus:outline-none transition-all font-mono resize-none"
-                      value={bulkText}
-                      onChange={e => setBulkText(e.target.value)}
-                      placeholder="Paracetamol 500mg&#10;Amoxicillin 250mg&#10;Ibuprofen 400mg"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-muted mb-1">Category for all listed medicines</label>
-                    <select 
-                      className="w-full px-3 py-2 bg-bg3 border border-glass-border rounded-lg text-sm text-text focus:border-green-500 focus:outline-none transition-all cursor-pointer"
-                      value={bulkCategory}
-                      onChange={e => setBulkCategory(e.target.value)}
-                    >
-                      <option value="">Select Category</option>
-                      <option value="Allopathy">Allopathy</option>
-                      <option value="Homeopathy">Homeopathy</option>
-                      <option value="Ayurvedic">Ayurvedic</option>
-                    </select>
-                  </div>
-                </form>
-              )}
+                <div>
+                  <label className="block text-xs font-semibold text-muted mb-1">Category for all listed medicines</label>
+                  <select 
+                    className="w-full px-3 py-2 bg-bg3 border border-glass-border rounded-lg text-sm text-text focus:border-green-500 focus:outline-none transition-all cursor-pointer"
+                    value={bulkCategory}
+                    onChange={e => setBulkCategory(e.target.value)}
+                  >
+                    <option value="">Select Category</option>
+                    <option value="Allopathy">Allopathy</option>
+                    <option value="Homeopathy">Homeopathy</option>
+                    <option value="Ayurvedic">Ayurvedic</option>
+                    <option value="General">General OTC</option>
+                  </select>
+                </div>
+              </form>
             </div>
 
             {/* Footer */}
             <div className="p-5 border-t border-glass-border bg-bg3 flex justify-end gap-3 shrink-0">
               <button 
                 type="button" 
-                onClick={() => { setShowAddModal(false); setAddMessage(null); }}
-                className="px-5 py-2 rounded-xl border border-glass-border hover:bg-bg2 text-muted hover:text-text font-medium transition-colors"
+                onClick={() => { setShowBulkAddModal(false); setAddMessage(null); }}
+                className="px-5 py-2 rounded-xl border border-glass-border hover:bg-bg2 text-muted hover:text-text font-medium transition-colors text-xs"
               >
                 Cancel
               </button>
               <button 
                 type="submit" 
-                form={addTab === 'single' ? 'single-add-form' : 'bulk-add-form'}
-                disabled={adding}
-                className="px-6 py-2 rounded-xl bg-green-600 hover:bg-green-500 text-white font-bold transition-colors flex items-center gap-2 shadow-lg shadow-green-600/20 disabled:opacity-50 disabled:cursor-not-allowed"
+                form="bulk-add-form"
+                disabled={adding || !bulkText.trim()}
+                className="px-6 py-2 rounded-xl bg-green-600 hover:bg-green-500 text-white font-bold transition-colors flex items-center gap-2 text-xs shadow-lg shadow-green-600/20 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {adding ? <RefreshCw size={18} className="animate-spin" /> : <Plus size={18} />}
-                {adding ? 'Registering...' : addTab === 'single' ? 'Add Single Medicine' : 'Bulk Register'}
+                {adding ? <RefreshCw size={16} className="animate-spin" /> : <Plus size={16} />}
+                {adding ? 'Registering...' : 'Bulk Register Medicines'}
               </button>
             </div>
           </div>

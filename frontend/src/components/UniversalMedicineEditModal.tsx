@@ -3,11 +3,12 @@ import { createPortal } from 'react-dom';
 import { 
   X, Save, RefreshCw, AlertTriangle, Pill, Package, Factory, 
   Barcode, Tag, MapPin, Database, ChevronDown, Eye, Shield, 
-  Percent, FileText, Settings, Sparkles, Check
+  Percent, FileText, Settings, Sparkles, Check, Trash2
 } from 'lucide-react';
 import { api } from '../services/api';
 import { useQueryClient } from '@tanstack/react-query';
 import { invalidateAfterStockWrite } from '../utils/cacheInvalidation';
+import { toastEvent } from '../services/events';
 
 export const updateMedicineNameWithPackSize = (currentName: string, newPackaging: string, oldPackaging?: string): string => {
   if (!currentName) return '';
@@ -185,8 +186,9 @@ const THERAPEUTIC_CLASSES = [
   'Other / Unclassified'
 ];
 
-interface Props {
-  medicineId: number;
+export interface UniversalMedicineEditModalProps {
+  medicineId?: number | null;
+  mode?: 'create' | 'edit';
   initialData?: any;
   ocrData?: {
     potentialName?: string;
@@ -196,55 +198,82 @@ interface Props {
     packaging?: string;
     dosageForm?: string;
     mrp?: number;
+    rate?: number;
+    sell_price?: number;
     batchNumber?: string;
     expiryDate?: string;
+    hsn_code?: string;
+    cgst_per?: number;
+    sgst_per?: number;
   };
   onClose: () => void;
-  onSave: () => void;
+  onSave?: (savedMedicine?: any) => void;
+  onDelete?: (deletedMedicineId: number) => void;
 }
 
 type TabType = 'basic' | 'classification' | 'codes' | 'tax' | 'stock' | 'substitutes';
 
-const UniversalMedicineEditModalInner: React.FC<Props> = ({ medicineId, initialData, ocrData, onClose, onSave }) => {
+const UniversalMedicineEditModalInner: React.FC<UniversalMedicineEditModalProps> = ({ 
+  medicineId, 
+  mode, 
+  initialData, 
+  ocrData, 
+  onClose, 
+  onSave, 
+  onDelete 
+}) => {
   const queryClient = useQueryClient();
+  const isCreateMode = mode === 'create' || !medicineId || medicineId <= 0;
+
   const [activeTab, setActiveTab] = useState<TabType>('basic');
-  const [loading, setLoading] = useState(!initialData);
+  const [loading, setLoading] = useState(!isCreateMode && !initialData);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
   const [form, setForm] = useState<any>(() => {
-    if (!initialData) return {};
-    const nameVal = initialData.name || '';
-    const packagingVal = initialData.packaging || '';
+    const nameVal = initialData?.name || '';
+    const packagingVal = initialData?.packaging || (isCreateMode ? '10 TAB' : '');
+    const mrpVal = ocrData?.mrp ?? initialData?.mrp ?? '';
+    const rateVal = ocrData?.rate ?? initialData?.rate ?? '';
+    const sellPriceVal = ocrData?.sell_price ?? initialData?.sell_price ?? (mrpVal !== '' ? mrpVal : '');
+
     return {
       name: ocrData?.potentialName || nameVal,
-      item_type: ocrData?.dosageForm || initialData.item_type || 'TABLET',
-      category: initialData.category || 'Allopathy',
-      pack_unit: initialData.pack_unit || 'TAB',
+      item_type: ocrData?.dosageForm || initialData?.item_type || 'TABLET',
+      category: initialData?.category || 'Allopathy',
+      pack_unit: initialData?.pack_unit || 'TAB',
       packaging: ocrData?.packaging || packagingVal,
-      pack_size: initialData.pack_size ?? (parsePackSizeFromPackaging(packagingVal) || 1),
-      therapeutic: initialData.therapeutic || '',
-      sub_therapeutic: initialData.sub_therapeutic || '',
-      schedule_type: initialData.schedule_type || 'None',
-      generic_name: ocrData?.genericName || initialData.generic_name || '',
-      manufacturer: ocrData?.manufacturer || initialData.manufacturer || '',
-      marketed_by: initialData.marketed_by || '',
-      item_code: initialData.item_code || '',
-      short_code: initialData.short_code || '',
-      ucode: initialData.ucode || '',
-      hsn_code: initialData.hsn_code || '',
-      cgst_per: initialData.cgst_per ?? 6,
-      sgst_per: initialData.sgst_per ?? 6,
-      igst_per: initialData.igst_per ?? 12,
-      api_reference: initialData.api_reference || '',
-      quantity: initialData.quantity || 0,
-      reorder_level: initialData.reorder_level ?? 10,
-      max_stock_level: initialData.max_stock_level ?? 500,
-      rack_location: initialData.rack_location || initialData.rack || '',
-      is_loose: false,
-      disable_auto_barcode: !!initialData.disable_auto_barcode,
-      tb_medicine: !!initialData.tb_medicine,
+      pack_size: initialData?.pack_size ?? (parsePackSizeFromPackaging(ocrData?.packaging || packagingVal) || 1),
+      therapeutic: initialData?.therapeutic || '',
+      sub_therapeutic: initialData?.sub_therapeutic || '',
+      schedule_type: initialData?.schedule_type || 'None',
+      generic_name: ocrData?.genericName || initialData?.generic_name || '',
+      manufacturer: ocrData?.manufacturer || initialData?.manufacturer || '',
+      marketed_by: initialData?.marketed_by || '',
+      item_code: initialData?.item_code || '',
+      short_code: initialData?.short_code || '',
+      ucode: initialData?.ucode || '',
+      hsn_code: ocrData?.hsn_code || initialData?.hsn_code || '',
+      cgst_per: ocrData?.cgst_per ?? initialData?.cgst_per ?? 6,
+      sgst_per: ocrData?.sgst_per ?? initialData?.sgst_per ?? 6,
+      igst_per: initialData?.igst_per ?? 12,
+      api_reference: initialData?.api_reference || '',
+      mrp: mrpVal,
+      rate: rateVal,
+      sell_price: sellPriceVal,
+      quantity: initialData?.quantity || 0,
+      reorder_level: initialData?.reorder_level ?? 10,
+      max_stock_level: initialData?.max_stock_level ?? 500,
+      rack_location: initialData?.rack_location || initialData?.rack || '',
+      is_loose: !!initialData?.is_loose,
+      allow_loose_sale: initialData?.allow_loose_sale !== undefined ? (initialData.allow_loose_sale ? 1 : 0) : 1,
+      disable_auto_barcode: !!initialData?.disable_auto_barcode,
+      tb_medicine: !!initialData?.tb_medicine,
     };
   });
+
   const [inventoryId, setInventoryId] = useState<number | null>(null);
   const [totalStock, setTotalStock] = useState<number>(initialData?.quantity || 0);
   const [mfgSuggestions, setMfgSuggestions] = useState<string[]>([]);
@@ -253,17 +282,20 @@ const UniversalMedicineEditModalInner: React.FC<Props> = ({ medicineId, initialD
   const [showMrkSuggestions, setShowMrkSuggestions] = useState(false);
 
   const [baseName, setBaseName] = useState(() => {
-    if (!initialData) return '';
-    return splitMedicineName(initialData.name || '', initialData.packaging || '').baseName;
+    const rawInitName = ocrData?.potentialName || initialData?.name || '';
+    const rawInitPkg = ocrData?.packaging || initialData?.packaging || (isCreateMode ? '10 TAB' : '');
+    return splitMedicineName(rawInitName, rawInitPkg).baseName;
   });
   const [packType, setPackType] = useState(() => {
-    if (!initialData) return 'TAB';
-    return splitMedicineName(initialData.name || '', initialData.packaging || '').packType;
+    const rawInitName = ocrData?.potentialName || initialData?.name || '';
+    const rawInitPkg = ocrData?.packaging || initialData?.packaging || (isCreateMode ? '10 TAB' : '');
+    return splitMedicineName(rawInitName, rawInitPkg).packType;
   });
   const [packQtyUnit, setPackQtyUnit] = useState(() => {
-    if (!initialData) return '10_TAB';
-    const parsed = splitMedicineName(initialData.name || '', initialData.packaging || '');
-    return getMatchingPreset(initialData.packaging || '', parsed.packType);
+    const rawInitName = ocrData?.potentialName || initialData?.name || '';
+    const rawInitPkg = ocrData?.packaging || initialData?.packaging || (isCreateMode ? '10 TAB' : '');
+    const parsed = splitMedicineName(rawInitName, rawInitPkg);
+    return getMatchingPreset(rawInitPkg, parsed.packType);
   });
   const [customPackaging, setCustomPackaging] = useState('');
   const [isManualName, setIsManualName] = useState(false);
@@ -311,6 +343,10 @@ const UniversalMedicineEditModalInner: React.FC<Props> = ({ medicineId, initialD
   };
 
   useEffect(() => {
+    if (isCreateMode || !medicineId) {
+      setLoading(false);
+      return;
+    }
     if (!initialData) {
       setLoading(true);
     }
@@ -389,10 +425,9 @@ const UniversalMedicineEditModalInner: React.FC<Props> = ({ medicineId, initialD
         }
         setLoading(false);
       });
-  }, [medicineId]);
+  }, [medicineId, isCreateMode]);
 
   useEffect(() => {
-    if (!medicineId) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         onClose();
@@ -400,7 +435,7 @@ const UniversalMedicineEditModalInner: React.FC<Props> = ({ medicineId, initialD
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [medicineId, onClose]);
+  }, [onClose]);
 
   useEffect(() => {
     if (loading) return;
@@ -442,6 +477,10 @@ const UniversalMedicineEditModalInner: React.FC<Props> = ({ medicineId, initialD
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!form.name || !form.name.trim()) {
+      setError('Medicine name is required');
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
@@ -452,25 +491,72 @@ const UniversalMedicineEditModalInner: React.FC<Props> = ({ medicineId, initialD
       const parsedSellPrice = form.sell_price !== '' && form.sell_price !== null && form.sell_price !== undefined && !isNaN(Number(form.sell_price))
         ? parseFloat(form.sell_price)
         : null;
+      const parsedMrp = form.mrp !== '' && form.mrp !== null && form.mrp !== undefined && !isNaN(Number(form.mrp))
+        ? parseFloat(form.mrp)
+        : 0;
+      const parsedRate = form.rate !== '' && form.rate !== null && form.rate !== undefined && !isNaN(Number(form.rate))
+        ? parseFloat(form.rate)
+        : 0;
 
-      await api.updateQuickEditMedicine(medicineId, {
-        ...form,
-        allow_loose_sale: form.allow_loose_sale !== undefined ? (form.allow_loose_sale ? 1 : 0) : (form.is_loose ? 1 : 0),
-        sell_price: parsedSellPrice,
-        inventory_id: inventoryId,
-        metadata: JSON.stringify(metadataObj)
-      });
+      let savedResult: any = null;
+
+      if (isCreateMode) {
+        const response = await api.createMedicine({
+          ...form,
+          mrp: parsedMrp,
+          rate: parsedRate,
+          sell_price: parsedSellPrice,
+          allow_loose_sale: form.allow_loose_sale !== undefined ? (form.allow_loose_sale ? 1 : 0) : (form.is_loose ? 1 : 0),
+          metadata: JSON.stringify(metadataObj)
+        });
+        savedResult = response?.data || response;
+        toastEvent.trigger(`Medicine "${form.name}" registered to Master Database!`, 'success');
+      } else {
+        await api.updateQuickEditMedicine(medicineId!, {
+          ...form,
+          mrp: parsedMrp,
+          rate: parsedRate,
+          allow_loose_sale: form.allow_loose_sale !== undefined ? (form.allow_loose_sale ? 1 : 0) : (form.is_loose ? 1 : 0),
+          sell_price: parsedSellPrice,
+          inventory_id: inventoryId,
+          metadata: JSON.stringify(metadataObj)
+        });
+        savedResult = { id: medicineId, ...form, mrp: parsedMrp, rate: parsedRate, sell_price: parsedSellPrice };
+        toastEvent.trigger(`Medicine "${form.name}" updated successfully across 26 fields!`, 'success');
+      }
 
       invalidateAfterStockWrite(queryClient);
       api.getCompactInventory().catch(() => {});
 
       setSaving(false);
-      onSave();
+      if (onSave) onSave(savedResult);
       onClose();
     } catch (err: any) {
       console.error(err);
-      setError("Failed to save 26-field medicine updates.");
+      const errMsg = err?.response?.data?.error || err.message || (isCreateMode ? "Failed to create medicine." : "Failed to save 26-field medicine updates.");
+      setError(errMsg);
       setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!medicineId || isCreateMode) return;
+    setDeleting(true);
+    setError(null);
+    try {
+      await api.deleteMedicine(medicineId);
+      invalidateAfterStockWrite(queryClient);
+      api.getCompactInventory().catch(() => {});
+      toastEvent.trigger(`Medicine #${medicineId} permanently deleted.`, 'success');
+      if (onDelete) onDelete(medicineId);
+      setShowDeleteConfirm(false);
+      onClose();
+    } catch (err: any) {
+      console.error('Failed to delete medicine:', err);
+      const errMsg = err?.response?.data?.error || err.message || 'Cannot delete medicine. It has associated sales, purchases, or ledger transactions.';
+      setError(errMsg);
+      setDeleting(false);
+      setShowDeleteConfirm(false);
     }
   };
 
@@ -485,17 +571,31 @@ const UniversalMedicineEditModalInner: React.FC<Props> = ({ medicineId, initialD
         {/* Header */}
         <div className="p-4 sm:p-5 border-b border-glass-border bg-bg3 flex justify-between items-center shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-primary/20 border border-primary/30 flex items-center justify-center text-primary">
+            <div className={`w-10 h-10 rounded-xl border flex items-center justify-center ${
+              isCreateMode 
+                ? 'bg-emerald-500/20 border-emerald-500/30 text-emerald-400' 
+                : 'bg-primary/20 border-primary/30 text-primary'
+            }`}>
               <Pill size={20} />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h3 className="text-lg font-bold text-text leading-tight">Universal Medicine Editor</h3>
-                <span className="bg-primary/15 text-primary text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-md border border-primary/30">
-                  26 Fields
+                <h3 className="text-lg font-bold text-text leading-tight">
+                  {isCreateMode ? 'Register New Medicine to Master Database' : 'Universal Medicine Editor'}
+                </h3>
+                <span className={`text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-md border ${
+                  isCreateMode
+                    ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                    : 'bg-primary/15 text-primary border-primary/30'
+                }`}>
+                  {isCreateMode ? 'New Catalog Item' : '26 Fields'}
                 </span>
               </div>
-              <p className="text-xs text-muted mt-0.5">Medicine ID #{medicineId} • Form-Aware Packaging & Regulatory Compliance</p>
+              <p className="text-xs text-muted mt-0.5">
+                {isCreateMode 
+                  ? 'Form-Aware Packaging, Tax & Regulatory Compliance Master Profile'
+                  : `Medicine ID #${medicineId} • Form-Aware Packaging & Regulatory Compliance`}
+              </p>
             </div>
           </div>
           <button 
@@ -1187,25 +1287,85 @@ const UniversalMedicineEditModalInner: React.FC<Props> = ({ medicineId, initialD
         </div>
 
         {/* Footer */}
-        <div className="p-4 sm:p-5 border-t border-glass-border bg-bg3 flex justify-end gap-3 shrink-0">
-          <button 
-            type="button" 
-            onClick={onClose}
-            className="px-5 py-2.5 rounded-xl border border-glass-border hover:bg-bg2 text-muted hover:text-text font-medium transition-colors text-xs"
-          >
-            Cancel
-          </button>
-          <button 
-            type="submit" 
-            form="universal-edit-form"
-            disabled={saving || loading}
-            className="px-6 py-2.5 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground font-bold transition-colors flex items-center gap-2 text-xs shadow-lg shadow-primary/20 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {saving ? <RefreshCw size={16} className="animate-spin" /> : <Save size={16} />}
-            {saving ? 'Saving 26 Fields...' : 'Save Universal Changes'}
-          </button>
+        <div className="p-4 sm:p-5 border-t border-glass-border bg-bg3 flex items-center justify-between gap-3 shrink-0">
+          <div>
+            {!isCreateMode && (
+              <button 
+                type="button" 
+                onClick={() => setShowDeleteConfirm(true)}
+                disabled={saving || deleting}
+                className="px-4 py-2.5 rounded-xl border border-red-500/30 bg-red-500/10 hover:bg-red-500/20 text-red-400 text-xs font-bold transition-all flex items-center gap-1.5 disabled:opacity-50"
+                title="Delete medicine from master database"
+              >
+                <Trash2 size={14} />
+                Delete Medicine
+              </button>
+            )}
+          </div>
+          <div className="flex items-center gap-3">
+            <button 
+              type="button" 
+              onClick={onClose}
+              className="px-5 py-2.5 rounded-xl border border-glass-border hover:bg-bg2 text-muted hover:text-text font-medium transition-colors text-xs"
+            >
+              Cancel
+            </button>
+            <button 
+              type="submit" 
+              form="universal-edit-form"
+              disabled={saving || loading || deleting || !form.name?.trim()}
+              className={`px-6 py-2.5 rounded-xl font-bold transition-colors flex items-center gap-2 text-xs shadow-lg disabled:opacity-50 disabled:cursor-not-allowed ${
+                isCreateMode
+                  ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-900/30'
+                  : 'bg-primary hover:bg-primary/90 text-primary-foreground shadow-primary/20'
+              }`}
+            >
+              {saving ? <RefreshCw size={16} className="animate-spin" /> : <Save size={16} />}
+              {saving ? (isCreateMode ? 'Registering Medicine...' : 'Saving 26 Fields...') : (isCreateMode ? 'Register New Medicine' : 'Save Universal Changes')}
+            </button>
+          </div>
         </div>
       </div>
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 z-modal flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="bg-bg2 border border-red-500/30 rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
+            <div className="flex items-center gap-3 text-red-400">
+              <div className="p-2.5 bg-red-500/20 rounded-xl border border-red-500/30">
+                <AlertTriangle size={24} />
+              </div>
+              <div>
+                <h4 className="font-bold text-text text-base">Permanently Delete Medicine?</h4>
+                <p className="text-xs text-muted">ID #{medicineId} • {form.name}</p>
+              </div>
+            </div>
+            <p className="text-xs text-muted leading-relaxed">
+              This will permanently delete this medicine record and its aliases from the master catalog.
+              If this medicine has linked sales, purchases, or ledger transactions, deletion will be safely rejected to protect accounting history.
+            </p>
+            <div className="flex justify-end gap-2.5 pt-2 border-t border-glass-border">
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={() => setShowDeleteConfirm(false)}
+                className="px-4 py-2 rounded-xl border border-glass-border hover:bg-bg3 text-xs font-semibold text-muted hover:text-text transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={handleDelete}
+                className="px-5 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-bold flex items-center gap-2 shadow-lg shadow-red-900/30 transition-all disabled:opacity-50"
+              >
+                {deleting ? <RefreshCw size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                {deleting ? 'Deleting...' : 'Confirm Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>,
     document.body
   );
