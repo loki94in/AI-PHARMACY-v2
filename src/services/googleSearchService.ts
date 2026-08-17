@@ -98,6 +98,23 @@ class GoogleSearchService {
   }
 
   /**
+   * Has this exact term already been searched recently? Used as a negative
+   * cache for "suggestion only" discovery flows (e.g. unknown WhatsApp
+   * medicine names) that don't persist a result to check against next time —
+   * without this, the same unresolved/nonsense word would get re-searched
+   * on every mention.
+   */
+  public async wasRecentlySearched(term: string, days = 14): Promise<boolean> {
+    if (!term || !term.trim()) return false;
+    const db = await dbManager.getConnection();
+    const row = await db.get(
+      "SELECT 1 as hit FROM google_search_logs WHERE query LIKE '%' || ? || '%' AND created_at >= datetime('now', ?) LIMIT 1",
+      [term.trim(), `-${days} days`]
+    );
+    return !!row;
+  }
+
+  /**
    * Parse details from raw OCR text using regex/keywords
    */
   public parseFieldsFromText(text: string): Omit<SearchEnrichmentResult, 'raw_text' | 'screenshot_path'> {

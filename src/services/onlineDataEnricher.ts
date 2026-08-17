@@ -244,6 +244,135 @@ export class OnlineDataEnricher {
     }
   }
 
+  /**
+   * "Suggestion only" discovery for a medicine name that a WhatsApp customer
+   * mentioned but that doesn't match anything in our own `medicines` catalog
+   * at all. Never writes to `medicines` — only attaches a human-readable note
+   * to the `special_orders` row (if given) and broadcasts it live, so a
+   * pharmacist can decide whether to add it to the catalog themselves. The
+   * discovered schedule classification is still learned into the local
+   * schedule_drug_reference table (general drug-knowledge, not a catalog
+   * entry), so the next customer asking about the same active ingredient
+   * resolves it instantly with zero network calls.
+   */
+  async suggestUnknownMedicine(candidateName: string, specialOrderId?: number, searchTerm?: string): Promise<{ found: boolean }> {
+    const cleanName = (candidateName || '').trim();
+    if (!cleanName) return { found: false };
+
+    try {
+      let composition: string | null = null;
+      let manufacturer: string | null = null;
+      let scheduleType: string | null = null;
+      let confidence: number | null = null;
+
+      // 1. Local schedule reference — free, offline; a customer-typed name is
+      // often already the generic/substance name.
+      const local = await matchLocalSchedule(cleanName);
+      if (local) {
+        scheduleType = local.schedule_type;
+      }
+
+      // 2. Official free APIs — always safe to try, no rate-limit concern.
+      this.isOnline = await checkConnectivity();
+      if (this.isOnline) {
+        for (const client of this.apiClients) {
+          try {
+            const enrichedData = await withRetry(
+              () => client.queryMedicine(cleanName),
+              { label: `Enricher/Suggest/${client.name}` }
+            );
+            if (enrichedData?.activeIngredients?.length) {
+              composition = enrichedData.activeIngredients.join(' + ');
+              manufacturer = enrichedData.manufacturer || null;
+              confidence = 0.95;
+              if (!scheduleType) {
+                const localFromComposition = await matchLocalSchedule(composition);
+                if (localFromComposition) scheduleType = localFromComposition.schedule_type;
+              }
+              break;
+            }
+          } catch (clientErr) {
+            console.error(`[Enricher] [Suggest] API Client ${client.name} query failed for ${cleanName}:`, clientErr);
+          }
+        }
+
+        // 3. Google fallback — only if still missing something, and only if
+        // this exact term hasn't been searched recently (negative cache,
+        // since nothing gets persisted to `medicines` for a future local hit).
+        if (!composition || !scheduleType) {
+          const { googleSearchService } = await import('./googleSearchService.js');
+          const recentlySearched = await googleSearchService.wasRecentlySearched(cleanName);
+          if (!recentlySearched) {
+            try {
+              const googleResult = await withRetry(
+                () => googleSearchService.discoverMedicineInfo(cleanName, searchTerm),
+                { label: 'Enricher/Suggest/GoogleSearch' }
+              );
+              if (googleResult) {
+                if (!composition && googleResult.api_reference?.trim()) {
+                  composition = googleResult.api_reference.trim();
+                  manufacturer = manufacturer || googleResult.manufacturer || null;
+                  confidence = confidence ?? 0.80;
+                }
+                if (!scheduleType && googleResult.schedule_type) {
+                  scheduleType = googleResult.schedule_type;
+                }
+              }
+            } catch (googleErr: any) {
+              console.error('[Enricher] [Suggest] Google search discovery failed:', googleErr.message || googleErr);
+            }
+          } else {
+            console.log(`[Enricher] [Suggest] Skipping Google search for "${cleanName}" — searched within the last 14 days.`);
+          }
+        }
+      }
+
+      if (!composition && !scheduleType) {
+        return { found: false };
+      }
+
+      // Learn the schedule locally regardless of persistence mode — this is
+      // drug-knowledge, not a catalog entry.
+      if (scheduleType) {
+        await learnSchedule(composition || cleanName, scheduleType, null, 'google_search');
+      }
+
+      const noteParts = [composition || cleanName];
+      if (scheduleType) noteParts.push(scheduleType);
+      if (manufacturer) noteParts.push(manufacturer);
+      const discoveryNote = `Likely: ${noteParts.join(' — ')}`;
+
+      if (specialOrderId) {
+        const db = await dbManager.getConnection();
+        try {
+          await db.run(
+            'UPDATE special_orders SET discovery_note = ?, discovery_confidence = ? WHERE id = ?',
+            [discoveryNote, confidence, specialOrderId]
+          );
+        } finally {
+          await dbManager.close();
+        }
+      }
+
+      const { eventService } = await import('./eventService.js');
+      eventService.broadcast('wa_medicine_discovery_suggestion', {
+        candidateName: cleanName,
+        specialOrderId: specialOrderId || null,
+        composition,
+        manufacturer,
+        scheduleType,
+        confidence,
+        discoveryNote
+      });
+
+      console.log(`[Enricher] [Suggest] Discovered suggestion for "${cleanName}": ${discoveryNote}`);
+      return { found: true };
+    } catch (err) {
+      console.error(`[Enricher] [Suggest] Failed to suggest for "${cleanName}":`, err);
+      return { found: false };
+    }
+  }
+
   private async saveScheduleType(cleanName: string, scheduleType: string, source: string): Promise<void> {
     const db = await dbManager.getConnection();
     try {

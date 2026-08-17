@@ -557,6 +557,16 @@ async function searchAndBroadcast(opts: {
         customer_phone: customer?.phone || phone || '',
         customer_name: customer?.name || '',
         source: 'whatsapp'
+      }).then(orderId => {
+        // Genuinely absent from our own catalog (not just a weak match) —
+        // look it up online and attach a suggestion, fire-and-forget so this
+        // never blocks the response. Rate-limited/throttled inside
+        // onlineDataEnricher + googleSearchService.
+        if (filterResult.matches.length === 0) {
+          import('./onlineDataEnricher.js')
+            .then(({ onlineDataEnricher }) => onlineDataEnricher.suggestUnknownMedicine(medicineName, orderId))
+            .catch(err => console.warn('[Intent Service] Unknown-medicine discovery failed:', err));
+        }
       }).catch(err => console.warn('[Intent Service] Shortage tracking failed:', err));
     } catch (trackErr) {
       console.warn('[Intent Service] Failed to import shortageReminderService:', trackErr);

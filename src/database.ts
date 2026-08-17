@@ -1021,6 +1021,11 @@ export async function ensureSchema(dbPath: string) {
     // Stamped whenever schedule discovery is attempted (found or not), so the
     // backlog worker doesn't retry the same unresolved item every cron tick.
     ['medicines', 'schedule_checked_at', "ALTER TABLE medicines ADD COLUMN schedule_checked_at DATETIME DEFAULT NULL"],
+    // Human-readable online-lookup suggestion for a WhatsApp-reported medicine
+    // that isn't in our own catalog yet (e.g. "Likely: Azithromycin 500mg —
+    // Schedule H1 · Cipla"). Suggestion-only — nothing is written to `medicines`.
+    ['special_orders', 'discovery_note', "ALTER TABLE special_orders ADD COLUMN discovery_note TEXT DEFAULT NULL"],
+    ['special_orders', 'discovery_confidence', "ALTER TABLE special_orders ADD COLUMN discovery_confidence REAL DEFAULT NULL"],
   ];
 
   // Pre-check PRAGMA table_info before ALTER TABLE ADD COLUMN to prevent SQLite error outputs
