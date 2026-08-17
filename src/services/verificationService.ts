@@ -145,7 +145,8 @@ export class VerificationService {
    */
   public async verifyPOSBill(billData: any): Promise<VerificationResult> {
     try {
-      const { items = [], patient_id, doctor_id, discount = 0, total_amount } = billData;
+      const { items = [], patient_id, doctor_id, discount = 0, total_amount, editingInvoiceId, invoice_id } = billData;
+      const editId = editingInvoiceId || invoice_id;
 
       // 1. Check basic structure
       if (!Array.isArray(items) || items.length === 0) {
@@ -157,6 +158,29 @@ export class VerificationService {
       }
 
       const db = await dbManager.getConnection();
+
+      // If editing an existing bill, retrieve its already-invoiced quantities so they are credited to available stock
+      const oldInvoiceItemsMap = new Map<number, { qty: number; loose: number }>();
+      if (editId) {
+        const oldRows = await db.all(
+          'SELECT inventory_id, quantity, loose_qty FROM sale_items WHERE invoice_id = ?',
+          [editId]
+        );
+        for (const r of oldRows) {
+          if (!r.inventory_id) continue;
+          const invId = Number(r.inventory_id);
+          const existing = oldInvoiceItemsMap.get(invId);
+          if (existing) {
+            existing.qty += Number(r.quantity || 0);
+            existing.loose += Number(r.loose_qty || 0);
+          } else {
+            oldInvoiceItemsMap.set(invId, {
+              qty: Number(r.quantity || 0),
+              loose: Number(r.loose_qty || 0)
+            });
+          }
+        }
+      }
 
       // 2. Validate items
       let computedSubtotal = 0;
@@ -208,30 +232,28 @@ export class VerificationService {
           [inventory_id]
         );
 
-          if (!invRow) {
-            return {
-              success: false,
-              layer: 'Validation',
-              message: `Inventory validation failed: Batch ID ${inventory_id} for item "${medicine_name || 'unknown'}" does not exist.`
-            };
-          }
+        if (!invRow) {
+          return {
+            success: false,
+            layer: 'Validation',
+            message: `Inventory validation failed: Batch ID ${inventory_id} for item "${medicine_name || 'unknown'}" does not exist.`
+          };
+        }
 
-          // Stock quantity verification
-          if (qty > invRow.quantity) {
-            return {
-              success: false,
-              layer: 'Validation',
-              message: `Stock validation failed: Requested ${qty} packs of "${medicine_name || 'unknown'}" but only ${invRow.quantity} are available in stock.`
-            };
-          }
+        // Smart Net-Stock Verification: account for items already present on this invoice
+        const oldInvoiced = oldInvoiceItemsMap.get(Number(inventory_id)) || { qty: 0, loose: 0 };
+        const effectiveAvailableUnits = ((invRow.quantity + oldInvoiced.qty) * pSize) + (invRow.loose_quantity + oldInvoiced.loose);
+        const requestedUnits = (qty * pSize) + loose;
 
-          if (loose > invRow.loose_quantity && qty >= invRow.quantity) {
-            return {
-              success: false,
-              layer: 'Validation',
-              message: `Stock validation failed: Requested loose quantity (${loose}) for "${medicine_name || 'unknown'}" exceeds available loose stock (${invRow.loose_quantity}).`
-            };
-          }
+        if (requestedUnits > effectiveAvailableUnits) {
+          const maxPacks = Math.floor(effectiveAvailableUnits / pSize);
+          const maxLoose = effectiveAvailableUnits % pSize;
+          return {
+            success: false,
+            layer: 'Validation',
+            message: `Stock validation failed: Requested ${qty} packs & ${loose} loose of "${medicine_name || 'unknown'}" exceeds available stock (${maxPacks} packs & ${maxLoose} loose).`
+          };
+        }
 
         // Subtotal calculation match check
         const dPrice = uPrice * (1 - discPer / 100);

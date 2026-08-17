@@ -1962,11 +1962,20 @@ router.get('/:id', async (req, res) => {
 
     invoice.items = await queryAllWithRetry(
       db,
-      `SELECT si.*, im.batch_no as batch_number, im.expiry_date, COALESCE(im.mrp, m.mrp) as item_mrp, COALESCE(m.pack_size, 1) as pack_size,
-              m.name as medicine_name, m.mrp as medicine_mrp, m.id as medicine_id
+      `SELECT si.*, 
+              COALESCE(im.batch_no, si.batch_no, '') as batch_number, 
+              COALESCE(im.batch_no, si.batch_no, '') as batch_no, 
+              im.expiry_date, 
+              COALESCE(im.mrp, si.mrp, m.mrp, si.unit_price, 0) as item_mrp, 
+              COALESCE(m.pack_size, 1) as pack_size,
+              COALESCE(m.name, 'Medicine') as medicine_name, 
+              COALESCE(m.mrp, si.mrp, im.mrp, si.unit_price, 0) as medicine_mrp, 
+              COALESCE(m.id, im.medicine_id) as medicine_id,
+              COALESCE(im.quantity, 0) as stock_qty,
+              COALESCE(im.loose_quantity, 0) as loose_quantity
        FROM sale_items si
        LEFT JOIN inventory_master im ON si.inventory_id = im.id
-       LEFT JOIN medicines m ON im.medicine_id = m.id
+       LEFT JOIN medicines m ON (im.medicine_id = m.id OR (im.id IS NULL AND si.inventory_id = m.id))
        WHERE si.invoice_id = ?`,
       [id]
     );
@@ -2164,7 +2173,7 @@ router.put('/:id', async (req, res) => {
       console.warn('Could not broadcast sale update:', sseErr);
     }
 
-    res.json({ success: true, message: 'Invoice updated' });
+    res.json({ success: true, message: 'Invoice updated', invoice_no: existing.invoice_no, id: Number(id) });
   } catch (error) {
     if (db) {
       try { await db.run('ROLLBACK'); } catch(e){}

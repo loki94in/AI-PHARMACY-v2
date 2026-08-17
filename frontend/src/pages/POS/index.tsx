@@ -246,19 +246,94 @@ const filterLocalInventory = (query: string, inventory: any[]): any[] => {
   return [...prefixes, ...infixes].slice(0, 30);
 };
 
+const mapEditSaleItemsToCart = (itemsList: any[]): any[] => {
+  if (!Array.isArray(itemsList) || itemsList.length === 0) return [];
+  const mapped: any[] = itemsList.map((it: any, idx: number) => {
+    const itemQty = it.quantity !== undefined && it.quantity !== null 
+      ? Number(it.quantity) 
+      : (it.qty !== undefined && it.qty !== null ? Number(it.qty) : 0);
+    const itemLooseQty = it.loose_qty !== undefined && it.loose_qty !== null
+      ? Number(it.loose_qty)
+      : (it.looseQty !== undefined && it.looseQty !== null ? Number(it.looseQty) : 0);
+    const packSize = Math.max(1, Number(it.pack_size || it.packSize || 1));
+    const unitPrice = Number(it.unit_price !== undefined && it.unit_price !== null ? it.unit_price : (it.rate || it.sell_price || it.mrp || 0));
+    return {
+      id: it.id ? `edit_item_${it.id}` : (it.inventory_id ? `inv_item_${it.inventory_id}_${idx}` : `item_${idx}_${Date.now()}`),
+      inventory_id: it.inventory_id || it.id,
+      medicine_id: it.medicine_id,
+      name: it.medicine_name || it.name || it.product_name || 'Medicine',
+      batch: it.batch_number || it.batch_no || '',
+      expiry: it.expiry_date || '',
+      mrp: Number(it.item_mrp ?? it.mrp ?? unitPrice ?? 0),
+      sell_price: unitPrice,
+      qty: itemQty,
+      quantity: itemQty,
+      unitPrice: unitPrice,
+      looseQty: itemLooseQty,
+      discount: Number(it.discount_per !== undefined ? it.discount_per : (it.discount || 0)),
+      packSize: packSize,
+      availableStock: Number(it.stock_qty ?? it.quantity ?? itemQty),
+      availableLooseStock: Number(it.loose_quantity ?? it.loose_qty ?? itemLooseQty),
+      isEmptyRow: false
+    };
+  });
+
+  // Append trailing empty row for fast subsequent entries
+  mapped.push({
+    id: 'empty_row_' + Date.now(),
+    name: '',
+    batch: '',
+    expiry: '',
+    mrp: 0,
+    qty: 0,
+    looseQty: 0,
+    discount: 0,
+    packSize: 1,
+    isEmptyRow: true
+  });
+  return mapped;
+};
+
 const POS = () => {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const [initialTabs] = useState(() => getInitialPOSTabs());
+  const locState = location.state as any;
+  const editSaleFromState = locState?.editSale || null;
+
+  const [initialTabs] = useState(() => {
+    const baseTabs = getInitialPOSTabs();
+    if (editSaleFromState) {
+      const editItems = Array.isArray(editSaleFromState.items) 
+        ? editSaleFromState.items 
+        : (Array.isArray(editSaleFromState.sale_items) ? editSaleFromState.sale_items : []);
+      const mapped = mapEditSaleItemsToCart(editItems);
+      const activeId = getInitialPOSActiveTabId(baseTabs);
+      return baseTabs.map(t => {
+        if (t.id === activeId) {
+          return {
+            ...t,
+            patientName: editSaleFromState.customer_name || '',
+            patientPhone: editSaleFromState.customer_phone || '',
+            doctor: editSaleFromState.doctor_name || '',
+            discount: Number(editSaleFromState.discount || 0),
+            paymentMedium: editSaleFromState.payment_medium || 'CASH',
+            items: mapped.length > 0 ? mapped : t.items || []
+          };
+        }
+        return t;
+      });
+    }
+    return baseTabs;
+  });
   const [initialActiveTabId] = useState(() => getInitialPOSActiveTabId(initialTabs));
   const initialActiveTab = initialTabs.find(t => t.id === initialActiveTabId) || initialTabs[0];
 
   const [searchTerm, setSearchTerm] = useDraftStore('pos_search_term', '');
   const [showCamera, setShowCamera] = useState(false);
   const [zoomedImage, setZoomedImage] = useState<string | null>(null);
-  const [patientName, setPatientName] = useState(initialActiveTab.patientName || '');
-  const [patientPhone, setPatientPhone] = useState(initialActiveTab.patientPhone || '');
+  const [patientName, setPatientName] = useState(() => editSaleFromState?.customer_name || initialActiveTab.patientName || '');
+  const [patientPhone, setPatientPhone] = useState(() => editSaleFromState?.customer_phone || initialActiveTab.patientPhone || '');
   const [selectedCustomerId, setSelectedCustomerId] = useState<number | null>(initialActiveTab.selectedCustomerId || null);
   const [patientId] = useState('P-' + Math.floor(100000 + Math.random() * 900000));
   const [refillEnabled, setRefillEnabled] = useState(initialActiveTab.refillEnabled || false);
@@ -339,49 +414,18 @@ const POS = () => {
     const locState = location.state as any;
     if (locState && locState.editSale) {
       const editSale = locState.editSale;
-      setEditingInvoiceId(editSale.id || null);
+      setEditingInvoiceId(Number(editSale.id) || null);
       setEditingInvoiceNo(editSale.invoice_no || editSale.id || null);
       if (editSale.customer_name) setPatientName(editSale.customer_name);
       if (editSale.customer_phone) setPatientPhone(editSale.customer_phone);
       if (editSale.doctor_name) setDoctor(editSale.doctor_name);
-      if (editSale.discount !== undefined) setDiscount(Number(editSale.discount));
+      if (editSale.discount !== undefined) setDiscount(Number(editSale.discount || 0));
       if (editSale.payment_medium) setPaymentMedium(editSale.payment_medium);
+      if (editSale.date) setDate(editSale.date.split('T')[0]);
 
       const itemsList = Array.isArray(editSale.items) ? editSale.items : (Array.isArray(editSale.sale_items) ? editSale.sale_items : []);
-      if (itemsList.length > 0) {
-        const cartItems = itemsList.map((it: any, idx: number) => {
-          // Use the bill's actual stored quantity (strips) and loose_qty.
-          // Fallback to 0, never to 1, so edit mode always shows the exact sold qty.
-          const itemQty = it.quantity !== undefined && it.quantity !== null 
-            ? Number(it.quantity) 
-            : (it.qty !== undefined && it.qty !== null ? Number(it.qty) : 0);
-          const itemLooseQty = it.loose_qty !== undefined && it.loose_qty !== null
-            ? Number(it.loose_qty)
-            : (it.looseQty !== undefined && it.looseQty !== null ? Number(it.looseQty) : 0);
-          const packSize = Number(it.pack_size || it.packSize || 1);
-          const unitPrice = Number(it.unit_price !== undefined && it.unit_price !== null ? it.unit_price : (it.rate || it.sell_price || it.mrp || 0));
-          return {
-            id: it.inventory_id || it.id || `edit_item_${idx}_${Date.now()}`,
-            inventory_id: it.inventory_id,
-            medicine_id: it.medicine_id,
-            name: it.medicine_name || it.name || it.product_name || 'Medicine',
-            batch: it.batch_number || it.batch_no || '',
-            expiry: it.expiry_date || '',
-            mrp: Number(it.item_mrp ?? it.mrp ?? unitPrice ?? 0),
-            sell_price: unitPrice,
-            qty: itemQty,
-            quantity: itemQty,
-            unitPrice: unitPrice,
-            looseQty: itemLooseQty,
-            discount: Number(it.discount_per !== undefined ? it.discount_per : (it.discount || 0)),
-            packSize: packSize,
-            availableStock: Number(it.stock_qty ?? it.quantity ?? itemQty),
-            availableLooseStock: Number(it.loose_quantity ?? it.loose_qty ?? itemLooseQty),
-            isEmptyRow: false
-          };
-        });
-        // Increment generation BEFORE setCart so any stale queueMicrotask from
-        // a previous addToCart (which captured an old medicine_id) will be skipped.
+      const cartItems = mapEditSaleItemsToCart(itemsList);
+      if (cartItems.length > 0) {
         cartGenerationRef.current += 1;
         setCart(cartItems);
         setTabs(prev => prev.map(t => {
@@ -529,10 +573,10 @@ const POS = () => {
   const [lastSavedGrandTotal, setLastSavedGrandTotal] = useState(0);
   const [lastSavedPaymentMedium, setLastSavedPaymentMedium] = useState('CASH');
   const [lastSavedWasWhatsAppSent, setLastSavedWasWhatsAppSent] = useState(false);
-  const [editingInvoiceId, setEditingInvoiceId] = useState<number | null>(null);
-  const [editingInvoiceNo, setEditingInvoiceNo] = useState<string | null>(null);
+  const [editingInvoiceId, setEditingInvoiceId] = useState<number | null>(() => Number(editSaleFromState?.id) || null);
+  const [editingInvoiceNo, setEditingInvoiceNo] = useState<string | null>(() => editSaleFromState?.invoice_no || editSaleFromState?.id || null);
   const pendingDirectSaveRef = useRef<boolean>(false);
-  const [doctor, setDoctor] = useState(initialActiveTab.doctor || '');
+  const [doctor, setDoctor] = useState(() => editSaleFromState?.doctor_name || initialActiveTab.doctor || '');
   const [isDoctorDropdownOpen, setIsDoctorDropdownOpen] = useState(false);
   const [doctorHighlightIndex, setDoctorHighlightIndex] = useState(-1);
   const [isManualDoctor, setIsManualDoctor] = useState(initialActiveTab.isManualDoctor || false);
@@ -554,11 +598,27 @@ const POS = () => {
   const [showPatientSuggestions, setShowPatientSuggestions] = useState(false);
   const [isPatientFuzzyMatch, setIsPatientFuzzyMatch] = useState(false);
   const [patientHighlightIndex, setPatientHighlightIndex] = useState(-1);
-  const [discount, setDiscount] = useState(initialActiveTab.discount || 0);
-  const [date, setDate] = useState(getLocalDateString());
-  const [cart, setCart] = useState<any[]>(initialActiveTab.items || []);
+  const [discount, setDiscount] = useState(() => editSaleFromState?.discount !== undefined ? Number(editSaleFromState.discount || 0) : (initialActiveTab.discount || 0));
+  const [date, setDate] = useState(() => editSaleFromState?.date ? editSaleFromState.date.split('T')[0] : getLocalDateString());
+  const [cart, setCart] = useState<any[]>(() => {
+    if (initialActiveTab.items && initialActiveTab.items.length > 0) {
+      return initialActiveTab.items;
+    }
+    return [{
+      id: 'empty_row_' + Date.now(),
+      name: '',
+      batch: '',
+      expiry: '',
+      mrp: 0,
+      qty: 0,
+      looseQty: 0,
+      discount: 0,
+      packSize: 1,
+      isEmptyRow: true
+    }];
+  });
   const [sendWhatsApp, setSendWhatsApp] = useState(initialActiveTab.sendWhatsApp || false); // DEFAULT: OFF
-  const [paymentMedium, setPaymentMedium] = useState<string>(initialActiveTab.paymentMedium || 'CASH'); // DEFAULT: CASH
+  const [paymentMedium, setPaymentMedium] = useState<string>(() => editSaleFromState?.payment_medium || initialActiveTab.paymentMedium || 'CASH'); // DEFAULT: CASH
   const queryClient = useQueryClient();
 
   const specialOrdersControl = useFetchMode('pos.specialOrders');
@@ -724,8 +784,7 @@ const POS = () => {
   // produces the exact same state transitions with a single effect pass.
   useEffect(() => {
     // 1) Auto-initialize with an empty row if the cart is completely empty
-    const validItems = cart.filter(item => !item.isEmptyRow);
-    if (validItems.length === 0 && (cart.length !== 1 || !cart[0].isEmptyRow)) {
+    if (cart.length === 0) {
       setCart([{
         id: 'empty_row_' + Date.now(),
         name: '',
@@ -742,25 +801,23 @@ const POS = () => {
     }
 
     // 2) Automatically append a new empty row at the bottom if the last row is filled
-    if (cart.length > 0) {
-      const lastItem = cart[cart.length - 1];
-      if (!lastItem.isEmptyRow && lastItem.name) {
-        setCart(prev => [
-          ...prev,
-          {
-            id: 'empty_row_' + Date.now(),
-            name: '',
-            batch: '',
-            expiry: '',
-            mrp: 0,
-            qty: 0,
-            looseQty: 0,
-            discount: 0,
-            packSize: 1,
-            isEmptyRow: true
-          }
-        ]);
-      }
+    const lastItem = cart[cart.length - 1];
+    if (lastItem && !lastItem.isEmptyRow && lastItem.name) {
+      setCart(prev => [
+        ...prev,
+        {
+          id: 'empty_row_' + Date.now(),
+          name: '',
+          batch: '',
+          expiry: '',
+          mrp: 0,
+          qty: 0,
+          looseQty: 0,
+          discount: 0,
+          packSize: 1,
+          isEmptyRow: true
+        }
+      ]);
     }
   }, [cart]);
 
@@ -2331,7 +2388,8 @@ const POS = () => {
         sendWhatsApp: paymentMedium === 'CREDIT' ? true : sendWhatsApp,
         refillEnabled: refillEnabled,
         refillDays: refillDays,
-        refillId: activeRefillId || undefined
+        refillId: activeRefillId || undefined,
+        editingInvoiceId: editingInvoiceId || undefined
       };
 
       // Verification Layer Check: Pre-save validation
