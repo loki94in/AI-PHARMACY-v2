@@ -684,7 +684,8 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
             const reqQty = Number(m.quantity_needed || 1);
             const stockQty = Number(m.in_stock_qty || 0);
 
-            if (stockQty < reqQty || diffDays <= 14 || m.hold_for_stock === 1) {
+            // Show in actionable ordering if due within 7 days (today -> next 7 days)
+            if (diffDays <= 7) {
               refillList.push({
                 id: m.id,
                 patient_name: patient.patient_name,
@@ -698,7 +699,9 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
                 hold_for_stock: m.hold_for_stock || 0,
                 is_active: m.is_active !== undefined ? m.is_active : 1,
                 quantity_needed: reqQty,
-                in_stock_qty: stockQty
+                in_stock_qty: stockQty,
+                reminder_status: m.reminder_status || 'NOT_SENT',
+                reminder_sent_at: m.reminder_sent_at || null
               });
             }
           });

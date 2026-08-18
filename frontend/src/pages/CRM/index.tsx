@@ -6,7 +6,7 @@ import type { SpecialOrder } from '../../services/api';
 import {
   RefreshCw, Send, Users, MessageSquare, Phone, Calendar,
   CheckCircle2, AlertCircle, Clock, Search, Repeat2, Bell,
-  MessageCircle, Check, Package, Mail, ExternalLink, LogOut, Zap, Copy, FileText, X, Plus, Trash2, Sliders, ChevronDown, Info, ClipboardList, ShoppingCart, AlertTriangle, Pencil, Edit2, RotateCcw
+  MessageCircle, Check, Package, Mail, ExternalLink, LogOut, Zap, Copy, FileText, X, Plus, Trash2, Sliders, ChevronDown, Info, ClipboardList, ShoppingCart, AlertTriangle, Pencil, Edit2, RotateCcw, Loader2
 } from 'lucide-react';
 import { toastEvent, specialOrdersEvent, liveCartAddEvent, refillEvent, messageSendEvent, whatsappQueueEvent } from '../../services/events';
 import { usePageActive } from '../../lib/keepAlive/PageActiveContext';
@@ -39,6 +39,8 @@ interface RefillPatient {
   patient_name: string;
   patient_phone: string;
   next_refill_date: string;
+  reminder_status?: string;
+  reminder_sent_at?: string | null;
   medicines: {
     id: number;
     medicine_id?: number;
@@ -58,6 +60,8 @@ interface RefillPatient {
     mrp?: number;
     sell_price?: number;
     unit_price?: number;
+    reminder_status?: string;
+    reminder_sent_at?: string | null;
   }[];
 }
 
@@ -726,16 +730,57 @@ const RefillsSection: React.FC = () => {
                     <Repeat2 size={12} />
                     <span>Renew Schedule</span>
                   </button>
-                  {/* Remind Now — always active */}
-                  <button
-                    onClick={() => handleRemindNow(patient.patient_phone)}
-                    disabled={sending === patient.patient_phone}
-                    title="Send WhatsApp reminder now"
-                    className="flex items-center gap-1 px-3 py-1.5 bg-green-500/10 border border-green-500/30 text-green-400 rounded-lg text-xs font-medium hover:bg-green-500/20 transition-colors disabled:opacity-50"
-                  >
-                    <Send size={11} className={sending === patient.patient_phone ? 'animate-pulse' : ''} />
-                    {sending === patient.patient_phone ? 'Sending…' : 'Remind Now'}
-                  </button>
+                  {/* Reminder Status Tracking / Action Button */}
+                  {patient.reminder_status === 'SENT' ? (
+                    <div
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 rounded-xl text-xs font-bold shadow-xs"
+                      title={patient.reminder_sent_at ? `Sent on ${patient.reminder_sent_at}` : 'Refill reminder sent'}
+                    >
+                      <Check size={12} className="text-emerald-400" />
+                      <span>Reminder Sent ✓</span>
+                      {patient.reminder_sent_at && (
+                        <span className="text-[10px] opacity-75 font-mono">({formatDate(patient.reminder_sent_at)})</span>
+                      )}
+                    </div>
+                  ) : patient.reminder_status === 'QUEUED' ? (
+                    <div
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/15 border border-amber-500/30 text-amber-400 rounded-xl text-xs font-bold shadow-xs"
+                      title="Refill reminder queued in dispatch queue"
+                    >
+                      <Clock size={12} className="text-amber-400" />
+                      <span>Queued ⏳</span>
+                    </div>
+                  ) : patient.reminder_status === 'SENDING' ? (
+                    <div
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-sky-500/15 border border-sky-500/30 text-sky-400 rounded-xl text-xs font-bold shadow-xs"
+                      title="Sending WhatsApp reminder..."
+                    >
+                      <Loader2 size={12} className="animate-spin text-sky-400" />
+                      <span>Sending 📡</span>
+                    </div>
+                  ) : patient.reminder_status === 'FAILED' ? (
+                    <button
+                      type="button"
+                      onClick={() => handleRemindNow(patient.patient_phone)}
+                      disabled={sending === patient.patient_phone}
+                      title="Reminder failed to send — click to retry"
+                      className="flex items-center gap-1 px-3 py-1.5 bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 text-red-400 rounded-xl text-xs font-bold transition-colors disabled:opacity-50 cursor-pointer shadow-xs"
+                    >
+                      <AlertCircle size={12} className="text-red-400" />
+                      <span>{sending === patient.patient_phone ? 'Retrying…' : 'Retry Reminder'}</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => handleRemindNow(patient.patient_phone)}
+                      disabled={sending === patient.patient_phone}
+                      title="Send WhatsApp refill reminder now"
+                      className="flex items-center gap-1 px-3 py-1.5 bg-green-500/10 border border-green-500/30 text-green-400 hover:bg-green-500/20 rounded-xl text-xs font-medium transition-colors disabled:opacity-50 cursor-pointer shadow-xs"
+                    >
+                      <Send size={11} className={sending === patient.patient_phone ? 'animate-pulse' : ''} />
+                      {sending === patient.patient_phone ? 'Sending…' : 'Remind Now'}
+                    </button>
+                  )}
                   {/* Sell Now → POS */}
                   <button
                     onClick={() => handleSellRefillPatient(patient)}

@@ -501,6 +501,9 @@ class WhatsAppQueueWorker {
 
         // Set status to sending
         await db.run("UPDATE whatsapp_send_queue SET status = 'sending' WHERE id = ?", [item.id]);
+        if (item.type === 'refill_reminder') {
+          await db.run("UPDATE patient_refills SET reminder_status = 'SENDING' WHERE reminder_job_id = ?", [item.id]).catch(() => {});
+        }
 
         try {
           let fileObj: any = undefined;
@@ -544,6 +547,17 @@ class WhatsAppQueueWorker {
             await this.markPharmarackOrderSent(db, item.target_name);
           }
 
+          if (item.type === 'refill_reminder') {
+            await db.run(
+              "UPDATE patient_refills SET reminder_status = 'SENT', reminder_sent_at = datetime('now'), status = 'notified' WHERE reminder_job_id = ?",
+              [item.id]
+            ).catch(() => {});
+            await db.run(
+              "UPDATE automation_notifications SET status = 'sent' WHERE (reference_id IN (SELECT CAST(id AS TEXT) FROM patient_refills WHERE reminder_job_id = ?) OR reference_id = ?) AND type = 'refill_reminder'",
+              [item.id, String(item.id)]
+            ).catch(() => {});
+          }
+
           const suppressedNote = sendResult.suppressed ? ' (duplicate suppressed)' : '';
           console.log(`[WhatsAppQueueWorker] Verified & sent message #${item.id} to ${item.number}${suppressedNote}`);
         } catch (err: any) {
@@ -560,6 +574,16 @@ class WhatsAppQueueWorker {
             if (item.type === 'pharmarack_distributor_order') {
               await this.markPharmarackOrderSent(db, item.target_name);
             }
+            if (item.type === 'refill_reminder') {
+              await db.run(
+                "UPDATE patient_refills SET reminder_status = 'SENT', reminder_sent_at = datetime('now'), status = 'notified' WHERE reminder_job_id = ?",
+                [item.id]
+              ).catch(() => {});
+              await db.run(
+                "UPDATE automation_notifications SET status = 'sent' WHERE (reference_id IN (SELECT CAST(id AS TEXT) FROM patient_refills WHERE reminder_job_id = ?) OR reference_id = ?) AND type = 'refill_reminder'",
+                [item.id, String(item.id)]
+              ).catch(() => {});
+            }
             console.log(`[WhatsAppQueueWorker] Outbox match — marking #${item.id} as sent despite error: ${errMsg}`);
           } else {
             const newRetryCount = item.retry_count + 1;
@@ -570,6 +594,17 @@ class WhatsAppQueueWorker {
               "UPDATE whatsapp_send_queue SET status = ?, retry_count = ?, error_message = ? WHERE id = ?",
               [newStatus, newRetryCount, errMsg, item.id]
             );
+
+            if (item.type === 'refill_reminder') {
+              await db.run(
+                "UPDATE patient_refills SET reminder_status = 'FAILED' WHERE reminder_job_id = ?",
+                [item.id]
+              ).catch(() => {});
+              await db.run(
+                "UPDATE automation_notifications SET status = 'failed', error_message = ? WHERE (reference_id IN (SELECT CAST(id AS TEXT) FROM patient_refills WHERE reminder_job_id = ?) OR reference_id = ?) AND type = 'refill_reminder'",
+                [errMsg, item.id, String(item.id)]
+              ).catch(() => {});
+            }
 
             // Log failure notification into automation_notifications if permanently failed
             if (newStatus === 'failed_perm') {

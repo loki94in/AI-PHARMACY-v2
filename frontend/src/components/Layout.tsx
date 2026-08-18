@@ -2182,16 +2182,35 @@ const QuickAssistSidebar = ({
     }
   };
 
-  // Group active refills by patient
-  const activeRefills = useMemo(() => refills.filter(r => r.is_active === 1), [refills]);
+  // Filter actionable refills: active and due within today + upcoming 7 calendar days (diffDays <= 7)
+  const actionableRefills = useMemo(() => {
+    const today = new Date();
+    const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
 
-  const groupedActiveRefills = useMemo(() => {
+    return (Array.isArray(refills) ? refills : []).filter(r => {
+      if (r.is_active !== 1 || !r.next_refill_date) return false;
+      const d = new Date(r.next_refill_date);
+      if (isNaN(d.getTime())) return false;
+      const dueStart = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+      const diffDays = Math.round((dueStart - todayStart) / 86400000);
+      return diffDays <= 7;
+    });
+  }, [refills]);
+
+  const groupedActionableRefills = useMemo(() => {
+    const today = new Date();
+    const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+
     const list: Array<{
       key: string;
       patient_name: string;
       patient_phone: string;
       next_refill_date: string;
+      diffDays: number;
+      timingCategory: 'Overdue' | 'Today' | 'Tomorrow' | 'Within 7 Days';
       hasHoldStock: boolean;
+      reminder_status: 'NOT_SENT' | 'QUEUED' | 'SENDING' | 'SENT' | 'FAILED';
+      reminder_sent_at?: string | null;
       medicines: Array<{
         id: number;
         medicine_name: string;
@@ -2199,13 +2218,20 @@ const QuickAssistSidebar = ({
         refill_interval_days: number;
         hold_for_stock: number;
         next_refill_date: string;
+        diffDays: number;
+        reminder_status: 'NOT_SENT' | 'QUEUED' | 'SENDING' | 'SENT' | 'FAILED';
+        reminder_sent_at?: string | null;
       }>;
     }> = [];
 
     const map = new Map<string, (typeof list)[0]>();
 
-    for (const r of activeRefills) {
+    for (const r of actionableRefills) {
       const key = (r.patient_phone || r.patient_name || String(r.id)).trim();
+      const d = new Date(r.next_refill_date);
+      const dueStart = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+      const diffDays = Math.round((dueStart - todayStart) / 86400000);
+
       let existing = map.get(key);
       if (!existing) {
         existing = {
@@ -2213,7 +2239,11 @@ const QuickAssistSidebar = ({
           patient_name: r.patient_name || 'Patient',
           patient_phone: r.patient_phone || '',
           next_refill_date: r.next_refill_date,
+          diffDays,
+          timingCategory: diffDays < 0 ? 'Overdue' : diffDays === 0 ? 'Today' : diffDays === 1 ? 'Tomorrow' : 'Within 7 Days',
           hasHoldStock: false,
+          reminder_status: 'NOT_SENT',
+          reminder_sent_at: null,
           medicines: [],
         };
         map.set(key, existing);
@@ -2222,7 +2252,10 @@ const QuickAssistSidebar = ({
       if (r.hold_for_stock === 1) existing.hasHoldStock = true;
       if (r.next_refill_date && (!existing.next_refill_date || new Date(r.next_refill_date) < new Date(existing.next_refill_date))) {
         existing.next_refill_date = r.next_refill_date;
+        existing.diffDays = diffDays;
+        existing.timingCategory = diffDays < 0 ? 'Overdue' : diffDays === 0 ? 'Today' : diffDays === 1 ? 'Tomorrow' : 'Within 7 Days';
       }
+      const medReminderStatus: 'NOT_SENT' | 'QUEUED' | 'SENDING' | 'SENT' | 'FAILED' = r.reminder_status || (r.status === 'notified' ? 'SENT' : 'NOT_SENT');
       existing.medicines.push({
         id: r.id,
         medicine_name: r.medicine_name || 'Medicine',
@@ -2230,66 +2263,46 @@ const QuickAssistSidebar = ({
         refill_interval_days: r.refill_interval_days || 30,
         hold_for_stock: r.hold_for_stock || 0,
         next_refill_date: r.next_refill_date,
+        diffDays,
+        reminder_status: medReminderStatus,
+        reminder_sent_at: r.reminder_sent_at || null,
       });
     }
 
-    return list;
-  }, [activeRefills]);
-
-  // Group due soon refills by patient
-  const groupedDueSoon = useMemo(() => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const cutoff = new Date(today);
-    cutoff.setDate(today.getDate() + 5);
-
-    const dueSoonItems = refills.filter(r => {
-      if (r.is_active !== 1 || !r.next_refill_date) return false;
-      const d = new Date(r.next_refill_date);
-      return d >= today && d <= cutoff;
-    });
-
-    const list: Array<{
-      key: string;
-      patient_name: string;
-      patient_phone: string;
-      next_refill_date: string;
-      diffDays: number;
-      medicines: Array<{
-        id: number;
-        medicine_name: string;
-        quantity_needed: number;
-      }>;
-    }> = [];
-
-    const map = new Map<string, (typeof list)[0]>();
-
-    for (const r of dueSoonItems) {
-      const key = (r.patient_phone || r.patient_name || String(r.id)).trim();
-      let existing = map.get(key);
-      if (!existing) {
-        const dueDate = new Date(r.next_refill_date);
-        const diffDays = Math.round((dueDate.getTime() - today.getTime()) / 86400000);
-        existing = {
-          key,
-          patient_name: r.patient_name || 'Patient',
-          patient_phone: r.patient_phone || '',
-          next_refill_date: r.next_refill_date,
-          diffDays,
-          medicines: [],
-        };
-        map.set(key, existing);
-        list.push(existing);
+    // Compute aggregate patient group reminder status & latest sent timestamp
+    for (const group of list) {
+      if (group.medicines.length > 0) {
+        if (group.medicines.every(m => m.reminder_status === 'SENT')) {
+          group.reminder_status = 'SENT';
+          const sentDates = group.medicines.map(m => m.reminder_sent_at).filter(Boolean);
+          group.reminder_sent_at = sentDates.length > 0 ? (sentDates as string[]).sort().reverse()[0] : null;
+        } else if (group.medicines.some(m => m.reminder_status === 'SENDING')) {
+          group.reminder_status = 'SENDING';
+        } else if (group.medicines.some(m => m.reminder_status === 'QUEUED')) {
+          group.reminder_status = 'QUEUED';
+        } else if (group.medicines.some(m => m.reminder_status === 'FAILED')) {
+          group.reminder_status = 'FAILED';
+        } else {
+          group.reminder_status = 'NOT_SENT';
+        }
       }
-      existing.medicines.push({
-        id: r.id,
-        medicine_name: r.medicine_name || 'Medicine',
-        quantity_needed: Number(r.quantity_needed || 3),
-      });
     }
 
+    // Sort by diffDays ascending (most urgent first)
+    list.sort((a, b) => a.diffDays - b.diffDays);
     return list;
-  }, [refills]);
+  }, [actionableRefills]);
+
+  const formatReminderSentAt = (sentAtStr?: string | null) => {
+    if (!sentAtStr) return '';
+    try {
+      const d = new Date(sentAtStr);
+      if (isNaN(d.getTime())) return sentAtStr;
+      return d.toLocaleDateString([], { day: '2-digit', month: 'short' }) + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+    } catch {
+      return sentAtStr;
+    }
+  };
 
   // Group active special orders by requester
   const activeSpecialOrders = useMemo(() => {
@@ -2349,7 +2362,7 @@ const QuickAssistSidebar = ({
   }, [activeSpecialOrders]);
 
   if (!expanded) {
-    const activeRefillsCount = groupedActiveRefills.length;
+    const activeRefillsCount = groupedActionableRefills.length;
     const activeSpecialOrdersCount = groupedSpecialOrders.length;
     const stagedNotificationsCount = Array.isArray(notifications) ? notifications.length : 0;
 
@@ -2363,11 +2376,11 @@ const QuickAssistSidebar = ({
 
         {/* 3 Distinct Category Count Badges at TOP */}
         <div className="flex flex-col gap-1.5 items-center mt-1">
-          {/* 1. Automations / Refills (Purple) */}
+          {/* 1. Refills Due Soon (Purple) */}
           {activeRefillsCount > 0 && (
             <div
               className="flex items-center justify-center min-w-[20px] h-5 px-1 rounded-full bg-purple-500/20 text-purple-400 text-[9px] font-black border border-purple-500/40 shadow-sm"
-              title={`Automations / Refills: ${activeRefillsCount} patient(s)`}
+              title={`Refills Due Soon: ${activeRefillsCount} patient(s)`}
             >
               {activeRefillsCount}
             </div>
@@ -2424,10 +2437,13 @@ const QuickAssistSidebar = ({
 
       {/* Main content scroll */}
       <div className="flex-1 min-h-0 overflow-y-auto p-4 flex flex-col gap-6 scrollbar-thin">
-        {/* Active Refills (Grouped by Patient with Expand/Collapse) */}
+        {/* Actionable Refills (Due within 7 Calendar Days) */}
         <div>
-          <div className="flex items-center justify-between mb-2 text-xs font-bold uppercase tracking-wider text-muted/70">
-            <span>Automations ({groupedActiveRefills.length})</span>
+          <div className="flex items-center justify-between mb-2 text-xs font-bold uppercase tracking-wider text-purple-400">
+            <div className="flex items-center gap-1.5">
+              <BellRing size={13} className="text-purple-400" />
+              <span>Refills Due Soon ({groupedActionableRefills.length})</span>
+            </div>
             <button
               onClick={() => navigate('/crm?tab=refills')}
               className="text-[9px] font-black text-sky-400 hover:text-sky-300 uppercase tracking-widest cursor-pointer"
@@ -2435,12 +2451,30 @@ const QuickAssistSidebar = ({
               Manage
             </button>
           </div>
-          {groupedActiveRefills.length === 0 ? (
-            <p className="text-xs text-muted/50 italic pl-2 py-1">No active refill tracks</p>
+          {groupedActionableRefills.length === 0 ? (
+            <p className="text-xs text-muted/50 italic pl-2 py-1">No refills due within 7 days</p>
           ) : (
             <div className="flex flex-col gap-2.5">
-              {groupedActiveRefills.map(group => {
+              {groupedActionableRefills.map(group => {
                 const isExpanded = expandedRefillKeys.has(group.key);
+                const timingBadge = group.timingCategory === 'Overdue' ? (
+                  <span className="px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 text-[9px] font-mono font-bold">
+                    Overdue ({Math.abs(group.diffDays)}d)
+                  </span>
+                ) : group.timingCategory === 'Today' ? (
+                  <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-[9px] font-mono font-bold">
+                    Today
+                  </span>
+                ) : group.timingCategory === 'Tomorrow' ? (
+                  <span className="px-1.5 py-0.5 rounded bg-sky-500/20 text-sky-300 text-[9px] font-mono font-bold">
+                    Tomorrow
+                  </span>
+                ) : (
+                  <span className="px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 text-[9px] font-mono font-bold">
+                    In {group.diffDays}d
+                  </span>
+                );
+
                 return (
                   <div key={group.key} className="p-3 rounded-xl bg-bg2 border border-glass-border flex flex-col gap-2 shadow-sm min-w-0 overflow-hidden transition-all">
                     {/* Patient Header (Click to toggle expansion) */}
@@ -2449,11 +2483,12 @@ const QuickAssistSidebar = ({
                       className="flex items-start justify-between gap-1.5 min-w-0 cursor-pointer select-none"
                     >
                       <div className="flex flex-col min-w-0 flex-1">
-                        <div className="flex items-center gap-1.5 min-w-0">
+                        <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
                           <span className="font-semibold text-xs text-text truncate">{group.patient_name}</span>
                           <span className="px-1.5 py-0.2 rounded-full bg-purple-500/15 text-purple-400 text-[9px] font-bold shrink-0">
                             {group.medicines.length} med{group.medicines.length > 1 ? 's' : ''}
                           </span>
+                          {timingBadge}
                         </div>
                         {group.patient_phone && (
                           <span className="text-[10px] text-muted truncate">{group.patient_phone}</span>
@@ -2469,26 +2504,74 @@ const QuickAssistSidebar = ({
                       </div>
                     </div>
 
-                    {/* Patient Card Actions & Due Date Footer */}
+                    {/* Patient Card Actions & Reminder Status Footer */}
                     <div className="flex items-center gap-2 justify-between min-w-0 pt-1 border-t border-border/30">
                       <div className="flex items-center gap-1 text-[9px] text-muted/70 font-medium truncate">
                         <ClockIcon size={10} className="shrink-0" />
                         <span className="truncate">
-                          Next: {group.next_refill_date ? new Date(group.next_refill_date).toLocaleDateString([], { month: 'short', day: 'numeric' }) : 'N/A'}
+                          Due: {group.next_refill_date ? new Date(group.next_refill_date).toLocaleDateString([], { month: 'short', day: 'numeric' }) : 'N/A'}
                         </span>
                       </div>
-                      {group.hasHoldStock && (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleAcknowledgeAll(group.medicines);
-                          }}
-                          className="py-1 px-2.5 rounded bg-amber-600 hover:bg-amber-700 text-white text-[9px] font-black tracking-wide uppercase transition-colors shadow-sm cursor-pointer shrink-0"
-                          title="Mark all held items as checked / resolved"
-                        >
-                          Acknowledge
-                        </button>
-                      )}
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {group.hasHoldStock && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleAcknowledgeAll(group.medicines);
+                            }}
+                            className="py-1 px-2 rounded bg-amber-600 hover:bg-amber-700 text-white text-[9px] font-black tracking-wide uppercase transition-colors shadow-sm cursor-pointer shrink-0"
+                            title="Mark all held items as checked / resolved"
+                          >
+                            Ack
+                          </button>
+                        )}
+                        {group.reminder_status === 'SENT' ? (
+                          <div
+                            className="flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-[9px] font-bold shrink-0"
+                            title={`Reminder sent on ${formatReminderSentAt(group.reminder_sent_at)}`}
+                          >
+                            <Check size={10} className="text-emerald-400" />
+                            <span>Sent ✓</span>
+                          </div>
+                        ) : group.reminder_status === 'QUEUED' ? (
+                          <div
+                            className="flex items-center gap-1 px-2 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-amber-400 text-[9px] font-bold shrink-0"
+                            title="Reminder queued in WhatsApp dispatch queue"
+                          >
+                            <ClockIcon size={10} className="text-amber-400" />
+                            <span>Queued ⏳</span>
+                          </div>
+                        ) : group.reminder_status === 'SENDING' ? (
+                          <div className="flex items-center gap-1 px-2 py-0.5 rounded bg-sky-500/15 border border-sky-500/30 text-sky-400 text-[9px] font-bold shrink-0">
+                            <Loader2 size={10} className="animate-spin text-sky-400" />
+                            <span>Sending 📡</span>
+                          </div>
+                        ) : group.reminder_status === 'FAILED' ? (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleSendRefillGroup(group);
+                            }}
+                            className="py-0.5 px-2 rounded bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/30 text-[9px] font-bold uppercase transition-colors flex items-center gap-1 shadow-sm cursor-pointer"
+                            title="Reminder failed to send — click to retry"
+                          >
+                            <AlertIcon size={10} />
+                            <span>Retry</span>
+                          </button>
+                        ) : (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleSendRefillGroup(group);
+                            }}
+                            className="py-0.5 px-2 rounded bg-purple-600 hover:bg-purple-700 text-white text-[9px] font-bold uppercase transition-colors flex items-center gap-1 shadow-sm cursor-pointer"
+                            title={`Send WhatsApp reminder to ${group.patient_name}`}
+                          >
+                            <SendIcon size={10} />
+                            <span>Send</span>
+                          </button>
+                        )}
+                      </div>
                     </div>
 
                     {/* Expandable Medicines List */}
@@ -2520,17 +2603,49 @@ const QuickAssistSidebar = ({
                                   Ack
                                 </button>
                               )}
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleSendSingleRefill(group.patient_name, group.patient_phone, med);
-                                }}
-                                className="py-0.5 px-2 rounded bg-purple-600/80 hover:bg-purple-600 text-white text-[9px] font-bold uppercase transition-colors flex items-center gap-1 shadow-sm cursor-pointer"
-                                title={`Send WhatsApp refill reminder for ${med.medicine_name}`}
-                              >
-                                <SendIcon size={10} />
-                                <span>Remind</span>
-                              </button>
+                              {med.reminder_status === 'SENT' ? (
+                                <div
+                                  className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-[9px] font-bold shrink-0"
+                                  title={`Reminder sent on ${formatReminderSentAt(med.reminder_sent_at)}`}
+                                >
+                                  <Check size={9} />
+                                  <span>Sent ✓</span>
+                                </div>
+                              ) : med.reminder_status === 'QUEUED' ? (
+                                <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-amber-400 text-[9px] font-bold shrink-0">
+                                  <ClockIcon size={9} />
+                                  <span>Queued ⏳</span>
+                                </div>
+                              ) : med.reminder_status === 'SENDING' ? (
+                                <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-sky-500/15 border border-sky-500/30 text-sky-400 text-[9px] font-bold shrink-0">
+                                  <Loader2 size={9} className="animate-spin" />
+                                  <span>Sending 📡</span>
+                                </div>
+                              ) : med.reminder_status === 'FAILED' ? (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleSendSingleRefill(group.patient_name, group.patient_phone, med);
+                                  }}
+                                  className="py-0.5 px-1.5 rounded bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/30 text-[9px] font-bold uppercase transition-colors flex items-center gap-1 shadow-sm cursor-pointer"
+                                  title="Retry WhatsApp refill reminder"
+                                >
+                                  <AlertIcon size={9} />
+                                  <span>Retry</span>
+                                </button>
+                              ) : (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleSendSingleRefill(group.patient_name, group.patient_phone, med);
+                                  }}
+                                  className="py-0.5 px-2 rounded bg-purple-600/80 hover:bg-purple-600 text-white text-[9px] font-bold uppercase transition-colors flex items-center gap-1 shadow-sm cursor-pointer"
+                                  title={`Send WhatsApp refill reminder for ${med.medicine_name}`}
+                                >
+                                  <SendIcon size={9} />
+                                  <span>Remind</span>
+                                </button>
+                              )}
                             </div>
                           </div>
                         ))}
@@ -2542,96 +2657,6 @@ const QuickAssistSidebar = ({
             </div>
           )}
         </div>
-
-        {/* Due Soon — Grouped by Patient (within 5 days) */}
-        {groupedDueSoon.length > 0 && (
-          <div>
-            <div className="flex items-center justify-between mb-2 text-xs font-bold uppercase tracking-wider text-emerald-400/80">
-              <div className="flex items-center gap-1.5">
-                <BellRing size={13} className="text-emerald-400" />
-                <span>Due Soon ({groupedDueSoon.length})</span>
-              </div>
-              <button
-                onClick={() => navigate('/crm?tab=refills')}
-                className="text-[9px] font-black text-emerald-400 hover:text-emerald-300 uppercase tracking-widest cursor-pointer"
-              >
-                View All
-              </button>
-            </div>
-            <div className="flex flex-col gap-2.5">
-              {groupedDueSoon.map(group => {
-                const isExpanded = expandedDueSoonKeys.has(group.key);
-                const dueLabel = group.diffDays === 0 ? 'Today' : group.diffDays === 1 ? 'Tomorrow' : `in ${group.diffDays} days`;
-                return (
-                  <div key={group.key} className="p-3 rounded-xl bg-emerald-500/[0.04] border border-emerald-500/20 flex flex-col gap-2 min-w-0 overflow-hidden transition-all">
-                    {/* Patient Header */}
-                    <div
-                      onClick={() => toggleDueSoonKey(group.key)}
-                      className="flex items-center justify-between gap-2 min-w-0 cursor-pointer select-none"
-                    >
-                      <div className="flex flex-col min-w-0 flex-1">
-                        <div className="flex items-center gap-1.5 min-w-0">
-                          <span className="font-semibold text-xs text-text truncate">{group.patient_name}</span>
-                          <span className="px-1.5 py-0.2 rounded-full bg-emerald-500/20 text-emerald-300 text-[9px] font-bold shrink-0">
-                            {group.medicines.length} med{group.medicines.length > 1 ? 's' : ''}
-                          </span>
-                        </div>
-                        <span className="text-[10px] text-emerald-400 font-mono font-medium">{dueLabel}</span>
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleSendRefillGroup(group);
-                          }}
-                          className="py-1.5 px-3 rounded bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold tracking-wide uppercase transition-colors flex items-center gap-1.5 shadow-sm cursor-pointer"
-                          title={`Send WhatsApp reminder to ${group.patient_name}`}
-                        >
-                          <SendIcon size={11} />
-                          Send
-                        </button>
-                        <ChevronDown size={14} className={`text-muted transition-transform duration-200 ${isExpanded ? 'rotate-180 text-emerald-400' : ''}`} />
-                      </div>
-                    </div>
-
-                    {/* Expandable Medicines List */}
-                    {isExpanded && (
-                      <div className="pt-2 border-t border-emerald-500/20 flex flex-col gap-1.5">
-                        {group.medicines.map((med) => (
-                          <div
-                            key={med.id}
-                            className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg bg-bg3/60 border border-emerald-500/20 text-[11px] min-w-0"
-                          >
-                            <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                              <Package size={11} className="text-emerald-400 shrink-0" />
-                              <span className="font-medium text-text truncate">{med.medicine_name}</span>
-                            </div>
-                            <div className="flex items-center gap-1.5 shrink-0">
-                              <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-[10px] font-mono font-bold shrink-0">
-                                Qty: {med.quantity_needed}
-                              </span>
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleSendSingleRefill(group.patient_name, group.patient_phone, med);
-                                }}
-                                className="py-0.5 px-2 rounded bg-emerald-600 hover:bg-emerald-700 text-white text-[9px] font-bold uppercase transition-colors flex items-center gap-1 shadow-sm cursor-pointer"
-                                title={`Send WhatsApp reminder for ${med.medicine_name}`}
-                              >
-                                <SendIcon size={10} />
-                                <span>Remind</span>
-                              </button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
 
         {/* Quick Special Requests (Grouped by Requester with Expand/Collapse) */}
         <div>

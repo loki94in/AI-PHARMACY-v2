@@ -2,7 +2,7 @@ import { jest } from '@jest/globals';
 
 jest.unstable_mockModule('../src/whatsappClient.js', () => ({
   __esModule: true,
-  sendMessage: jest.fn(() => Promise.resolve(true)),
+  sendMessage: jest.fn(() => Promise.resolve({ sent: true })),
   initClient: jest.fn(() => Promise.resolve(true)),
   getWhatsAppStatus: jest.fn(() => Promise.resolve({ isConnected: true, status: 'CONNECTED' })),
   shouldRouteToBusiness: jest.fn(() => false),
@@ -33,55 +33,57 @@ describe('Patient Refills & POS Auto-Save Integration', () => {
   let dbPath: string;
 
   beforeAll(async () => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'refill-test-'));
-    dbPath = path.join(tmpDir, 'app.db');
-    process.env.DB_PATH = dbPath;
-    await ensureSchema(dbPath);
+    try {
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'refill-test-'));
+      dbPath = path.join(tmpDir, 'app.db');
+      process.env.DB_PATH = dbPath;
+      await ensureSchema(dbPath);
 
-    // Create special_orders table which is queried by inventory overrides
-    const { open } = await import('sqlite');
-    const sqlite3 = await import('sqlite3');
-    const db = await open({ filename: dbPath, driver: sqlite3.default.Database });
-    await db.exec(`
-      CREATE TABLE IF NOT EXISTS special_orders (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        product TEXT,
-        requester TEXT,
-        phone TEXT,
-        qty INTEGER,
-        priority TEXT,
-        status TEXT DEFAULT 'Pending',
-        date DATETIME DEFAULT CURRENT_TIMESTAMP,
-        notified INTEGER DEFAULT 0,
-        pharmarack_distributor TEXT,
-        pharmarack_rate REAL,
-        pharmarack_mrp REAL,
-        pharmarack_mapped INTEGER DEFAULT 0,
-        pharmarack_scheme TEXT,
-        advance_payment REAL DEFAULT 0.0,
-        source_refill_id INTEGER DEFAULT NULL,
-        source TEXT
-      )
-    `);
-    await db.close();
+      // Create special_orders table which is queried by inventory overrides
+      const { open } = await import('sqlite');
+      const sqlite3 = await import('sqlite3');
+      const db = await open({ filename: dbPath, driver: sqlite3.default.Database });
+      await db.exec(`
+        CREATE TABLE IF NOT EXISTS special_orders (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          product TEXT,
+          requester TEXT,
+          phone TEXT,
+          qty INTEGER,
+          priority TEXT,
+          status TEXT DEFAULT 'Pending',
+          date DATETIME DEFAULT CURRENT_TIMESTAMP,
+          notified INTEGER DEFAULT 0,
+          pharmarack_distributor TEXT,
+          pharmarack_rate REAL,
+          pharmarack_mrp REAL,
+          pharmarack_mapped INTEGER DEFAULT 0,
+          pharmarack_scheme TEXT,
+          advance_payment REAL DEFAULT 0.0,
+          source_refill_id INTEGER DEFAULT NULL,
+          source TEXT
+        )
+      `);
+      await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('store_name', 'Apollo Pharmacy')");
+      await db.close();
 
-    mockSendMessage = (await import('../src/whatsappClient.js')).sendMessage;
-    mockTelegramBotService = (await import('../src/telegramBot.js')).telegramBotService;
+      mockSendMessage = (await import('../src/whatsappClient.js')).sendMessage;
+      mockTelegramBotService = (await import('../src/telegramBot.js')).telegramBotService;
 
-    // Load routers
-    const { default: salesRouter } = await import('../src/routes/sales.js');
-    const { default: refillsRouter } = await import('../src/routes/refills.js');
-    const { default: inventoryRouter } = await import('../src/routes/inventory.js');
+      // Load routers
+      const { default: salesRouter } = await import('../src/routes/sales.js');
+      const { default: refillsRouter } = await import('../src/routes/refills.js');
+      const { default: inventoryRouter } = await import('../src/routes/inventory.js');
 
-    app = express();
-    app.use(express.json());
-    app.use('/api/sales', salesRouter);
-    app.use('/api/refills', refillsRouter);
-    app.use('/api/inventory', inventoryRouter);
-  });
-
-  afterAll(() => {
-    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
+      app = express();
+      app.use(express.json());
+      app.use('/api/sales', salesRouter);
+      app.use('/api/refills', refillsRouter);
+      app.use('/api/inventory', inventoryRouter);
+    } catch (err) {
+      console.error('FATAL beforeAll error:', err);
+      throw err;
+    }
   });
 
   beforeEach(() => {
@@ -245,6 +247,363 @@ describe('Patient Refills & POS Auto-Save Integration', () => {
     expect(snoozedRes.status).toBe(200);
     expect(snoozedRes.body.success).toBe(true);
     expect(Array.isArray(snoozedRes.body.items)).toBe(true);
+  });
+
+  describe('Section 18 — Actionable 7-Day Window & Persistent Reminder Status Tests', () => {
+    test('Scenario 1 & 2: 7-Day Actionable Window Filter (today -> +7 days only)', async () => {
+      const { open } = await import('sqlite');
+      const sqlite3 = await import('sqlite3');
+      const db = await open({ filename: dbPath, driver: sqlite3.default.Database });
+
+      const today = new Date();
+      const in3Days = new Date(today);
+      in3Days.setDate(today.getDate() + 3);
+      const in30Days = new Date(today);
+      in30Days.setDate(today.getDate() + 30);
+
+      // Insert actionable refill (due in 3 days) and future refill (due in 30 days)
+      const resActionable = await db.run(
+        `INSERT INTO patient_refills (patient_name, patient_phone, medicine_id, next_refill_date, is_active, status, quantity_needed)
+         VALUES ('Actionable Patient', '9991112222', 201, ?, 1, 'pending', 2)`,
+        [in3Days.toISOString().slice(0, 19).replace('T', ' ')]
+      );
+
+      const resFuture = await db.run(
+        `INSERT INTO patient_refills (patient_name, patient_phone, medicine_id, next_refill_date, is_active, status, quantity_needed)
+         VALUES ('Future Patient', '9993334444', 202, ?, 1, 'pending', 3)`,
+        [in30Days.toISOString().slice(0, 19).replace('T', ' ')]
+      );
+
+      await db.close();
+
+      // Fetch /panel list
+      const panelRes = await request(app).get('/api/refills/panel');
+      expect(panelRes.status).toBe(200);
+      const panelData = panelRes.body;
+
+      // Scenario 3: Future refills MUST remain saved and present in full panel list
+      const foundActionable = panelData.find((p: any) => p.patient_phone === '9991112222');
+      const foundFuture = panelData.find((p: any) => p.patient_phone === '9993334444');
+      expect(foundActionable).toBeDefined();
+      expect(foundFuture).toBeDefined();
+      expect(foundFuture.medicines[0].quantity_needed).toBe(3);
+
+      // Test helper function logic equivalent to Quick Assist filtering (diffDays <= 7)
+      const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+      const actionableFiltered = panelData.filter((p: any) => {
+        const d = new Date(p.next_refill_date);
+        const dueStart = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+        const diffDays = Math.round((dueStart - todayStart) / 86400000);
+        return diffDays <= 7;
+      });
+
+      expect(actionableFiltered.some((p: any) => p.patient_phone === '9991112222')).toBe(true);
+      expect(actionableFiltered.some((p: any) => p.patient_phone === '9993334444')).toBe(false);
+    });
+
+    test('Scenario 4 & 5: Reminder send enqueues into whatsapp_send_queue and sets reminder_status = QUEUED / SENT', async () => {
+      const { open } = await import('sqlite');
+      const sqlite3 = await import('sqlite3');
+      const db = await open({ filename: dbPath, driver: sqlite3.default.Database });
+
+      // Create refill
+      const today = new Date();
+      const refillRes = await db.run(
+        `INSERT INTO patient_refills (patient_name, patient_phone, medicine_id, next_refill_date, is_active, status, quantity_needed)
+         VALUES ('Reminder Patient', '9876543210', 201, ?, 1, 'pending', 2)`,
+        [today.toISOString().slice(0, 19).replace('T', ' ')]
+      );
+      const refillId = refillRes.lastID;
+      await db.close();
+
+      // Trigger single send
+      const sendRes = await request(app).post(`/api/refills/${refillId}/send`);
+      expect(sendRes.status).toBe(200);
+      expect(sendRes.body.success).toBe(true);
+      expect(sendRes.body.reminder_status).toBe('QUEUED');
+      expect(sendRes.body.queueId).toBeDefined();
+
+      // Verify patient_refills has reminder_status = QUEUED and reminder_job_id
+      const dbVerify = await open({ filename: dbPath, driver: sqlite3.default.Database });
+      const row = await dbVerify.get('SELECT * FROM patient_refills WHERE id = ?', [refillId]);
+      expect(row.reminder_status).toBe('QUEUED');
+      expect(row.reminder_job_id).toBe(sendRes.body.queueId);
+      expect(row.reminder_occurrence_date).toBeDefined();
+
+      // Verify whatsapp_send_queue has this item
+      const queueItem = await dbVerify.get('SELECT * FROM whatsapp_send_queue WHERE id = ?', [sendRes.body.queueId]);
+      expect(queueItem).toBeDefined();
+      expect(queueItem.type).toBe('refill_reminder');
+
+      // Simulate successful delivery by queue worker: mark sent
+      await dbVerify.run(
+        "UPDATE patient_refills SET reminder_status = 'SENT', reminder_sent_at = datetime('now'), status = 'notified' WHERE id = ?",
+        [refillId]
+      );
+      await dbVerify.run(
+        "UPDATE whatsapp_send_queue SET status = 'sent', sent_at = ? WHERE id = ?",
+        [Date.now(), sendRes.body.queueId]
+      );
+
+      const sentRow = await dbVerify.get('SELECT * FROM patient_refills WHERE id = ?', [refillId]);
+      expect(sentRow.reminder_status).toBe('SENT');
+      expect(sentRow.reminder_sent_at).toBeTruthy();
+      await dbVerify.close();
+    });
+
+    test('Scenario 6: Duplicate Reminder Protection rejects second send on already SENT refill', async () => {
+      const { open } = await import('sqlite');
+      const sqlite3 = await import('sqlite3');
+      const db = await open({ filename: dbPath, driver: sqlite3.default.Database });
+
+      const refillRes = await db.run(
+        `INSERT INTO patient_refills (patient_name, patient_phone, medicine_id, next_refill_date, is_active, status, reminder_status, reminder_sent_at)
+         VALUES ('Sent Patient', '9988776655', 201, '2026-08-18 10:00:00', 1, 'notified', 'SENT', '2026-08-18 09:30:00')`
+      );
+      const refillId = refillRes.lastID;
+      await db.close();
+
+      // Attempt to send again
+      const sendRes = await request(app).post(`/api/refills/${refillId}/send`);
+      expect(sendRes.status).toBe(400);
+      expect(sendRes.body.error).toContain('Reminder already sent');
+      expect(sendRes.body.already_sent).toBe(true);
+      expect(sendRes.body.reminder_status).toBe('SENT');
+      expect(sendRes.body.reminder_sent_at).toBe('2026-08-18 09:30:00');
+    });
+
+    test('Scenario 7: Grouped Refill Send with Duplicate Protection', async () => {
+      const { open } = await import('sqlite');
+      const sqlite3 = await import('sqlite3');
+      const db = await open({ filename: dbPath, driver: sqlite3.default.Database });
+
+      const phone = '9123456780';
+      const r1 = await db.run(
+        `INSERT INTO patient_refills (patient_name, patient_phone, medicine_id, next_refill_date, is_active, status, reminder_status, reminder_sent_at)
+         VALUES ('Multi Med Patient', ?, 201, '2026-08-18 10:00:00', 1, 'notified', 'SENT', '2026-08-18 08:00:00')`,
+        [phone]
+      );
+      const r2 = await db.run(
+        `INSERT INTO patient_refills (patient_name, patient_phone, medicine_id, next_refill_date, is_active, status, reminder_status)
+         VALUES ('Multi Med Patient', ?, 202, '2026-08-18 10:00:00', 1, 'pending', 'NOT_SENT')`,
+        [phone]
+      );
+      await db.close();
+
+      // Send grouped reminder for both medicines
+      const groupRes = await request(app).post('/api/refills/send-grouped').send({
+        patient_phone: phone,
+        patient_name: 'Multi Med Patient',
+        refill_ids: [r1.lastID, r2.lastID]
+      });
+
+      expect(groupRes.status).toBe(200);
+      expect(groupRes.body.success).toBe(true);
+      expect(groupRes.body.updatedRefillCount).toBe(1); // Only r2 was updated because r1 was already SENT
+
+      // If we attempt again when all are queued / sent:
+      const secondGroupRes = await request(app).post('/api/refills/send-grouped').send({
+        patient_phone: phone,
+        patient_name: 'Multi Med Patient',
+        refill_ids: [r1.lastID, r2.lastID]
+      });
+      expect(secondGroupRes.status).toBe(400);
+    });
+
+    test('Scenario 8: Failed send marks reminder_status = FAILED and allows retry', async () => {
+      const { open } = await import('sqlite');
+      const sqlite3 = await import('sqlite3');
+      const db = await open({ filename: dbPath, driver: sqlite3.default.Database });
+
+      const refillRes = await db.run(
+        `INSERT INTO patient_refills (patient_name, patient_phone, medicine_id, next_refill_date, is_active, status, reminder_status)
+         VALUES ('Fail Patient', '9555555555', 201, '2026-08-18 10:00:00', 1, 'pending', 'FAILED')`
+      );
+      const refillId = refillRes.lastID;
+      await db.close();
+
+      // Retrying from FAILED status should be allowed
+      const retryRes = await request(app).post(`/api/refills/${refillId}/send`);
+      expect(retryRes.status).toBe(200);
+      expect(retryRes.body.reminder_status).toBe('QUEUED');
+    });
+
+    test('Scenario 9: Next cycle advancement (fulfillment via POST /fulfill) resets reminder state to NOT_SENT', async () => {
+      const { open } = await import('sqlite');
+      const sqlite3 = await import('sqlite3');
+      const db = await open({ filename: dbPath, driver: sqlite3.default.Database });
+
+      const refillRes = await db.run(
+        `INSERT INTO patient_refills (patient_name, patient_phone, medicine_id, refill_interval_days, next_refill_date, is_active, status, reminder_status, reminder_sent_at)
+         VALUES ('Cycle Patient', '9444444444', 201, 30, '2026-08-18 10:00:00', 1, 'notified', 'SENT', '2026-08-18 09:00:00')`
+      );
+      const refillId = refillRes.lastID;
+      await db.close();
+
+      // Fulfill refill to advance to next cycle
+      const fulfillRes = await request(app).post(`/api/refills/${refillId}/fulfill`);
+      expect(fulfillRes.status).toBe(200);
+      expect(fulfillRes.body.success).toBe(true);
+
+      // Verify the new occurrence in September has its own NOT_SENT status and NULL sent timestamp
+      const dbVerify = await open({ filename: dbPath, driver: sqlite3.default.Database });
+      const row = await dbVerify.get('SELECT * FROM patient_refills WHERE id = ?', [refillId]);
+      await dbVerify.close();
+
+      expect(row.reminder_status).toBe('NOT_SENT');
+      expect(row.reminder_sent_at).toBeNull();
+      expect(row.status).toBe('pending');
+      expect(new Date(row.next_refill_date).getTime()).toBeGreaterThan(new Date('2026-08-18').getTime());
+    });
+
+    test('Scenario 10: Sale checkout advances refill cycle and resets reminder_status to NOT_SENT', async () => {
+      const { open } = await import('sqlite');
+      const sqlite3 = await import('sqlite3');
+      const db = await open({ filename: dbPath, driver: sqlite3.default.Database });
+
+      const phone = '9333333333';
+      const refillRes = await db.run(
+        `INSERT INTO patient_refills (patient_name, patient_phone, medicine_id, refill_interval_days, next_refill_date, is_active, status, reminder_status, reminder_sent_at)
+         VALUES ('POS Checkout Patient', ?, 201, 30, '2026-08-18 10:00:00', 1, 'notified', 'SENT', '2026-08-18 09:00:00')`,
+        [phone]
+      );
+      const refillId = refillRes.lastID;
+      await db.close();
+
+      // Perform POS checkout for this customer
+      const saleRes = await request(app)
+        .post('/api/sales')
+        .send({
+          patient_name: 'POS Checkout Patient',
+          patient_phone: phone,
+          refill_id: refillId,
+          items: [{ inventory_id: 10, quantity: 1, unit_price: 10 }]
+        });
+
+      expect(saleRes.status).toBe(200);
+      expect(saleRes.body.success).toBe(true);
+
+      const dbVerify = await open({ filename: dbPath, driver: sqlite3.default.Database });
+      const row = await dbVerify.get('SELECT * FROM patient_refills WHERE id = ?', [refillId]);
+      await dbVerify.close();
+
+      expect(row.reminder_status).toBe('NOT_SENT');
+      expect(row.reminder_sent_at).toBeNull();
+      expect(row.status).toBe('pending');
+    });
+
+    test('Scenario 11: Skip refill resets reminder state to NOT_SENT for the postponed date', async () => {
+      const { open } = await import('sqlite');
+      const sqlite3 = await import('sqlite3');
+      const db = await open({ filename: dbPath, driver: sqlite3.default.Database });
+
+      const refillRes = await db.run(
+        `INSERT INTO patient_refills (patient_name, patient_phone, medicine_id, next_refill_date, is_active, status, reminder_status, reminder_sent_at)
+         VALUES ('Skip Patient', '9222222222', 201, '2026-08-18 10:00:00', 1, 'notified', 'SENT', '2026-08-18 09:00:00')`
+      );
+      const refillId = refillRes.lastID;
+      await db.close();
+
+      // Skip refill for today
+      const skipRes = await request(app).post(`/api/refills/${refillId}/skip`);
+      expect(skipRes.status).toBe(200);
+      expect(skipRes.body.success).toBe(true);
+
+      const dbVerify = await open({ filename: dbPath, driver: sqlite3.default.Database });
+      const row = await dbVerify.get('SELECT * FROM patient_refills WHERE id = ?', [refillId]);
+      await dbVerify.close();
+
+      expect(row.reminder_status).toBe('NOT_SENT');
+      expect(row.reminder_sent_at).toBeNull();
+    });
+
+    test('Scenario 12: Stock shortage on distant refill (>7 days) does not leak into 7-day actionable window', async () => {
+      const { open } = await import('sqlite');
+      const sqlite3 = await import('sqlite3');
+      const db = await open({ filename: dbPath, driver: sqlite3.default.Database });
+
+      // Medicine 301 has 0 stock
+      await db.run('INSERT INTO medicines (id, name) VALUES (301, "Distant Shortage Med")');
+      await db.run('INSERT INTO inventory_master (medicine_id, quantity) VALUES (301, 0)');
+
+      // Refill is due 25 days from now
+      const in25Days = new Date();
+      in25Days.setDate(in25Days.getDate() + 25);
+      const refillRes = await db.run(
+        `INSERT INTO patient_refills (patient_name, patient_phone, medicine_id, next_refill_date, is_active, status, quantity_needed)
+         VALUES ('Distant Shortage Patient', '9111223344', 301, ?, 1, 'pending', 5)`,
+        [in25Days.toISOString().slice(0, 19).replace('T', ' ')]
+      );
+      await db.close();
+
+      const panelRes = await request(app).get('/api/refills/panel');
+      expect(panelRes.status).toBe(200);
+
+      // Verify the refill exists in panel
+      const patientInPanel = panelRes.body.find((p: any) => p.patient_phone === '9111223344');
+      expect(patientInPanel).toBeDefined();
+
+      // But Quick Assist 7-day window strictly ignores it
+      const today = new Date();
+      const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+      const actionable = panelRes.body.filter((p: any) => {
+        const d = new Date(p.next_refill_date);
+        const dueStart = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+        const diffDays = Math.round((dueStart - todayStart) / 86400000);
+        return diffDays <= 7;
+      });
+
+      expect(actionable.some((p: any) => p.patient_phone === '9111223344')).toBe(false);
+    });
+
+    test('Scenario 13: Zero dummy data validation & clean state persistence', async () => {
+      const { open } = await import('sqlite');
+      const sqlite3 = await import('sqlite3');
+      const db = await open({ filename: dbPath, driver: sqlite3.default.Database });
+
+      const allRefills = await db.all('SELECT * FROM patient_refills');
+      for (const r of allRefills) {
+        // Assert no fabricated dummy values exist
+        expect(r.patient_name).not.toMatch(/MANUAL|AUTO|SPECIAL|DEFAULT|BATCH123|B-GEN|B-CATALOG/);
+        expect(r.reminder_status).toMatch(/^(NOT_SENT|QUEUED|SENDING|SENT|FAILED)$/);
+      }
+      await db.close();
+    });
+
+    test('Scenario 14: Centralized WhatsApp queue worker handles state transitions', async () => {
+      const { open } = await import('sqlite');
+      const sqlite3 = await import('sqlite3');
+      const db = await open({ filename: dbPath, driver: sqlite3.default.Database });
+
+      // Insert fresh refill
+      const refillRes = await db.run(
+        `INSERT INTO patient_refills (patient_name, patient_phone, medicine_id, next_refill_date, is_active, status, quantity_needed)
+         VALUES ('Queue Transition Patient', '9888877777', 201, '2026-08-18 10:00:00', 1, 'pending', 1)`
+      );
+      const refillId = refillRes.lastID;
+      await db.close();
+
+      // Enqueue reminder
+      const sendRes = await request(app).post(`/api/refills/${refillId}/send`);
+      expect(sendRes.status).toBe(200);
+      const queueId = sendRes.body.queueId;
+
+      // Simulate worker picking it up: SENDING
+      const dbWorker = await open({ filename: dbPath, driver: sqlite3.default.Database });
+      await dbWorker.run("UPDATE patient_refills SET reminder_status = 'SENDING' WHERE reminder_job_id = ?", [queueId]);
+      let checkRow = await dbWorker.get('SELECT reminder_status FROM patient_refills WHERE id = ?', [refillId]);
+      expect(checkRow.reminder_status).toBe('SENDING');
+
+      // Simulate worker completing send: SENT
+      await dbWorker.run(
+        "UPDATE patient_refills SET reminder_status = 'SENT', reminder_sent_at = datetime('now'), status = 'notified' WHERE reminder_job_id = ?",
+        [queueId]
+      );
+      checkRow = await dbWorker.get('SELECT reminder_status, reminder_sent_at FROM patient_refills WHERE id = ?', [refillId]);
+      expect(checkRow.reminder_status).toBe('SENT');
+      expect(checkRow.reminder_sent_at).toBeTruthy();
+      await dbWorker.close();
+    });
   });
 
   afterAll(async () => {

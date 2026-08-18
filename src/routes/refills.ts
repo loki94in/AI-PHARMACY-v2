@@ -226,75 +226,6 @@ router.put('/:id', async (req, res) => {
   }
 });
 
-// Send refill reminder immediately via WhatsApp
-router.post('/:id/send', async (req, res) => {
-  const { id } = req.params;
-  let db;
-  try {
-    db = await dbManager.getConnection();
-    const refill = await db.get(
-      `SELECT pr.*, m.name as medicine_name, c.language 
-       FROM patient_refills pr
-       JOIN medicines m ON pr.medicine_id = m.id
-       LEFT JOIN customers c ON (pr.customer_id = c.id OR pr.patient_phone = c.phone)
-       WHERE pr.id = ?`,
-      [id]
-    );
-
-    if (!refill) {
-      return res.status(404).json({ error: 'Refill schedule not found' });
-    }
-
-    const storeName = await getConfiguredPharmacyName(db);
-    if (!storeName) {
-      return res.status(400).json({
-        error: 'Pharmacy name required in Settings. Please set your Pharmacy Name in Settings before sending refill reminders.'
-      });
-    }
-    const lang = (refill.language === 'hi' || refill.language === 'mr') ? refill.language : 'en';
-
-    const message = getMessage(lang, 'whatsapp.refillReminder', {
-      pharmacyName: storeName,
-      patientName: refill.patient_name || 'Patient',
-      medicineName: refill.medicine_name || 'Medicine',
-      dueDate: refill.next_refill_date || 'today',
-      quantityLeft: String(refill.quantity || 1),
-      unit: 'unit(s)'
-    });
-
-    try {
-      await sendMessage(refill.patient_phone, undefined, message);
-
-      // Update refill status to notified, reset is_ready
-      await db.run(
-        "UPDATE patient_refills SET status = 'notified', is_ready = 0, hold_for_stock = 0 WHERE id = ?",
-        [id]
-      );
-
-      // Log notification as sent
-      await db.run(
-        `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        ['refill_reminder', refill.patient_name, refill.patient_phone, message, 'sent', String(id)]
-      );
-
-      res.json({ success: true, message: 'Refill reminder sent successfully' });
-    } catch (sendErr: any) {
-      const errMsg = sendErr.message || 'Unknown WhatsApp send error';
-      // Log notification as failed
-      await db.run(
-        `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, error_message, reference_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        ['refill_reminder', refill.patient_name, refill.patient_phone, message, 'failed', errMsg, String(id)]
-      );
-      res.status(500).json({ error: 'Failed to send WhatsApp message: ' + errMsg });
-    }
-  } catch (err: any) {
-    console.error('Failed to trigger immediate refill send:', err);
-    res.status(500).json({ error: 'Internal server error: ' + err.message });
-  }
-});
-
 // Acknowledge a refill's stock alert (stop blinking)
 router.post('/:id/acknowledge', async (req, res) => {
   const { id } = req.params;
@@ -326,7 +257,8 @@ router.post('/:id/skip', async (req, res) => {
 
     await db.run(
       `UPDATE patient_refills 
-       SET next_refill_date = ?, acknowledged = 0, ordering_triggered = 0, is_ready = 0, hold_for_stock = 0, stock_verified_override = 0
+       SET next_refill_date = ?, acknowledged = 0, ordering_triggered = 0, is_ready = 0, hold_for_stock = 0, stock_verified_override = 0,
+           reminder_status = 'NOT_SENT', reminder_sent_at = NULL, reminder_job_id = NULL, reminder_occurrence_date = NULL
        WHERE id = ?`,
       [nextDateStr, id]
     );
@@ -379,6 +311,8 @@ router.get('/panel', async (req, res) => {
           patient_name: row.patient_name,
           patient_phone: row.patient_phone,
           next_refill_date: row.next_refill_date,
+          reminder_status: 'NOT_SENT',
+          reminder_sent_at: null,
           medicines: []
         };
       }
@@ -386,6 +320,7 @@ router.get('/panel', async (req, res) => {
       if (new Date(row.next_refill_date) < new Date(patientGroups[phone].next_refill_date)) {
         patientGroups[phone].next_refill_date = row.next_refill_date;
       }
+      const medReminderStatus = row.reminder_status || (row.status === 'notified' ? 'SENT' : 'NOT_SENT');
       patientGroups[phone].medicines.push({
         id: row.id,
         medicine_id: row.medicine_id,
@@ -399,8 +334,32 @@ router.get('/panel', async (req, res) => {
         is_ready: row.is_ready || 0,
         is_active: row.is_active !== undefined ? row.is_active : 1,
         status: row.is_active === 0 ? 'paused' : (row.status || 'pending'),
-        quick_bill_id: row.quick_bill_id
+        quick_bill_id: row.quick_bill_id,
+        reminder_status: medReminderStatus,
+        reminder_sent_at: row.reminder_sent_at || null,
+        reminder_job_id: row.reminder_job_id || null,
+        reminder_occurrence_date: row.reminder_occurrence_date || null
       });
+    }
+
+    // Aggregate group-level reminder status and latest sent timestamp
+    for (const group of Object.values(patientGroups)) {
+      const activeMeds = group.medicines.filter((m: any) => m.is_active !== 0);
+      if (activeMeds.length > 0) {
+        if (activeMeds.every((m: any) => m.reminder_status === 'SENT')) {
+          group.reminder_status = 'SENT';
+          const sentDates = activeMeds.map((m: any) => m.reminder_sent_at).filter(Boolean);
+          group.reminder_sent_at = sentDates.length > 0 ? sentDates.sort().reverse()[0] : null;
+        } else if (activeMeds.some((m: any) => m.reminder_status === 'SENDING')) {
+          group.reminder_status = 'SENDING';
+        } else if (activeMeds.some((m: any) => m.reminder_status === 'QUEUED')) {
+          group.reminder_status = 'QUEUED';
+        } else if (activeMeds.some((m: any) => m.reminder_status === 'FAILED')) {
+          group.reminder_status = 'FAILED';
+        } else {
+          group.reminder_status = 'NOT_SENT';
+        }
+      }
     }
 
     res.json(Object.values(patientGroups));
@@ -561,7 +520,11 @@ router.post('/:id/fulfill', async (req, res) => {
            is_ready = 0,
            hold_for_stock = 0,
            quick_bill_id = NULL,
-           status = 'pending'
+           status = 'pending',
+           reminder_status = 'NOT_SENT',
+           reminder_sent_at = NULL,
+           reminder_job_id = NULL,
+           reminder_occurrence_date = NULL
        WHERE id = ?`,
       [nextDateStr, id]
     );
@@ -601,12 +564,34 @@ router.post('/:id/send', async (req, res) => {
       return res.status(404).json({ error: 'Refill record not found' });
     }
 
+    // Strict duplicate protection: check if already sent or queued for this occurrence
+    if (refill.reminder_status === 'SENT') {
+      return res.status(400).json({
+        error: 'Reminder already sent',
+        already_sent: true,
+        reminder_status: 'SENT',
+        reminder_sent_at: refill.reminder_sent_at
+      });
+    }
+    if (refill.reminder_status === 'QUEUED' || refill.reminder_status === 'SENDING') {
+      return res.status(400).json({
+        error: 'Reminder is already queued or sending',
+        already_queued: true,
+        reminder_status: refill.reminder_status
+      });
+    }
+
     const cleanPhone = normalizeWhatsAppPhone(refill.patient_phone);
     if (!cleanPhone || cleanPhone.length < 10) {
       return res.status(400).json({ error: 'Patient phone number is invalid or missing' });
     }
 
-    const medicalName = (await getConfiguredPharmacyName(db)) || 'AI Pharmacy';
+    const medicalName = await getConfiguredPharmacyName(db);
+    if (!medicalName) {
+      return res.status(400).json({
+        error: 'Pharmacy name required in Settings. Please set your Pharmacy Name in Settings before sending refill reminders.'
+      });
+    }
     const patientName = refill.patient_name || 'Customer';
     const medName = refill.medicine_name || 'Prescribed Medicine';
     const qtyNeeded = refill.quantity_needed || 1;
@@ -621,8 +606,19 @@ router.post('/:id/send', async (req, res) => {
     );
 
     await db.run(
-      `UPDATE patient_refills SET status = 'notified' WHERE id = ?`,
-      [id]
+      `UPDATE patient_refills 
+       SET status = 'notified', 
+           reminder_status = 'QUEUED', 
+           reminder_job_id = ?, 
+           reminder_occurrence_date = ? 
+       WHERE id = ?`,
+      [queueId, refill.next_refill_date, id]
+    );
+
+    await db.run(
+      `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      ['refill_reminder', patientName, cleanPhone, msg, 'queued', String(id)]
     );
 
     whatsappQueueWorker.triggerProcessing();
@@ -630,6 +626,7 @@ router.post('/:id/send', async (req, res) => {
     res.json({
       success: true,
       queueId,
+      reminder_status: 'QUEUED',
       message: `Refill reminder queued for ${patientName} (${cleanPhone})`
     });
   } catch (err: any) {
@@ -657,38 +654,59 @@ router.post('/send-grouped', async (req, res) => {
     const patientName = patient_name || 'Customer';
 
     let medListStr = '';
-    const idsToUpdate: number[] = Array.isArray(refill_ids) ? refill_ids : [];
-
+    const rawIds: number[] = Array.isArray(refill_ids) ? refill_ids : [];
     if (Array.isArray(medicines) && medicines.length > 0) {
-      medListStr = medicines.map((m: any) => `• ${m.medicine_name || m.name || 'Medicine'} (Qty: ${m.quantity_needed || m.qty || 1})`).join('\n');
       medicines.forEach((m: any) => {
-        if (m.id && !idsToUpdate.includes(m.id)) idsToUpdate.push(m.id);
+        if (m.id && !rawIds.includes(m.id)) rawIds.push(m.id);
       });
-    } else if (idsToUpdate.length > 0) {
-      const placeholders = idsToUpdate.map(() => '?').join(',');
-      const rows = await db.all(
-        `SELECT pr.id, pr.quantity_needed, m.name as medicine_name 
+    }
+
+    // Fetch target refill rows
+    let rows: any[] = [];
+    if (rawIds.length > 0) {
+      const placeholders = rawIds.map(() => '?').join(',');
+      rows = await db.all(
+        `SELECT pr.*, m.name as medicine_name 
          FROM patient_refills pr 
          LEFT JOIN medicines m ON pr.medicine_id = m.id 
          WHERE pr.id IN (${placeholders})`,
-        idsToUpdate
+        rawIds
       );
-      medListStr = rows.map((r: any) => `• ${r.medicine_name || 'Medicine'} (Qty: ${r.quantity_needed || 1})`).join('\n');
     } else {
-      // Fallback: fetch all active refills for this phone
-      const rows = await db.all(
-        `SELECT pr.id, pr.quantity_needed, m.name as medicine_name 
+      rows = await db.all(
+        `SELECT pr.*, m.name as medicine_name 
          FROM patient_refills pr 
          LEFT JOIN medicines m ON pr.medicine_id = m.id 
          WHERE pr.patient_phone = ? AND pr.is_active = 1`,
         [patient_phone]
       );
-      if (rows.length === 0) {
-        return res.status(400).json({ error: 'No active refills found for this patient' });
-      }
-      medListStr = rows.map((r: any) => `• ${r.medicine_name || 'Medicine'} (Qty: ${r.quantity_needed || 1})`).join('\n');
-      rows.forEach((r: any) => idsToUpdate.push(r.id));
     }
+
+    if (rows.length === 0) {
+      return res.status(400).json({ error: 'No active refills found for this patient' });
+    }
+
+    // Check duplicate status across candidate items
+    const unsentRows = rows.filter(r => r.reminder_status !== 'SENT' && r.reminder_status !== 'QUEUED' && r.reminder_status !== 'SENDING');
+    
+    if (unsentRows.length === 0) {
+      const allSent = rows.every(r => r.reminder_status === 'SENT');
+      if (allSent) {
+        return res.status(400).json({
+          error: 'Reminder already sent',
+          already_sent: true,
+          reminder_status: 'SENT',
+          reminder_sent_at: rows[0].reminder_sent_at
+        });
+      }
+      return res.status(400).json({
+        error: 'Reminder is already queued or sending',
+        already_queued: true
+      });
+    }
+
+    const idsToUpdate = unsentRows.map(r => r.id);
+    medListStr = unsentRows.map((r: any) => `• ${r.medicine_name || 'Medicine'} (Qty: ${r.quantity_needed || 1})`).join('\n');
 
     const msg = `🔔 *MEDICINE REFILL REMINDER — ${medicalName}*\n\nDear ${patientName},\nYour regular prescription is due for refill:\n\n${medListStr}\n\n*Please reply to confirm delivery or pickup.*`;
 
@@ -699,19 +717,23 @@ router.post('/send-grouped', async (req, res) => {
       patientName
     );
 
-    if (idsToUpdate.length > 0) {
-      const placeholders = idsToUpdate.map(() => '?').join(',');
+    const placeholders = idsToUpdate.map(() => '?').join(',');
+    await db.run(
+      `UPDATE patient_refills 
+       SET status = 'notified', 
+           reminder_status = 'QUEUED', 
+           reminder_job_id = ?, 
+           reminder_occurrence_date = next_refill_date 
+       WHERE id IN (${placeholders})`,
+      [queueId, ...idsToUpdate]
+    );
+
+    for (const rId of idsToUpdate) {
       await db.run(
-        `UPDATE patient_refills SET status = 'notified' WHERE id IN (${placeholders})`,
-        idsToUpdate
+        `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        ['refill_reminder', patientName, cleanPhone, msg, 'queued', String(rId)]
       );
-      for (const rId of idsToUpdate) {
-        await db.run(
-          `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
-           VALUES (?, ?, ?, ?, ?, ?)`,
-          ['refill_reminder', patientName, cleanPhone, msg, 'queued', String(rId)]
-        );
-      }
     }
 
     whatsappQueueWorker.triggerProcessing();
@@ -719,6 +741,7 @@ router.post('/send-grouped', async (req, res) => {
     res.json({
       success: true,
       queueId,
+      reminder_status: 'QUEUED',
       updatedRefillCount: idsToUpdate.length,
       message: `Consolidated refill reminder queued for ${patientName} (${cleanPhone})`
     });
@@ -743,7 +766,6 @@ router.post('/send-tomorrow-reminder', async (req, res) => {
   let db;
   try {
     db = await dbManager.getConnection();
-
     const medicalName = await getConfiguredPharmacyName(db);
     if (!medicalName) {
       return res.status(400).json({
@@ -755,7 +777,7 @@ router.post('/send-tomorrow-reminder', async (req, res) => {
     const rows = await db.all(
       `SELECT pr.*, m.name as medicine_name FROM patient_refills pr
        JOIN medicines m ON pr.medicine_id = m.id
-       WHERE pr.patient_phone = ? AND pr.status = 'pending' AND pr.is_active = 1 
+       WHERE pr.patient_phone = ? AND pr.is_active = 1 
          AND (pr.is_ready = 1 OR pr.stock_verified_override = 1)`,
       [patient_phone]
     );
@@ -774,8 +796,18 @@ router.post('/send-tomorrow-reminder', async (req, res) => {
       return res.status(400).json({ error: 'No ready refills due tomorrow found for this patient' });
     }
 
-    const patientName = tomorrowRefills[0].patient_name || 'Customer';
-    const medicineNames = tomorrowRefills.map(r => r.medicine_name).join(', ');
+    // Check duplicate status
+    const unsent = tomorrowRefills.filter(r => r.reminder_status !== 'SENT' && r.reminder_status !== 'QUEUED' && r.reminder_status !== 'SENDING');
+    if (unsent.length === 0) {
+      const allSent = tomorrowRefills.every(r => r.reminder_status === 'SENT');
+      if (allSent) {
+        return res.status(400).json({ error: 'Reminder already sent', already_sent: true, reminder_status: 'SENT', reminder_sent_at: tomorrowRefills[0].reminder_sent_at });
+      }
+      return res.status(400).json({ error: 'Reminder is already queued or sending', already_queued: true });
+    }
+
+    const patientName = unsent[0].patient_name || 'Customer';
+    const medicineNames = unsent.map(r => r.medicine_name).join(', ');
 
     const msg = `Hello ${patientName}, this is a friendly reminder that your refill for ${medicineNames} is due tomorrow. We have checked our stock and prepared it for you. Please collect it from ${medicalName} at your convenience.`;
 
@@ -786,15 +818,21 @@ router.post('/send-tomorrow-reminder', async (req, res) => {
       patientName
     );
 
-    // Update status to notified, reset is_ready
-    const ids = tomorrowRefills.map(r => r.id);
+    // Update status to notified and reminder_status to QUEUED
+    const ids = unsent.map(r => r.id);
     const placeholders = ids.map(() => '?').join(',');
     await db.run(
-      `UPDATE patient_refills SET status = 'notified', is_ready = 0 WHERE id IN (${placeholders})`,
-      ids
+      `UPDATE patient_refills 
+       SET status = 'notified', 
+           is_ready = 0, 
+           reminder_status = 'QUEUED', 
+           reminder_job_id = ?, 
+           reminder_occurrence_date = next_refill_date 
+       WHERE id IN (${placeholders})`,
+      [queueId, ...ids]
     );
 
-    for (const r of tomorrowRefills) {
+    for (const r of unsent) {
       await db.run(
         `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
          VALUES (?, ?, ?, ?, ?, ?)`,
@@ -804,7 +842,7 @@ router.post('/send-tomorrow-reminder', async (req, res) => {
 
     whatsappQueueWorker.triggerProcessing();
 
-    res.json({ success: true, queueId, message: 'Tomorrow reminder queued successfully via WhatsApp Queue' });
+    res.json({ success: true, queueId, reminder_status: 'QUEUED', message: 'Tomorrow reminder queued successfully via WhatsApp Queue' });
   } catch (err: any) {
     console.error('Failed to send tomorrow reminder:', err);
     res.status(500).json({ error: 'Internal server error: ' + err.message });
@@ -826,7 +864,6 @@ router.post('/send-reminder-now', async (req, res) => {
   let db;
   try {
     db = await dbManager.getConnection();
-
     const medicalName = await getConfiguredPharmacyName(db);
     if (!medicalName) {
       return res.status(400).json({
@@ -837,7 +874,7 @@ router.post('/send-reminder-now', async (req, res) => {
     const rows = await db.all(
       `SELECT pr.*, m.name as medicine_name FROM patient_refills pr
        JOIN medicines m ON pr.medicine_id = m.id
-       WHERE pr.patient_phone = ? AND pr.is_active = 1 AND pr.status != 'notified'
+       WHERE pr.patient_phone = ? AND pr.is_active = 1
        ORDER BY pr.next_refill_date ASC`,
       [patient_phone]
     );
@@ -846,10 +883,20 @@ router.post('/send-reminder-now', async (req, res) => {
       return res.status(400).json({ error: 'No active refills found for this patient' });
     }
 
-    const patientName = rows[0].patient_name || 'Customer';
-    const medicineNames = rows.map((r: any) => r.medicine_name).join(', ');
-    const refillDate = rows[0].next_refill_date
-      ? new Date(rows[0].next_refill_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+    // Filter out already sent/queued items
+    const unsentRows = rows.filter(r => r.reminder_status !== 'SENT' && r.reminder_status !== 'QUEUED' && r.reminder_status !== 'SENDING');
+    if (unsentRows.length === 0) {
+      const allSent = rows.every(r => r.reminder_status === 'SENT');
+      if (allSent) {
+        return res.status(400).json({ error: 'Reminder already sent', already_sent: true, reminder_status: 'SENT', reminder_sent_at: rows[0].reminder_sent_at });
+      }
+      return res.status(400).json({ error: 'Reminder is already queued or sending', already_queued: true });
+    }
+
+    const patientName = unsentRows[0].patient_name || 'Customer';
+    const medicineNames = unsentRows.map((r: any) => r.medicine_name).join(', ');
+    const refillDate = unsentRows[0].next_refill_date
+      ? new Date(unsentRows[0].next_refill_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
       : 'soon';
 
     const msg = `Hello ${patientName}, a friendly reminder that your prescription refill for ${medicineNames} is due on ${refillDate}. Please visit us at ${medicalName} to collect your medicines. Thank you! 🙏`;
@@ -861,14 +908,19 @@ router.post('/send-reminder-now', async (req, res) => {
       patientName
     );
 
-    const ids = rows.map((r: any) => r.id);
+    const ids = unsentRows.map((r: any) => r.id);
     const placeholders = ids.map(() => '?').join(',');
     await db.run(
-      `UPDATE patient_refills SET status = 'notified' WHERE id IN (${placeholders})`,
-      ids
+      `UPDATE patient_refills 
+       SET status = 'notified', 
+           reminder_status = 'QUEUED', 
+           reminder_job_id = ?, 
+           reminder_occurrence_date = next_refill_date 
+       WHERE id IN (${placeholders})`,
+      [queueId, ...ids]
     );
 
-    for (const r of rows) {
+    for (const r of unsentRows) {
       await db.run(
         `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
          VALUES (?, ?, ?, ?, ?, ?)`,
@@ -878,7 +930,7 @@ router.post('/send-reminder-now', async (req, res) => {
 
     whatsappQueueWorker.triggerProcessing();
 
-    res.json({ success: true, queueId, message: 'Refill reminder queued via WhatsApp' });
+    res.json({ success: true, queueId, reminder_status: 'QUEUED', message: 'Refill reminder queued via WhatsApp' });
   } catch (err: any) {
     console.error('Failed to send immediate reminder:', err);
     res.status(500).json({ error: 'Internal server error: ' + err.message });

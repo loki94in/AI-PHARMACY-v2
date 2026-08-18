@@ -111,6 +111,10 @@ export interface Refill {
   is_ready?: number;
   quantity_needed?: number;
   in_stock_qty?: number;
+  reminder_status?: 'NOT_SENT' | 'QUEUED' | 'SENDING' | 'SENT' | 'FAILED';
+  reminder_sent_at?: string | null;
+  reminder_job_id?: number | null;
+  reminder_occurrence_date?: string | null;
 }
 
 export interface AutomationNotification {

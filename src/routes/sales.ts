@@ -480,7 +480,12 @@ router.post('/', async (req, res) => {
                is_ready = 0, 
                hold_for_stock = 0, 
                quick_bill_id = NULL,
-               stock_verified_override = 0
+               stock_verified_override = 0,
+               status = 'pending',
+               reminder_status = 'NOT_SENT',
+               reminder_sent_at = NULL,
+               reminder_job_id = NULL,
+               reminder_occurrence_date = NULL
            WHERE id = ?`,
           [nextDateStr, refill.id]
         );

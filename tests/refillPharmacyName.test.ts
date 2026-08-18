@@ -2,9 +2,9 @@ import { jest } from '@jest/globals';
 
 jest.unstable_mockModule('../src/whatsappClient.js', () => ({
   __esModule: true,
-  sendMessage: jest.fn(() => Promise.resolve(true)),
+  sendMessage: jest.fn(() => Promise.resolve({ sent: true })),
   initClient: jest.fn(() => Promise.resolve(true)),
-  getWhatsAppStatus: jest.fn(() => Promise.resolve({ isConnected: true, status: 'CONNECTED' })),
+  getWhatsAppStatus: jest.fn(() => Promise.resolve({ isConnected: true, isReady: true, status: 'CONNECTED' })),
   shouldRouteToBusiness: jest.fn(() => false),
   hashMessageBody: jest.fn(() => 'mock-hash'),
   normalizeWhatsAppPhone: jest.fn((p: string) => p ? String(p).replace(/\D/g, '') : '')
@@ -119,15 +119,20 @@ describe('Task 13 — Refill WhatsApp Pharmacy Name Enforcement', () => {
     const res = await request(app).post('/api/refills/1/send');
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
+
+    await new Promise(r => setTimeout(r, 100));
+
     expect(mockSendMessage).toHaveBeenCalledWith(
       '919876543210',
       undefined,
-      expect.stringContaining('APOLLO HEALTH PHARMACY')
+      expect.stringContaining('APOLLO HEALTH PHARMACY'),
+      undefined
     );
     expect(mockSendMessage).not.toHaveBeenCalledWith(
       expect.anything(),
       undefined,
-      expect.stringContaining('XYZ MEDICAL')
+      expect.stringContaining('XYZ MEDICAL'),
+      expect.anything()
     );
   });
 
