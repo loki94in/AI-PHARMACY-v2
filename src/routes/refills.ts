@@ -291,20 +291,24 @@ router.get('/panel', async (req, res) => {
       noticeDays = parseInt(setting.value, 10) || 3;
     }
 
-    // ponytail: noticeDays was read but never used in SQL — now applied.
-    // Show only: overdue (past) OR due within next 7 days. Future records beyond window remain in DB.
-    const rows = await db.all(
-      `SELECT pr.*, m.name as medicine_name, COALESCE(inv.in_stock_qty, 0) as in_stock_qty 
+    // Optional upcoming_days query parameter (if omitted, returns all patient refills for CRM management)
+    const upcomingDays = req.query.upcoming_days ? parseInt(req.query.upcoming_days as string, 10) : null;
+    let query = `SELECT pr.*, m.name as medicine_name, COALESCE(inv.in_stock_qty, 0) as in_stock_qty 
        FROM patient_refills pr
        JOIN medicines m ON pr.medicine_id = m.id
        LEFT JOIN (
          SELECT medicine_id, (SUM(quantity) + COALESCE(SUM(loose_quantity), 0)) as in_stock_qty 
          FROM inventory_master 
          GROUP BY medicine_id
-       ) inv ON inv.medicine_id = pr.medicine_id
-       WHERE pr.next_refill_date <= date('now', '+7 days')
-       ORDER BY pr.next_refill_date ASC LIMIT 1000`
-    );
+       ) inv ON inv.medicine_id = pr.medicine_id`;
+    const params: any[] = [];
+    if (upcomingDays && !isNaN(upcomingDays) && upcomingDays > 0) {
+      query += ` WHERE pr.next_refill_date <= date('now', '+' || ? || ' days')`;
+      params.push(upcomingDays);
+    }
+    query += ` ORDER BY pr.next_refill_date ASC LIMIT 1000`;
+
+    const rows = await db.all(query, params);
 
     const patientGroups: Record<string, any> = {};
     for (const row of rows) {
@@ -874,12 +878,10 @@ router.post('/send-reminder-now', async (req, res) => {
       });
     }
 
-    // ponytail: scope to 7-day actionable window so September refills aren't reminded for August click.
     const rows = await db.all(
       `SELECT pr.*, m.name as medicine_name FROM patient_refills pr
        JOIN medicines m ON pr.medicine_id = m.id
        WHERE pr.patient_phone = ? AND pr.is_active = 1
-         AND pr.next_refill_date <= date('now', '+7 days')
        ORDER BY pr.next_refill_date ASC`,
       [patient_phone]
     );

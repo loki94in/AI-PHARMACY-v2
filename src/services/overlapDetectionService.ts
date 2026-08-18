@@ -86,11 +86,10 @@ export class OverlapDetectionService {
 
         const overlapId = res.lastID;
 
-        // Update order status to ARRIVED or OVERLAP_DETECTED
-        const targetStatus = 'ARRIVED';
+        // Update order status to Ready
         await db.run(
           `UPDATE special_orders 
-           SET status = 'ARRIVED', lifecycle_status = 'ARRIVED', notified = 1 
+           SET status = 'Ready', lifecycle_status = 'ARRIVED', notified = 1 
            WHERE id = ?`,
           [order.id]
         );
