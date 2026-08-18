@@ -970,6 +970,7 @@ export async function ensureSchema(dbPath: string) {
     ['patient_refills', 'quick_bill_id', 'ALTER TABLE patient_refills ADD COLUMN quick_bill_id INTEGER DEFAULT NULL'],
     ['patient_refills', 'stock_verified_override', 'ALTER TABLE patient_refills ADD COLUMN stock_verified_override INTEGER DEFAULT 0'],
     ['patient_refills', 'customer_id', 'ALTER TABLE patient_refills ADD COLUMN customer_id INTEGER DEFAULT NULL'],
+    ['patient_refills', 'quantity_needed', 'ALTER TABLE patient_refills ADD COLUMN quantity_needed INTEGER DEFAULT 3'],
     ['special_orders', 'customer_id', 'ALTER TABLE special_orders ADD COLUMN customer_id INTEGER DEFAULT NULL'],
     ['special_orders', 'date', 'ALTER TABLE special_orders ADD COLUMN date DATETIME DEFAULT CURRENT_TIMESTAMP'],
     ['special_orders', 'product', 'ALTER TABLE special_orders ADD COLUMN product TEXT'],

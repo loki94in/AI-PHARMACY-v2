@@ -95,7 +95,7 @@ export async function checkAllRefills(db: Database): Promise<void> {
 
           if (!existingOrder) {
             // Log order in special_orders
-            const orderQty = Number(refill.quantity || 1);
+            const orderQty = Number(refill.quantity_needed || refill.quantity || 3);
             await db.run(
               `INSERT INTO special_orders (product, requester, phone, qty, priority, status, pharmarack_mapped, source_refill_id, source)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -121,7 +121,7 @@ export async function checkAllRefills(db: Database): Promise<void> {
               body: JSON.stringify({
                 items: [{
                   name: refill.medicine_name,
-                  qty: Number(refill.quantity || 1)
+                  qty: Number(refill.quantity_needed || refill.quantity || 3)
                 }]
               })
             }).catch(e => console.error('Failed to auto-add to Pharmarack cart:', e));

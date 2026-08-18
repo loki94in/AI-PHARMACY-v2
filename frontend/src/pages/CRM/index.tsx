@@ -6,7 +6,7 @@ import type { SpecialOrder } from '../../services/api';
 import {
   RefreshCw, Send, Users, MessageSquare, Phone, Calendar,
   CheckCircle2, AlertCircle, Clock, Search, Repeat2, Bell,
-  MessageCircle, Check, Package, Mail, ExternalLink, LogOut, Zap, Copy, FileText, X, Plus, Trash2, Sliders, ChevronDown, Info, ClipboardList, ShoppingCart, AlertTriangle, Pencil
+  MessageCircle, Check, Package, Mail, ExternalLink, LogOut, Zap, Copy, FileText, X, Plus, Trash2, Sliders, ChevronDown, Info, ClipboardList, ShoppingCart, AlertTriangle, Pencil, Edit2
 } from 'lucide-react';
 import { toastEvent, specialOrdersEvent, liveCartAddEvent, refillEvent, messageSendEvent } from '../../services/events';
 import { usePageActive } from '../../lib/keepAlive/PageActiveContext';
@@ -123,7 +123,7 @@ interface MedicineRow {
 const emptyRow = (): MedicineRow => ({
   medicineId: null,
   medicineName: '',
-  quantity_needed: 10,
+  quantity_needed: 3,
   searchTerm: '',
   suggestions: [],
   isOpen: false,
@@ -138,8 +138,9 @@ const RefillsSection: React.FC = () => {
   const [sending, setSending] = useState<string | null>(null);
   const [runningCheck, setRunningCheck] = useState(false);
 
-  // ── Add Refill modal state ─────────────────────────────────────────────────
+  // ── Add / Edit Refill modal state ──────────────────────────────────────────
   const [showAddModal, setShowAddModal] = useState(false);
+  const [editingPatient, setEditingPatient] = useState<RefillPatient | null>(null);
   const [addPatientName, setAddPatientName] = useState('');
   const [addPatientPhone, setAddPatientPhone] = useState('');
   
@@ -151,6 +152,40 @@ const RefillsSection: React.FC = () => {
 
   const [medicineRows, setMedicineRows] = useState<MedicineRow[]>([emptyRow()]);
   const [submitting, setSubmitting] = useState(false);
+
+  const handleOpenAddModal = () => {
+    setEditingPatient(null);
+    setAddPatientName('');
+    setAddPatientPhone('');
+    setAddInterval(30);
+    setFreqMode('preset');
+    setMedicineRows([emptyRow()]);
+    setShowAddModal(true);
+  };
+
+  const handleEditPatientRefill = (patient: RefillPatient) => {
+    setEditingPatient(patient);
+    setAddPatientName(patient.patient_name || '');
+    setAddPatientPhone(patient.patient_phone || '');
+    const interval = patient.medicines[0]?.refill_interval_days || 30;
+    setFreqMode('preset');
+    setAddInterval(interval);
+    if (patient.medicines && patient.medicines.length > 0) {
+      setMedicineRows(patient.medicines.map(m => ({
+        medicineId: m.medicine_id || m.id,
+        medicineName: m.medicine_name,
+        searchTerm: m.medicine_name,
+        suggestions: [],
+        isOpen: false,
+        quantity_needed: m.quantity_needed || 3,
+        inStockQty: m.in_stock_qty || 0
+      })));
+    } else {
+      setMedicineRows([emptyRow()]);
+    }
+    setShowAddModal(true);
+    toastEvent.trigger(`Editing refill schedule for ${patient.patient_name}`, 'info', '/crm');
+  };
 
   // Effective interval calculation helper
   const getEffectiveIntervalDays = useCallback(() => {
@@ -219,16 +254,20 @@ const RefillsSection: React.FC = () => {
   };
 
   const handleRenewRefill = (patient: RefillPatient) => {
+    setEditingPatient(null);
     setShowAddModal(true);
     setAddPatientName(patient.patient_name);
     setAddPatientPhone(patient.patient_phone);
+    const interval = patient.medicines[0]?.refill_interval_days || 30;
+    setFreqMode('preset');
+    setAddInterval(interval);
     setMedicineRows(patient.medicines.map(m => ({
       medicineId: m.medicine_id || m.id,
       medicineName: m.medicine_name,
       searchTerm: m.medicine_name,
       suggestions: [],
       isOpen: false,
-      quantity_needed: m.quantity_needed || 1,
+      quantity_needed: m.quantity_needed || 3,
       inStockQty: m.in_stock_qty || 0
     })));
     toastEvent.trigger(`Pre-filled refill renewal form for ${patient.patient_name}`, 'info', '/crm');
@@ -439,8 +478,8 @@ const RefillsSection: React.FC = () => {
     });
   };
 
-  // ── Submit Add Refill ─────────────────────────────────────────────────────
-  const handleAddRefill = async (e: React.FormEvent) => {
+  // ── Submit Add / Edit Refill ──────────────────────────────────────────────
+  const handleSaveRefill = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!addPatientName.trim() || !addPatientPhone.trim()) {
       toastEvent.trigger('Patient name and phone are required', 'error');
@@ -454,26 +493,45 @@ const RefillsSection: React.FC = () => {
     const intervalDays = getEffectiveIntervalDays();
     setSubmitting(true);
     try {
-      await Promise.all(
-        validRows.map(row =>
-          apiClient.post('/refills', {
-            patient_name: addPatientName.trim(),
-            patient_phone: addPatientPhone.trim(),
+      if (editingPatient) {
+        // Update existing patient refills
+        await apiClient.put('/refills/patient-medicines', {
+          original_phone: editingPatient.patient_phone,
+          patient_name: addPatientName.trim(),
+          patient_phone: addPatientPhone.trim(),
+          refill_interval_days: intervalDays,
+          medicines: validRows.map(row => ({
             medicine_id: row.medicineId,
-            refill_interval_days: intervalDays
-          })
-        )
-      );
-      toastEvent.trigger(`Refill registered for ${addPatientName} (${validRows.length} medicine${validRows.length > 1 ? 's' : ''}, every ${intervalDays} days)`, 'success', '/crm');
+            medicine_name: row.medicineName,
+            quantity_needed: row.quantity_needed || 3
+          }))
+        });
+        toastEvent.trigger(`Refill updated for ${addPatientName} (${validRows.length} medicine${validRows.length > 1 ? 's' : ''}, every ${intervalDays} days)`, 'success', '/crm');
+      } else {
+        await Promise.all(
+          validRows.map(row =>
+            apiClient.post('/refills', {
+              patient_name: addPatientName.trim(),
+              patient_phone: addPatientPhone.trim(),
+              medicine_id: row.medicineId,
+              refill_interval_days: intervalDays,
+              quantity_needed: row.quantity_needed || 3
+            })
+          )
+        );
+        toastEvent.trigger(`Refill registered for ${addPatientName} (${validRows.length} medicine${validRows.length > 1 ? 's' : ''}, every ${intervalDays} days)`, 'success', '/crm');
+      }
       setShowAddModal(false);
+      setEditingPatient(null);
       setAddPatientName('');
       setAddPatientPhone('');
       setAddInterval(30);
       setFreqMode('preset');
       setMedicineRows([emptyRow()]);
+      refillEvent.triggerRefresh();
       await load();
     } catch (err: any) {
-      toastEvent.trigger(err.response?.data?.error || 'Failed to add refill', 'error', '/crm');
+      toastEvent.trigger(err.response?.data?.error || (editingPatient ? 'Failed to update refill' : 'Failed to add refill'), 'error', '/crm');
     } finally { setSubmitting(false); }
   };
 
@@ -532,7 +590,7 @@ const RefillsSection: React.FC = () => {
         </div>
 
         <button
-          onClick={() => setShowAddModal(true)}
+          onClick={handleOpenAddModal}
           className="flex items-center gap-2 px-3 py-2 bg-primary/10 border border-primary/30 text-primary rounded-lg text-sm font-medium hover:bg-primary/20 transition-colors"
         >
           <Plus size={14} />
@@ -577,7 +635,7 @@ const RefillsSection: React.FC = () => {
 
           // 5-6 Days Lead Window (Notification Buffer before due date)
           const isLeadWindowActive = !isOverdue && diffDays <= 6 && diffDays >= 0;
-          const hasShortage = patient.medicines.some(m => Number(m.quantity_needed || 1) > Number(m.in_stock_qty || 0));
+          const hasShortage = patient.medicines.some(m => Number(m.quantity_needed || 3) > Number(m.in_stock_qty || 0));
           const is3DayStockAlert = !isOverdue && diffDays <= 3 && hasShortage;
 
           const allReady = patient.medicines.every(m => m.is_ready);
@@ -630,6 +688,16 @@ const RefillsSection: React.FC = () => {
                     <Calendar size={10} />
                     {isOverdue ? 'Overdue · ' : 'Due · '}{formatDate(patient.next_refill_date)}
                   </div>
+                  {/* Edit Patient Refill */}
+                  <button
+                    type="button"
+                    onClick={() => handleEditPatientRefill(patient)}
+                    title="Edit patient refill details, medicines, quantities & frequency"
+                    className="flex items-center gap-1 px-3 py-1.5 bg-bg2 border border-border hover:border-primary/50 text-text hover:bg-bg3 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                  >
+                    <Edit2 size={12} className="text-primary" />
+                    <span>Edit</span>
+                  </button>
                   {/* Renew Schedule */}
                   <button
                     type="button"
@@ -665,7 +733,7 @@ const RefillsSection: React.FC = () => {
               {/* Medicines with Shortage Calculation, Inline Freq Slider, Pause/Resume & Direct Live Cart Button */}
               <div className="space-y-1.5">
                 {patient.medicines.map(med => {
-                  const reqQty = Number(med.quantity_needed || 1);
+                  const reqQty = Number(med.quantity_needed !== undefined && med.quantity_needed !== null ? med.quantity_needed : 3);
                   const stockQty = Number(med.in_stock_qty || 0);
                   const shortageQty = Math.max(0, reqQty - stockQty);
                   const cartOrderQty = shortageQty > 0 ? shortageQty : reqQty;
@@ -787,7 +855,7 @@ const RefillsSection: React.FC = () => {
         })}
       </div>
 
-      {/* ── Add Refill Modal ─────────────────────────────────────────────────── */}
+      {/* ── Add / Edit Refill Modal ─────────────────────────────────────────── */}
       {showAddModal && createPortal(
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-modal flex items-center justify-center p-4">
           <div className="bg-bg2 border border-border rounded-2xl w-full max-w-xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
@@ -795,15 +863,20 @@ const RefillsSection: React.FC = () => {
             <div className="p-4 border-b border-border flex items-center justify-between flex-shrink-0 bg-bg3/40">
               <div>
                 <h3 className="text-sm font-bold text-text flex items-center gap-2">
-                  <Repeat2 size={18} className="text-primary" />
-                  Add New Patient Refill
+                  {editingPatient ? <Edit2 size={18} className="text-primary" /> : <Repeat2 size={18} className="text-primary" />}
+                  {editingPatient ? 'Edit Patient Refill' : 'Add New Patient Refill'}
                 </h3>
                 <p className="text-[11px] text-muted mt-0.5">
-                  Select medication directly from inventory & set flexible refill frequency
+                  {editingPatient
+                    ? 'Modify prescribed medications, quantities, or refill frequency'
+                    : 'Select medication directly from inventory & set flexible refill frequency'}
                 </p>
               </div>
               <button
-                onClick={() => setShowAddModal(false)}
+                onClick={() => {
+                  setShowAddModal(false);
+                  setEditingPatient(null);
+                }}
                 className="p-1.5 rounded-lg text-muted hover:text-text hover:bg-bg3 transition-colors"
               >
                 <X size={18} />
@@ -811,7 +884,7 @@ const RefillsSection: React.FC = () => {
             </div>
 
             {/* Modal Body */}
-            <form onSubmit={handleAddRefill} className="p-5 space-y-5 overflow-y-auto flex-1">
+            <form onSubmit={handleSaveRefill} className="p-5 space-y-5 overflow-y-auto flex-1">
               {/* Patient Details */}
               <div className="space-y-1.5">
                 <label className="text-[10px] font-bold text-muted uppercase tracking-wider flex items-center gap-1">
@@ -1107,7 +1180,10 @@ const RefillsSection: React.FC = () => {
               <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-border">
                 <button
                   type="button"
-                  onClick={() => setShowAddModal(false)}
+                  onClick={() => {
+                    setShowAddModal(false);
+                    setEditingPatient(null);
+                  }}
                   className="px-4 py-2 rounded-xl text-xs font-bold text-muted hover:bg-bg3 transition-colors"
                 >
                   Cancel
@@ -1118,9 +1194,9 @@ const RefillsSection: React.FC = () => {
                   className="px-5 py-2 rounded-xl bg-primary hover:bg-primary/90 text-white text-xs font-bold transition-all shadow-md disabled:opacity-50 flex items-center gap-2"
                 >
                   {submitting ? (
-                    <><RefreshCw size={13} className="animate-spin" /> Registering…</>
+                    <><RefreshCw size={13} className="animate-spin" /> {editingPatient ? 'Updating…' : 'Registering…'}</>
                   ) : (
-                    <><Plus size={13} /> Register Refill Schedule</>
+                    <><Check size={13} /> {editingPatient ? 'Update Refill Schedule' : 'Register Refill Schedule'}</>
                   )}
                 </button>
               </div>
