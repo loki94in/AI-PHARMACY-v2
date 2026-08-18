@@ -2477,7 +2477,7 @@ const QuickAssistSidebar = ({
 
                 return (
                   <div key={group.key} className="p-3 rounded-xl bg-bg2 border border-glass-border flex flex-col gap-2 shadow-sm min-w-0 overflow-hidden transition-all">
-                    {/* Patient Header (Click to toggle expansion) */}
+                    {/* Patient Header (Click to toggle expansion / fold & unfold) */}
                     <div
                       onClick={() => toggleRefillKey(group.key)}
                       className="flex items-start justify-between gap-1.5 min-w-0 cursor-pointer select-none"
@@ -2500,9 +2500,32 @@ const QuickAssistSidebar = ({
                             Hold Stock
                           </span>
                         )}
-                        <ChevronDown size={14} className={`text-muted transition-transform duration-200 ${isExpanded ? 'rotate-180 text-primary' : ''}`} />
+                        <ChevronDown size={14} className={`text-muted transition-transform duration-200 ${isExpanded ? 'rotate-180 text-purple-400' : ''}`} />
                       </div>
                     </div>
+
+                    {/* Unfolded Medicine Names: shows only medicine names (1 if one, multiple if multiple) */}
+                    {isExpanded && (
+                      <div className="flex flex-col gap-1.5 pt-1 border-t border-glass-border/50">
+                        {group.medicines.map((med) => (
+                          <div
+                            key={med.id}
+                            className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg bg-bg3/50 border border-border/30 text-[11px] min-w-0"
+                          >
+                            <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                              <Package size={11} className="text-purple-400 shrink-0" />
+                              <span className="font-medium text-text truncate">{med.medicine_name}</span>
+                            </div>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <span className="px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 text-[10px] font-mono font-bold">
+                                Qty: {med.quantity_needed}
+                              </span>
+                              <span className="text-[9px] text-muted">{med.refill_interval_days}d</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
 
                     {/* Patient Card Actions & Reminder Status Footer */}
                     <div className="flex items-center gap-2 justify-between min-w-0 pt-1 border-t border-border/30">
@@ -2573,84 +2596,6 @@ const QuickAssistSidebar = ({
                         )}
                       </div>
                     </div>
-
-                    {/* Expandable Medicines List */}
-                    {isExpanded && (
-                      <div className="pt-2 border-t border-glass-border/50 flex flex-col gap-1.5">
-                        {group.medicines.map((med) => (
-                          <div
-                            key={med.id}
-                            className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg bg-bg3/50 border border-border/30 text-[11px] min-w-0"
-                          >
-                            <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                              <Package size={11} className="text-purple-400 shrink-0" />
-                              <span className="font-medium text-text truncate">{med.medicine_name}</span>
-                            </div>
-                            <div className="flex items-center gap-1.5 shrink-0">
-                              <span className="px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 text-[10px] font-mono font-bold">
-                                Qty: {med.quantity_needed}
-                              </span>
-                              <span className="text-[9px] text-muted">{med.refill_interval_days}d</span>
-                              {med.hold_for_stock === 1 && (
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleAcknowledge(med.id);
-                                  }}
-                                  className="py-0.5 px-1.5 rounded bg-amber-600 hover:bg-amber-700 text-white text-[9px] font-black uppercase transition-colors shadow-sm cursor-pointer"
-                                  title="Acknowledge stock hold for this medicine"
-                                >
-                                  Ack
-                                </button>
-                              )}
-                              {med.reminder_status === 'SENT' ? (
-                                <div
-                                  className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-[9px] font-bold shrink-0"
-                                  title={`Reminder sent on ${formatReminderSentAt(med.reminder_sent_at)}`}
-                                >
-                                  <Check size={9} />
-                                  <span>Sent ✓</span>
-                                </div>
-                              ) : med.reminder_status === 'QUEUED' ? (
-                                <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-amber-400 text-[9px] font-bold shrink-0">
-                                  <ClockIcon size={9} />
-                                  <span>Queued ⏳</span>
-                                </div>
-                              ) : med.reminder_status === 'SENDING' ? (
-                                <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-sky-500/15 border border-sky-500/30 text-sky-400 text-[9px] font-bold shrink-0">
-                                  <Loader2 size={9} className="animate-spin" />
-                                  <span>Sending 📡</span>
-                                </div>
-                              ) : med.reminder_status === 'FAILED' ? (
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleSendSingleRefill(group.patient_name, group.patient_phone, med);
-                                  }}
-                                  className="py-0.5 px-1.5 rounded bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/30 text-[9px] font-bold uppercase transition-colors flex items-center gap-1 shadow-sm cursor-pointer"
-                                  title="Retry WhatsApp refill reminder"
-                                >
-                                  <AlertIcon size={9} />
-                                  <span>Retry</span>
-                                </button>
-                              ) : (
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleSendSingleRefill(group.patient_name, group.patient_phone, med);
-                                  }}
-                                  className="py-0.5 px-2 rounded bg-purple-600/80 hover:bg-purple-600 text-white text-[9px] font-bold uppercase transition-colors flex items-center gap-1 shadow-sm cursor-pointer"
-                                  title={`Send WhatsApp refill reminder for ${med.medicine_name}`}
-                                >
-                                  <SendIcon size={9} />
-                                  <span>Remind</span>
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
                   </div>
                 );
               })}
@@ -2658,7 +2603,7 @@ const QuickAssistSidebar = ({
           )}
         </div>
 
-        {/* Quick Special Requests (Grouped by Requester with Expand/Collapse) */}
+        {/* Quick Special Requests */}
         <div>
           <div className="flex items-center justify-between mb-2 text-xs font-bold uppercase tracking-wider text-amber-400">
             <div className="flex items-center gap-1.5">
@@ -2691,7 +2636,7 @@ const QuickAssistSidebar = ({
                         : 'bg-amber-500/[0.04] border-amber-500/20'
                     }`}
                   >
-                    {/* Requester Header (Click to toggle expansion) */}
+                    {/* Requester Header (Click to toggle expansion / fold & unfold) */}
                     <div
                       onClick={() => toggleSpecialOrderKey(group.key)}
                       className="flex items-start justify-between gap-1.5 min-w-0 cursor-pointer select-none"
@@ -2723,7 +2668,27 @@ const QuickAssistSidebar = ({
                       </div>
                     </div>
 
-                    {/* Patient-Level Action Buttons */}
+                    {/* Unfolded Medicine Names: shows only medicine names (1 if one, multiple if multiple) */}
+                    {isExpanded && (
+                      <div className="flex flex-col gap-1.5 pt-1 border-t border-border/30">
+                        {group.items.map((item) => (
+                          <div
+                            key={item.id}
+                            className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg bg-bg3/60 border border-border/30 text-[11px] min-w-0"
+                          >
+                            <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                              <Package size={11} className="text-amber-400 shrink-0" />
+                              <span className="font-medium text-text truncate">{item.product}</span>
+                            </div>
+                            <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 text-[10px] font-mono font-bold shrink-0">
+                              Qty: {item.qty}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Action Buttons Footer */}
                     <div className="flex items-center flex-wrap gap-1.5 pt-1 border-t border-border/30 min-w-0">
                       {group.overallStatus === 'Ready' ? (
                         <button
@@ -2787,116 +2752,6 @@ const QuickAssistSidebar = ({
                         Cancel
                       </button>
                     </div>
-
-                    {/* Expandable Medicines List */}
-                    {isExpanded && (
-                      <div className="pt-2 border-t border-border/30 flex flex-col gap-1.5">
-                        {group.items.map((item) => (
-                          <div
-                            key={item.id}
-                            className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg bg-bg3/60 border border-border/30 text-[11px] min-w-0 flex-wrap"
-                          >
-                            <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                              <Package size={11} className="text-amber-400 shrink-0" />
-                              <span className="font-medium text-text truncate">{item.product}</span>
-                            </div>
-                            <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
-                              <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 text-[10px] font-mono font-bold">
-                                Qty: {item.qty}
-                              </span>
-                              <span
-                                className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase ${
-                                  item.status === 'Ready'
-                                    ? 'bg-sky-500/20 text-sky-300'
-                                    : item.status === 'Ordered'
-                                    ? 'bg-emerald-500/20 text-emerald-300'
-                                    : 'bg-amber-500/20 text-amber-300'
-                                }`}
-                              >
-                                {item.status}
-                              </span>
-                              {item.status === 'Ready' ? (
-                                <button
-                                  disabled={processingOrderIds.has(item.id)}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleUpdateSpecialOrderStatus(item, 'Completed');
-                                  }}
-                                  className="py-0.5 px-1.5 rounded bg-purple-600 hover:bg-purple-700 text-white text-[9px] font-bold uppercase transition-colors flex items-center gap-0.5 shadow-sm cursor-pointer"
-                                  title="Mark item Completed"
-                                >
-                                  <Check size={9} />
-                                  <span>Done</span>
-                                </button>
-                              ) : item.status === 'Ordered' ? (
-                                <div className="flex items-center gap-1">
-                                  <button
-                                    disabled={processingOrderIds.has(item.id)}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleUpdateSpecialOrderStatus(item, 'Ready');
-                                    }}
-                                    className="py-0.5 px-1.5 rounded bg-sky-600 hover:bg-sky-700 text-white text-[9px] font-bold uppercase transition-colors flex items-center gap-0.5 shadow-sm cursor-pointer"
-                                    title="Mark item Ready"
-                                  >
-                                    <Check size={9} />
-                                    <span>Ready</span>
-                                  </button>
-                                  <button
-                                    disabled={processingOrderIds.has(item.id)}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleUpdateSpecialOrderStatus(item, 'Completed');
-                                    }}
-                                    className="py-0.5 px-1.5 rounded bg-purple-600/80 hover:bg-purple-700 text-white text-[9px] font-bold uppercase transition-colors flex items-center gap-0.5 shadow-sm cursor-pointer"
-                                    title="Mark item Completed"
-                                  >
-                                    <Check size={9} />
-                                  </button>
-                                </div>
-                              ) : (
-                                <div className="flex items-center gap-1">
-                                  <button
-                                    disabled={processingOrderIds.has(item.id)}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleSendSpecialOrder(item);
-                                    }}
-                                    className="py-0.5 px-1.5 rounded bg-emerald-600 hover:bg-emerald-700 text-white text-[9px] font-bold uppercase transition-colors flex items-center gap-0.5 shadow-sm cursor-pointer"
-                                    title="Send WhatsApp Order for this item"
-                                  >
-                                    <SendIcon size={9} />
-                                    <span>Order</span>
-                                  </button>
-                                  <button
-                                    disabled={processingOrderIds.has(item.id)}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleUpdateSpecialOrderStatus(item, 'Completed');
-                                    }}
-                                    className="py-0.5 px-1.5 rounded bg-purple-600/80 hover:bg-purple-700 text-white text-[9px] font-bold uppercase transition-colors flex items-center gap-0.5 shadow-sm cursor-pointer"
-                                    title="Mark item Completed"
-                                  >
-                                    <Check size={9} />
-                                  </button>
-                                  <button
-                                    disabled={processingOrderIds.has(item.id)}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleUpdateSpecialOrderStatus(item, 'Cancelled');
-                                    }}
-                                    className="py-0.5 px-1.5 rounded bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 text-[9px] font-bold uppercase transition-colors flex items-center gap-0.5 cursor-pointer"
-                                    title="Cancel this item"
-                                  >
-                                    <X size={9} />
-                                  </button>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
                   </div>
                 );
               })}

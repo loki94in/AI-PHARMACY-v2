@@ -437,6 +437,10 @@ const POS = () => {
     if (location.state && (location.state as any).prefill) {
       const prefill = (location.state as any).prefill;
       const { patientName: name, patientPhone: phone, advancePayment, specialOrderId, refillPatient, refillId, refillDays: rDays, doctorName, doctor: docName, selectedCustomerId: prefCustId, customerId: prefCId } = prefill;
+      // ponytail: capture refillIds so we can fulfill after successful bill save
+      if (Array.isArray(prefill.refillIds) && prefill.refillIds.length > 0) {
+        pendingRefillIdsRef.current = prefill.refillIds.map(Number).filter(Boolean);
+      }
       if (name) setPatientName(name);
       if (phone) {
         setPatientPhone(phone);
@@ -502,45 +506,62 @@ const POS = () => {
               try {
                 if (targetId > 0) {
                   const refillInfo = await api.getMedicineRefillInfo(targetId);
-                  if (refillInfo && refillInfo.medicine) {
-                    const m = refillInfo.medicine;
-                    const bestInv = refillInfo.best_inventory || {};
-                    const lastSale = refillInfo.last_sale;
-
-                    // If patient info wasn't provided at top level, populate from last sale
-                    if (!name && lastSale?.customer_name) setPatientName(lastSale.customer_name);
-                    if (!phone && lastSale?.customer_phone) setPatientPhone(lastSale.customer_phone);
-                    if (!doctor && lastSale?.doctor_name) setDoctor(lastSale.doctor_name);
-                    if (lastSale?.customer_id && !selectedCustomerIdRef.current) {
-                      setSelectedCustomerId(lastSale.customer_id);
-                      selectedCustomerIdRef.current = lastSale.customer_id;
-                    }
-
-                    const sellPrice = Number(m.sell_price || 0);
-                    const mrp = Number(bestInv.mrp || m.mrp || 0);
-                    const autoDisc = (sellPrice > 0 && mrp > 0 && sellPrice < mrp)
-                      ? parseFloat((((mrp - sellPrice) / mrp) * 100).toFixed(2))
-                      : (lastSale?.discount || 0);
-
-                    const finalQty = med.quantity_needed || med.quantity || med.qty || lastSale?.quantity || 1;
-                    const finalLooseQty = targetLooseQty || lastSale?.loose_qty || 0;
-
-                    return {
-                      id: bestInv.inventory_id || m.id,
-                      name: m.name,
-                      batch: bestInv.batch_no || '',
-                      expiry: bestInv.expiry_date || '',
-                      mrp: mrp,
-                      sell_price: m.sell_price || null,
-                      qty: Number(finalQty),
-                      quantity: Number(finalQty),
-                      unitPrice: Number(bestInv.unit_price || m.sell_price || m.mrp || 0),
-                      looseQty: Number(finalLooseQty),
-                      discount: autoDisc,
-                      packSize: parsePackSizeFromPackaging(m.packaging) || m.pack_size || 1,
-                      isEmptyRow: false
-                    };
+                  // Medicine not in database at all
+                  if (!refillInfo || !refillInfo.medicine) {
+                    toastEvent.trigger(
+                      `Medicine ID ${targetId} not found in database.`,
+                      'info', '/pos'
+                    );
+                    return null;
                   }
+
+                  const m = refillInfo.medicine;
+
+                  // Guard: if medicine exists in DB but has no in-stock batch, show clear message
+                  if (!refillInfo.best_inventory) {
+                    toastEvent.trigger(
+                      `"${m.name}" is not available in inventory. Please record a purchase first before selling.`,
+                      'info', '/pos'
+                    );
+                    return null;
+                  }
+
+                  const bestInv = refillInfo.best_inventory;
+                  const lastSale = refillInfo.last_sale;
+
+                  // If patient info wasn't provided at top level, populate from last sale
+                  if (!name && lastSale?.customer_name) setPatientName(lastSale.customer_name);
+                  if (!phone && lastSale?.customer_phone) setPatientPhone(lastSale.customer_phone);
+                  if (!doctor && lastSale?.doctor_name) setDoctor(lastSale.doctor_name);
+                  if (lastSale?.customer_id && !selectedCustomerIdRef.current) {
+                    setSelectedCustomerId(lastSale.customer_id);
+                    selectedCustomerIdRef.current = lastSale.customer_id;
+                  }
+
+                  const sellPrice = Number(m.sell_price || 0);
+                  const mrp = Number(bestInv.mrp || m.mrp || 0);
+                  const autoDisc = (sellPrice > 0 && mrp > 0 && sellPrice < mrp)
+                    ? parseFloat((((mrp - sellPrice) / mrp) * 100).toFixed(2))
+                    : (lastSale?.discount || 0);
+
+                  const finalQty = med.quantity_needed || med.quantity || med.qty || lastSale?.quantity || 1;
+                  const finalLooseQty = targetLooseQty || lastSale?.loose_qty || 0;
+
+                  return {
+                    id: bestInv.inventory_id || m.id,
+                    name: m.name,
+                    batch: bestInv.batch_no || '',
+                    expiry: bestInv.expiry_date || '',
+                    mrp: mrp,
+                    sell_price: m.sell_price || null,
+                    qty: Number(finalQty),
+                    quantity: Number(finalQty),
+                    unitPrice: Number(bestInv.unit_price || m.sell_price || m.mrp || 0),
+                    looseQty: Number(finalLooseQty),
+                    discount: autoDisc,
+                    packSize: parsePackSizeFromPackaging(m.packaging) || m.pack_size || 1,
+                    isEmptyRow: false
+                  };
                 }
 
                 // Fallback to name search in inventory
@@ -574,28 +595,21 @@ const POS = () => {
                 console.warn('Medicine prefill resolution warning:', e);
               }
 
-              // Fallback placeholder item
-              return {
-                id: 'prefill_' + Date.now() + '_' + Math.random(),
-                name: targetName || 'Prefilled Medicine',
-                batch: med.batch || med.batch_no || '',
-                expiry: med.expiry || med.expiry_date || '',
-                mrp: Number(med.mrp || 0),
-                sell_price: med.sell_price || null,
-                qty: targetQty,
-                quantity: targetQty,
-                unitPrice: Number(med.unitPrice || med.unit_price || med.mrp || 0),
-                looseQty: targetLooseQty,
-                discount: Number(med.discount || 0),
-                packSize: Number(med.packSize || med.pack_size || 1),
-                isEmptyRow: false
-              };
+              // If no medicine found in system, show clear message — do not fabricate data
+              if (targetName) {
+                toastEvent.trigger(
+                  `"${targetName}" could not be found in the medicine database. It may need to be added or purchased first.`,
+                  'info', '/pos'
+                );
+              }
+              return null;
             }));
 
             if (resolvedCartItems.length > 0) {
               const deduped: any[] = [];
               const seenMeds = new Set<string>();
-              for (const ci of resolvedCartItems.filter(ci => !ci.isEmptyRow && (ci.name || '').trim())) {
+              // ponytail: filter nulls (unavailable medicines) before building cart
+              for (const ci of resolvedCartItems.filter(ci => ci !== null && !ci.isEmptyRow && (ci.name || '').trim())) {
                 const key = (ci.name || '').toLowerCase().trim();
                 if (!seenMeds.has(key)) {
                   seenMeds.add(key);
@@ -641,6 +655,8 @@ const POS = () => {
   const [lastSavedWasWhatsAppSent, setLastSavedWasWhatsAppSent] = useState(false);
   const [editingInvoiceId, setEditingInvoiceId] = useState<number | null>(() => Number(editSaleFromState?.id) || null);
   const [editingInvoiceNo, setEditingInvoiceNo] = useState<string | null>(() => editSaleFromState?.invoice_no || editSaleFromState?.id || null);
+  // ponytail: stores refill IDs from CRM prefill; cleared after bill save (fulfill call)
+  const pendingRefillIdsRef = useRef<number[]>([]);
   const pendingDirectSaveRef = useRef<boolean>(false);
   const [doctor, setDoctor] = useState(() => editSaleFromState?.doctor_name || initialActiveTab.doctor || '');
   const [isDoctorDropdownOpen, setIsDoctorDropdownOpen] = useState(false);
@@ -2606,6 +2622,18 @@ const POS = () => {
 
       // Refresh the local inventory cache so POS search shows the reduced stock immediately
       api.getCompactInventory().catch(() => {});
+
+      // ponytail: fulfill refill records after a successful NEW bill (not edit-bill)
+      // Fire-and-forget — does not block bill UI or affect the sale record.
+      if (!isEditMode && pendingRefillIdsRef.current.length > 0) {
+        const idsToFulfill = [...pendingRefillIdsRef.current];
+        pendingRefillIdsRef.current = [];
+        idsToFulfill.forEach(rid => {
+          apiClient.post(`/refills/${rid}/fulfill`).catch(err => {
+            console.warn(`[Refill] Failed to fulfill refill #${rid} after sale:`, err);
+          });
+        });
+      }
       
       const isWaSent = paymentMedium === 'CREDIT' || (sendWhatsApp && !!phoneToUse.trim());
 

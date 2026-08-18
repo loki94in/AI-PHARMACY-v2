@@ -60,6 +60,7 @@ interface RefillPatient {
     mrp?: number;
     sell_price?: number;
     unit_price?: number;
+    stock_verified_override?: number;
     reminder_status?: string;
     reminder_sent_at?: string | null;
   }[];
@@ -340,6 +341,17 @@ const RefillsSection: React.FC = () => {
 
   // ── Sell Refill Patient → POS ─────────────────────────────────────────────
   const handleSellRefillPatient = (patient: RefillPatient) => {
+    // Only include active medicines that are actually actionable
+    const activeMeds = patient.medicines.filter(m => m.is_active !== 0 && m.status !== 'canceled');
+    // Never prefill a medicine with no real stock — matches refillService.ts hasStock check
+    const sellableMeds = activeMeds.filter(m => Number(m.in_stock_qty || 0) > 0 || m.stock_verified_override === 1);
+    const outOfStockMeds = activeMeds.filter(m => !(Number(m.in_stock_qty || 0) > 0 || m.stock_verified_override === 1));
+
+    if (sellableMeds.length === 0) {
+      toastEvent.trigger(`No medicines currently in stock for ${patient.patient_name}. Please record a purchase first.`, 'error', '/crm');
+      return;
+    }
+
     navigate('/pos', {
       state: {
         prefill: {
@@ -347,7 +359,9 @@ const RefillsSection: React.FC = () => {
           patientPhone: patient.patient_phone,
           customerId: patient.customer_id || undefined,
           refillPatient: true,
-          medicines: patient.medicines.map(m => ({
+          // ponytail: pass refillIds so POS can fulfill each after a successful bill save
+          refillIds: sellableMeds.map(m => m.id),
+          medicines: sellableMeds.map(m => ({
             medicineId: m.medicine_id,
             medicine_id: m.medicine_id,
             medicine_name: m.medicine_name,
@@ -364,7 +378,11 @@ const RefillsSection: React.FC = () => {
         }
       }
     });
-    toastEvent.trigger(`Transferring ${patient.medicines.length} prescribed medicine(s) for ${patient.patient_name} to POS...`, 'info', '/pos');
+
+    const skipNote = outOfStockMeds.length > 0
+      ? ` (skipped ${outOfStockMeds.length} out-of-stock: ${outOfStockMeds.map(m => m.medicine_name).join(', ')})`
+      : '';
+    toastEvent.trigger(`Transferring ${sellableMeds.length} prescribed medicine(s) for ${patient.patient_name} to POS...${skipNote}`, 'info', '/pos');
   };
 
   const handleAddRefillShortageToCart = async (medicineName: string, orderQty: number) => {

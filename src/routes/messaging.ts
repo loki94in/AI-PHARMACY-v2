@@ -4,6 +4,7 @@ import { initClient, sendMessage, currentQr, isReady, forceReconnect, destroyCli
 import QRCode from 'qrcode';
 import { dbManager } from '../database/connection.js';
 import { eventService } from '../services/eventService.js';
+import { whatsappQueueWorker } from '../services/whatsappQueueWorker.js';
 
 import fs from 'fs';
 import path from 'path';
