@@ -44,6 +44,7 @@ import {
   Keyboard,
   FileText,
   Loader2,
+  ChevronDown,
 } from 'lucide-react';
 import { shortcutEvent, SHORTCUT_DIRECTORY } from '../services/keyboardShortcuts';
 import { usePWAInstall } from '../hooks/usePWAInstall';
@@ -1927,129 +1928,323 @@ const QuickAssistSidebar = ({
   const [processingOrderIds, setProcessingOrderIds] = useState<Set<number>>(new Set());
   const [optimisticHiddenOrderIds, setOptimisticHiddenOrderIds] = useState<Set<number>>(new Set());
 
+  // Expand / collapse state for grouped patients (collapsed by default)
+  const [expandedRefillKeys, setExpandedRefillKeys] = useState<Set<string>>(new Set());
+  const [expandedDueSoonKeys, setExpandedDueSoonKeys] = useState<Set<string>>(new Set());
+  const [expandedSpecialOrderKeys, setExpandedSpecialOrderKeys] = useState<Set<string>>(new Set());
+
+  const toggleRefillKey = (key: string) => {
+    setExpandedRefillKeys(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const toggleDueSoonKey = (key: string) => {
+    setExpandedDueSoonKeys(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const toggleSpecialOrderKey = (key: string) => {
+    setExpandedSpecialOrderKeys(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
   useOnClickOutside(sidebarRef, () => {
     if (expanded) {
       setExpanded(false);
     }
   });
 
-  const handleAcknowledge = async (id: number) => {
+  const handleAcknowledgeAll = async (items: Array<{ id: number; hold_for_stock: number }>) => {
     try {
-      await api.acknowledgeRefill(id);
+      const holdItems = items.filter(i => i.hold_for_stock === 1);
+      await Promise.all(holdItems.map(i => api.acknowledgeRefill(i.id).catch(() => {})));
       refillEvent.triggerRefresh();
       onActionComplete();
     } catch (e) {
-      console.error('Failed to acknowledge refill:', e);
+      console.error('Failed to acknowledge all refills:', e);
     }
   };
 
-  const handleSend = async (id: number) => {
+  const handleSendRefillGroup = async (group: { patient_name: string; patient_phone: string; medicines: Array<{ id: number; medicine_name: string; quantity_needed: number }> }) => {
     try {
-      await api.sendRefillNow(id);
-      refillEvent.triggerRefresh();
-      onActionComplete();
-    } catch (e) {
-      console.error('Failed to send refill message:', e);
-    }
-  };
-
-  const handlePause = async (id: number) => {
-    try {
-      await api.updateRefill(id, { is_active: 0 });
-      refillEvent.triggerRefresh();
-      onActionComplete();
-    } catch (e) {
-      console.error('Failed to pause refill:', e);
-    }
-  };
-
-  const handleSkip = async (id: number) => {
-    try {
-      await api.skipRefill(id);
-      refillEvent.triggerRefresh();
-      onActionComplete();
-    } catch (e) {
-      console.error('Failed to skip refill:', e);
-    }
-  };
-
-  const handleUpdateSpecialOrderStatus = async (order: any, newStatus: string) => {
-    if (processingOrderIds.has(order.id)) return;
-
-    setProcessingOrderIds(prev => new Set(prev).add(order.id));
-    if (newStatus === 'Completed' || newStatus === 'Cancelled') {
-      setOptimisticHiddenOrderIds(prev => new Set(prev).add(order.id));
-    }
-
-    try {
-      await apiClient.post(`/orders/${order.id}/status`, { status: newStatus });
-      if (newStatus === 'Completed') {
-        toastEvent.trigger(`Marked "${order.product}" as Completed!`, 'success');
-      } else if (newStatus === 'Ready') {
-        toastEvent.trigger(`Marked "${order.product}" as Ready!`, 'success');
-      } else if (newStatus === 'Cancelled') {
-        toastEvent.trigger(`Cancelled request for "${order.product}"`, 'info');
-      } else {
-        toastEvent.trigger(`Updated status for "${order.product}" to ${newStatus}`, 'info');
+      const medListStr = group.medicines.map(m => `• ${m.medicine_name} (Qty: ${m.quantity_needed})`).join('\n');
+      const msg = `🔔 *MEDICINE REFILL REMINDER — AI PHARMACY*\n\nDear ${group.patient_name},\nYour regular prescription is due for refill:\n\n${medListStr}\n\n*Please reply to confirm delivery or pickup.*`;
+      if (group.patient_phone) {
+        const cleanPhone = group.patient_phone.replace(/\D/g, '');
+        const targetPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
+        const waUrl = `https://api.whatsapp.com/send?phone=${targetPhone}&text=${encodeURIComponent(msg)}`;
+        window.open(waUrl, '_blank');
       }
-      queryClient.invalidateQueries({ queryKey: ['orders'] });
-      specialOrdersEvent.triggerUpdated();
-      window.dispatchEvent(new CustomEvent('refresh-special-orders'));
+      await Promise.all(group.medicines.map(m => api.sendRefillNow(m.id).catch(() => {})));
+      refillEvent.triggerRefresh();
       onActionComplete();
-    } catch (err: any) {
-      console.error(`Failed to update status to ${newStatus}:`, err);
-      toastEvent.trigger('Failed to update request status', 'error');
-      setOptimisticHiddenOrderIds(prev => {
-        const next = new Set(prev);
-        next.delete(order.id);
-        return next;
-      });
-    } finally {
-      setProcessingOrderIds(prev => {
-        const next = new Set(prev);
-        next.delete(order.id);
-        return next;
-      });
+    } catch (e) {
+      console.error('Failed to send refill group reminder:', e);
     }
   };
 
-  const handleSendSpecialOrder = async (order: any) => {
-    if (processingOrderIds.has(order.id)) return;
+  const handleSendGroupSpecialOrder = async (group: { requester: string; phone: string; items: Array<{ id: number; product: string; qty: number; status: string }> }) => {
+    const pendingItems = group.items.filter(i => i.status === 'Pending');
+    const targetItems = pendingItems.length > 0 ? pendingItems : group.items;
+    const itemIds = targetItems.map(i => i.id);
 
-    setProcessingOrderIds(prev => new Set(prev).add(order.id));
+    setProcessingOrderIds(prev => {
+      const next = new Set(prev);
+      itemIds.forEach(id => next.add(id));
+      return next;
+    });
+
     try {
-      const msg = `🏬 *QUICK SPECIAL ORDER — AI PHARMACY*\n\n📦 *Item:* ${order.product}\n📊 *Qty:* ${order.qty || 1}\n📋 *Requested By:* ${order.requester || 'Customer'} (${order.phone || 'N/A'})\n\n*Please confirm receipt & order dispatch.*`;
+      const itemsStr = targetItems.map(i => `• ${i.product} (Qty: ${i.qty})`).join('\n');
+      const msg = `🏬 *QUICK SPECIAL ORDER — AI PHARMACY*\n\n📋 *Requested By:* ${group.requester} ${group.phone ? `(${group.phone})` : ''}\n\n📦 *Requested Items:*\n${itemsStr}\n\n*Please confirm receipt & order dispatch.*`;
 
-      if (order.phone) {
-        const cleanPhone = order.phone.replace(/\D/g, '');
+      if (group.phone) {
+        const cleanPhone = group.phone.replace(/\D/g, '');
         const targetPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
         const waUrl = `https://api.whatsapp.com/send?phone=${targetPhone}&text=${encodeURIComponent(msg)}`;
         window.open(waUrl, '_blank');
       }
 
-      await apiClient.post(`/orders/${order.id}/status`, { status: 'Ordered' });
-      toastEvent.trigger(`Marked special request "${order.product}" as Ordered!`, 'success');
+      await Promise.all(targetItems.map(i => apiClient.post(`/orders/${i.id}/status`, { status: 'Ordered' })));
+      toastEvent.trigger(`Marked ${targetItems.length} request(s) for ${group.requester} as Ordered!`, 'success');
       queryClient.invalidateQueries({ queryKey: ['orders'] });
       specialOrdersEvent.triggerUpdated();
       window.dispatchEvent(new CustomEvent('refresh-special-orders'));
       onActionComplete();
     } catch (e: any) {
-      console.error('Failed to send special order:', e);
+      console.error('Failed to send group special order:', e);
       toastEvent.trigger('Failed to update special request status', 'error');
     } finally {
       setProcessingOrderIds(prev => {
         const next = new Set(prev);
-        next.delete(order.id);
+        itemIds.forEach(id => next.delete(id));
         return next;
       });
     }
   };
 
+  const handleUpdateGroupStatus = async (group: { requester: string; items: Array<{ id: number; product: string }> }, newStatus: string) => {
+    const itemIds = group.items.map(i => i.id);
+
+    setProcessingOrderIds(prev => {
+      const next = new Set(prev);
+      itemIds.forEach(id => next.add(id));
+      return next;
+    });
+
+    if (newStatus === 'Completed' || newStatus === 'Cancelled') {
+      setOptimisticHiddenOrderIds(prev => {
+        const next = new Set(prev);
+        itemIds.forEach(id => next.add(id));
+        return next;
+      });
+    }
+
+    try {
+      await Promise.all(group.items.map(i => apiClient.post(`/orders/${i.id}/status`, { status: newStatus })));
+      toastEvent.trigger(`Marked all requests for "${group.requester}" as ${newStatus}!`, 'success');
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
+      specialOrdersEvent.triggerUpdated();
+      window.dispatchEvent(new CustomEvent('refresh-special-orders'));
+      onActionComplete();
+    } catch (err: any) {
+      console.error(`Failed to update group status to ${newStatus}:`, err);
+      toastEvent.trigger('Failed to update request status', 'error');
+      setOptimisticHiddenOrderIds(prev => {
+        const next = new Set(prev);
+        itemIds.forEach(id => next.delete(id));
+        return next;
+      });
+    } finally {
+      setProcessingOrderIds(prev => {
+        const next = new Set(prev);
+        itemIds.forEach(id => next.delete(id));
+        return next;
+      });
+    }
+  };
+
+  // Group active refills by patient
+  const activeRefills = useMemo(() => refills.filter(r => r.is_active === 1), [refills]);
+
+  const groupedActiveRefills = useMemo(() => {
+    const list: Array<{
+      key: string;
+      patient_name: string;
+      patient_phone: string;
+      next_refill_date: string;
+      hasHoldStock: boolean;
+      medicines: Array<{
+        id: number;
+        medicine_name: string;
+        quantity_needed: number;
+        refill_interval_days: number;
+        hold_for_stock: number;
+        next_refill_date: string;
+      }>;
+    }> = [];
+
+    const map = new Map<string, (typeof list)[0]>();
+
+    for (const r of activeRefills) {
+      const key = (r.patient_phone || r.patient_name || String(r.id)).trim();
+      let existing = map.get(key);
+      if (!existing) {
+        existing = {
+          key,
+          patient_name: r.patient_name || 'Patient',
+          patient_phone: r.patient_phone || '',
+          next_refill_date: r.next_refill_date,
+          hasHoldStock: false,
+          medicines: [],
+        };
+        map.set(key, existing);
+        list.push(existing);
+      }
+      if (r.hold_for_stock === 1) existing.hasHoldStock = true;
+      if (r.next_refill_date && (!existing.next_refill_date || new Date(r.next_refill_date) < new Date(existing.next_refill_date))) {
+        existing.next_refill_date = r.next_refill_date;
+      }
+      existing.medicines.push({
+        id: r.id,
+        medicine_name: r.medicine_name || 'Medicine',
+        quantity_needed: Number(r.quantity_needed || 3),
+        refill_interval_days: r.refill_interval_days || 30,
+        hold_for_stock: r.hold_for_stock || 0,
+        next_refill_date: r.next_refill_date,
+      });
+    }
+
+    return list;
+  }, [activeRefills]);
+
+  // Group due soon refills by patient
+  const groupedDueSoon = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const cutoff = new Date(today);
+    cutoff.setDate(today.getDate() + 5);
+
+    const dueSoonItems = refills.filter(r => {
+      if (r.is_active !== 1 || !r.next_refill_date) return false;
+      const d = new Date(r.next_refill_date);
+      return d >= today && d <= cutoff;
+    });
+
+    const list: Array<{
+      key: string;
+      patient_name: string;
+      patient_phone: string;
+      next_refill_date: string;
+      diffDays: number;
+      medicines: Array<{
+        id: number;
+        medicine_name: string;
+        quantity_needed: number;
+      }>;
+    }> = [];
+
+    const map = new Map<string, (typeof list)[0]>();
+
+    for (const r of dueSoonItems) {
+      const key = (r.patient_phone || r.patient_name || String(r.id)).trim();
+      let existing = map.get(key);
+      if (!existing) {
+        const dueDate = new Date(r.next_refill_date);
+        const diffDays = Math.round((dueDate.getTime() - today.getTime()) / 86400000);
+        existing = {
+          key,
+          patient_name: r.patient_name || 'Patient',
+          patient_phone: r.patient_phone || '',
+          next_refill_date: r.next_refill_date,
+          diffDays,
+          medicines: [],
+        };
+        map.set(key, existing);
+        list.push(existing);
+      }
+      existing.medicines.push({
+        id: r.id,
+        medicine_name: r.medicine_name || 'Medicine',
+        quantity_needed: Number(r.quantity_needed || 3),
+      });
+    }
+
+    return list;
+  }, [refills]);
+
+  // Group active special orders by requester
+  const activeSpecialOrders = useMemo(() => {
+    return Array.isArray(specialOrders)
+      ? specialOrders.filter(s => s.status !== 'Completed' && s.status !== 'Fulfilled' && s.status !== 'Cancelled' && !optimisticHiddenOrderIds.has(s.id))
+      : [];
+  }, [specialOrders, optimisticHiddenOrderIds]);
+
+  const groupedSpecialOrders = useMemo(() => {
+    const list: Array<{
+      key: string;
+      requester: string;
+      phone: string;
+      overallStatus: 'Pending' | 'Ordered' | 'Ready' | 'Other';
+      items: Array<{
+        id: number;
+        product: string;
+        qty: number;
+        status: string;
+        priority: string;
+      }>;
+    }> = [];
+
+    const map = new Map<string, (typeof list)[0]>();
+
+    for (const order of activeSpecialOrders) {
+      const key = (order.phone || order.requester || String(order.id)).trim();
+      let existing = map.get(key);
+      if (!existing) {
+        existing = {
+          key,
+          requester: order.requester || 'Customer',
+          phone: order.phone || '',
+          overallStatus: order.status || 'Pending',
+          items: [],
+        };
+        map.set(key, existing);
+        list.push(existing);
+      }
+      existing.items.push({
+        id: order.id,
+        product: order.product || 'Item',
+        qty: Number(order.qty || 1),
+        status: order.status || 'Pending',
+        priority: order.priority || 'Normal',
+      });
+    }
+
+    for (const g of list) {
+      if (g.items.some(i => i.status === 'Pending')) g.overallStatus = 'Pending';
+      else if (g.items.some(i => i.status === 'Ordered')) g.overallStatus = 'Ordered';
+      else if (g.items.some(i => i.status === 'Ready')) g.overallStatus = 'Ready';
+      else g.overallStatus = 'Other';
+    }
+
+    return list;
+  }, [activeSpecialOrders]);
+
   if (!expanded) {
-    const activeRefillsCount = Array.isArray(refills) ? refills.filter(r => r.is_active === 1).length : 0;
-    const activeSpecialOrdersCount = Array.isArray(specialOrders)
-      ? specialOrders.filter(s => s.status !== 'Completed' && s.status !== 'Fulfilled' && s.status !== 'Cancelled' && !optimisticHiddenOrderIds.has(s.id)).length
-      : 0;
+    const activeRefillsCount = groupedActiveRefills.length;
+    const activeSpecialOrdersCount = groupedSpecialOrders.length;
     const stagedNotificationsCount = Array.isArray(notifications) ? notifications.length : 0;
 
     return (
@@ -2066,7 +2261,7 @@ const QuickAssistSidebar = ({
           {activeRefillsCount > 0 && (
             <div
               className="flex items-center justify-center min-w-[20px] h-5 px-1 rounded-full bg-purple-500/20 text-purple-400 text-[9px] font-black border border-purple-500/40 shadow-sm"
-              title={`Automations / Refills: ${activeRefillsCount}`}
+              title={`Automations / Refills: ${activeRefillsCount} patient(s)`}
             >
               {activeRefillsCount}
             </div>
@@ -2076,7 +2271,7 @@ const QuickAssistSidebar = ({
           {activeSpecialOrdersCount > 0 && (
             <div
               className="flex items-center justify-center min-w-[20px] h-5 px-1 rounded-full bg-amber-500/20 text-amber-400 text-[9px] font-black border border-amber-500/40 shadow-sm animate-pulse"
-              title={`Quick Special Requests: ${activeSpecialOrdersCount}`}
+              title={`Quick Special Requests: ${activeSpecialOrdersCount} customer(s)`}
             >
               {activeSpecialOrdersCount}
             </div>
@@ -2104,12 +2299,6 @@ const QuickAssistSidebar = ({
     );
   }
 
-  const activeRefills = refills.filter(r => r.is_active === 1);
-  const inactiveRefills = refills.filter(r => r.is_active === 0);
-  const activeSpecialOrders = Array.isArray(specialOrders)
-    ? specialOrders.filter(s => s.status !== 'Completed' && s.status !== 'Fulfilled' && s.status !== 'Cancelled' && !optimisticHiddenOrderIds.has(s.id))
-    : [];
-
   return (
     <div ref={sidebarRef} className="w-80 max-w-[85vw] bg-glass-bg border-l border-glass-border backdrop-blur-xl flex flex-col h-full min-h-0 overflow-hidden shrink-0 z-20 transition-all duration-300">
       {/* Header */}
@@ -2129,182 +2318,272 @@ const QuickAssistSidebar = ({
 
       {/* Main content scroll */}
       <div className="flex-1 min-h-0 overflow-y-auto p-4 flex flex-col gap-6 scrollbar-thin">
-        {/* Active Refills */}
+        {/* Active Refills (Grouped by Patient with Expand/Collapse) */}
         <div>
           <div className="flex items-center justify-between mb-2 text-xs font-bold uppercase tracking-wider text-muted/70">
-            <span>Automations ({activeRefills.length})</span>
+            <span>Automations ({groupedActiveRefills.length})</span>
             <button
-              onClick={() => navigate('/refills')}
-              className="text-[9px] font-black text-sky-400 hover:text-sky-300 uppercase tracking-widest"
+              onClick={() => navigate('/crm?tab=refills')}
+              className="text-[9px] font-black text-sky-400 hover:text-sky-300 uppercase tracking-widest cursor-pointer"
             >
               Manage
             </button>
           </div>
-          {activeRefills.length === 0 ? (
+          {groupedActiveRefills.length === 0 ? (
             <p className="text-xs text-muted/50 italic pl-2 py-1">No active refill tracks</p>
           ) : (
             <div className="flex flex-col gap-2.5">
-              {activeRefills.map(refill => (
-                <div key={refill.id} className="p-3 rounded-xl bg-bg2 border border-glass-border flex flex-col gap-1.5 shadow-sm min-w-0 overflow-hidden">
-                  <div className="flex items-start justify-between gap-1 min-w-0">
-                    <span className="font-semibold text-xs text-text truncate flex-1 min-w-0">{refill.patient_name}</span>
-                    {refill.hold_for_stock === 1 && (
-                      <span className="px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/20 text-amber-500 text-[8px] font-bold uppercase tracking-wider animate-pulse shrink-0">
-                        Hold Stock
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-[10px] text-muted flex items-center gap-1 min-w-0">
-                    <span className="font-mono text-purple-400 truncate flex-1 min-w-0">{refill.medicine_name}</span>
-                    <span className="shrink-0">·</span>
-                    <span className="shrink-0">{refill.refill_interval_days}d cycle</span>
-                  </div>
-                  <div className="flex items-center gap-2 mt-1 justify-between min-w-0">
-                    <div className="flex items-center gap-1 text-[9px] text-muted/70 font-medium truncate">
-                      <ClockIcon size={10} className="shrink-0" />
-                      <span className="truncate">Next: {new Date(refill.next_refill_date).toLocaleDateString([], { month: 'short', day: 'numeric' })}</span>
+              {groupedActiveRefills.map(group => {
+                const isExpanded = expandedRefillKeys.has(group.key);
+                return (
+                  <div key={group.key} className="p-3 rounded-xl bg-bg2 border border-glass-border flex flex-col gap-2 shadow-sm min-w-0 overflow-hidden transition-all">
+                    {/* Patient Header (Click to toggle expansion) */}
+                    <div
+                      onClick={() => toggleRefillKey(group.key)}
+                      className="flex items-start justify-between gap-1.5 min-w-0 cursor-pointer select-none"
+                    >
+                      <div className="flex flex-col min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span className="font-semibold text-xs text-text truncate">{group.patient_name}</span>
+                          <span className="px-1.5 py-0.2 rounded-full bg-purple-500/15 text-purple-400 text-[9px] font-bold shrink-0">
+                            {group.medicines.length} med{group.medicines.length > 1 ? 's' : ''}
+                          </span>
+                        </div>
+                        {group.patient_phone && (
+                          <span className="text-[10px] text-muted truncate">{group.patient_phone}</span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {group.hasHoldStock && (
+                          <span className="px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/20 text-amber-500 text-[8px] font-bold uppercase tracking-wider animate-pulse shrink-0">
+                            Hold Stock
+                          </span>
+                        )}
+                        <ChevronDown size={14} className={`text-muted transition-transform duration-200 ${isExpanded ? 'rotate-180 text-primary' : ''}`} />
+                      </div>
                     </div>
-                    {refill.hold_for_stock === 1 && (
-                      <button
-                        onClick={() => handleAcknowledge(refill.id)}
-                        className="py-1 px-2.5 rounded bg-amber-600 hover:bg-amber-700 text-white text-[9px] font-black tracking-wide uppercase transition-colors shadow-sm cursor-pointer shrink-0"
-                        title="Mark item as checked / resolved"
-                      >
-                        Acknowledge
-                      </button>
+
+                    {/* Patient Card Actions & Due Date Footer */}
+                    <div className="flex items-center gap-2 justify-between min-w-0 pt-1 border-t border-border/30">
+                      <div className="flex items-center gap-1 text-[9px] text-muted/70 font-medium truncate">
+                        <ClockIcon size={10} className="shrink-0" />
+                        <span className="truncate">
+                          Next: {group.next_refill_date ? new Date(group.next_refill_date).toLocaleDateString([], { month: 'short', day: 'numeric' }) : 'N/A'}
+                        </span>
+                      </div>
+                      {group.hasHoldStock && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleAcknowledgeAll(group.medicines);
+                          }}
+                          className="py-1 px-2.5 rounded bg-amber-600 hover:bg-amber-700 text-white text-[9px] font-black tracking-wide uppercase transition-colors shadow-sm cursor-pointer shrink-0"
+                          title="Mark all held items as checked / resolved"
+                        >
+                          Acknowledge
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Expandable Medicines List */}
+                    {isExpanded && (
+                      <div className="pt-2 border-t border-glass-border/50 flex flex-col gap-1.5">
+                        {group.medicines.map((med) => (
+                          <div
+                            key={med.id}
+                            className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg bg-bg3/50 border border-border/30 text-[11px] min-w-0"
+                          >
+                            <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                              <Package size={11} className="text-purple-400 shrink-0" />
+                              <span className="font-medium text-text truncate">{med.medicine_name}</span>
+                            </div>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <span className="px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 text-[10px] font-mono font-bold">
+                                Qty: {med.quantity_needed}
+                              </span>
+                              <span className="text-[9px] text-muted">{med.refill_interval_days}d</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                     )}
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
 
-        {/* Due Soon — patients with upcoming refills (within 5 days) */}
-        {(() => {
-          const today = new Date();
-          today.setHours(0, 0, 0, 0);
-          const cutoff = new Date(today);
-          cutoff.setDate(today.getDate() + 5);
-
-          const dueSoon = refills.filter(r => {
-            if (r.is_active !== 1) return false;
-            if (!r.next_refill_date) return false;
-            const d = new Date(r.next_refill_date);
-            return d >= today && d <= cutoff;
-          });
-
-          if (dueSoon.length === 0) return null;
-
-          return (
-            <div>
-              <div className="flex items-center justify-between mb-2 text-xs font-bold uppercase tracking-wider text-emerald-400/80">
-                <div className="flex items-center gap-1.5">
-                  <BellRing size={13} className="text-emerald-400" />
-                  <span>Due Soon ({dueSoon.length})</span>
-                </div>
-                <button
-                  onClick={() => navigate('/refills')}
-                  className="text-[9px] font-black text-emerald-400 hover:text-emerald-300 uppercase tracking-widest"
-                >
-                  View All
-                </button>
+        {/* Due Soon — Grouped by Patient (within 5 days) */}
+        {groupedDueSoon.length > 0 && (
+          <div>
+            <div className="flex items-center justify-between mb-2 text-xs font-bold uppercase tracking-wider text-emerald-400/80">
+              <div className="flex items-center gap-1.5">
+                <BellRing size={13} className="text-emerald-400" />
+                <span>Due Soon ({groupedDueSoon.length})</span>
               </div>
-              <div className="flex flex-col gap-2">
-                {dueSoon.map(refill => {
-                  const dueDate = new Date(refill.next_refill_date);
-                  const diffDays = Math.round((dueDate.getTime() - today.getTime()) / 86400000);
-                  const dueLabel = diffDays === 0 ? 'Today' : diffDays === 1 ? 'Tomorrow' : `in ${diffDays} days`;
-                  return (
-                    <div key={refill.id} className="p-3 rounded-xl bg-emerald-500/[0.04] border border-emerald-500/20 flex items-center justify-between gap-2 min-w-0 overflow-hidden">
-                      <div className="flex flex-col gap-0.5 min-w-0 flex-1">
-                        <span className="font-semibold text-xs text-text truncate min-w-0">{refill.patient_name}</span>
-                        <span className="text-[10px] text-emerald-400 font-mono">{dueLabel}</span>
-                      </div>
-                      <button
-                        onClick={() => handleSend(refill.id)}
-                        className="shrink-0 py-1.5 px-3 rounded bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold tracking-wide uppercase transition-colors flex items-center gap-1.5 shadow-sm cursor-pointer min-w-[60px] justify-center"
-                        title={`Send WhatsApp reminder to ${refill.patient_name}`}
-                      >
-                        <SendIcon size={11} />
-                        Send
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
+              <button
+                onClick={() => navigate('/crm?tab=refills')}
+                className="text-[9px] font-black text-emerald-400 hover:text-emerald-300 uppercase tracking-widest cursor-pointer"
+              >
+                View All
+              </button>
             </div>
-          );
-        })()}
+            <div className="flex flex-col gap-2.5">
+              {groupedDueSoon.map(group => {
+                const isExpanded = expandedDueSoonKeys.has(group.key);
+                const dueLabel = group.diffDays === 0 ? 'Today' : group.diffDays === 1 ? 'Tomorrow' : `in ${group.diffDays} days`;
+                return (
+                  <div key={group.key} className="p-3 rounded-xl bg-emerald-500/[0.04] border border-emerald-500/20 flex flex-col gap-2 min-w-0 overflow-hidden transition-all">
+                    {/* Patient Header */}
+                    <div
+                      onClick={() => toggleDueSoonKey(group.key)}
+                      className="flex items-center justify-between gap-2 min-w-0 cursor-pointer select-none"
+                    >
+                      <div className="flex flex-col min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span className="font-semibold text-xs text-text truncate">{group.patient_name}</span>
+                          <span className="px-1.5 py-0.2 rounded-full bg-emerald-500/20 text-emerald-300 text-[9px] font-bold shrink-0">
+                            {group.medicines.length} med{group.medicines.length > 1 ? 's' : ''}
+                          </span>
+                        </div>
+                        <span className="text-[10px] text-emerald-400 font-mono font-medium">{dueLabel}</span>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleSendRefillGroup(group);
+                          }}
+                          className="py-1.5 px-3 rounded bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold tracking-wide uppercase transition-colors flex items-center gap-1.5 shadow-sm cursor-pointer"
+                          title={`Send WhatsApp reminder to ${group.patient_name}`}
+                        >
+                          <SendIcon size={11} />
+                          Send
+                        </button>
+                        <ChevronDown size={14} className={`text-muted transition-transform duration-200 ${isExpanded ? 'rotate-180 text-emerald-400' : ''}`} />
+                      </div>
+                    </div>
 
-        {/* Quick Special Requests */}
+                    {/* Expandable Medicines List */}
+                    {isExpanded && (
+                      <div className="pt-2 border-t border-emerald-500/20 flex flex-col gap-1.5">
+                        {group.medicines.map((med) => (
+                          <div
+                            key={med.id}
+                            className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg bg-bg3/60 border border-emerald-500/20 text-[11px] min-w-0"
+                          >
+                            <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                              <Package size={11} className="text-emerald-400 shrink-0" />
+                              <span className="font-medium text-text truncate">{med.medicine_name}</span>
+                            </div>
+                            <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-[10px] font-mono font-bold shrink-0">
+                              Qty: {med.quantity_needed}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Quick Special Requests (Grouped by Requester with Expand/Collapse) */}
         <div>
           <div className="flex items-center justify-between mb-2 text-xs font-bold uppercase tracking-wider text-amber-400">
             <div className="flex items-center gap-1.5">
               <Package size={14} className="text-amber-400" />
-              <span>Quick Special Requests ({activeSpecialOrders.length})</span>
+              <span>Quick Special Requests ({groupedSpecialOrders.length})</span>
             </div>
             <button
               onClick={() => navigate('/crm?tab=special_orders')}
-              className="text-[9px] font-black text-amber-400 hover:text-amber-300 uppercase tracking-widest"
+              className="text-[9px] font-black text-amber-400 hover:text-amber-300 uppercase tracking-widest cursor-pointer"
             >
               View All
             </button>
           </div>
-          {activeSpecialOrders.length === 0 ? (
+          {groupedSpecialOrders.length === 0 ? (
             <p className="text-xs text-muted/50 italic pl-2 py-1">No active special requests</p>
           ) : (
             <div className="flex flex-col gap-2.5">
-              {activeSpecialOrders.map(order => {
-                const isOrderedOrReady = order.status === 'Ordered' || order.status === 'Ready' || order.status === 'Completed' || order.status === 'Fulfilled';
-                const isCancelled = order.status === 'Cancelled';
-                const isProcessing = processingOrderIds.has(order.id);
+              {groupedSpecialOrders.map(group => {
+                const isExpanded = expandedSpecialOrderKeys.has(group.key);
+                const isProcessing = group.items.some(i => processingOrderIds.has(i.id));
 
                 return (
-                  <div key={order.id} className={`p-3 rounded-xl border flex flex-col gap-2 transition-all min-w-0 overflow-hidden ${isOrderedOrReady
-                      ? 'bg-emerald-500/[0.04] border-emerald-500/30'
-                      : isCancelled
-                        ? 'bg-red-500/[0.04] border-red-500/20 opacity-60'
+                  <div
+                    key={group.key}
+                    className={`p-3 rounded-xl border flex flex-col gap-2 transition-all min-w-0 overflow-hidden ${
+                      group.overallStatus === 'Ready'
+                        ? 'bg-sky-500/[0.04] border-sky-500/30'
+                        : group.overallStatus === 'Ordered'
+                        ? 'bg-emerald-500/[0.04] border-emerald-500/30'
                         : 'bg-amber-500/[0.04] border-amber-500/20'
-                    }`}>
-                    <div className="flex items-start justify-between gap-1 min-w-0">
-                      <span className={`font-bold text-xs text-text truncate flex-1 min-w-0 ${isOrderedOrReady || isCancelled ? 'line-through text-muted/80' : ''}`}>
-                        {order.product}
-                      </span>
-                      <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 text-[9px] font-mono font-bold shrink-0">
-                        Qty: {order.qty || 1}
-                      </span>
+                    }`}
+                  >
+                    {/* Requester Header (Click to toggle expansion) */}
+                    <div
+                      onClick={() => toggleSpecialOrderKey(group.key)}
+                      className="flex items-start justify-between gap-1.5 min-w-0 cursor-pointer select-none"
+                    >
+                      <div className="flex flex-col min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span className="font-bold text-xs text-text truncate">{group.requester}</span>
+                          <span className="px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-400 text-[9px] font-bold shrink-0">
+                            {group.items.length} item{group.items.length > 1 ? 's' : ''}
+                          </span>
+                        </div>
+                        {group.phone && (
+                          <span className="text-[10px] text-muted truncate">{group.phone}</span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <span
+                          className={`px-1.5 py-0.5 rounded text-[9px] font-mono font-bold uppercase ${
+                            group.overallStatus === 'Ready'
+                              ? 'bg-sky-500/20 text-sky-300 border border-sky-500/30'
+                              : group.overallStatus === 'Ordered'
+                              ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                              : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                          }`}
+                        >
+                          {group.overallStatus}
+                        </span>
+                        <ChevronDown size={14} className={`text-muted transition-transform duration-200 ${isExpanded ? 'rotate-180 text-amber-400' : ''}`} />
+                      </div>
                     </div>
-                    <div className="text-[10px] text-muted flex items-center justify-between gap-2 min-w-0">
-                      <span className="truncate flex-1 min-w-0">{order.requester || 'Customer'} {order.phone ? `(${order.phone})` : ''}</span>
-                    </div>
-                    <div className="flex items-center flex-wrap gap-1.5 mt-1 min-w-0">
-                      {order.status === 'Ready' ? (
+
+                    {/* Patient-Level Action Buttons */}
+                    <div className="flex items-center flex-wrap gap-1.5 pt-1 border-t border-border/30 min-w-0">
+                      {group.overallStatus === 'Ready' ? (
                         <button
                           disabled={isProcessing}
-                          onClick={() => handleUpdateSpecialOrderStatus(order, 'Completed')}
+                          onClick={() => handleUpdateGroupStatus(group, 'Completed')}
                           className="flex-1 py-1 px-2 rounded bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-[10px] font-bold tracking-wide uppercase transition-colors flex items-center justify-center gap-1 shadow-sm cursor-pointer whitespace-nowrap min-w-0"
-                          title="Mark special request as Completed and remove from Quick Assist"
+                          title="Mark all requests as Completed and remove from Quick Assist"
                         >
                           {isProcessing ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
-                          Complete
+                          Complete All
                         </button>
-                      ) : order.status === 'Ordered' ? (
+                      ) : group.overallStatus === 'Ordered' ? (
                         <>
                           <button
                             disabled={isProcessing}
-                            onClick={() => handleUpdateSpecialOrderStatus(order, 'Ready')}
+                            onClick={() => handleUpdateGroupStatus(group, 'Ready')}
                             className="flex-1 py-1 px-2 rounded bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white text-[10px] font-bold tracking-wide uppercase transition-colors flex items-center justify-center gap-1 shadow-sm cursor-pointer whitespace-nowrap min-w-0"
-                            title="Mark order as Ready for customer"
+                            title="Mark all requests as Ready for customer"
                           >
                             {isProcessing ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
                             Mark Ready
                           </button>
                           <button
                             disabled={isProcessing}
-                            onClick={() => handleUpdateSpecialOrderStatus(order, 'Completed')}
+                            onClick={() => handleUpdateGroupStatus(group, 'Completed')}
                             className="flex-1 py-1 px-2 rounded bg-purple-600/80 hover:bg-purple-700 disabled:opacity-50 text-white text-[10px] font-bold tracking-wide uppercase transition-colors flex items-center justify-center gap-1 shadow-sm cursor-pointer whitespace-nowrap min-w-0"
-                            title="Directly mark special request as Completed"
+                            title="Directly mark all requests as Completed"
                           >
                             {isProcessing ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
                             Complete
@@ -2314,35 +2593,66 @@ const QuickAssistSidebar = ({
                         <>
                           <button
                             disabled={isProcessing}
-                            onClick={() => handleSendSpecialOrder(order)}
+                            onClick={() => handleSendGroupSpecialOrder(group)}
                             className="flex-1 py-1 px-2 rounded bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-[10px] font-bold tracking-wide uppercase transition-colors flex items-center justify-center gap-1 shadow-sm cursor-pointer whitespace-nowrap min-w-0"
-                            title="Send WhatsApp Order for this Special Request"
+                            title="Send WhatsApp Order for these special requests"
                           >
                             {isProcessing ? <Loader2 size={11} className="animate-spin" /> : <SendIcon size={11} />}
                             Send Order
                           </button>
                           <button
                             disabled={isProcessing}
-                            onClick={() => handleUpdateSpecialOrderStatus(order, 'Completed')}
+                            onClick={() => handleUpdateGroupStatus(group, 'Completed')}
                             className="flex-1 py-1 px-2 rounded bg-purple-600/80 hover:bg-purple-700 disabled:opacity-50 text-white text-[10px] font-bold tracking-wide uppercase transition-colors flex items-center justify-center gap-1 shadow-sm cursor-pointer whitespace-nowrap min-w-0"
-                            title="Directly mark special request as Completed"
+                            title="Directly mark all requests as Completed"
                           >
                             {isProcessing ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
                             Complete
                           </button>
                         </>
                       )}
-                      {!isCancelled && (
-                        <button
-                          disabled={isProcessing}
-                          onClick={() => handleUpdateSpecialOrderStatus(order, 'Cancelled')}
-                          className="flex-1 py-1 px-2 rounded bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 text-[10px] font-bold uppercase transition-all flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50 whitespace-nowrap min-w-0"
-                          title="Cancel/Dash this medicine request"
-                        >
-                          Cancel
-                        </button>
-                      )}
+                      <button
+                        disabled={isProcessing}
+                        onClick={() => handleUpdateGroupStatus(group, 'Cancelled')}
+                        className="py-1 px-2 rounded bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 text-[10px] font-bold uppercase transition-all flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50 whitespace-nowrap shrink-0"
+                        title="Cancel all requests for this customer"
+                      >
+                        Cancel
+                      </button>
                     </div>
+
+                    {/* Expandable Medicines List */}
+                    {isExpanded && (
+                      <div className="pt-2 border-t border-border/30 flex flex-col gap-1.5">
+                        {group.items.map((item) => (
+                          <div
+                            key={item.id}
+                            className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg bg-bg3/60 border border-border/30 text-[11px] min-w-0"
+                          >
+                            <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                              <Package size={11} className="text-amber-400 shrink-0" />
+                              <span className="font-medium text-text truncate">{item.product}</span>
+                            </div>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 text-[10px] font-mono font-bold">
+                                Qty: {item.qty}
+                              </span>
+                              <span
+                                className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase ${
+                                  item.status === 'Ready'
+                                    ? 'bg-sky-500/20 text-sky-300'
+                                    : item.status === 'Ordered'
+                                    ? 'bg-emerald-500/20 text-emerald-300'
+                                    : 'bg-amber-500/20 text-amber-300'
+                                }`}
+                              >
+                                {item.status}
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -2369,30 +2679,6 @@ const QuickAssistSidebar = ({
                   <p className="text-[11px] text-muted leading-snug italic bg-bg3 p-1.5 rounded-lg border border-glass-border break-words">
                     "{msg.message}"
                   </p>
-                  <div className="flex items-center flex-wrap gap-1.5 mt-1 min-w-0">
-                    <button
-                      onClick={() => handleSend(msg.reference_id ? Number(msg.reference_id) : msg.id)}
-                      className="flex-1 min-w-[80px] py-1.5 rounded bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold tracking-wide uppercase transition-colors flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
-                      title="Approve and Send WhatsApp message"
-                    >
-                      <SendIcon size={12} />
-                      Send
-                    </button>
-                    <button
-                      onClick={() => handlePause(msg.reference_id ? Number(msg.reference_id) : msg.id)}
-                      className="py-1 px-2 rounded border border-glass-border hover:bg-bg3 text-muted hover:text-text text-[10px] font-bold uppercase transition-all cursor-pointer"
-                      title="Pause this refill reminder cycle"
-                    >
-                      <PauseIcon size={10} />
-                    </button>
-                    <button
-                      onClick={() => handleSkip(msg.reference_id ? Number(msg.reference_id) : msg.id)}
-                      className="py-1 px-2.5 rounded border border-glass-border hover:bg-bg3 text-muted hover:text-text text-[10px] font-bold uppercase transition-all cursor-pointer"
-                      title="Skip this alert for today"
-                    >
-                      Skip
-                    </button>
-                  </div>
                 </div>
               ))}
             </div>
