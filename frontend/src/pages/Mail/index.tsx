@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useDeferredEffect } from '../../hooks/useDeferredEffect';
-import { getLocalDateString, getTodayString } from '../../utils/date';
+import { getLocalDateString, getTodayString, toDateInputValue } from '../../utils/date';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { usePageActive } from '../../lib/keepAlive/PageActiveContext';
 import {
@@ -210,7 +210,7 @@ const Mail = () => {
         prefilledPurchase: {
           distributorName: review.distributor_name || '',
           invoiceNo: review.invoice_number || '',
-          date: '', // Unresolved: invoice date missing from review, user must verify/enter actual date
+          date: review.email_date ? toDateInputValue(review.email_date) : getTodayString(),
           totalAmount: 0,
           globalCdPer: 0,
           items: meds.map(m => ({
@@ -580,7 +580,7 @@ const Mail = () => {
           prefilledPurchase: {
             distributorName: parsedDistributorName || selectedEmail.distributorName || '',
             invoiceNo: parsedInvoiceNo || (invoiceNoMatch ? invoiceNoMatch[0] : ''),
-            date: parsedInvoiceDate || '',
+            date: selectedEmail.date ? toDateInputValue(selectedEmail.date) : (parsedInvoiceDate || getTodayString()),
             totalAmount: parsedTotalAmount || 0,
             globalCdPer: parsedGlobalCdPer || 0,
             source_filename: selectedFiles[0]?.filename || '',

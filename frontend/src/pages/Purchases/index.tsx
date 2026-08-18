@@ -996,7 +996,6 @@ const Purchases: React.FC = () => {
   const [activeMedicineIndex, setActiveMedicineIndex] = useState<number | null>(null);
   const [mfgSuggestions, setMfgSuggestions] = useState<string[]>([]);
   const [showMfgSuggestions, setShowMfgSuggestions] = useState(false);
-  const [generatingProductBarcode, setGeneratingProductBarcode] = useState(false);
 
   const openAddMedicineModal = (index: number) => {
     setActiveMedicineIndex(index);
@@ -1060,36 +1059,6 @@ const Purchases: React.FC = () => {
     setIsUniversalModalOpen(true);
     setSearchResults([]);
     setActiveSearchIndex(null);
-  };
-
-  const handlePrintProductBarcodes = async (itemsToGenerate: Array<{ name?: string; medicine_name?: string; batch_no?: string; batch_number?: string; batch?: string }>) => {
-    const payload = itemsToGenerate
-      .filter(it => (it.name || it.medicine_name || '').trim().length > 0)
-      .map(it => ({
-        name: (it.name || it.medicine_name || 'Medicine').trim(),
-        batch: (it.batch_no || it.batch_number || it.batch || 'N/A').trim(),
-      }));
-
-    if (payload.length === 0) {
-      toastEvent.trigger('No valid items in purchase bill for barcode label generation', 'error');
-      return;
-    }
-
-    setGeneratingProductBarcode(true);
-    try {
-      const res = await api.generateMedicineBarcodes(payload);
-      if (res && res.pdfUrl) {
-        toastEvent.trigger(`Generated ${payload.length} product barcode label(s)`, 'success');
-        window.open(res.pdfUrl, '_blank');
-      } else {
-        toastEvent.trigger('Failed to generate product barcode label', 'error');
-      }
-    } catch (err) {
-      console.error('Product barcode generation error:', err);
-      toastEvent.trigger('Failed to generate product barcode label', 'error');
-    } finally {
-      setGeneratingProductBarcode(false);
-    }
   };
 
   // Enrichment Drawer States
@@ -1368,7 +1337,7 @@ const Purchases: React.FC = () => {
       api.createMedicineAlias(item.original_name, medicine.id).catch(e => console.error('Failed to create alias:', e));
     }
 
-    // Last purchase lookup: runs in background, patches the row when it arrives
+    // Last purchase lookup: runs in background, patches only if fields are empty and never overwrites GST
     api.getLastPurchase(medicine.name, medicine.id, selectedDistributor || undefined)
       .then(response => {
         if (response && response.found) {
@@ -1377,12 +1346,10 @@ const Purchases: React.FC = () => {
             const target = updated[index];
             // Guard: bail if the row was changed since we fired the request
             if (!target || target.medicine_id !== medicine.id) return prev;
-            target.batch_no = response.batch_no || '';
-            target.expiry_date = formatExpiryToMMYY(response.expiry_date || '');
-            target.rate = response.rate || response.cost_price || medicine.rate;
-            target.mrp = response.mrp || medicine.mrp;
-            target.cgst_per = (response.cgst_per !== undefined && response.cgst_per !== 0) ? response.cgst_per : target.cgst_per;
-            target.sgst_per = (response.sgst_per !== undefined && response.sgst_per !== 0) ? response.sgst_per : target.sgst_per;
+            if (!target.batch_no && response.batch_no) target.batch_no = response.batch_no;
+            if (!target.expiry_date && response.expiry_date) target.expiry_date = formatExpiryToMMYY(response.expiry_date);
+            if ((!target.rate || target.rate === 0) && response.rate) target.rate = response.rate;
+            if ((!target.mrp || target.mrp === 0) && response.mrp) target.mrp = response.mrp;
             target.amount = calculateItemAmount(target);
             return updated;
           });
@@ -1418,7 +1385,11 @@ const Purchases: React.FC = () => {
       if (editPurchaseId) setEditPurchaseId(editPurchaseId);
       if (distributor_id) setSelectedDistributor(distributor_id);
       if (prefInvoiceNo) setInvoiceNo(prefInvoiceNo);
-      if (prefDate !== undefined) setInvoiceDate(prefDate || '');
+      if (prefDate !== undefined) {
+        setInvoiceDate(toDateInputValue(prefDate) || (emailSource?.date ? toDateInputValue(emailSource.date) : getTodayString()));
+      } else if (emailSource?.date) {
+        setInvoiceDate(toDateInputValue(emailSource.date));
+      }
       if (prefCnAmount !== undefined) setCnAmount(prefCnAmount);
       if (prefCnNumber !== undefined) setCnNumber(prefCnNumber);
       if (prefReconcileExpiryReturnId !== undefined) setReconcileExpiryReturnId(prefReconcileExpiryReturnId);
@@ -1639,18 +1610,20 @@ const Purchases: React.FC = () => {
         const batchVal = value.trim();
         api.getBatchInfo(item.medicine_id, batchVal)
           .then(batchRes => {
-            if (batchRes) {
+            if (batchRes && batchRes.found) {
               setItems(prevItems => {
                 const updated = [...prevItems];
                 const target = updated[index];
                 if (target) {
-                  if (batchRes.found) {
-                    if (batchRes.rate) target.rate = batchRes.rate;
-                    if (batchRes.mrp) target.mrp = batchRes.mrp;
-                    if (batchRes.expiry_date) target.expiry_date = formatExpiryToMMYY(batchRes.expiry_date);
+                  if (batchRes.rate) target.rate = batchRes.rate;
+                  if (batchRes.mrp) target.mrp = batchRes.mrp;
+                  if (batchRes.expiry_date) target.expiry_date = formatExpiryToMMYY(batchRes.expiry_date);
+                  if ((target.cgst_per === '' || target.cgst_per === undefined) && batchRes.cgst_per !== undefined && batchRes.cgst_per !== null) {
+                    target.cgst_per = batchRes.cgst_per;
                   }
-                  target.cgst_per = batchRes.cgst_per ?? 6;
-                  target.sgst_per = batchRes.sgst_per ?? 6;
+                  if ((target.sgst_per === '' || target.sgst_per === undefined) && batchRes.sgst_per !== undefined && batchRes.sgst_per !== null) {
+                    target.sgst_per = batchRes.sgst_per;
+                  }
                   target.amount = calculateItemAmount(target);
                 }
                 return updated;
@@ -1753,7 +1726,8 @@ const Purchases: React.FC = () => {
     });
 
     const cnVal = parseFloat(cnAmount as any) || 0;
-    const grandTotal = subtotal + totalCgst + totalSgst - cnVal;
+    const extraDiscVal = parseFloat(extraCredit as any) || 0;
+    const grandTotal = Math.max(0, subtotal + totalCgst + totalSgst - cnVal - extraDiscVal);
 
     return {
       grossAmount,
@@ -1763,7 +1737,7 @@ const Purchases: React.FC = () => {
       totalSgst,
       grandTotal,
     };
-  }, [items, cnAmount]);
+  }, [items, cnAmount, extraCredit]);
 
   const calculateTotals = () => memoizedTotals;
 
@@ -1863,6 +1837,7 @@ const Purchases: React.FC = () => {
         invoice_no: finalInvoiceNo,
         date: cleanInvoiceDate,
         cd_per: parseFloat(String(globalCdPer || 0)) || 0,
+        extra_credit: parseFloat(String(extraCredit || 0)) || 0,
         cn_amount: parseFloat(String(cnAmount || 0)) || 0,
         cn_number: cnNumber,
         reconcile_expiry_return_id: reconcileExpiryReturnId,
@@ -2519,9 +2494,13 @@ const Purchases: React.FC = () => {
           <div className="w-36">
             <div className="flex items-center justify-between mb-1">
               <label className="block text-sm font-medium text-gray-300">Date <span className="text-red-400">*</span></label>
-              {!invoiceDate && (
+              {emailSource?.date ? (
+                <span className="text-[10px] text-blue-400 font-medium flex items-center gap-0.5" title={`Received email date: ${emailSource.date}`}>
+                  <Mail className="w-3 h-3 inline" /> Mail Date
+                </span>
+              ) : !invoiceDate ? (
                 <span className="text-[10px] text-amber-400 font-bold">Required</span>
-              )}
+              ) : null}
             </div>
             <input
               type="date"
@@ -2546,6 +2525,20 @@ const Purchases: React.FC = () => {
               className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               min="0"
               max="100"
+            />
+          </div>
+
+          {/* Additional Discount (Bill Discount) */}
+          <div className="w-28">
+            <label className="block text-sm font-medium text-amber-300 mb-1">Add. Disc (₹)</label>
+            <input
+              type="number"
+              value={extraCredit === 0 ? '' : extraCredit}
+              onChange={(e) => setExtraCredit(parseFloat(e.target.value) || '')}
+              className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-amber-500 font-bold text-amber-300"
+              min="0"
+              placeholder="0.00"
+              title="Additional Discount on entire bill (deducted from Grand Total)"
             />
           </div>
 
@@ -3155,17 +3148,6 @@ const Purchases: React.FC = () => {
                       >
                         <Edit size={14} />
                       </button>
-                      {item.medicine_name && item.medicine_name.trim().length > 0 && (
-                        <button
-                          type="button"
-                          onClick={() => handlePrintProductBarcodes([item])}
-                          disabled={generatingProductBarcode}
-                          className="text-purple-400 hover:text-purple-300 p-1 transition-colors cursor-pointer disabled:opacity-40"
-                          title="Generate & Print Barcode Stickers for this specific medicine (Replace damaged strip barcode)"
-                        >
-                          <QrCode size={14} />
-                        </button>
-                      )}
                       <button
                         onClick={() => removeItem(index)}
                         className="text-red-400 hover:text-red-300 p-1"
@@ -3216,6 +3198,14 @@ const Purchases: React.FC = () => {
               -₹{(parseFloat(cnAmount as any) || 0).toFixed(2)}
             </span>
           </div>
+          {(parseFloat(extraCredit as any) || 0) > 0 && (
+            <div className="flex flex-col items-center justify-center py-2 px-3 gap-0.5">
+              <span className="text-[10px] font-bold text-amber-400 uppercase tracking-widest">Add. Disc</span>
+              <span className="text-base font-bold text-red-400">
+                -₹{(parseFloat(extraCredit as any) || 0).toFixed(2)}
+              </span>
+            </div>
+          )}
         </div>
 
         <div className="flex items-center justify-between px-6 py-4 border-t border-white/20 bg-white/5">
@@ -3226,18 +3216,6 @@ const Purchases: React.FC = () => {
             </p>
           </div>
           <div className="flex items-center gap-3">
-            {items.some(i => (i.name || i.medicine_name || '').trim().length > 0) && (
-              <button
-                type="button"
-                onClick={() => handlePrintProductBarcodes(items)}
-                disabled={generatingProductBarcode}
-                className="bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/40 text-purple-300 px-4 py-3 rounded-xl font-bold text-xs shadow-md transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
-                title="Generate and print barcode stickers for all items in this purchase bill"
-              >
-                {generatingProductBarcode ? <RefreshCw size={14} className="animate-spin" /> : <QrCode size={14} />}
-                <span>Print Product Barcodes</span>
-              </button>
-            )}
             {(!selectedDistributor && (!distributorSearch.trim() || !isValidDistributorName(distributorSearch))) && (
               <div className="flex items-center gap-1.5 text-xs font-semibold text-rose-400 bg-rose-500/10 px-3 py-2 rounded-xl border border-rose-500/20 shadow-sm">
                 <span>⚠️ Distributor required before purchase can be finalized.</span>

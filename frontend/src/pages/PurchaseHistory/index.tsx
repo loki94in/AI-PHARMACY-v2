@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { api, apiClient } from '../../services/api';
 import { useApiQuery } from '../../hooks/useApiQuery';
-import { Search, Filter, Download, Eye, Clock, CheckCircle, XCircle, AlertCircle, Database, RefreshCw, Trash2, Edit, ChevronDown, ChevronUp, Calendar, Loader2 } from 'lucide-react';
+import { Search, Filter, Download, Eye, Clock, CheckCircle, XCircle, AlertCircle, Database, RefreshCw, Trash2, Edit, ChevronDown, ChevronUp, Calendar, Loader2, QrCode } from 'lucide-react';
 import { usePersistedDateRange } from '../../hooks/usePersistedDateRange';
 import { getTodayString, getNDaysAgoString, formatDisplayDate, toDateInputValue } from '../../utils/date';
 import { useInfiniteScroll } from '../../hooks/useInfiniteScroll';
@@ -143,6 +143,69 @@ const PurchaseHistory = () => {
   const [reissuingUid, setReissuingUid] = useState<number | null>(null);
   const [resolvingUid, setResolvingUid] = useState<number | null>(null);
   const [viewPurchase, setViewPurchase] = useState<any | null>(null);
+  const [generatingBarcodeId, setGeneratingBarcodeId] = useState<number | null>(null);
+  const [generatingItemIndex, setGeneratingItemIndex] = useState<number | null>(null);
+
+  const handlePrintBillBarcodes = async (purchaseId: number, existingItems?: any[]) => {
+    setGeneratingBarcodeId(purchaseId);
+    try {
+      let billItems = existingItems;
+      if (!billItems || billItems.length === 0) {
+        const res = await api.getPurchase(purchaseId);
+        billItems = res?.items || [];
+      }
+
+      const payload = (billItems || [])
+        .filter((it: any) => (it.name || it.medicine_name || '').trim().length > 0)
+        .map((it: any) => ({
+          name: (it.name || it.medicine_name || 'Medicine').trim(),
+          batch: (it.batch_no || it.batch_number || it.batch || 'N/A').trim(),
+        }));
+
+      if (payload.length === 0) {
+        toastEvent.trigger('No valid items found in purchase bill for barcode generation', 'error');
+        return;
+      }
+
+      const res = await api.generateMedicineBarcodes(payload);
+      if (res && res.pdfUrl) {
+        toastEvent.trigger(`Generated ${payload.length} product barcode label(s)`, 'success');
+        window.open(res.pdfUrl, '_blank');
+      } else {
+        toastEvent.trigger('Failed to generate product barcode labels', 'error');
+      }
+    } catch (err) {
+      console.error('Bill barcode generation error:', err);
+      toastEvent.trigger('Failed to generate product barcode labels', 'error');
+    } finally {
+      setGeneratingBarcodeId(null);
+    }
+  };
+
+  const handlePrintSingleProductBarcode = async (item: any, itemIndex?: number) => {
+    const name = (item.name || item.medicine_name || 'Medicine').trim();
+    const batch = (item.batch_no || item.batch_number || item.batch || 'N/A').trim();
+    if (!name) {
+      toastEvent.trigger('Invalid product for barcode generation', 'error');
+      return;
+    }
+
+    if (itemIndex !== undefined) setGeneratingItemIndex(itemIndex);
+    try {
+      const res = await api.generateMedicineBarcodes([{ name, batch }]);
+      if (res && res.pdfUrl) {
+        toastEvent.trigger(`Generated barcode label for ${name}`, 'success');
+        window.open(res.pdfUrl, '_blank');
+      } else {
+        toastEvent.trigger('Failed to generate product barcode label', 'error');
+      }
+    } catch (err) {
+      console.error('Product barcode generation error:', err);
+      toastEvent.trigger('Failed to generate product barcode label', 'error');
+    } finally {
+      if (itemIndex !== undefined) setGeneratingItemIndex(null);
+    }
+  };
 
   const fetchHistory = async () => {
     refetch();
@@ -612,6 +675,14 @@ const PurchaseHistory = () => {
                               <button onClick={() => openView(tx.id)} className="text-muted hover:text-primary transition-colors p-1 rounded hover:bg-primary/10" title="View Details">
                                 <Eye size={16} />
                               </button>
+                              <button
+                                onClick={() => handlePrintBillBarcodes(tx.id, tx.items)}
+                                disabled={generatingBarcodeId === tx.id}
+                                className="text-muted hover:text-purple-400 transition-colors p-1 rounded hover:bg-purple-500/10 cursor-pointer disabled:opacity-50"
+                                title="Generate & Print Product Barcodes for this Bill"
+                              >
+                                {generatingBarcodeId === tx.id ? <RefreshCw size={16} className="animate-spin text-purple-400" /> : <QrCode size={16} />}
+                              </button>
                               <button onClick={() => openEdit(tx.id)} className="text-muted hover:text-primary transition-colors p-1 rounded hover:bg-primary/10" title="Edit Purchase">
                                 <Edit size={16} />
                               </button>
@@ -1004,6 +1075,7 @@ const PurchaseHistory = () => {
                         <th className="px-4 py-3 text-right">Free</th>
                         <th className="px-4 py-3 text-right">Rate</th>
                         <th className="px-4 py-3 text-right">MRP</th>
+                        <th className="px-4 py-3 text-center">Barcode</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-glass-border/30">
@@ -1016,6 +1088,17 @@ const PurchaseHistory = () => {
                           <td className="px-4 py-3 text-right text-muted">{item.free_qty || 0}</td>
                           <td className="px-4 py-3 text-right text-muted font-mono">₹{(Number(item.cost_price) || 0).toFixed(2)}</td>
                           <td className="px-4 py-3 text-right text-muted font-mono">₹{(Number(item.mrp) || 0).toFixed(2)}</td>
+                          <td className="px-4 py-3 text-center">
+                            <button
+                              type="button"
+                              onClick={() => handlePrintSingleProductBarcode(item, i)}
+                              disabled={generatingItemIndex === i}
+                              className="text-purple-400 hover:text-purple-300 p-1.5 transition-colors cursor-pointer disabled:opacity-50 hover:bg-purple-500/10 rounded"
+                              title="Print Barcode sticker for this specific product (missing/damaged barcode)"
+                            >
+                              {generatingItemIndex === i ? <RefreshCw size={14} className="animate-spin" /> : <QrCode size={14} />}
+                            </button>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -1025,6 +1108,16 @@ const PurchaseHistory = () => {
             </div>
 
             <div className="p-5 border-t border-glass-border bg-bg2 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => handlePrintBillBarcodes(viewPurchase.purchase.id, viewPurchase.items)}
+                disabled={generatingBarcodeId === viewPurchase.purchase.id}
+                className="px-4 py-2 text-xs font-bold rounded-xl bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 border border-purple-500/40 transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                title="Generate and print barcodes for all products in this bill"
+              >
+                {generatingBarcodeId === viewPurchase.purchase.id ? <RefreshCw size={14} className="animate-spin" /> : <QrCode size={14} />}
+                Print All Barcodes
+              </button>
               <button
                 onClick={() => setViewPurchase(null)}
                 className="px-5 py-2 text-xs font-bold rounded-xl bg-bg3 hover:bg-glass-bg text-muted hover:text-text border border-glass-border transition-all cursor-pointer"

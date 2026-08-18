@@ -154,6 +154,57 @@ export async function getPharmacyOwnerPhone(dbInstance?: any): Promise<string> {
   return '';
 }
 
+/**
+ * Resolves the recipient phone number(s) for email arrival & invoice notifications based on user setting:
+ * 'both' | 'store' | 'owner' | 'none'
+ */
+export async function getInvoiceWhatsAppRecipients(dbInstance?: any): Promise<string[]> {
+  try {
+    const db = dbInstance || (await dbManager.getConnection());
+    
+    // Check if notifications are disabled overall
+    const toggleRow = await db.get("SELECT value FROM app_settings WHERE key = 'notify_owner_on_email_whatsapp'");
+    if (toggleRow && (toggleRow.value === '0' || toggleRow.value === 'false')) {
+      return [];
+    }
+
+    const recipientRow = await db.get("SELECT value FROM app_settings WHERE key = 'email_invoice_whatsapp_recipient'");
+    const mode = (recipientRow?.value || 'both').toLowerCase().trim();
+
+    if (mode === 'none') {
+      return [];
+    }
+
+    const storePhone = await getStorePhone(db);
+    const ownerPhone = await getPharmacyOwnerPhone(db);
+
+    const recipients: string[] = [];
+
+    if (mode === 'store' || mode === 'pharmacy') {
+      if (storePhone) recipients.push(storePhone);
+    } else if (mode === 'owner') {
+      if (ownerPhone) recipients.push(ownerPhone);
+    } else {
+      // 'both' (default)
+      if (storePhone) recipients.push(storePhone);
+      if (ownerPhone && !recipients.includes(ownerPhone)) {
+        recipients.push(ownerPhone);
+      }
+    }
+
+    // Safeguard fallback: If the chosen specific recipient is not configured in DB, try the other phone
+    if (recipients.length === 0) {
+      if (storePhone) recipients.push(storePhone);
+      else if (ownerPhone) recipients.push(ownerPhone);
+    }
+
+    return recipients;
+  } catch (err) {
+    console.warn('[StoreSettings] Error resolving invoice WhatsApp recipients:', err);
+    return [];
+  }
+}
+
 
 /**
  * Returns formatted store name with phone if available (e.g. "TANMANY MEDICAL (Ph: 9876543210)" or "TANMANY MEDICAL").

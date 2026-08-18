@@ -17,7 +17,8 @@ jest.unstable_mockModule('../src/whatsappClient.js', () => ({
 jest.unstable_mockModule('../src/telegramBot.js', () => ({
   __esModule: true,
   telegramBotService: {
-    sendDefaultNotification: jest.fn(() => Promise.resolve(true))
+    sendDefaultNotification: jest.fn(() => Promise.resolve(true)),
+    sendEmailAlertToTelegram: jest.fn(() => Promise.resolve(true))
   }
 }));
 
@@ -350,6 +351,73 @@ describe('Email Purchase Distributor Integrity Tests', () => {
     // Verify no Default Distributor was created
     const fakeDist = await db.get('SELECT * FROM distributors WHERE name = "Default Distributor"');
     expect(fakeDist).toBeUndefined();
+
+    await db.close();
+  });
+
+  test('11. Confirm getInvoiceWhatsAppRecipients resolves based on user setting (both, store, owner, none)', async () => {
+    const { getInvoiceWhatsAppRecipients } = await import('../src/services/storeSettingsService.js');
+    const { open } = await import('sqlite');
+    const sqlite3 = await import('sqlite3');
+    const db = await open({ filename: dbPath, driver: sqlite3.default.Database });
+
+    // Seed phone numbers in app_settings
+    await db.run('INSERT OR REPLACE INTO app_settings (key, value) VALUES ("shop_phone", "9130558910")');
+    await db.run('INSERT OR REPLACE INTO app_settings (key, value) VALUES ("owner_whatsapp_number", "8080888041")');
+
+    // 1. Setting: both (default)
+    await db.run('INSERT OR REPLACE INTO app_settings (key, value) VALUES ("notify_owner_on_email_whatsapp", "1")');
+    await db.run('INSERT OR REPLACE INTO app_settings (key, value) VALUES ("email_invoice_whatsapp_recipient", "both")');
+    const bothRecipients = await getInvoiceWhatsAppRecipients(db);
+    expect(bothRecipients).toContain('9130558910');
+    expect(bothRecipients).toContain('8080888041');
+
+    // 2. Setting: store only
+    await db.run('INSERT OR REPLACE INTO app_settings (key, value) VALUES ("email_invoice_whatsapp_recipient", "store")');
+    const storeRecipients = await getInvoiceWhatsAppRecipients(db);
+    expect(storeRecipients).toEqual(['9130558910']);
+
+    // 3. Setting: owner only
+    await db.run('INSERT OR REPLACE INTO app_settings (key, value) VALUES ("email_invoice_whatsapp_recipient", "owner")');
+    const ownerRecipients = await getInvoiceWhatsAppRecipients(db);
+    expect(ownerRecipients).toEqual(['8080888041']);
+
+    // 4. Setting: none
+    await db.run('INSERT OR REPLACE INTO app_settings (key, value) VALUES ("email_invoice_whatsapp_recipient", "none")');
+    const noneRecipients = await getInvoiceWhatsAppRecipients(db);
+    expect(noneRecipients).toEqual([]);
+
+    await db.close();
+  });
+
+  test('12. Confirm processEmail formats WhatsApp alert with strictly only Distributor Name and Bill Number', async () => {
+    const { open } = await import('sqlite');
+    const sqlite3 = await import('sqlite3');
+    const db = await open({ filename: dbPath, driver: sqlite3.default.Database });
+
+    // Enable both numbers for invoice alerts
+    await db.run('INSERT OR REPLACE INTO app_settings (key, value) VALUES ("notify_owner_on_email_whatsapp", "1")');
+    await db.run('INSERT OR REPLACE INTO app_settings (key, value) VALUES ("email_invoice_whatsapp_recipient", "both")');
+    await db.run('INSERT OR REPLACE INTO app_settings (key, value) VALUES ("shop_phone", "9130558910")');
+    await db.run('INSERT OR REPLACE INTO app_settings (key, value) VALUES ("owner_whatsapp_number", "8080888041")');
+
+    await emailServiceModule.processEmail({
+      uid: 1088,
+      from: 'orders@metropharma.com',
+      subject: 'Invoice INV-CONCISE-1088 for Store',
+      body: 'Invoice INV-CONCISE-1088 total 1500',
+      attachments: []
+    });
+
+    const notifs = await db.all('SELECT * FROM automation_notifications WHERE reference_id LIKE "%email_uid_1088%"');
+    expect(notifs.length).toBeGreaterThanOrEqual(1);
+
+    for (const notif of notifs) {
+      expect(notif.message).toContain('Distributor: Metro Pharma Logistics');
+      expect(notif.message).toContain('Invoice No: INV-CONCISE-1088');
+      // Must not contain unnecessary bulk text
+      expect(notif.message).not.toContain('No items could be extracted from the email text body');
+    }
 
     await db.close();
   });

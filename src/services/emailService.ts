@@ -15,7 +15,7 @@ import * as XLSX from 'xlsx';
 import { eventService } from './eventService.js';
 import { aiCameraService } from './aiCameraService.js';
 import { extractCleanEmail } from '../utils/emailSanitizer.js';
-import { getEmailRetentionLimit, getStorePhone } from './storeSettingsService.js';
+import { getEmailRetentionLimit, getStorePhone, getInvoiceWhatsAppRecipients } from './storeSettingsService.js';
 import { config, getAppDataDir } from '../config/index.js';
 import { medicineService } from './medicineService.js';
 import { isValidDistributorName } from '../utils/nameNormalizer.js';
@@ -1503,61 +1503,59 @@ export class EmailService {
       db = await dbManager.getConnection();
       const refId = uid ? `email_uid_${uid}` : `email_subj_${(processedEmail.subject || '').replace(/[^a-zA-Z0-9._-]/g, '_')}`;
 
-      // Check ON/OFF setting for Store Owner WhatsApp email alerts
-      const toggleRow = await db.get("SELECT value FROM app_settings WHERE key = 'notify_owner_on_email_whatsapp'");
-      const notifyOwnerEnabled = toggleRow ? toggleRow.value === '1' : true; // Default enabled
-
       let whatsappSentToOwner = false;
-      const ownerPhone = await getStorePhone(db);
+      const targetPhones = await getInvoiceWhatsAppRecipients(db);
 
-      if (!notifyOwnerEnabled) {
-        console.log(`[MailArrival] Store Owner email WhatsApp notification is disabled in settings. Skipping WhatsApp alert for ${refId}.`);
-      } else if (ownerPhone) {
-        const existingNotif = await db.get(
-          `SELECT id FROM automation_notifications 
-           WHERE recipient_phone = ? 
-             AND status = 'sent' 
-             AND (reference_id = ? OR reference_id LIKE ?)
-           LIMIT 1`,
-          [ownerPhone, refId, `${refId}%`]
-        );
+      if (!targetPhones || targetPhones.length === 0) {
+        console.log(`[MailArrival] Invoice/Email WhatsApp alerts disabled or no recipient phone configured. Skipping WhatsApp alert for ${refId}.`);
+      } else {
+        // Build concise message (strictly Distributor Name & Bill Number as requested)
+        const distName = (orderInfo?.distributorName && isValidDistributorName(orderInfo.distributorName))
+          ? orderInfo.distributorName.trim()
+          : (orderInfo?.senderEmail || processedEmail.from || 'Distributor');
+        const billNo = (orderInfo?.invoiceNumber && orderInfo.invoiceNumber !== 'N/A')
+          ? orderInfo.invoiceNumber.trim()
+          : 'N/A';
 
-        if (existingNotif) {
-          console.log(`[MailArrival] Owner WhatsApp notification already logged for ${refId}. Skipping duplicate WhatsApp.`);
-          whatsappSentToOwner = true;
-        } else {
-          // Attach sender email to orderInfo if not present
-          const enrichedOrderInfo = {
-            ...orderInfo,
-            senderEmail: orderInfo?.senderEmail || processedEmail.from
-          };
+        const message = isOrder
+          ? `Distributor: ${distName}\nInvoice No: ${billNo}`
+          : `📧 *New Email Received*\nFrom: ${processedEmail.from || 'Unknown'}\nSubject: ${processedEmail.subject || 'No Subject'}`;
 
-          if (isOrder) {
-            // Send detailed invoice stock alert to Store Owner
-            await this.sendDistributorWhatsAppAlert(enrichedOrderInfo, refId);
+        for (const phone of targetPhones) {
+          const phoneRefId = `${refId}_${phone}`;
+          const existingNotif = await db.get(
+            `SELECT id FROM automation_notifications 
+             WHERE recipient_phone = ? 
+               AND status = 'sent' 
+               AND (reference_id = ? OR reference_id = ? OR reference_id LIKE ?)
+             LIMIT 1`,
+            [phone, phoneRefId, refId, `${refId}%`]
+          );
+
+          if (existingNotif) {
+            console.log(`[MailArrival] WhatsApp notification already logged for ${phone} (${refId}). Skipping duplicate.`);
             whatsappSentToOwner = true;
-          } else {
-            // Send general mail arrival alert to Store Owner
-            const timeStr = (parsedDate ? new Date(parsedDate) : new Date()).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
-            const hasAtt = (processedEmail.attachments || []).length > 0;
-            const message = `📧 *New Email Received in Pharmacy Mailbox*\n\n*Mail ID / From:* ${processedEmail.from}\n*Subject:* ${processedEmail.subject}\n*Time:* ${timeStr}\n${hasAtt ? '📎 *Attachments:* Included\n' : ''}\n— AI Pharmacy OS`;
-            
-            try {
-              await sendMessage(ownerPhone, undefined, message);
-              console.log(`[MailArrival] WhatsApp alert sent to Store Owner (${ownerPhone}) for ${refId}`);
-              await db.run(
-                `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
-                 VALUES (?, ?, ?, ?, ?, ?)`,
-                ['email_arrival', 'Admin / Store Owner', ownerPhone, message, 'sent', refId]
-              );
-              whatsappSentToOwner = true;
-            } catch (wsErr: any) {
-              console.error('[MailArrival] Failed to send Store Owner WhatsApp mail alert:', wsErr);
-            }
+            continue;
+          }
+
+          try {
+            await sendMessage(phone, undefined, message);
+            console.log(`[MailArrival] WhatsApp alert sent to ${phone} for ${refId}`);
+            await db.run(
+              `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
+               VALUES (?, ?, ?, ?, ?, ?)`,
+              [isOrder ? 'distributor_invoice' : 'email_arrival', distName || 'Admin / Store Owner', phone, message, 'sent', phoneRefId]
+            );
+            whatsappSentToOwner = true;
+          } catch (wsErr: any) {
+            console.error(`[MailArrival] Failed to send WhatsApp mail alert to ${phone}:`, wsErr);
+            await db.run(
+              `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, error_message, reference_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?)`,
+              [isOrder ? 'distributor_invoice' : 'email_arrival', distName || 'Admin / Store Owner', phone, message, 'failed', wsErr?.message || 'Unknown error', phoneRefId]
+            );
           }
         }
-      } else {
-        console.warn('[MailArrival] Store Owner phone not configured in app_settings. Skipping WhatsApp alert.');
       }
 
       // 2. Telegram Alert to Store Owner / Default Chat
@@ -1597,12 +1595,12 @@ export class EmailService {
           invoiceNo: orderInfo?.invoiceNumber !== 'N/A' ? orderInfo?.invoiceNumber : undefined,
           timestamp: timeStr,
           whatsappSent: whatsappSentToOwner,
-          whatsappNumber: ownerPhone || undefined
+          whatsappNumber: (targetPhones && targetPhones.length > 0) ? targetPhones.join(', ') : undefined
         });
       } catch (sseErr) {
         console.error('[MailArrival] Failed to send SSE in-app email notification:', sseErr);
       }
-      // Note: Incoming email notifications go ONLY to Store Owner. Delivery boys are NOT notified.
+      // Note: Incoming email notifications go ONLY to Store Owner / Pharmacy. Delivery boys are NOT notified.
     } catch (err) {
       console.error('[MailArrival] Error in notifyMailArrival:', err);
     }
@@ -1610,46 +1608,55 @@ export class EmailService {
 
   /**
    * Deprecated delivery boy email notification method.
-   * Incoming distributor email notifications now strictly go to Store Owner only.
+   * Incoming distributor email notifications now strictly go to Store Owner / Pharmacy only.
    */
   private async notifyDeliveryBoys(orderInfo: any): Promise<void> {
-    console.log('[EmailService] Delivery boys are excluded from email arrival notifications. Email alerts are routed exclusively to Store Owner.');
+    console.log('[EmailService] Delivery boys are excluded from email arrival notifications. Email alerts are routed exclusively to Store / Owner.');
   }
 
   /**
-   * Send distributor invoice details via WhatsApp to the owner's phone
+   * Send distributor invoice details via WhatsApp to configured recipients
    */
   public async sendDistributorWhatsAppAlert(orderInfo: any, customRefId?: string): Promise<void> {
     let db = null;
     try {
       db = await dbManager.getConnection();
-      const shopPhone = await getStorePhone(db);
+      const targetPhones = await getInvoiceWhatsAppRecipients(db);
 
-      if (!shopPhone) {
-        console.warn('Store / Owner phone not configured in settings. Skipping distributor invoice alert.');
+      if (!targetPhones || targetPhones.length === 0) {
+        console.log('[EmailService] No active WhatsApp recipients configured for invoice alert. Skipping.');
         return;
       }
 
+      const distName = (orderInfo?.distributorName && isValidDistributorName(orderInfo.distributorName))
+        ? orderInfo.distributorName.trim()
+        : (orderInfo?.senderEmail || 'Distributor');
+      const billNo = (orderInfo?.invoiceNumber && orderInfo.invoiceNumber !== 'N/A')
+        ? orderInfo.invoiceNumber.trim()
+        : 'N/A';
+
       const logRefId = customRefId || orderInfo.invoiceNumber || 'distributor_invoice';
+      const message = `Distributor: ${distName}\nInvoice No: ${billNo}`;
 
-      const message = `Distributor: ${orderInfo.distributorName}\nInvoice No: ${orderInfo.invoiceNumber}\nTime Received: ${orderInfo.timeStr}\n\n— AI Pharmacy OS`;
-
-      try {
-        await sendMessage(shopPhone, undefined, message);
-        console.log(`Distributor WhatsApp alert sent to owner/store phone: ${shopPhone}`);
-        
-        await db.run(
-          `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
-           VALUES (?, ?, ?, ?, ?, ?)`,
-          ['distributor_invoice', orderInfo.distributorName, shopPhone, message, 'sent', logRefId]
-        );
-      } catch (wsError: any) {
-        console.error(`Failed to send distributor alert to ${shopPhone}:`, wsError);
-        await db.run(
-          `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, error_message, reference_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
-          ['distributor_invoice', orderInfo.distributorName, shopPhone, message, 'failed', wsError.message || 'Unknown error', logRefId]
-        );
+      for (const phone of targetPhones) {
+        const phoneRefId = `${logRefId}_${phone}`;
+        try {
+          await sendMessage(phone, undefined, message);
+          console.log(`Distributor WhatsApp alert sent to: ${phone}`);
+          
+          await db.run(
+            `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
+             VALUES (?, ?, ?, ?, ?, ?)`,
+            ['distributor_invoice', distName, phone, message, 'sent', phoneRefId]
+          );
+        } catch (wsError: any) {
+          console.error(`Failed to send distributor alert to ${phone}:`, wsError);
+          await db.run(
+            `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, error_message, reference_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            ['distributor_invoice', distName, phone, message, 'failed', wsError.message || 'Unknown error', phoneRefId]
+          );
+        }
       }
     } catch (err) {
       console.error('Error in sendDistributorWhatsAppAlert:', err);
@@ -1663,6 +1670,7 @@ export class EmailService {
 
       // Notify owner & system channels for all mail arrivals
       await this.notifyMailArrival({
+        uid: (email as any).uid,
         processedEmail: email,
         orderInfo,
         isOrder: !!isOrderRelated,
@@ -3353,10 +3361,11 @@ export class EmailService {
         }
       }
 
-      // Scan recent emails (up to 30) for any email missing a sent owner notification
+      // Scan recent emails (up to 30) for any email missing a sent notification
       try {
-        const ownerPhone = await getStorePhone(db);
-        if (ownerPhone) {
+        const targetPhones = await getInvoiceWhatsAppRecipients(db);
+        if (targetPhones && targetPhones.length > 0) {
+          const primaryPhone = targetPhones[0];
           const unnotifiedEmails = await db.all(
             `SELECT e.* FROM emails e
              LEFT JOIN automation_notifications n 
@@ -3366,11 +3375,11 @@ export class EmailService {
              WHERE n.id IS NULL
              ORDER BY e.uid DESC
              LIMIT 30`,
-            [ownerPhone]
+            [primaryPhone]
           );
 
           if (unnotifiedEmails && unnotifiedEmails.length > 0) {
-            console.log(`[Sync] Found ${unnotifiedEmails.length} recent un-notified email(s). Catching up owner notifications...`);
+            console.log(`[Sync] Found ${unnotifiedEmails.length} recent un-notified email(s). Catching up notifications...`);
             for (const rawEmail of unnotifiedEmails) {
               const processedEmail: ProcessedEmail = {
                 from: rawEmail.from_addr || '',

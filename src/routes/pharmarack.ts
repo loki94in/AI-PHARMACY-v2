@@ -2228,7 +2228,8 @@ router.get('/sent-orders/latest-map', async (req, res) => {
       const parsedItems = items.map((i: any) => ({
         productCode: i.productCode || i.product_code || '',
         productName: i.productName || i.product || i.name || '',
-        qty: i.qty || i.quantity || 1
+        qty: i.qty || i.quantity || 1,
+        placedAt: Number(i.placedAt || i.placed_at || placedAt || 0)
       }));
 
       const updateKey = (key: string) => {
@@ -2246,13 +2247,15 @@ router.get('/sent-orders/latest-map', async (req, res) => {
           }
           parsedItems.forEach((pi: any) => {
             const piNormName = (pi.productName || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-            const exists = sentMap[key].items.some((ex: any) => {
+            const existingIndex = sentMap[key].items.findIndex((ex: any) => {
               if (pi.productCode && ex.productCode && pi.productCode === ex.productCode) return true;
               const exNormName = (ex.productName || '').toLowerCase().replace(/[^a-z0-9]/g, '');
               return piNormName && exNormName && (piNormName === exNormName || (piNormName.length >= 4 && exNormName.length >= 4 && (piNormName.includes(exNormName) || exNormName.includes(piNormName))));
             });
-            if (!exists) {
+            if (existingIndex === -1) {
               sentMap[key].items.push(pi);
+            } else if (pi.placedAt > (sentMap[key].items[existingIndex].placedAt || 0)) {
+              sentMap[key].items[existingIndex].placedAt = pi.placedAt;
             }
           });
         }

@@ -927,9 +927,11 @@ router.post('/manual', async (req, res) => {
     });
     const globalCdDisc = hasItemCd ? 0 : (subtotal * (cdPerVal / 100));
     const originalAmount = subtotal + totalCgst + totalSgst - globalCdDisc;
-    const cnAmountVal = parseFloat(cn_amount !== undefined ? cn_amount : extra_credit) || 0;
+    const cnAmountVal = parseFloat(cn_amount) || 0;
+    const extraCreditVal = parseFloat(extra_credit) || 0;
+    const totalDeductions = cnAmountVal + extraCreditVal;
     const cnNumberVal = cn_number || null;
-    const grandTotal = Math.max(0, originalAmount - cnAmountVal);
+    const grandTotal = Math.max(0, originalAmount - totalDeductions);
 
     // Generate app_invoice_no sequentially
     const lastPur = await db.get(
@@ -957,7 +959,7 @@ router.post('/manual', async (req, res) => {
     const purchRes = await db.run(
       `INSERT INTO purchases (distributor_id, invoice_no, app_invoice_no, date, total_amount, cgst_value, sgst_value, cn_amount, cn_number, original_amount) 
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [distId, invoice_no, appInvoiceNo, purchaseDate, grandTotal, totalCgst, totalSgst, cnAmountVal, cnNumberVal, originalAmount]
+      [distId, invoice_no, appInvoiceNo, purchaseDate, grandTotal, totalCgst, totalSgst, totalDeductions, cnNumberVal, originalAmount]
     );
     const purchaseId = purchRes.lastID;
 
@@ -1400,9 +1402,11 @@ async function handleUpdatePurchaseFull(req: express.Request, res: express.Respo
     });
     const globalCdDisc = hasItemCd ? 0 : (subtotal * (cdPerVal / 100));
     const originalAmount = subtotal + totalCgst + totalSgst - globalCdDisc;
-    const cnAmountVal = parseFloat(cn_amount !== undefined ? cn_amount : extra_credit) || 0;
+    const cnAmountVal = parseFloat(cn_amount) || 0;
+    const extraCreditVal = parseFloat(extra_credit) || 0;
+    const totalDeductions = cnAmountVal + extraCreditVal;
     const cnNumberVal = cn_number || null;
-    const grandTotal = Math.max(0, originalAmount - cnAmountVal);
+    const grandTotal = Math.max(0, originalAmount - totalDeductions);
 
     // Revert old credit reconciliation
     await db.run(
@@ -1428,7 +1432,7 @@ async function handleUpdatePurchaseFull(req: express.Request, res: express.Respo
       `UPDATE purchases 
        SET distributor_id = ?, invoice_no = ?, date = ?, total_amount = ?, cgst_value = ?, sgst_value = ?, cn_amount = ?, cn_number = ?, original_amount = ? 
        WHERE id = ?`,
-      [distRow.id, invoice_no, purchaseDate, grandTotal, totalCgst, totalSgst, cnAmountVal, cnNumberVal, originalAmount, id]
+      [distRow.id, invoice_no, purchaseDate, grandTotal, totalCgst, totalSgst, totalDeductions, cnNumberVal, originalAmount, id]
     );
 
     // Re-apply credit reconciliation if necessary

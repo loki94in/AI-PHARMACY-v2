@@ -778,7 +778,10 @@ function IntegrationsCredentialsTab({ rawSettings, refetchSettings, isVisible }:
   const [waPreferredSystem, setWaPreferredSystem] = useState(rawSettings.whatsapp_preferred_system || 'web');
   const [waBusinessToken, setWaBusinessToken] = useState(rawSettings.wa_business_access_token || '');
   const [waBusinessPhoneId, setWaBusinessPhoneId] = useState(rawSettings.wa_business_phone_number_id || '');
-  const [notifyOwnerOnEmailWhatsapp, setNotifyOwnerOnEmailWhatsapp] = useState(rawSettings.notify_owner_on_email_whatsapp !== '0');
+  const [emailInvoiceRecipient, setEmailInvoiceRecipient] = useState<string>(() => {
+    if (rawSettings.notify_owner_on_email_whatsapp === '0') return 'none';
+    return rawSettings.email_invoice_whatsapp_recipient || 'both';
+  });
   
   const [telegramEnabled, setTelegramEnabled] = useState(rawSettings.telegram_enabled === 'true');
   const [telegramToken, setTelegramToken] = useState(rawSettings.telegram_token || '');
@@ -821,7 +824,7 @@ function IntegrationsCredentialsTab({ rawSettings, refetchSettings, isVisible }:
     setWaPreferredSystem(rawSettings.whatsapp_preferred_system || 'web');
     setWaBusinessToken(rawSettings.wa_business_access_token || '');
     setWaBusinessPhoneId(rawSettings.wa_business_phone_number_id || '');
-    setNotifyOwnerOnEmailWhatsapp(rawSettings.notify_owner_on_email_whatsapp !== '0');
+    setEmailInvoiceRecipient(rawSettings.notify_owner_on_email_whatsapp === '0' ? 'none' : (rawSettings.email_invoice_whatsapp_recipient || 'both'));
     setTelegramEnabled(rawSettings.telegram_enabled === 'true');
     setTelegramToken(rawSettings.telegram_token || '');
     setTelegramChatId(rawSettings.telegram_chat_id || '');
@@ -840,7 +843,8 @@ function IntegrationsCredentialsTab({ rawSettings, refetchSettings, isVisible }:
         whatsapp_preferred_system: waPreferredSystem,
         wa_business_access_token: waBusinessToken,
         wa_business_phone_number_id: waBusinessPhoneId,
-        notify_owner_on_email_whatsapp: notifyOwnerOnEmailWhatsapp ? '1' : '0',
+        email_invoice_whatsapp_recipient: emailInvoiceRecipient,
+        notify_owner_on_email_whatsapp: emailInvoiceRecipient === 'none' ? '0' : '1',
         telegram_enabled: telegramEnabled ? 'true' : 'false',
         telegram_token: telegramToken,
         telegram_chat_id: telegramChatId,
@@ -945,23 +949,71 @@ function IntegrationsCredentialsTab({ rawSettings, refetchSettings, isVisible }:
             </div>
           </div>
 
-          {/* Toggle: Store Owner Email Notifications via WhatsApp */}
-          <div className="md:col-span-2 bg-bg3/30 border border-border rounded-xl p-4 flex items-center justify-between">
-            <div>
-              <h3 className="text-xs font-bold text-text uppercase">Store Owner Email Notifications (WhatsApp)</h3>
-              <p className="text-[11px] text-muted mt-0.5">
-                Send instant WhatsApp alerts to the Store Owner when new distributor invoice emails are received. Notifications are routed exclusively to the Store Owner's phone number.
-              </p>
+          {/* Email Invoice WhatsApp Alert Recipient Management */}
+          <div className="md:col-span-2 bg-bg3/30 border border-border rounded-xl p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-xs font-bold text-text uppercase flex items-center gap-2">
+                  <Mail size={14} className="text-primary" /> Invoice Email WhatsApp Notifications
+                </h3>
+                <p className="text-[11px] text-muted mt-0.5">
+                  Choose which phone number(s) receive automatic WhatsApp alerts when distributor invoice emails are received.
+                </p>
+              </div>
             </div>
-            <label className="relative inline-flex items-center cursor-pointer ml-4">
-              <input
-                type="checkbox"
-                checked={notifyOwnerOnEmailWhatsapp}
-                onChange={(e) => setNotifyOwnerOnEmailWhatsapp(e.target.checked)}
-                className="sr-only peer"
-              />
-              <div className="w-11 h-6 bg-bg3 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
-            </label>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 pt-1">
+              {[
+                {
+                  id: 'both',
+                  label: 'Both Numbers',
+                  desc: 'Store & Owner',
+                  phone: [rawSettings.shop_phone || rawSettings.phone, rawSettings.owner_whatsapp_number].filter(Boolean).join(' + ') || 'Both configured'
+                },
+                {
+                  id: 'pharmacy',
+                  label: 'Pharmacy / Counter',
+                  desc: 'Store Phone',
+                  phone: rawSettings.shop_phone || rawSettings.phone || 'Not configured'
+                },
+                {
+                  id: 'owner',
+                  label: 'Owner WhatsApp',
+                  desc: 'Owner Mobile',
+                  phone: rawSettings.owner_whatsapp_number || 'Not configured'
+                },
+                {
+                  id: 'none',
+                  label: 'Disabled',
+                  desc: 'No Alerts',
+                  phone: 'Turned off'
+                }
+              ].map((opt) => {
+                const isSelected = emailInvoiceRecipient === opt.id;
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => setEmailInvoiceRecipient(opt.id)}
+                    className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                      isSelected
+                        ? 'bg-primary/10 border-primary shadow-sm text-text'
+                        : 'bg-bg2/60 border-border text-muted hover:text-text hover:bg-bg2'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold">{opt.label}</span>
+                      <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center ${isSelected ? 'border-primary bg-primary' : 'border-border'}`}>
+                        {isSelected && <span className="w-1.5 h-1.5 rounded-full bg-white"></span>}
+                      </span>
+                    </div>
+                    <div className="mt-2 text-[10px] text-muted truncate">
+                      <span className="font-mono">{opt.phone}</span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
       </div>

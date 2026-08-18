@@ -155,11 +155,18 @@ export default function PharmarackCart() {
     }
   };
 
-  const isItemAlreadySent = (item: CartLineItem, dist: Distributor): boolean => {
+  interface PastOrderedInfo {
+    isPastOrdered: boolean;
+    placedAt: number;
+    placedDateStr: string;
+    isToday: boolean;
+    isYesterday: boolean;
+  }
+
+  const getPastOrderedInfo = (item: CartLineItem, dist: Distributor): PastOrderedInfo => {
     const storeKey = dist.storeId ? String(dist.storeId) : (dist.storeName || '').toLowerCase().trim();
     const normDistName = (dist.storeName || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
-    // 1. Find sentInfo by storeId or storeName or fuzzy normalized storeName
     let sentInfo = latestSentMap[storeKey] || latestSentMap[(dist.storeName || '').toLowerCase().trim()] || latestSentMap[normDistName];
     if (!sentInfo && normDistName) {
       const matchKey = Object.keys(latestSentMap).find(k => {
@@ -170,40 +177,101 @@ export default function PharmarackCart() {
     }
 
     if (!sentInfo) {
-      // Fallback: If distributor was sent successfully in current session, treat items as sent
-      if (sentWaStatusMap[dist.storeId] === 'success' || sentWaStatusMap[dist.storeId] === 'queued') {
-        return true;
-      }
-      return false;
+      return { isPastOrdered: false, placedAt: 0, placedDateStr: '', isToday: false, isYesterday: false };
     }
 
-    // 2. Check if productCode / productName was included in logged sent items
+    let matchedSentItem: any = null;
     if (Array.isArray(sentInfo.items) && sentInfo.items.length > 0) {
       const normItemName = item.productName.toLowerCase().replace(/[^a-z0-9]/g, '');
-      const matched = sentInfo.items.some((sentItem: any) => {
+      matchedSentItem = sentInfo.items.find((sentItem: any) => {
         if (item.productCode && sentItem.productCode && item.productCode === sentItem.productCode) {
           return true;
         }
         const normSentName = (sentItem.productName || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-        return normItemName === normSentName || (normItemName.length >= 4 && normSentName.length >= 4 && (normItemName.includes(normSentName) || normSentName.includes(normItemName)));
+        return normItemName && normSentName && (normItemName === normSentName || (normItemName.length >= 4 && normSentName.length >= 4 && (normItemName.includes(normSentName) || normSentName.includes(normItemName))));
       });
-      if (matched) return true;
     }
 
-    // 3. If createdDate exists on cart item, compare against last placedAt timestamp
-    if (sentInfo.placedAt && item.createdDate) {
-      const itemCreatedMs = new Date(item.createdDate).getTime();
-      if (!isNaN(itemCreatedMs) && itemCreatedMs > 0) {
-        return itemCreatedMs <= sentInfo.placedAt;
-      }
+    if (!matchedSentItem && !sentInfo.placedAt) {
+      return { isPastOrdered: false, placedAt: 0, placedDateStr: '', isToday: false, isYesterday: false };
     }
 
-    // 4. Session status fallback
+    const placedTimestamp = Number(matchedSentItem?.placedAt || sentInfo.placedAt || 0);
+    if (!placedTimestamp || isNaN(placedTimestamp)) {
+      return { isPastOrdered: false, placedAt: 0, placedDateStr: '', isToday: false, isYesterday: false };
+    }
+
+    const placedDate = new Date(placedTimestamp);
+    const now = new Date();
+
+    const isToday = placedDate.getFullYear() === now.getFullYear() &&
+                    placedDate.getMonth() === now.getMonth() &&
+                    placedDate.getDate() === now.getDate();
+
+    const yesterday = new Date(now);
+    yesterday.setDate(now.getDate() - 1);
+    const isYesterday = placedDate.getFullYear() === yesterday.getFullYear() &&
+                        placedDate.getMonth() === yesterday.getMonth() &&
+                        placedDate.getDate() === yesterday.getDate();
+
+    const placedDateStr = placedDate.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
+
+    return {
+      isPastOrdered: true,
+      placedAt: placedTimestamp,
+      placedDateStr,
+      isToday,
+      isYesterday
+    };
+  };
+
+  const isItemAlreadySent = (item: CartLineItem, dist: Distributor): boolean => {
+    // Session status fallback: sent today in current session
     if (sentWaStatusMap[dist.storeId] === 'success' || sentWaStatusMap[dist.storeId] === 'queued') {
       return true;
     }
 
+    const pastInfo = getPastOrderedInfo(item, dist);
+    // Only treat as already sent if it was placed TODAY in a previous session
+    if (pastInfo.isPastOrdered && pastInfo.isToday) {
+      return true;
+    }
+
     return false;
+  };
+
+  const handleToggleItemCheck = (storeId: number, productKey: string, isChecked: boolean) => {
+    setDistributors(prev => {
+      const next = prev.map(dist => {
+        if (dist.storeId !== storeId) return dist;
+        return {
+          ...dist,
+          items: dist.items.map(item => {
+            const key = item.productCode || item.productName;
+            if (key === productKey || item.productCode === productKey || item.productName === productKey) {
+              return { ...item, isChecked };
+            }
+            return item;
+          })
+        };
+      });
+      cachedDistributors = next;
+      return next;
+    });
+  };
+
+  const handleToggleSelectAllInDist = (storeId: number, isChecked: boolean) => {
+    setDistributors(prev => {
+      const next = prev.map(dist => {
+        if (dist.storeId !== storeId) return dist;
+        return {
+          ...dist,
+          items: dist.items.map(item => ({ ...item, isChecked }))
+        };
+      });
+      cachedDistributors = next;
+      return next;
+    });
   };
 
   const loadSentDates = async () => {
@@ -294,13 +362,15 @@ export default function PharmarackCart() {
   const isSendingBatchRef = useRef(false);
   const [sendingWaDistributorId, setSendingWaDistributorId] = useState<number | null>(null);
 
-  // Persistent WhatsApp sent status map by storeId (preserves history across reloads & sessions)
+  // Persistent WhatsApp sent status map by storeId (preserves history across reloads & sessions, scoped to TODAY)
+  const getTodayDateKey = () => new Date().toISOString().slice(0, 10);
+
   const [sentWaStatusMap, setSentWaStatusMap] = useState<Record<number, 'success' | 'queued' | 'sending' | 'error'>>(() => {
     try {
       const saved = localStorage.getItem('pharmacart_sent_wa_history');
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (parsed && typeof parsed.data === 'object') {
+        if (parsed && typeof parsed.data === 'object' && parsed.date === getTodayDateKey()) {
           return parsed.data;
         }
       }
@@ -311,6 +381,7 @@ export default function PharmarackCart() {
   useEffect(() => {
     try {
       localStorage.setItem('pharmacart_sent_wa_history', JSON.stringify({
+        date: getTodayDateKey(),
         timestamp: Date.now(),
         data: sentWaStatusMap
       }));
@@ -739,17 +810,26 @@ export default function PharmarackCart() {
     return rate * qty;
   };
 
+  const getDistributorCheckedTotal = (dist: Distributor): number => {
+    return (dist.items || [])
+      .filter(item => item.isChecked !== false)
+      .reduce((sum, item) => sum + getCartItemAmount(item), 0);
+  };
+
+  const getDistributorFullTotal = (dist: Distributor): number => {
+    return (dist.items || [])
+      .reduce((sum, item) => sum + getCartItemAmount(item), 0);
+  };
+
   const unsentCartDistributors = React.useMemo(() => {
     return distributors.map(dist => {
-      const freshItems = dist.items.filter(item => !isItemAlreadySent(item, dist));
-      const computedTotal = freshItems.reduce((sum, item) => sum + getCartItemAmount(item), 0);
+      const checkedTotal = getDistributorCheckedTotal(dist);
       return {
         ...dist,
-        items: freshItems,
-        lineTotal: computedTotal
+        lineTotal: checkedTotal
       };
     }).filter(dist => dist.items.length > 0);
-  }, [distributors, latestSentMap, sentWaStatusMap]);
+  }, [distributors]);
 
   const sentCartDistributors = React.useMemo(() => {
     return distributors.map(dist => {
@@ -765,10 +845,10 @@ export default function PharmarackCart() {
 
   const activeCartDistributors = React.useMemo(() => {
     return distributors.map(dist => {
-      const computedTotal = dist.items.reduce((sum, item) => sum + getCartItemAmount(item), 0);
+      const fullTotal = getDistributorFullTotal(dist);
       return {
         ...dist,
-        lineTotal: computedTotal
+        lineTotal: fullTotal
       };
     }).filter(dist => dist.items.length > 0);
   }, [distributors]);
@@ -1031,11 +1111,13 @@ export default function PharmarackCart() {
   const handleSendDeliveryBoyNotification = async (dist: Distributor) => {
     setSendingDeliveryBoyNotifId(dist.storeId);
     try {
+      const checkedItems = dist.items.filter(item => item.isChecked !== false);
+      const itemsToSend = checkedItems.length > 0 ? checkedItems : dist.items;
       const res = await api.sendManualCartNotification({
         storeId: dist.storeId,
         storeName: dist.storeName,
         deliveryPersons: dist.deliveryPersons,
-        items: dist.items
+        items: itemsToSend
       });
       if (res && res.success) {
         toastEvent.trigger(`Delivery Boy notification sent via WhatsApp for ${dist.storeName}!`, 'success');
@@ -1055,11 +1137,13 @@ export default function PharmarackCart() {
   const handleSendManualNotification = async (dist: Distributor) => {
     setSendingNotifId(dist.storeId);
     try {
+      const checkedItems = dist.items.filter(item => item.isChecked !== false);
+      const itemsToSend = checkedItems.length > 0 ? checkedItems : dist.items;
       const res = await api.sendManualCartNotification({
         storeId: dist.storeId,
         storeName: dist.storeName,
         deliveryPersons: dist.deliveryPersons,
-        items: dist.items
+        items: itemsToSend
       });
       if (res && res.success) {
         toastEvent.trigger(res.message || 'Notification sent successfully!', 'success');
@@ -1137,9 +1221,9 @@ export default function PharmarackCart() {
     const storePhone = storeInfo.phone || storeInfo.adminPhone || '';
     const formattedStorePhone = storePhone ? formatPhone(storePhone) : 'N/A';
 
-    // Filter to send ONLY fresh/new items so distributor is not confused by already-sent old items
-    const freshItems = dist.items.filter(item => !isItemAlreadySent(item, dist));
-    const itemsToSend = freshItems.length > 0 ? freshItems : dist.items;
+    // Filter to send ONLY checked items (unchecked items are excluded by user)
+    const checkedItems = dist.items.filter(item => item.isChecked !== false);
+    const itemsToSend = checkedItems.length > 0 ? checkedItems : dist.items;
 
     let msg = `🏥 *${storeName}*\n`;
     msg += `📍 *Delivery Location:* ${address}\n`;
@@ -1236,11 +1320,11 @@ export default function PharmarackCart() {
       return;
     }
 
-    const freshItems = dist.items.filter(item => !isItemAlreadySent(item, dist));
-    const itemsToOrder = freshItems.length > 0 ? freshItems : dist.items;
+    const checkedItems = dist.items.filter(item => item.isChecked !== false);
+    const itemsToOrder = checkedItems.length > 0 ? checkedItems : dist.items;
 
-    if (itemsToOrder.length === 0) {
-      toastEvent.trigger(`No items found in cart for ${dist.storeName}.`, 'info');
+    if (dist.items.filter(item => item.isChecked !== false).length === 0) {
+      toastEvent.trigger(`No items selected for ${dist.storeName}. Please check at least 1 item to send.`, 'info');
       return;
     }
 
@@ -1422,12 +1506,12 @@ export default function PharmarackCart() {
       const ordersPayload: { storeName: string; storeId: number; phone: string; message: string; lineTotal?: number; items: any[] }[] = [];
 
       for (const dist of mapped) {
-        const freshItems = dist.items.filter(item => !isItemAlreadySent(item, dist));
-        if (freshItems.length === 0) {
-          toastEvent.trigger(`Skipped ${dist.storeName}: All items were already sent in a previous order.`, 'info');
+        const checkedItems = dist.items.filter(item => item.isChecked !== false);
+        if (checkedItems.length === 0) {
+          toastEvent.trigger(`Skipped ${dist.storeName}: No items selected.`, 'info');
           continue;
         }
-        const itemsForBatch = freshItems;
+        const itemsForBatch = checkedItems;
 
         let phoneNum = getDistributorPhoneNumber(dist);
         let cleanPhone = phoneNum.replace(/\D/g, '');
@@ -1711,6 +1795,38 @@ export default function PharmarackCart() {
     return null;
   };
 
+  const normalizeItemsWithCheckStatus = (
+    rawList: Distributor[],
+    prevDistributors: Distributor[] = distributors
+  ): Distributor[] => {
+    return rawList.map(dist => {
+      const prevDist = prevDistributors.find(d => d.storeId === dist.storeId);
+      const updatedItems = (dist.items || []).map(item => {
+        const prevItem = prevDist?.items.find(pi => (pi.productCode && pi.productCode === item.productCode) || pi.productName === item.productName);
+        if (prevItem && typeof prevItem.isChecked === 'boolean') {
+          return { ...item, isChecked: prevItem.isChecked };
+        }
+        if (typeof item.isChecked === 'boolean') {
+          return item;
+        }
+
+        const pastInfo = getPastOrderedInfo(item, dist);
+        // Default to false (unchecked) if ordered yesterday or earlier
+        // Default to true (checked) if fresh item or ordered today
+        const defaultChecked = !(pastInfo.isPastOrdered && !pastInfo.isToday);
+        return {
+          ...item,
+          isChecked: defaultChecked
+        };
+      });
+
+      return {
+        ...dist,
+        items: updatedItems
+      };
+    });
+  };
+
   const fetchCart = async () => {
     // Only show loading spinner on cold cache (first visit)
     if (cachedDistributors.length === 0) {
@@ -1720,7 +1836,8 @@ export default function PharmarackCart() {
     try {
       const data = await api.getPharmarackCart();
       if (data && data.success) {
-        const list = data.distributors || [];
+        const rawList = data.distributors || [];
+        const list = normalizeItemsWithCheckStatus(rawList, distributors);
         setDistributors(list);
         cachedDistributors = list;
         const now = new Date();
@@ -1753,7 +1870,8 @@ export default function PharmarackCart() {
     try {
       const data = await api.getPharmarackCart();
       if (data && data.success) {
-        const list = data.distributors || [];
+        const rawList = data.distributors || [];
+        const list = normalizeItemsWithCheckStatus(rawList, distributors);
         setDistributors(list);
         cachedDistributors = list;
         const now = new Date();
@@ -3084,15 +3202,31 @@ export default function PharmarackCart() {
                               </span>
                             )}
                             {(() => {
-                              const sentCount = dist.items.filter(i => isItemAlreadySent(i, dist)).length;
-                              const newCount = dist.items.length - sentCount;
+                              const totalCount = dist.items.length;
+                              const checkedCount = dist.items.filter(i => i.isChecked !== false).length;
+                              const yesterdayCount = dist.items.filter(i => {
+                                const p = getPastOrderedInfo(i, dist);
+                                return p.isPastOrdered && !p.isToday;
+                              }).length;
+                              const checkedTotal = getDistributorCheckedTotal(dist);
+
                               return (
-                                <span className="text-[10px] font-bold px-2 py-0.5 bg-bg/50 rounded-full border border-glass-border/30 flex items-center gap-1.5 shrink-0">
-                                  {newCount > 0 && <span className="text-emerald-400 font-extrabold">✨ {newCount} New</span>}
-                                  {newCount > 0 && sentCount > 0 && <span className="text-muted/40">•</span>}
-                                  {sentCount > 0 && <span className="text-muted font-semibold">✓ {sentCount} Sent</span>}
-                                  {newCount === 0 && sentCount === 0 && (
-                                    <span className="text-muted font-normal">{dist.items.length} items</span>
+                                <span className="text-[10px] font-bold px-2.5 py-0.5 bg-bg/60 rounded-full border border-glass-border/40 flex items-center gap-1.5 shrink-0">
+                                  <span className="text-text font-mono font-black">
+                                    ₹{checkedTotal.toFixed(2)}
+                                  </span>
+                                  <span className="text-muted/40">•</span>
+                                  <span className={checkedCount > 0 ? "text-primary font-bold" : "text-muted"}>
+                                    {checkedCount}/{totalCount} selected
+                                  </span>
+                                  {yesterdayCount > 0 && (
+                                    <>
+                                      <span className="text-muted/40">•</span>
+                                      <span className="text-amber-400 font-extrabold flex items-center gap-0.5">
+                                        <Clock size={10} />
+                                        {yesterdayCount} past
+                                      </span>
+                                    </>
                                   )}
                                 </span>
                               );
@@ -3219,7 +3353,16 @@ export default function PharmarackCart() {
                           <table className="w-full text-xs">
                             <thead>
                               <tr className="border-b border-glass-border/30 text-muted font-bold uppercase tracking-wider text-[10px]">
-                                <th className="text-left px-4 py-2">Product</th>
+                                <th className="text-center px-3 py-2 w-10">
+                                  <input
+                                    type="checkbox"
+                                    checked={dist.items.length > 0 && dist.items.every(i => i.isChecked !== false)}
+                                    onChange={(e) => handleToggleSelectAllInDist(dist.storeId, e.target.checked)}
+                                    className="w-4 h-4 rounded text-primary focus:ring-primary cursor-pointer accent-primary"
+                                    title="Select / Deselect all items for this distributor"
+                                  />
+                                </th>
+                                <th className="text-left px-3 py-2">Product</th>
                                 <th className="text-left px-3 py-2">Company</th>
                                 <th className="text-center px-3 py-2">Pack</th>
                                 <th className="text-center px-3 py-2">Qty</th>
@@ -3234,30 +3377,65 @@ export default function PharmarackCart() {
                             <tbody className="divide-y divide-glass-border/15">
                               {dist.items.map((item, idx) => {
                                 const isSent = isItemAlreadySent(item, dist);
+                                const pastInfo = getPastOrderedInfo(item, dist);
+                                const isChecked = item.isChecked !== false;
+                                const isYesterdayOrPast = pastInfo.isPastOrdered && !pastInfo.isToday;
                                 const isDeleting = updatingItemId === (item.productCode || String(item.productId || item.productName));
+
                                 return (
                                   <tr
                                     key={`${item.productCode}-${idx}`}
                                     className={`transition-colors ${
-                                      isSent
-                                        ? 'bg-bg3/20 opacity-75 hover:opacity-100 text-muted'
-                                        : 'bg-emerald-500/[0.04] hover:bg-emerald-500/[0.09]'
+                                      !isChecked
+                                        ? 'bg-bg3/10 opacity-70 hover:opacity-100 text-muted'
+                                        : isYesterdayOrPast
+                                          ? 'bg-amber-500/[0.06] hover:bg-amber-500/[0.12] border-l-2 border-l-amber-500'
+                                          : isSent
+                                            ? 'bg-bg3/20 opacity-75 hover:opacity-100 text-muted'
+                                            : 'bg-emerald-500/[0.04] hover:bg-emerald-500/[0.09]'
                                     }`}
                                   >
-                                    <td className="px-4 py-2.5">
+                                    <td className="px-3 py-2.5 text-center w-10">
+                                      <input
+                                        type="checkbox"
+                                        checked={isChecked}
+                                        onChange={(e) => handleToggleItemCheck(dist.storeId, item.productCode || item.productName, e.target.checked)}
+                                        className="w-4 h-4 rounded text-primary focus:ring-primary cursor-pointer accent-primary"
+                                        title={
+                                          isYesterdayOrPast
+                                            ? `Ordered previously on ${pastInfo.placedDateStr}. Check box to include in today's order.`
+                                            : isChecked
+                                              ? "Included in order. Uncheck to skip."
+                                              : "Excluded from order. Check to include."
+                                        }
+                                      />
+                                    </td>
+                                    <td className="px-3 py-2.5">
                                       <div className="flex flex-col gap-1">
                                         <div className="flex items-center gap-1.5 flex-wrap">
-                                          <span className={`font-bold text-[11px] ${isSent ? 'text-muted line-through opacity-80' : 'text-text'}`}>
+                                          <span className={`font-bold text-[11px] ${!isChecked ? 'text-muted line-through opacity-80' : isSent ? 'text-muted' : 'text-text'}`}>
                                             {item.productName}
                                           </span>
-                                          {isSent ? (
+                                          {isYesterdayOrPast && (
+                                            <span className="text-[8px] font-black uppercase px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/40 shrink-0 select-none flex items-center gap-1" title={`Ordered previously on ${pastInfo.placedDateStr}. Check box to include in today's order.`}>
+                                              <Clock size={9} />
+                                              <span>⚡ {pastInfo.isYesterday ? 'ORDERED YESTERDAY' : `ORDERED ON ${pastInfo.placedDateStr.toUpperCase()}`}</span>
+                                            </span>
+                                          )}
+                                          {!isYesterdayOrPast && isSent && (
                                             <span className="text-[8px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-bg3 text-muted border border-border/40 shrink-0 select-none flex items-center gap-0.5">
                                               <Check size={8} />
-                                              <span>SENT</span>
+                                              <span>SENT TODAY</span>
                                             </span>
-                                          ) : (
+                                          )}
+                                          {!isYesterdayOrPast && !isSent && (
                                             <span className="text-[8px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shrink-0 select-none flex items-center gap-0.5">
                                               <span>✨ NEW</span>
+                                            </span>
+                                          )}
+                                          {!isChecked && (
+                                            <span className="text-[8px] font-bold px-1.5 py-0.5 rounded bg-bg3/60 text-muted border border-border/40 shrink-0 select-none">
+                                              Excluded
                                             </span>
                                           )}
                                         </div>

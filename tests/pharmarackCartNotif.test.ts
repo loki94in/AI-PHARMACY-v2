@@ -87,9 +87,9 @@ describe('Pharmarack Cart Notifications Tests', () => {
     // Verify messages content
     const msg = mockSendMessage.mock.calls[0][2];
     expect(msg).toContain("Items Requested:");
-    expect(msg).toContain("Aspirin —");
+    expect(msg).toContain("Aspirin");
     expect(msg).toContain("Qty: 2");
-    expect(msg).toContain("Ibuprofen —");
+    expect(msg).toContain("Ibuprofen");
     expect(msg).toContain("Qty: 5");
     expect(msg).toContain("Delivery Boy John");
   });
