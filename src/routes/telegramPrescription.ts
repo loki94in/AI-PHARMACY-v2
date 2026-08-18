@@ -199,10 +199,12 @@ router.post('/bill/generate', async (req, res) => {
     // Clear cart after successful bill generation
     telegramPrescriptionService.clearCart(parsedChatId);
 
-    // Trigger WhatsApp delivery asynchronously
-    import('../services/whatsappInvoiceService.js').then(({ whatsappInvoiceService }) => {
-      whatsappInvoiceService.sendInvoiceViaWhatsApp(invoiceId).catch(console.error);
-    });
+    // Trigger WhatsApp delivery asynchronously ONLY IF user explicitly enabled sendWhatsApp
+    if (Boolean(req.body.sendWhatsApp)) {
+      import('../services/whatsappInvoiceService.js').then(({ whatsappInvoiceService }) => {
+        whatsappInvoiceService.sendInvoiceViaWhatsApp(invoiceId).catch(console.error);
+      });
+    }
 
     res.json({
       success: true,

@@ -196,8 +196,8 @@ router.post('/batch', async (req, res) => {
       throw txErr;
     }
 
-    // Send ONE SINGLE CONSOLIDATED WHATSAPP MESSAGE for all items in the order
-    if (insertedOrders.length > 0 && phone) {
+    // Send ONE SINGLE CONSOLIDATED WHATSAPP MESSAGE for all items in the order IF user explicitly requested sendWhatsApp
+    if (Boolean(req.body.sendWhatsApp) && insertedOrders.length > 0 && phone) {
       const formattedPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
       const medicalName = await getStoreMedicalNameAndPhone(db);
       const totalAdv = Number(advance_payment || 0);
@@ -338,8 +338,8 @@ router.post('/', async (req, res) => {
       ]
     );
     
-    // Auto send confirmation message to customer via WhatsApp
-    if (phone) {
+    // Send confirmation message to customer via WhatsApp ONLY IF user explicitly requested it
+    if (Boolean(req.body.sendWhatsApp) && phone) {
       const formattedPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
       const medicalName = await getStoreMedicalNameAndPhone(db);
       const advMsg = advance_payment && Number(advance_payment) > 0 ? ` (Advance Paid: ₹${Number(advance_payment).toFixed(2)})` : '';
@@ -460,7 +460,7 @@ router.post('/:id/resend-booking', async (req, res) => {
   }
 });
 
-// Route to fetch uncollected orders (not collected for 2-3 days) and send auto reminders
+// Route to fetch uncollected orders (not collected for 2-3 days) - Read-only query for UI review
 router.get('/uncollected-alerts', async (_req, res) => {
   try {
     const db = await dbManager.getConnection();
@@ -473,49 +473,7 @@ router.get('/uncollected-alerts', async (_req, res) => {
        AND datetime(date) <= datetime('now', '-2 days')`
     );
 
-    const alertedOrders: any[] = [];
-    for (const order of uncollected) {
-      if (order.phone && order.notified === 0) {
-        const cleanPhone = order.phone.replace(/\D/g, '');
-        const formattedPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
-        const msg = await buildOrderReadyNotificationMessage(order.requester, order.product, order.qty, db);
-        
-        try {
-          await sendMessage(formattedPhone, undefined, msg);
-          
-          // Mark as notified in database
-          await db.run('UPDATE special_orders SET notified = 1 WHERE id = ?', [order.id]);
-          order.notified = 1;
-          alertedOrders.push({ ...order, autoWhatsAppSent: true });
-          
-          await db.run(
-            `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
-             VALUES (?, ?, ?, ?, ?, ?)`,
-            ['uncollected_reminder', order.requester || 'Customer', formattedPhone, msg, 'sent', String(order.id)]
-          );
-        } catch (wsError: any) {
-          console.error(`Failed to send auto collection reminder to ${order.requester}:`, wsError);
-          const errMsg = wsError.message || 'Unknown error';
-          alertedOrders.push({ ...order, autoWhatsAppSent: false, error: errMsg });
-          
-          await db.run(
-            "INSERT INTO action_logs (action_type, description) VALUES (?, ?)",
-            'AUTOMATION_ALERT',
-            `❌ WhatsApp Alert Failure: Failed to send collection reminder to ${order.requester} (${order.phone}). Error: ${errMsg}`
-          );
-          
-          await db.run(
-            `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, error_message, reference_id)
-             VALUES (?, ?, ?, ?, ?, ?, ?)`,
-            ['uncollected_reminder', order.requester || 'Customer', formattedPhone, msg, 'failed', errMsg, String(order.id)]
-          );
-        }
-      } else {
-        alertedOrders.push({ ...order, autoWhatsAppSent: false });
-      }
-    }
-
-        res.json(alertedOrders);
+    res.json(uncollected || []);
   } catch (err) {
     console.error('Fetch uncollected alerts error:', err);
     res.status(500).json({ error: 'Internal server error' });
@@ -536,7 +494,7 @@ router.put('/:id', async (req, res) => {
     
     const existing = await db.get('SELECT * FROM special_orders WHERE id = ?', id);
     if (!existing) {
-            return res.status(404).json({ error: 'Order not found' });
+      return res.status(404).json({ error: 'Order not found' });
     }
 
     let newStatus = status !== undefined ? status : existing.status;
@@ -564,29 +522,6 @@ router.put('/:id', async (req, res) => {
        WHERE id = ?`,
       [newStatus, newPriority, newQty, newProduct, newRequester, newPhone, newDistributor, newRate, newMrp, newMapped, newAdvancePayment, newCartAddError, id]
     );
-
-    // If status changes to 'Ready', auto send WhatsApp arrival alert via Live Queue Controller (if not already notified)
-    if (newStatus === 'Ready' && existing.status !== 'Ready' && Number(existing.notified) !== 1 && newPhone) {
-      try {
-        const cleanPhone = String(newPhone).replace(/\D/g, '');
-        if (cleanPhone.length >= 10) {
-          const formattedPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
-          const custRow = await db.get('SELECT language FROM customers WHERE phone = ? LIMIT 1', [cleanPhone]);
-          const lang = custRow?.language || 'en';
-
-          const msg = await buildOrderReadyNotificationMessage(newRequester || existing.requester, newProduct || existing.product, newQty || existing.qty, db, lang);
-          await whatsappQueueWorker.enqueue(formattedPhone, msg, 'special_order_arrived', newRequester || existing.requester || 'Customer');
-          await db.run('UPDATE special_orders SET notified = 1 WHERE id = ?', [id]);
-          await db.run(
-            `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
-             VALUES (?, ?, ?, ?, ?, ?)`,
-            ['special_order_arrived', newRequester || existing.requester || 'Customer', formattedPhone, msg, 'queued', String(id)]
-          );
-        }
-      } catch (err) {
-        console.error(`Failed to enqueue WhatsApp arrival alert from status change handler:`, err);
-      }
-    }
 
     res.json({ success: true, message: 'Order updated successfully' });
   } catch (err) {
@@ -617,29 +552,6 @@ const handleStatusUpdate = async (req: express.Request, res: express.Response) =
     }
 
     await db.run('UPDATE special_orders SET status = ? WHERE id = ?', [status, id]);
-
-    // If status changes to 'Ready', auto send WhatsApp arrival alert via Live Queue Controller (if not already notified)
-    if (status === 'Ready' && existing.status !== 'Ready' && Number(existing.notified) !== 1 && existing.phone) {
-      try {
-        const cleanPhone = String(existing.phone).replace(/\D/g, '');
-        if (cleanPhone.length >= 10) {
-          const formattedPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
-          const custRow = await db.get('SELECT language FROM customers WHERE phone = ? LIMIT 1', [cleanPhone]);
-          const lang = custRow?.language || 'en';
-
-          const msg = await buildOrderReadyNotificationMessage(existing.requester, existing.product, existing.qty, db, lang);
-          await whatsappQueueWorker.enqueue(formattedPhone, msg, 'special_order_arrived', existing.requester || 'Customer');
-          await db.run('UPDATE special_orders SET notified = 1 WHERE id = ?', [id]);
-          await db.run(
-            `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
-             VALUES (?, ?, ?, ?, ?, ?)`,
-            ['special_order_arrived', existing.requester || 'Customer', formattedPhone, msg, 'queued', String(id)]
-          );
-        }
-      } catch (err) {
-        console.error(`Failed to enqueue WhatsApp arrival alert from status change handler:`, err);
-      }
-    }
 
     res.json({ success: true, message: `Order status updated to ${status}` });
   } catch (err: any) {
@@ -694,10 +606,10 @@ router.post('/convert-to-refill', async (req, res) => {
   }
 });
 
-// Mark special order as Fulfilled / Delivered & send automated WhatsApp notification
+// Mark special order as Fulfilled / Delivered (manual trigger for WhatsApp receipt if sendWhatsApp is true)
 router.post('/:id/fulfill', async (req, res) => {
   const { id } = req.params;
-  const { invoiceNo, grandTotal } = req.body;
+  const { invoiceNo, grandTotal, sendWhatsApp } = req.body;
   try {
     const db = await dbManager.getConnection();
     await initOrdersTable(db);
@@ -709,7 +621,7 @@ router.post('/:id/fulfill', async (req, res) => {
 
     await db.run("UPDATE special_orders SET status = 'Fulfilled' WHERE id = ?", id);
 
-    if (order.phone) {
+    if (Boolean(sendWhatsApp) && order.phone) {
       const cleanPhone = order.phone.replace(/\D/g, '');
       const formattedPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
       const medicalName = await getStoreMedicalNameAndPhone(db);
@@ -721,7 +633,7 @@ router.post('/:id/fulfill', async (req, res) => {
       await whatsappQueueWorker.enqueue(formattedPhone, msg, 'special_order_fulfilled', order.requester || 'Customer');
     }
 
-    res.json({ success: true, message: 'Special order marked as Fulfilled & delivery WhatsApp queued successfully' });
+    res.json({ success: true, message: 'Special order marked as Fulfilled' });
   } catch (err: any) {
     console.error('Fulfill order error:', err);
     res.status(500).json({ error: 'Failed to fulfill order: ' + (err.message || 'Unknown error') });

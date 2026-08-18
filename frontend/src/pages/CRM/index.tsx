@@ -3048,18 +3048,18 @@ const SpecialOrdersSection: React.FC = () => {
   const handleScanUncollected = async () => {
     setRefreshing(true);
     try {
-      const alertedList = await api.getUncollectedAlerts();
-      const notifiedCount = alertedList.filter(o => o.notified).length;
+      const list = await api.getUncollectedAlerts();
+      const count = (list || []).length;
       
-      if (notifiedCount > 0) {
-        toastEvent.trigger(`Reminders scan complete. Sent WhatsApp alerts to ${notifiedCount} customer(s).`, 'success', '/crm');
+      if (count > 0) {
+        toastEvent.trigger(`Found ${count} uncollected order(s) pending pickup. You can click 'Send Arrival WA' to notify customer.`, 'info', '/crm');
       } else {
-        toastEvent.trigger('No uncollected orders required notifications at this time.', 'info', '/crm');
+        toastEvent.trigger('No uncollected orders found pending collection.', 'info', '/crm');
       }
       await loadOrders();
     } catch (err) {
-      console.error('Error scanning uncollected alerts:', err);
-      toastEvent.trigger('Failed to execute uncollected alerts reminders.', 'error', '/crm');
+      console.error('Error scanning uncollected orders:', err);
+      toastEvent.trigger('Failed to check uncollected orders.', 'error', '/crm');
     } finally {
       setRefreshing(false);
     }
@@ -3341,15 +3341,15 @@ const SpecialOrdersSection: React.FC = () => {
             </button>
           </div>
 
-          {/* Auto Remind Uncollected Button */}
+          {/* Check Uncollected Orders Button */}
           <button
             onClick={handleScanUncollected}
             disabled={refreshing || loading}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 hover:bg-amber-500/20 text-xs font-bold transition-all disabled:opacity-50"
-            title="Scan orders ready for 2+ days and send auto WhatsApp reminder notifications"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 hover:bg-amber-500/20 text-xs font-bold transition-all disabled:opacity-50 cursor-pointer"
+            title="Check orders ready for 2+ days pending pickup"
           >
             <AlertTriangle size={13} className={refreshing ? 'animate-spin' : ''} />
-            <span>Auto Remind</span>
+            <span>Check Uncollected</span>
           </button>
 
           <button
@@ -3485,22 +3485,33 @@ const SpecialOrdersSection: React.FC = () => {
                       <span>⚡ Sell Now</span>
                     </button>
 
-                    {/* Arrived & WA Button */}
-                    {!isArrived ? (
+                    {/* Customer Notified Status / Manual Send WhatsApp Arrival Button */}
+                    {order.notified === 1 ? (
+                      <div className="flex items-center gap-1">
+                        <span className="px-2.5 py-1 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-bold flex items-center gap-1">
+                          <Check size={12} />
+                          <span>WA Sent</span>
+                        </span>
+                        <button
+                          onClick={() => handleNotifyArrival(order)}
+                          disabled={notifyingId === order.id}
+                          className="flex items-center gap-1 px-2 py-1 rounded-xl bg-bg3 hover:bg-bg border border-border text-muted hover:text-emerald-400 text-xs font-semibold transition-all cursor-pointer"
+                          title="Resend arrival WhatsApp notification to customer"
+                        >
+                          <MessageCircle size={12} className={notifyingId === order.id ? 'animate-spin' : ''} />
+                          <span>{notifyingId === order.id ? '...' : 'Resend'}</span>
+                        </button>
+                      </div>
+                    ) : (
                       <button
                         onClick={() => handleNotifyArrival(order)}
                         disabled={notifyingId === order.id}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-400 text-xs font-bold transition-all disabled:opacity-50"
-                        title="Mark order as arrived and auto send WhatsApp arrival notification to customer"
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold shadow-md shadow-emerald-500/20 transition-all hover:scale-105 active:scale-95 cursor-pointer disabled:opacity-50"
+                        title="Manually send WhatsApp arrival notification to customer"
                       >
-                        <CheckCircle2 size={13} className={notifyingId === order.id ? 'animate-spin' : ''} />
-                        <span>{notifyingId === order.id ? 'Sending...' : 'Arrived & WA'}</span>
+                        <MessageCircle size={13} className={notifyingId === order.id ? 'animate-spin' : ''} />
+                        <span>{notifyingId === order.id ? 'Sending...' : '📱 Send Arrival WA'}</span>
                       </button>
-                    ) : (
-                      <span className="px-2.5 py-1 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-bold flex items-center gap-1">
-                        <Check size={12} />
-                        <span>Arrived &amp; Customer Notified</span>
-                      </span>
                     )}
 
                     {/* Pending Status Button */}

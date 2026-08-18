@@ -28,6 +28,7 @@ export interface InvoiceData {
   patientAddress?: string;
   paymentMedium?: string;
   paymentStatus?: string;
+  sendWhatsApp?: boolean;
 }
 
 export interface InvoiceResult {
@@ -251,8 +252,8 @@ export class InvoiceService {
         }
       }
 
-      // Trigger WhatsApp delivery asynchronously
-      if (customerId && invoiceId !== undefined) {
+      // Trigger WhatsApp delivery asynchronously ONLY IF user explicitly enabled sendWhatsApp
+      if (Boolean(data.sendWhatsApp) && customerId && invoiceId !== undefined) {
         import('./whatsappInvoiceService.js').then(({ whatsappInvoiceService }) => {
           whatsappInvoiceService.sendInvoiceViaWhatsApp(invoiceId).catch(console.error);
         });

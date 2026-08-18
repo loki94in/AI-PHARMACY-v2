@@ -1,7 +1,5 @@
 import { Database } from 'sqlite';
 import { dbManager } from '../database/connection.js';
-import { messagingQueue } from './messagingQueue.js';
-import { getStoreMedicalName, getStoreMedicalNameAndPhone } from './storeSettingsService.js';
 
 export class OrderFulfillmentService {
   private static instance: OrderFulfillmentService;
@@ -38,7 +36,10 @@ export class OrderFulfillmentService {
   }
 
   /**
-   * Reconcile special orders against newly arrived inventory (from a purchase bill)
+   * Reconcile special orders against newly arrived inventory (from a purchase bill or stock addition).
+   * CONTRACT: The app NEVER automatically sends messages to patients upon medicine arrival.
+   * Special orders are updated to 'Ready' (in stock) with notified = 0.
+   * The user manually clicks the 'Send Arrival WA' button in the UI to notify the customer.
    */
   public async reconcileIncomingInventory(db: Database, medicineName: string) {
     if (!medicineName) return;
@@ -52,78 +53,13 @@ export class OrderFulfillmentService {
       [medicineName.trim()]
     );
 
-    const uniquePhones = new Set<string>();
-
     for (const order of pendingOrders) {
-      // Update special order to 'Ready'
+      // Update special order to 'Ready' (in stock) and keep notified = 0 for manual user trigger
       await db.run(
-        `UPDATE special_orders SET status = 'Ready' WHERE id = ?`,
+        `UPDATE special_orders SET status = 'Ready', notified = 0 WHERE id = ?`,
         [order.id]
       );
-      console.log(`[OrderFulfillmentService] Special order ID ${order.id} marked as Ready.`);
-      
-      if (order.phone) {
-        uniquePhones.add(order.phone);
-      }
-    }
-
-    // Trigger consolidated notification alerts for each affected customer
-    for (const phone of uniquePhones) {
-      await this.sendConsolidatedReadyNotification(db, phone);
-    }
-  }
-
-  /**
-   * Helper to send consolidated WhatsApp notification for ready special orders
-   */
-  public async sendConsolidatedReadyNotification(db: Database, phone: string) {
-    if (!phone) return;
-
-    // Check if there are still pending or ordered items for this customer phone
-    const activeCountRow = await db.get(
-      `SELECT COUNT(*) as cnt FROM special_orders 
-       WHERE phone = ? AND (status = 'Pending' OR status = 'Ordered')`,
-      [phone]
-    );
-    const activeCount = activeCountRow ? (activeCountRow.cnt || 0) : 0;
-
-    // If there are still pending/ordered items, wait until all are ready
-    if (activeCount > 0) return;
-
-    // Fetch all 'Ready' but not notified special orders for this customer phone
-    const readyOrders = await db.all(
-      `SELECT id, product, qty, requester FROM special_orders 
-       WHERE phone = ? AND status = 'Ready' AND notified = 0`,
-      [phone]
-    );
-
-    if (readyOrders.length === 0) return;
-
-    const requester = readyOrders[0].requester || 'Customer';
-    
-    const medicalName = await getStoreMedicalNameAndPhone(db);
-
-    let productList = '';
-    if (readyOrders.length === 1) {
-      productList = `${readyOrders[0].product} (Qty: ${readyOrders[0].qty})`;
-    } else {
-      productList = readyOrders.map((o, idx) => `${idx + 1}. ${o.product} (Qty: ${o.qty})`).join('\n');
-    }
-
-    const msg = `Hi ${requester},\n\nAll of your requested medicines are now READY for collection at ${medicalName}:\n\n${productList}\n\nPlease visit us to collect them.`;
-
-    // Queue the WhatsApp message
-    await messagingQueue.queueMessage(
-      'order_ready',
-      requester,
-      phone,
-      msg,
-      String(readyOrders[0].id)
-    );
-
-    // Mark as notified in special_orders
-    for (const order of readyOrders) {
-      await db.run("UPDATE special_orders SET notified = 1 WHERE id = ?", [order.id]);
+      console.log(`[OrderFulfillmentService] Special order ID ${order.id} marked as Ready (manual patient notification required via UI button).`);
     }
   }
 

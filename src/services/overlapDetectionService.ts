@@ -1,7 +1,5 @@
 import { dbManager } from '../database/connection.js';
 import { orderTrackingService } from './orderTrackingService.js';
-import { buildOrderReadyNotificationMessage } from './storeSettingsService.js';
-import { whatsappQueueWorker } from './whatsappQueueWorker.js';
 
 export interface OverlapMatch {
   overlapId: number;
@@ -86,10 +84,10 @@ export class OverlapDetectionService {
 
         const overlapId = res.lastID;
 
-        // Update order status to Ready
+        // Update order status to Ready, but keep notified = 0 so user can manually send WhatsApp via UI
         await db.run(
           `UPDATE special_orders 
-           SET status = 'Ready', lifecycle_status = 'ARRIVED', notified = 1 
+           SET status = 'Ready', lifecycle_status = 'ARRIVED', notified = 0 
            WHERE id = ?`,
           [order.id]
         );
@@ -100,29 +98,15 @@ export class OverlapDetectionService {
           sourceId: purchaseId || inventoryMasterId || 0,
           distributorId,
           quantity,
-          notes: `Auto-matched stock arrival for ${cleanName}`
+          notes: `Auto-matched stock arrival for ${cleanName} (staged for manual WhatsApp notification)`
         });
 
         await orderTrackingService.logEvent(
           order.id,
           'overlap_detected',
-          `Stock overlap detected for ${cleanName} from distributor ID ${distributorId || 'N/A'}`,
+          `Stock overlap detected for ${cleanName} from distributor ID ${distributorId || 'N/A'}. Ready for manual customer notification.`,
           'overlap_engine'
         );
-
-        // Queue WhatsApp notification to customer if phone number is present
-        if (order.phone) {
-          const cleanPhone = order.phone.replace(/\D/g, '');
-          const formattedPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
-          const msg = await buildOrderReadyNotificationMessage(order.requester, cleanName, order.qty || 1, db);
-
-          try {
-            await whatsappQueueWorker.enqueue(formattedPhone, msg, 'special_order_arrival', order.requester || 'Customer');
-            await db.run('UPDATE special_orders SET notified = 1 WHERE id = ?', [order.id]);
-          } catch (waErr) {
-            console.warn('[OverlapDetectionService] WhatsApp queue warning:', waErr);
-          }
-        }
 
         detectedOverlaps.push({
           overlapId: overlapId || 0,

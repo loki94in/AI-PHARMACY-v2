@@ -983,4 +983,7 @@ export const api = {
     apiClient.post<{ success: boolean; message: string }>(`/dispatch/distributor-reminders/${id}/retry`, data).then(res => res.data),
   getCommunicationAuditLogs: (params?: { limit?: number; status?: string }) =>
     apiClient.get<{ success: boolean; count: number; logs: any[] }>('/dispatch/audit-logs', { params }).then(res => res.data),
+
+  // Price & Purchase History APIs
+  getBatchLastPurchase: (medicines: { name: string }[], distributor_id?: number) => apiClient.post<any[]>('/purchases/batch-last-purchase', { medicines, distributor_id }).then(res => res.data),
 };

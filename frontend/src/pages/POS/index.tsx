@@ -2571,7 +2571,7 @@ const POS = () => {
         })(),
         paymentMedium: paymentMedium,
         paymentStatus: paymentMedium === 'CREDIT' ? 'UNPAID' : 'PAID',
-        sendWhatsApp: paymentMedium === 'CREDIT' ? true : sendWhatsApp,
+        sendWhatsApp: Boolean(sendWhatsApp),
         refillEnabled: refillEnabled,
         refillDays: refillDays,
         refillId: activeRefillId || undefined,
@@ -2635,7 +2635,7 @@ const POS = () => {
         });
       }
       
-      const isWaSent = paymentMedium === 'CREDIT' || (sendWhatsApp && !!phoneToUse.trim());
+      const isWaSent = Boolean(sendWhatsApp) && !!phoneToUse.trim();
 
       setLastSavedInvoiceNo(invoiceNo);
       setLastSavedPatientName(patientName || 'Walk-in Customer');

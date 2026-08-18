@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { RefreshCw, RotateCw, RotateCcw, ExternalLink, ShoppingCart, Package, AlertCircle, Truck, Clock, Send, Building2, MessageSquare, Phone, UserCheck, Search, Edit2, X, Plus, Check, Calendar, TrendingUp, Layers, Trash2 } from 'lucide-react';
+import { RefreshCw, RotateCw, RotateCcw, ExternalLink, ShoppingCart, Package, AlertCircle, Truck, Clock, Send, Building2, MessageSquare, Phone, UserCheck, Search, Edit2, X, Plus, Check, Calendar, TrendingUp, Layers, Trash2, ArrowLeftRight, Sparkles, Filter, CheckCircle2, ArrowRight } from 'lucide-react';
 import { formatDisplayDate } from '../../utils/date';
 import { api, apiClient, type SpecialOrder, type Refill } from '../../services/api';
 import { toastEvent, liveCartAddEvent, specialOrdersEvent, whatsappQueueEvent, messageSendEvent } from '../../services/events';
@@ -178,6 +178,33 @@ export default function PharmarackCart() {
   const [sentOrdersLoading, setSentOrdersLoading] = useState<boolean>(false);
   const [readdingSentItems, setReaddingSentItems] = useState<boolean>(false);
 
+  // Switch Supplier Modal State
+  const [switchModalTarget, setSwitchModalTarget] = useState<{ item: CartLineItem; dist: Distributor } | null>(null);
+  const [switchCatalogResults, setSwitchCatalogResults] = useState<any[]>([]);
+  const [switchSearching, setSwitchSearching] = useState<boolean>(false);
+  const [switchingDistributor, setSwitchingDistributor] = useState<boolean>(false);
+  const [switchSearchQuery, setSwitchSearchQuery] = useState<string>('');
+
+  // Reorder Hub Filter States
+  const [reorderSearchQuery, setReorderSearchQuery] = useState<string>('');
+  const [reorderDistFilter, setReorderDistFilter] = useState<string>('all');
+  const [reorderCategoryFilter, setReorderCategoryFilter] = useState<'all' | 'yesterday' | 'low_stock' | 'purchased_before' | 'never_purchased' | 'special_requests' | 'refills'>('all');
+
+  // Batch Last Purchase Intelligence Map
+  const [lastPurchaseMap, setLastPurchaseMap] = useState<Record<string, any>>({});
+  const [lastPurchaseLoading, setLastPurchaseLoading] = useState<boolean>(false);
+
+  // Reorder Same Medicine Confirmation Modal State
+  const [reorderSameModalTarget, setReorderSameModalTarget] = useState<any | null>(null);
+  const [reorderModalQty, setReorderModalQty] = useState<number>(1);
+  const [reorderModalSupplierId, setReorderModalSupplierId] = useState<number | null>(null);
+
+  // Purchase History Modal State
+  const [purchaseHistoryModalTarget, setPurchaseHistoryModalTarget] = useState<{ medicineName: string; loading: boolean; history: any[] } | null>(null);
+
+  // Shortages Hub Subtab State
+  const [shortagesSubTab, setShortagesSubTab] = useState<'requests' | 'refills' | 'sales_suggestions'>('requests');
+
   // Latest sent order history map by store ID / store name
   const [latestSentMap, setLatestSentMap] = useState<Record<string, { storeId: number | null; storeName: string; placedAt: number; items: any[] }>>({});
 
@@ -229,11 +256,11 @@ export default function PharmarackCart() {
       });
     }
 
-    if (!matchedSentItem && !sentInfo.placedAt) {
+    if (!matchedSentItem) {
       return { isPastOrdered: false, placedAt: 0, placedDateStr: '', isToday: false, isYesterday: false };
     }
 
-    const placedTimestamp = Number(matchedSentItem?.placedAt || sentInfo.placedAt || 0);
+    const placedTimestamp = Number(matchedSentItem.placedAt || sentInfo.placedAt || 0);
     if (!placedTimestamp || isNaN(placedTimestamp)) {
       return { isPastOrdered: false, placedAt: 0, placedDateStr: '', isToday: false, isYesterday: false };
     }
@@ -984,7 +1011,7 @@ export default function PharmarackCart() {
   // Aggregate all previous-ordered items (yesterday/past) from the current cart for the reorder banner.
   // Uses existing getPastOrderedInfo + isItemIncludedInDispatch — no new data fetching.
   const previousOrderItemsInfo = React.useMemo(() => {
-    const result: { dist: Distributor; item: CartLineItem; isChecked: boolean; placedDateStr: string }[] = [];
+    const result: { dist: Distributor; item: CartLineItem; isChecked: boolean; placedDateStr: string; isYesterday: boolean }[] = [];
     for (const dist of distributors) {
       for (const item of dist.items) {
         const pastInfo = getPastOrderedInfo(item, dist);
@@ -993,7 +1020,8 @@ export default function PharmarackCart() {
             dist,
             item,
             isChecked: isItemIncludedInDispatch(item, dist),
-            placedDateStr: pastInfo.placedDateStr
+            placedDateStr: pastInfo.placedDateStr,
+            isYesterday: pastInfo.isYesterday
           });
         }
       }
@@ -2233,6 +2261,81 @@ export default function PharmarackCart() {
     }
   };
 
+  const handleOpenSwitchModal = async (item: CartLineItem, dist: Distributor) => {
+    setSwitchModalTarget({ item, dist });
+    setSwitchSearchQuery(item.productName);
+    setSwitchSearching(true);
+    setSwitchCatalogResults([]);
+    try {
+      const res = await api.searchPharmarack(item.productName);
+      if (res && res.success && Array.isArray(res.products)) {
+        setSwitchCatalogResults(res.products);
+      }
+      if (!priceHistoryCache[item.productName]) {
+        fetchPriceHistories([{ items: [item] } as any]);
+      }
+    } catch (err) {
+      console.warn('Failed to search suppliers for switch:', err);
+    } finally {
+      setSwitchSearching(false);
+    }
+  };
+
+  const handleSearchSwitchCatalog = async (query: string) => {
+    setSwitchSearchQuery(query);
+    if (!query || query.trim().length < 2) return;
+    setSwitchSearching(true);
+    try {
+      const res = await api.searchPharmarack(query);
+      if (res && res.success && Array.isArray(res.products)) {
+        setSwitchCatalogResults(res.products);
+      }
+    } catch (err) {
+      console.warn('Failed to search catalog for switch query:', err);
+    } finally {
+      setSwitchSearching(false);
+    }
+  };
+
+  const handleConfirmSwitchSupplier = async (targetSupplier: any) => {
+    if (!switchModalTarget) return;
+    const { item, dist: currentDist } = switchModalTarget;
+    setSwitchingDistributor(true);
+    try {
+      const addRes = await api.addPharmarackCart([{
+        productId: targetSupplier.productId || 0,
+        storeId: targetSupplier.storeId,
+        qty: item.qty || 1,
+        rate: targetSupplier.rate !== undefined ? targetSupplier.rate : undefined,
+        mrp: targetSupplier.mrp !== undefined ? targetSupplier.mrp : undefined,
+        scheme: targetSupplier.scheme || undefined,
+        productCode: targetSupplier.productCode || undefined,
+        company: targetSupplier.company || item.company,
+        productName: targetSupplier.name || targetSupplier.productName || item.productName,
+        storeName: targetSupplier.storeName,
+        packaging: targetSupplier.packaging || item.packaging,
+        mapped: targetSupplier.mapped ?? true
+      }]);
+
+      if (addRes && addRes.success) {
+        if (currentDist.storeId !== targetSupplier.storeId) {
+          try {
+            await handleDeleteItem(item);
+          } catch (_) {}
+        }
+        toastEvent.trigger(`Switched "${item.productName}" to ${targetSupplier.storeName || 'new distributor'}!`, 'success');
+        setSwitchModalTarget(null);
+        await fetchCart();
+      } else {
+        toastEvent.trigger(addRes?.error || 'Failed to switch supplier', 'error');
+      }
+    } catch (err: any) {
+      toastEvent.trigger(err?.message || 'Error switching supplier', 'error');
+    } finally {
+      setSwitchingDistributor(false);
+    }
+  };
+
   // ponytail: stagger initial mount fetches — the live cart (plus its "already sent" badge
   // map) is the primary visible data, so it loads immediately. Pending special orders/refills
   // load shortly after, and sales reorder suggestions (lowest priority, sidebar-only) load last.
@@ -2266,6 +2369,358 @@ export default function PharmarackCart() {
     if (!showSuggestionsTier) return;
     fetchReorderSuggestions();
   }, [showSuggestionsTier]);
+
+  // Card quantity overrides
+  const [cardQtyOverrides, setCardQtyOverrides] = useState<Record<string, number>>({});
+  const handleUpdateCardQty = (cardId: string, qty: number) => {
+    setCardQtyOverrides(prev => ({ ...prev, [cardId]: Math.max(1, qty) }));
+  };
+
+  // Load batch last purchase info for candidate names
+  const fetchBatchLastPurchases = async (names: string[]) => {
+    if (!names || names.length === 0) return;
+    const missingNames = names.filter(n => !lastPurchaseMap[n] && !lastPurchaseMap[n.toLowerCase().trim()]);
+    if (missingNames.length === 0) return;
+
+    setLastPurchaseLoading(true);
+    try {
+      const payload = missingNames.slice(0, 100).map(name => ({ name }));
+      const res = await api.getBatchLastPurchase(payload);
+      if (Array.isArray(res)) {
+        const nextMap = { ...lastPurchaseMap };
+        for (const item of res) {
+          if (item && item.query) {
+            nextMap[item.query] = item;
+            nextMap[item.query.toLowerCase().trim()] = item;
+            if (item.medicine_name) {
+              nextMap[item.medicine_name] = item;
+              nextMap[item.medicine_name.toLowerCase().trim()] = item;
+            }
+          }
+        }
+        setLastPurchaseMap(nextMap);
+      }
+    } catch (err) {
+      console.warn('Failed to load batch last purchase info:', err);
+    } finally {
+      setLastPurchaseLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    const candidateNames = [
+      ...distributors.flatMap(d => d.items.map(i => i.productName)),
+      ...reorderSuggestions.map(s => s.medicineName),
+      ...pendingOrders.map(o => o.product),
+      ...pendingRefills.map(r => r.medicine_name)
+    ].filter(Boolean);
+
+    if (candidateNames.length > 0) {
+      fetchBatchLastPurchases(candidateNames);
+    }
+  }, [distributors, reorderSuggestions, pendingOrders, pendingRefills]);
+
+
+  // 1. Unified Reorder Cards Memo
+  const allCandidateCards = useMemo(() => {
+    const cards: any[] = [];
+    const seenNames = new Set<string>();
+
+    // A. Active Cart Items (already in distributor carts)
+    for (const dist of distributors) {
+      for (const item of dist.items) {
+        const normName = item.productName.toLowerCase().trim();
+        seenNames.add(normName);
+        const pastInfo = getPastOrderedInfo(item, dist);
+        const lastP = lastPurchaseMap[item.productName] || lastPurchaseMap[normName];
+        const cardId = `cart_${dist.storeId}_${item.productCode || item.productName}`;
+
+        const reasonType = pastInfo.isPastOrdered
+          ? (pastInfo.isYesterday ? 'yesterday_order' : 'previous_order')
+          : 'cart_item';
+        const reasonBadgeLabel = pastInfo.isPastOrdered
+          ? (pastInfo.isYesterday ? 'Ordered Yesterday' : 'Previously Dispatched')
+          : 'In Reorder Cart';
+
+        cards.push({
+          id: cardId,
+          medicineId: item.productId || undefined,
+          medicineName: item.productName,
+          company: item.company || '',
+          packaging: item.packaging || '',
+          ptr: item.ptr || 0,
+          mrp: item.mrp || 0,
+          scheme: item.scheme || '',
+          reason: reasonType,
+          reasonLabel: reasonBadgeLabel,
+          reasonDetail: `Staged in ${dist.storeName} cart`,
+          currentStock: item.stock !== null ? item.stock : 0,
+          minStock: 10,
+          suggestedQty: item.qty || 1,
+          orderQty: cardQtyOverrides[cardId] || item.qty || 1,
+          hasPreviousPurchase: Boolean(lastP?.found || pastInfo.isPastOrdered),
+          previousPurchase: lastP?.found ? {
+            supplierName: lastP.distributor_name || dist.storeName,
+            supplierId: lastP.distributor_id || dist.storeId,
+            quantity: lastP.quantity,
+            price: lastP.cost_price,
+            purchaseDate: lastP.purchase_date,
+            batchNo: lastP.batch_no,
+            expiryDate: lastP.expiry_date,
+            invoiceNo: lastP.invoice_no
+          } : undefined,
+          assignedSupplier: {
+            storeId: dist.storeId,
+            storeName: dist.storeName,
+            phone: getDistributorPhoneNumber(dist),
+            isMapped: true
+          },
+          isInCart: true,
+          distributor: dist,
+          rawItem: item
+        });
+      }
+    }
+
+    // B. Sales Reorder Suggestions (Low stock & 70/30 consumption)
+    for (const sug of reorderSuggestions) {
+      const normName = sug.medicineName.toLowerCase().trim();
+      if (seenNames.has(normName)) continue;
+      seenNames.add(normName);
+      const lastP = lastPurchaseMap[sug.medicineName] || lastPurchaseMap[normName];
+      const cardId = `sug_${sug.medicineId}`;
+
+      const isBelowMin = sug.currentStock <= 2 || sug.isLowStockSafety;
+      cards.push({
+        id: cardId,
+        medicineId: sug.medicineId,
+        medicineName: sug.medicineName,
+        company: sug.company || '',
+        packaging: sug.packaging || '',
+        ptr: sug.ptr || 0,
+        mrp: sug.mrp || 0,
+        reason: isBelowMin ? 'below_min_stock' : 'sales_restock',
+        reasonLabel: isBelowMin ? 'Below Min Stock' : 'Sales Restock',
+        reasonDetail: isBelowMin
+          ? `Stock: ${sug.currentStock} (Low stock safety threshold)`
+          : `Monthly Avg: ${sug.monthlyWeightedConsumption} | 2-Day: ${sug.twoDaySales}`,
+        currentStock: sug.currentStock,
+        minStock: 10,
+        suggestedQty: sug.suggestedQty,
+        orderQty: cardQtyOverrides[cardId] || sug.suggestedQty,
+        hasPreviousPurchase: Boolean(lastP?.found),
+        previousPurchase: lastP?.found ? {
+          supplierName: lastP.distributor_name,
+          supplierId: lastP.distributor_id,
+          quantity: lastP.quantity,
+          price: lastP.cost_price,
+          purchaseDate: lastP.purchase_date,
+          batchNo: lastP.batch_no,
+          expiryDate: lastP.expiry_date,
+          invoiceNo: lastP.invoice_no
+        } : undefined,
+        assignedSupplier: lastP?.found ? {
+          storeId: lastP.distributor_id || (distributors[0]?.storeId || 0),
+          storeName: lastP.distributor_name || (distributors[0]?.storeName || 'Unassigned'),
+          isMapped: true
+        } : {
+          storeId: distributors[0]?.storeId || 0,
+          storeName: distributors[0]?.storeName || 'Unassigned',
+          isMapped: Boolean(distributors[0])
+        },
+        isInCart: false
+      });
+    }
+
+    // C. Special Shortage Requests
+    for (const ord of pendingOrders) {
+      const normName = ord.product.toLowerCase().trim();
+      if (seenNames.has(normName)) continue;
+      seenNames.add(normName);
+      const lastP = lastPurchaseMap[ord.product] || lastPurchaseMap[normName];
+      const inCart = Boolean(getOrderItemInCart(ord));
+      const cardId = `order_${ord.id}`;
+
+      cards.push({
+        id: cardId,
+        medicineName: ord.product,
+        company: '',
+        packaging: '',
+        ptr: 0,
+        mrp: 0,
+        reason: 'special_order',
+        reasonLabel: 'Special Customer Request',
+        reasonDetail: `Req by: ${ord.requester} (${ord.phone}) • Qty: ${ord.qty}`,
+        currentStock: 0,
+        minStock: ord.qty || 1,
+        suggestedQty: ord.qty || 1,
+        orderQty: cardQtyOverrides[cardId] || ord.qty || 1,
+        hasPreviousPurchase: Boolean(lastP?.found),
+        previousPurchase: lastP?.found ? {
+          supplierName: lastP.distributor_name,
+          supplierId: lastP.distributor_id,
+          quantity: lastP.quantity,
+          price: lastP.cost_price,
+          purchaseDate: lastP.purchase_date,
+          batchNo: lastP.batch_no,
+          expiryDate: lastP.expiry_date,
+          invoiceNo: lastP.invoice_no
+        } : undefined,
+        assignedSupplier: {
+          storeId: distributors[0]?.storeId || 0,
+          storeName: ord.pharmarack_distributor || distributors[0]?.storeName || 'Unassigned',
+          isMapped: Boolean(distributors[0])
+        },
+        isInCart: inCart,
+        specialOrderId: ord.id
+      });
+    }
+
+    // D. Refills Due
+    for (const ref of pendingRefills) {
+      const rawName = ref.medicine_name || '';
+      if (!rawName) continue;
+      const normName = rawName.toLowerCase().trim();
+      if (seenNames.has(normName)) continue;
+      seenNames.add(normName);
+      const lastP = lastPurchaseMap[rawName] || lastPurchaseMap[normName];
+      const inCart = Boolean(getRefillItemInCart(ref));
+      const cardId = `refill_${ref.id}`;
+
+      cards.push({
+        id: cardId,
+        medicineName: rawName,
+        company: '',
+        packaging: '',
+        ptr: 0,
+        mrp: 0,
+        reason: 'refill_due',
+        reasonLabel: 'Chronic Refill Due',
+        reasonDetail: `Patient: ${ref.patient_name} (${ref.patient_phone}) • Due in ≤7d`,
+        currentStock: ref.in_stock_qty || 0,
+        minStock: ref.quantity_needed || 1,
+        suggestedQty: ref.quantity_needed || 1,
+        orderQty: cardQtyOverrides[cardId] || ref.quantity_needed || 1,
+        hasPreviousPurchase: Boolean(lastP?.found),
+        previousPurchase: lastP?.found ? {
+          supplierName: lastP.distributor_name,
+          supplierId: lastP.distributor_id,
+          quantity: lastP.quantity,
+          price: lastP.cost_price,
+          purchaseDate: lastP.purchase_date,
+          batchNo: lastP.batch_no,
+          expiryDate: lastP.expiry_date,
+          invoiceNo: lastP.invoice_no
+        } : undefined,
+        assignedSupplier: {
+          storeId: distributors[0]?.storeId || 0,
+          storeName: distributors[0]?.storeName || 'Unassigned',
+          isMapped: Boolean(distributors[0])
+        },
+        isInCart: inCart,
+        refillId: ref.id
+      });
+    }
+
+    return cards;
+  }, [distributors, reorderSuggestions, pendingOrders, pendingRefills, lastPurchaseMap, cardQtyOverrides]);
+
+  const handleOpenReorderSameModal = (card: any) => {
+    setReorderSameModalTarget(card);
+    setReorderModalQty(card.orderQty || card.suggestedQty || 1);
+    
+    // Default to previous supplier storeId if mapped, or first distributor
+    let matchedStoreId = distributors[0]?.storeId || 0;
+    if (card.previousPurchase?.supplierName) {
+      const prevName = card.previousPurchase.supplierName.toLowerCase().trim();
+      const match = distributors.find(d => 
+        (d.storeName && d.storeName.toLowerCase().trim() === prevName) ||
+        (d.storeName && (d.storeName.toLowerCase().includes(prevName) || prevName.includes(d.storeName.toLowerCase())))
+      );
+      if (match) matchedStoreId = match.storeId;
+    } else if (card.assignedSupplier?.storeId) {
+      matchedStoreId = card.assignedSupplier.storeId;
+    }
+    setReorderModalSupplierId(matchedStoreId);
+  };
+
+  const handleConfirmReorderSame = async () => {
+    if (!reorderSameModalTarget) return;
+    const card = reorderSameModalTarget;
+    const targetStoreId = reorderModalSupplierId || distributors[0]?.storeId || 0;
+    const targetDist = distributors.find(d => d.storeId === targetStoreId) || distributors[0];
+
+    try {
+      const rate = card.previousPurchase?.price || card.ptr || undefined;
+      const addRes = await api.addPharmarackCart([{
+        productId: card.medicineId || 0,
+        storeId: targetStoreId,
+        qty: reorderModalQty,
+        rate: rate,
+        mrp: card.mrp || card.previousPurchase?.mrp || undefined,
+        company: card.company || '',
+        productName: card.medicineName,
+        storeName: targetDist?.storeName || 'Distributor',
+        packaging: card.packaging || '',
+        mapped: true
+      }]);
+
+      if (addRes && addRes.success) {
+        toastEvent.trigger(`Added "${card.medicineName}" (x${reorderModalQty}) to ${targetDist?.storeName || 'Cart'}!`, 'success');
+        setReorderSameModalTarget(null);
+        await fetchCart();
+      } else {
+        toastEvent.trigger(addRes?.error || 'Opening Live Search to verify product...', 'info');
+        liveCartAddEvent.triggerOpen(card.medicineName, reorderModalQty);
+        setReorderSameModalTarget(null);
+      }
+    } catch (err: any) {
+      toastEvent.trigger(err?.message || 'Failed to add reorder item', 'error');
+    }
+  };
+
+  const handleOpenPurchaseHistoryModal = async (medicineName: string) => {
+    setPurchaseHistoryModalTarget({ medicineName, loading: true, history: [] });
+    try {
+      const res = await api.getMedicinePriceHistory(medicineName);
+      if (res && Array.isArray(res.data)) {
+        setPurchaseHistoryModalTarget({ medicineName, loading: false, history: res.data });
+      } else {
+        setPurchaseHistoryModalTarget({ medicineName, loading: false, history: [] });
+      }
+    } catch (err) {
+      console.warn('Failed to load purchase history:', err);
+      setPurchaseHistoryModalTarget({ medicineName, loading: false, history: [] });
+    }
+  };
+
+  const handleOpenSwitchModalForCard = (card: any) => {
+    const dummyItem: CartLineItem = {
+      productId: card.medicineId || 0,
+      storeId: card.assignedSupplier?.storeId || (distributors[0]?.storeId || 0),
+      productCode: String(card.medicineId || card.medicineName),
+      productName: card.medicineName,
+      company: card.company || '',
+      packaging: card.packaging || '',
+      qty: card.orderQty || card.suggestedQty || 1,
+      ptr: card.ptr || card.previousPurchase?.price || 0,
+      mrp: card.mrp || 0,
+      scheme: card.scheme || '',
+      stock: card.currentStock || null,
+      amount: (card.orderQty || card.suggestedQty || 1) * (card.ptr || card.previousPurchase?.price || 0),
+      cartSource: 'reorder',
+      isChecked: true,
+      createdDate: new Date().toISOString()
+    };
+    const matchedDist: Distributor = distributors.find(d => d.storeId === dummyItem.storeId) || distributors[0] || {
+      storeId: 0,
+      storeName: card.assignedSupplier?.storeName || 'Unassigned',
+      lineTotal: 0,
+      deliveryPersons: [],
+      items: []
+    };
+    handleOpenSwitchModal(dummyItem, matchedDist);
+  };
 
   // Re-fetch pending special orders whenever any page creates/updates an order.
   // This clears the module-level cache so stale data is never shown.
@@ -2336,6 +2791,9 @@ export default function PharmarackCart() {
           if (tab === 'sent-history') setHasUnreadSentHistory(false);
         }}
         hasUnreadSentHistory={hasUnreadSentHistory}
+        activeCount={distributors.reduce((acc, d) => acc + (d.items || []).filter(i => isItemIncludedInDispatch(i, d) && !isItemAlreadySent(i, d)).length, 0)}
+        reorderCount={previousOrderItemsInfo.length}
+        shortageCount={visiblePendingOrders.length + visiblePendingRefills.length + reorderSuggestions.length}
       />
 
       {currentTab === 'non-mapped' ? (
@@ -2505,6 +2963,693 @@ export default function PharmarackCart() {
                 </div>
               )}
             </div>
+          </div>
+        </div>
+      ) : currentTab === 'reorder' ? (
+        /* ── REORDER CART & RESTOCKING WORKSPACE MASTER VIEW ── */
+        <div className="flex-1 flex flex-col overflow-hidden bg-glass-bg border border-glass-border rounded-3xl min-h-0">
+          {/* Top Header */}
+          <div className="p-4 sm:p-5 border-b border-glass-border/40 bg-glass-bg/10 backdrop-blur-md shrink-0 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0 shadow-sm">
+                  <RotateCw size={18} />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-base font-black tracking-wide uppercase text-text leading-none">
+                      REORDER CART
+                    </h2>
+                    <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full border bg-amber-500/15 text-amber-400 border-amber-500/35 font-mono">
+                      Restocking Workspace
+                    </span>
+                  </div>
+                  <p className="text-xs text-muted mt-1 font-medium">
+                    Review medicines that need restocking and create purchase orders.
+                  </p>
+                </div>
+              </div>
+
+              {/* Top Quick Actions */}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleToggleAllPreviousItems(true)}
+                  disabled={previousOrderItemsInfo.length === 0 || previousOrderItemsInfo.every(x => x.isChecked)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-extrabold transition-all active:scale-95 text-xs disabled:opacity-40 shadow-sm cursor-pointer"
+                  title="Select all previous medicines to include in today's active dispatch"
+                >
+                  <Check size={13} />
+                  <span>Reorder All for Today</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setSearchParams({ tab: 'cart' })}
+                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-primary text-white hover:bg-primary/90 font-extrabold transition-all active:scale-95 text-xs shadow-sm cursor-pointer"
+                >
+                  <ShoppingCart size={13} />
+                  <span>Supplier PO Grouping ➔</span>
+                </button>
+              </div>
+            </div>
+
+            {/* ── Educational Restocking Lifecycle Progression Bar ── */}
+            <div className="p-3 rounded-2xl bg-bg2/60 border border-glass-border/60 shadow-xs">
+              <div className="flex items-center gap-1.5 overflow-x-auto text-[10px] font-bold text-muted custom-scrollbar py-0.5">
+                <span className="px-2.5 py-1 rounded-lg bg-bg border border-glass-border flex items-center gap-1.5 shrink-0 text-text">
+                  <span className="w-2 h-2 rounded-full bg-primary" /> 1. Low Stock Detected
+                </span>
+                <span className="text-muted/60 font-mono">➔</span>
+                <span className="px-2.5 py-1 rounded-lg bg-bg border border-glass-border flex items-center gap-1.5 shrink-0 text-text">
+                  <span className="w-2 h-2 rounded-full bg-amber-400" /> 2. Review Past Supplier & Price
+                </span>
+                <span className="text-muted/60 font-mono">➔</span>
+                <span className="px-2.5 py-1 rounded-lg bg-amber-500/15 border border-amber-500/35 flex items-center gap-1.5 shrink-0 text-amber-400 font-extrabold">
+                  <RotateCw size={11} className="text-amber-400" /> 3. ↻ REORDER SAME
+                </span>
+                <span className="text-muted/60 font-mono">➔</span>
+                <span className="px-2.5 py-1 rounded-lg bg-bg border border-glass-border flex items-center gap-1.5 shrink-0 text-text">
+                  <span className="w-2 h-2 rounded-full bg-sky-400" /> 4. Create Purchase Order
+                </span>
+                <span className="text-muted/60 font-mono">➔</span>
+                <span className="px-2.5 py-1 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 font-black flex items-center gap-1.5 shrink-0">
+                  <CheckCircle2 size={11} /> 5. GRN Updates Inventory
+                </span>
+              </div>
+
+              {/* Critical Rule Callout */}
+              <div className="mt-2 pt-2 border-t border-glass-border/40 flex items-center gap-1.5 text-[10px] text-muted">
+                <AlertCircle size={13} className="text-amber-400 shrink-0" />
+                <span>
+                  <strong>CRITICAL INVENTORY RULE:</strong> Adding items to Reorder Cart or creating a Purchase Order does <strong>NOT</strong> increase inventory. Stock is updated <strong>ONLY</strong> when medicines are physically received in GRN (<code className="font-mono text-primary font-bold">/purchases</code>).
+                </span>
+              </div>
+            </div>
+
+            {/* ── Top Summary KPIs ── */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 shrink-0">
+              <div className="p-3 rounded-2xl bg-bg2/40 border border-glass-border/60 shadow-xs flex items-center gap-3">
+                <div className="w-8 h-8 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 shrink-0">
+                  <RotateCw size={15} />
+                </div>
+                <div>
+                  <span className="text-[10px] text-muted font-bold uppercase tracking-wider block">Medicines to Reorder</span>
+                  <span className="text-sm font-black text-text font-mono leading-none">
+                    {allCandidateCards.length}
+                  </span>
+                </div>
+              </div>
+
+              <div className="p-3 rounded-2xl bg-bg2/40 border border-glass-border/60 shadow-xs flex items-center gap-3">
+                <div className="w-8 h-8 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0">
+                  <CheckCircle2 size={15} />
+                </div>
+                <div>
+                  <span className="text-[10px] text-muted font-bold uppercase tracking-wider block">Previously Purchased</span>
+                  <span className="text-sm font-black text-emerald-400 font-mono leading-none">
+                    {allCandidateCards.filter((c: any) => c.hasPreviousPurchase).length}
+                  </span>
+                </div>
+              </div>
+
+              <div className="p-3 rounded-2xl bg-bg2/40 border border-glass-border/60 shadow-xs flex items-center gap-3">
+                <div className="w-8 h-8 rounded-xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400 shrink-0">
+                  <AlertCircle size={15} />
+                </div>
+                <div>
+                  <span className="text-[10px] text-muted font-bold uppercase tracking-wider block">Low Stock / Below Min</span>
+                  <span className="text-sm font-black text-rose-400 font-mono leading-none">
+                    {allCandidateCards.filter((c: any) => c.reason === 'below_min_stock' || c.reason === 'low_stock').length}
+                  </span>
+                </div>
+              </div>
+
+              <div className="p-3 rounded-2xl bg-bg2/40 border border-glass-border/60 shadow-xs flex items-center gap-3">
+                <div className="w-8 h-8 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center text-sky-400 shrink-0">
+                  <Building2 size={15} />
+                </div>
+                <div>
+                  <span className="text-[10px] text-muted font-bold uppercase tracking-wider block">Suppliers / POs</span>
+                  <span className="text-sm font-black text-sky-400 font-mono leading-none">
+                    {distributors.length} Connected
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Quick Filters Bar & Category Pills */}
+          <div className="px-6 py-3 border-b border-glass-border/30 bg-bg2/40 flex flex-col md:flex-row md:items-center justify-between gap-3 shrink-0">
+            {/* Search Input */}
+            <div className="relative flex-1 max-w-md">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+              <input
+                type="text"
+                placeholder="Search medicine, manufacturer, or previous supplier..."
+                value={reorderSearchQuery}
+                onChange={(e) => setReorderSearchQuery(e.target.value)}
+                className="w-full bg-bg border border-glass-border rounded-xl pl-9 pr-3 py-1.5 text-xs text-text focus:outline-none focus:border-amber-500 font-medium"
+              />
+            </div>
+
+            {/* Category Filter Pills */}
+            <div className="flex items-center gap-1.5 overflow-x-auto custom-scrollbar py-0.5">
+              <button
+                type="button"
+                onClick={() => setReorderCategoryFilter('all')}
+                className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all cursor-pointer whitespace-nowrap ${
+                  reorderCategoryFilter === 'all'
+                    ? 'bg-primary text-white shadow-xs'
+                    : 'bg-bg border border-glass-border text-muted hover:text-text hover:bg-bg3'
+                }`}
+              >
+                All Restock ({allCandidateCards.length})
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setReorderCategoryFilter('yesterday')}
+                className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all cursor-pointer whitespace-nowrap ${
+                  reorderCategoryFilter === 'yesterday'
+                    ? 'bg-amber-500 text-white shadow-xs font-black'
+                    : 'bg-bg border border-glass-border text-amber-400 hover:bg-amber-500/10'
+                }`}
+              >
+                🕒 Ordered Yesterday ({allCandidateCards.filter((c: any) => c.reason === 'yesterday_order').length})
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setReorderCategoryFilter('purchased_before')}
+                className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all cursor-pointer whitespace-nowrap ${
+                  reorderCategoryFilter === 'purchased_before'
+                    ? 'bg-emerald-500 text-white shadow-xs font-black'
+                    : 'bg-bg border border-glass-border text-emerald-400 hover:bg-emerald-500/10'
+                }`}
+              >
+                ✓ Previously Purchased ({allCandidateCards.filter((c: any) => c.hasPreviousPurchase).length})
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setReorderCategoryFilter('never_purchased')}
+                className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all cursor-pointer whitespace-nowrap ${
+                  reorderCategoryFilter === 'never_purchased'
+                    ? 'bg-amber-500 text-white shadow-xs font-black'
+                    : 'bg-bg border border-glass-border text-amber-400 hover:bg-amber-500/10'
+                }`}
+              >
+                ⚠️ Never Purchased ({allCandidateCards.filter((c: any) => !c.hasPreviousPurchase).length})
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setReorderCategoryFilter('low_stock')}
+                className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all cursor-pointer whitespace-nowrap ${
+                  reorderCategoryFilter === 'low_stock'
+                    ? 'bg-rose-500 text-white shadow-xs font-black'
+                    : 'bg-bg border border-glass-border text-rose-400 hover:bg-rose-500/10'
+                }`}
+              >
+                🔴 Low Stock ({allCandidateCards.filter((c: any) => c.reason === 'below_min_stock' || c.reason === 'low_stock').length})
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setReorderCategoryFilter('special_requests')}
+                className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all cursor-pointer whitespace-nowrap ${
+                  reorderCategoryFilter === 'special_requests'
+                    ? 'bg-purple-500 text-white shadow-xs font-black'
+                    : 'bg-bg border border-glass-border text-purple-400 hover:bg-purple-500/10'
+                }`}
+              >
+                🟣 Special Requests ({allCandidateCards.filter((c: any) => c.reason === 'special_order').length})
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setReorderCategoryFilter('refills')}
+                className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all cursor-pointer whitespace-nowrap ${
+                  reorderCategoryFilter === 'refills'
+                    ? 'bg-sky-500 text-white shadow-xs font-black'
+                    : 'bg-bg border border-glass-border text-sky-400 hover:bg-sky-500/10'
+                }`}
+              >
+                🔵 Refills Due ({allCandidateCards.filter((c: any) => c.reason === 'refill_due').length})
+              </button>
+            </div>
+          </div>
+
+          {/* ── Reorder Cards Grid ── */}
+          <div className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar">
+            {(() => {
+              // Apply text search and category filter
+              const filteredCards = allCandidateCards.filter((card: any) => {
+                // Category Filter
+                if (reorderCategoryFilter === 'yesterday' && card.reason !== 'yesterday_order') return false;
+                if (reorderCategoryFilter === 'purchased_before' && !card.hasPreviousPurchase) return false;
+                if (reorderCategoryFilter === 'never_purchased' && card.hasPreviousPurchase) return false;
+                if (reorderCategoryFilter === 'low_stock' && card.reason !== 'below_min_stock' && card.reason !== 'low_stock') return false;
+                if (reorderCategoryFilter === 'special_requests' && card.reason !== 'special_order') return false;
+                if (reorderCategoryFilter === 'refills' && card.reason !== 'refill_due') return false;
+
+                // Search Query
+                if (reorderSearchQuery.trim()) {
+                  const q = reorderSearchQuery.toLowerCase();
+                  const matchesName = card.medicineName.toLowerCase().includes(q);
+                  const matchesCompany = card.company && card.company.toLowerCase().includes(q);
+                  const matchesSupplier = card.previousPurchase?.supplierName && card.previousPurchase.supplierName.toLowerCase().includes(q);
+                  if (!matchesName && !matchesCompany && !matchesSupplier) return false;
+                }
+
+                return true;
+              });
+
+              if (filteredCards.length === 0) {
+                return (
+                  <div className="flex flex-col items-center justify-center h-full gap-3 text-center py-20">
+                    <RotateCw size={48} className="text-muted/30" />
+                    <div>
+                      <p className="text-sm font-bold text-text">No medicines match current filter</p>
+                      <p className="text-xs text-muted mt-1">All low-stock medicines, patient shortages, and reorder demands are reviewed.</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => { setReorderCategoryFilter('all'); setReorderSearchQuery(''); }}
+                      className="px-4 py-2 rounded-xl bg-primary text-white text-xs font-bold hover:bg-primary/80 transition-all mt-2 cursor-pointer"
+                    >
+                      Clear Filters
+                    </button>
+                  </div>
+                );
+              }
+
+              return (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {filteredCards.map(card => {
+                    const estRate = card.ptr || card.previousPurchase?.price || 0;
+                    const effectiveOrderQty = card.orderQty || card.suggestedQty || 1;
+                    const estTotal = effectiveOrderQty * estRate;
+
+                    return (
+                      <div
+                        key={card.id}
+                        className="p-4 rounded-2xl border border-glass-border/70 bg-bg2/40 shadow-xs hover:border-glass-border flex flex-col justify-between gap-3.5 transition-all"
+                      >
+                        {/* 1. Card Top: Name, Packaging, Manufacturer, Reason Badge */}
+                        <div className="space-y-2">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <h4 className="font-black text-xs sm:text-sm text-text leading-snug truncate" title={card.medicineName}>
+                                  {card.medicineName}
+                                </h4>
+                                {card.packaging && (
+                                  <span className="text-[9px] font-mono text-muted bg-bg px-1.5 py-0.2 rounded border border-glass-border">
+                                    {card.packaging}
+                                  </span>
+                                )}
+                              </div>
+                              {card.company && (
+                                <div className="text-[11px] text-muted truncate">
+                                  Manufacturer: <strong className="text-text">{card.company}</strong>
+                                </div>
+                              )}
+                              {card.composition && (
+                                <div className="text-[10px] text-primary/80 font-medium truncate">
+                                  Generic: {card.composition}
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Why is this medicine here? (Reason Badge) */}
+                            <span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded-full border shrink-0 flex items-center gap-1 ${
+                              card.reason === 'below_min_stock'
+                                ? 'bg-rose-500/20 text-rose-400 border-rose-500/40'
+                                : card.reason === 'low_stock'
+                                ? 'bg-amber-500/20 text-amber-400 border-amber-500/40'
+                                : card.reason === 'special_order'
+                                ? 'bg-purple-500/20 text-purple-400 border-purple-500/40'
+                                : card.reason === 'refill_due'
+                                ? 'bg-sky-500/20 text-sky-400 border-sky-500/40'
+                                : card.reason === 'previous_order'
+                                ? 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                                : 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'
+                            }`}>
+                              <span>{card.reasonLabel}</span>
+                            </span>
+                          </div>
+
+                          {/* 2. Stock Snapshot */}
+                          <div className="grid grid-cols-3 gap-2 p-2 rounded-xl bg-bg/50 border border-glass-border/40 text-center">
+                            <div>
+                              <span className="text-[9px] text-muted uppercase font-bold block">Current Stock</span>
+                              <span className={`text-xs font-mono font-black ${card.currentStock <= 2 ? 'text-rose-400' : 'text-text'}`}>
+                                {card.currentStock}
+                              </span>
+                            </div>
+                            <div>
+                              <span className="text-[9px] text-muted uppercase font-bold block">Min Stock</span>
+                              <span className="text-xs font-mono font-bold text-muted">
+                                {card.minStock}
+                              </span>
+                            </div>
+                            <div>
+                              <span className="text-[9px] text-primary uppercase font-bold block">Suggested Order</span>
+                              <span className="text-xs font-mono font-black text-primary">
+                                {card.suggestedQty}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* 3. Previous Purchase Record Box */}
+                          <div className="p-3 rounded-xl border border-glass-border/50 bg-bg/30">
+                            {card.hasPreviousPurchase && card.previousPurchase ? (
+                              <div className="space-y-1">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-[10px] font-black uppercase text-emerald-400 flex items-center gap-1">
+                                    <Check size={11} /> Previously Purchased
+                                  </span>
+                                  <span className="text-[9px] text-muted font-mono">
+                                    {card.previousPurchase.purchaseDate ? formatDisplayDate(card.previousPurchase.purchaseDate) : 'Past Invoice'}
+                                  </span>
+                                </div>
+                                <div className="text-xs text-text space-y-0.5">
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-muted text-[11px]">Supplier:</span>
+                                    <strong className="text-text font-bold truncate max-w-[180px]">{card.previousPurchase.supplierName}</strong>
+                                  </div>
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-muted text-[11px]">Prev Quantity:</span>
+                                    <strong className="font-mono text-text">{card.previousPurchase.quantity} units</strong>
+                                  </div>
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-muted text-[11px]">Purchase Price:</span>
+                                    <strong className="font-mono text-emerald-400 font-bold">₹{card.previousPurchase.price?.toFixed(2)}</strong>
+                                  </div>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="space-y-0.5 text-center py-0.5">
+                                <div className="text-[10px] font-bold text-amber-400 flex items-center justify-center gap-1">
+                                  <AlertCircle size={11} /> No previous purchase found
+                                </div>
+                                <p className="text-[9px] text-muted">No prior invoices in database. Select supplier to restock.</p>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* 4. Quantity Adjuster & Estimated Total */}
+                          <div className="flex items-center justify-between gap-3 pt-1 border-t border-glass-border/30">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[10px] text-muted font-bold">Order Qty:</span>
+                              <div className="flex items-center gap-1 bg-bg border border-glass-border rounded-xl p-0.5">
+                                <button
+                                  type="button"
+                                  onClick={() => handleUpdateCardQty(card.id, Math.max(1, effectiveOrderQty - 1))}
+                                  className="w-5 h-5 rounded bg-bg2 hover:bg-bg3 text-xs font-bold flex items-center justify-center cursor-pointer"
+                                >
+                                  -
+                                </button>
+                                <span className="w-7 text-center font-mono font-black text-xs text-text">
+                                  {effectiveOrderQty}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleUpdateCardQty(card.id, effectiveOrderQty + 1)}
+                                  className="w-5 h-5 rounded bg-bg2 hover:bg-bg3 text-xs font-bold flex items-center justify-center cursor-pointer"
+                                >
+                                  +
+                                </button>
+                              </div>
+                            </div>
+
+                            <div className="text-right">
+                              <span className="text-[8px] text-muted block uppercase font-bold">Est. Total</span>
+                              <span className="text-xs font-mono font-black text-emerald-400">
+                                {estTotal > 0 ? `₹${estTotal.toFixed(2)}` : '—'}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* 5. Primary Action Buttons */}
+                        <div className="pt-2 border-t border-glass-border/40 space-y-2">
+                          {/* ↻ REORDER SAME button */}
+                          <button
+                            type="button"
+                            onClick={() => handleOpenReorderSameModal(card)}
+                            className="w-full py-2 px-3 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-extrabold text-xs flex items-center justify-center gap-1.5 transition-all active:scale-95 shadow-sm cursor-pointer"
+                          >
+                            <RotateCw size={13} />
+                            <span>↻ REORDER SAME</span>
+                          </button>
+
+                          {/* Secondary actions: View History, Switch Supplier */}
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleOpenPurchaseHistoryModal(card.medicineName)}
+                              className="flex-1 py-1.5 px-2 rounded-xl bg-bg border border-glass-border hover:bg-bg3 text-muted hover:text-text font-bold text-[10px] flex items-center justify-center gap-1 transition-all cursor-pointer"
+                              title="View all past purchase invoices for this medicine"
+                            >
+                              <Clock size={11} />
+                              <span>Purchase History</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleOpenSwitchModalForCard(card)}
+                              className="flex-1 py-1.5 px-2 rounded-xl bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/30 text-sky-400 font-bold text-[10px] flex items-center justify-center gap-1 transition-all cursor-pointer"
+                              title="Compare prices and switch connected distributor"
+                            >
+                              <ArrowLeftRight size={11} />
+                              <span>Switch Supplier</span>
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+          </div>
+        </div>
+      ) : currentTab === 'shortages' ? (
+        /* ── Shortages & Restock Hub View ── */
+        <div className="flex-1 flex flex-col overflow-hidden bg-glass-bg border border-glass-border rounded-3xl min-h-0">
+          {/* Header */}
+          <div className="h-16 border-b border-glass-border/40 px-6 flex items-center justify-between shrink-0 bg-glass-bg/10 backdrop-blur-md">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-sky-500/15 border border-sky-500/30 flex items-center justify-center text-sky-400">
+                <Building2 size={16} />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-text tracking-wide uppercase leading-none flex items-center gap-2">
+                  Shortages & Restock Hub
+                  <span className="text-[9px] font-extrabold px-2 py-0.5 rounded-full border bg-sky-500/10 text-sky-400 border-sky-500/30 font-mono">
+                    {visiblePendingOrders.length + visiblePendingRefills.length + reorderSuggestions.length} Demands
+                  </span>
+                </h3>
+                <p className="text-[10px] text-muted tracking-wider mt-1">
+                  Patient shortages, refill reminders, and sales-weighted inventory replenishment.
+                </p>
+              </div>
+            </div>
+
+            {/* Sub-Tabs Selector */}
+            <div className="flex items-center gap-1.5 bg-bg p-1 rounded-xl border border-glass-border">
+              <button
+                type="button"
+                onClick={() => setShortagesSubTab('requests')}
+                className={`flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                  shortagesSubTab === 'requests'
+                    ? 'bg-bg2 text-primary font-black shadow-xs border border-border'
+                    : 'text-muted hover:text-text hover:bg-bg3'
+                }`}
+              >
+                <Clock size={12} />
+                <span>Special Requests ({visiblePendingOrders.length})</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShortagesSubTab('refills')}
+                className={`flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                  shortagesSubTab === 'refills'
+                    ? 'bg-bg2 text-primary font-black shadow-xs border border-border'
+                    : 'text-muted hover:text-text hover:bg-bg3'
+                }`}
+              >
+                <ShoppingCart size={12} />
+                <span>Refills Due ({visiblePendingRefills.length})</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShortagesSubTab('sales_suggestions')}
+                className={`flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                  shortagesSubTab === 'sales_suggestions'
+                    ? 'bg-emerald-500/20 text-emerald-400 font-black shadow-xs border border-emerald-500/30'
+                    : 'text-muted hover:text-text hover:bg-bg3'
+                }`}
+              >
+                <TrendingUp size={12} />
+                <span>Sales Restock ({reorderSuggestions.length})</span>
+              </button>
+            </div>
+          </div>
+
+          {/* SubTab Content */}
+          <div className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar">
+            {/* Special Shortage Requests */}
+            {shortagesSubTab === 'requests' && (
+              visiblePendingOrders.length === 0 ? (
+                <div className="text-center py-16 text-xs text-muted italic">
+                  No pending customer special shortage orders found.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {visiblePendingOrders.map((order) => {
+                    const inCart = Boolean(getOrderItemInCart(order));
+                    return (
+                      <div key={order.id} className="p-4 rounded-2xl border border-glass-border/70 bg-bg2/40 flex flex-col justify-between gap-3 shadow-sm hover:border-glass-border transition-all">
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="font-extrabold text-xs text-text">{order.product}</span>
+                            <span className={`text-[9px] font-extrabold px-2 py-0.5 rounded-full ${
+                              order.priority === 'Urgent' ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30' : 'bg-bg3 text-muted border border-glass-border'
+                            }`}>
+                              {order.priority || 'Normal'}
+                            </span>
+                          </div>
+
+                          <div className="text-xs text-muted space-y-1">
+                            <div>Customer: <strong className="text-text">{order.requester}</strong> ({order.phone})</div>
+                            <div>Required Qty: <strong className="text-primary font-mono">{order.qty || 1}</strong></div>
+                            {order.advance_payment ? <div>Advance Paid: <strong className="text-emerald-400 font-mono">₹{order.advance_payment}</strong></div> : null}
+                            {order.pharmarack_distributor && <div>Assigned Dist: <strong className="text-text">{order.pharmarack_distributor}</strong></div>}
+                          </div>
+                        </div>
+
+                        <div className="pt-2 border-t border-glass-border/30 flex items-center justify-between gap-2">
+                          <button
+                            type="button"
+                            onClick={() => liveCartAddEvent.triggerOpen(order.product, order.qty, order.id)}
+                            className={`flex-1 py-1.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all active:scale-95 cursor-pointer ${
+                              inCart ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-primary text-white hover:bg-primary/80'
+                            }`}
+                          >
+                            <ShoppingCart size={12} />
+                            <span>{inCart ? 'In Cart' : 'Add to Cart'}</span>
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )
+            )}
+
+            {/* Refills Due */}
+            {shortagesSubTab === 'refills' && (
+              visiblePendingRefills.length === 0 ? (
+                <div className="text-center py-16 text-xs text-muted italic">
+                  No patient refills due within the next 7 days.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {visiblePendingRefills.map((refill) => {
+                    const inCart = Boolean(getRefillItemInCart(refill));
+                    return (
+                      <div key={refill.id} className="p-4 rounded-2xl border border-glass-border/70 bg-bg2/40 flex flex-col justify-between gap-3 shadow-sm hover:border-glass-border transition-all">
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="font-extrabold text-xs text-text">{refill.medicine_name}</span>
+                            <span className="text-[9px] font-mono font-bold text-sky-400 bg-sky-500/10 px-2 py-0.5 rounded-full border border-sky-500/20">
+                              Due: {refill.next_refill_date ? new Date(refill.next_refill_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : 'Soon'}
+                            </span>
+                          </div>
+
+                          <div className="text-xs text-muted space-y-1">
+                            <div>Patient: <strong className="text-text">{refill.patient_name}</strong> ({refill.patient_phone})</div>
+                            <div>Needed: <strong className="text-primary font-mono">{refill.quantity_needed || 1}</strong> | In Stock: <strong className="text-text font-mono">{refill.in_stock_qty || 0}</strong></div>
+                          </div>
+                        </div>
+
+                        <div className="pt-2 border-t border-glass-border/30 flex items-center justify-between gap-2">
+                          <button
+                            type="button"
+                            onClick={() => liveCartAddEvent.triggerOpen(refill.medicine_name, refill.quantity_needed || 1)}
+                            className={`flex-1 py-1.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all active:scale-95 cursor-pointer ${
+                              inCart ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-primary text-white hover:bg-primary/80'
+                            }`}
+                          >
+                            <ShoppingCart size={12} />
+                            <span>{inCart ? 'In Cart' : 'Add to Cart'}</span>
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )
+            )}
+
+            {/* Smart Sales Restock */}
+            {shortagesSubTab === 'sales_suggestions' && (
+              reorderSuggestions.length === 0 ? (
+                <div className="text-center py-16 text-xs text-muted italic">
+                  No sales reorder suggestions currently flagged.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {reorderSuggestions.map((sug) => (
+                    <div key={sug.medicineId} className="p-4 rounded-2xl border border-glass-border/70 bg-bg2/40 flex flex-col justify-between gap-3 shadow-sm hover:border-glass-border transition-all">
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="font-extrabold text-xs text-text">{sug.medicineName}</span>
+                          <span className="text-[9px] font-bold uppercase px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                            {sug.isHotMover ? '🔥 Hot Mover' : '⚠️ Low Stock'}
+                          </span>
+                        </div>
+
+                        <div className="text-xs text-muted space-y-1">
+                          {sug.company && <div>Company: <strong className="text-text">{sug.company}</strong></div>}
+                          <div>Current Stock: <strong className="text-rose-400 font-mono">{sug.currentStock}</strong> | Monthly Avg: <strong className="text-text font-mono">{sug.monthlyWeightedConsumption}</strong></div>
+                          <div>Suggested Top-up: <strong className="text-emerald-400 font-mono font-bold">{sug.suggestedQty}</strong></div>
+                        </div>
+                      </div>
+
+                      <div className="pt-2 border-t border-glass-border/30 flex items-center justify-between gap-2">
+                        <button
+                          type="button"
+                          onClick={() => liveCartAddEvent.triggerOpen(sug.medicineName, sug.suggestedQty)}
+                          className="flex-1 py-1.5 px-3 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold flex items-center justify-center gap-1.5 transition-all active:scale-95 cursor-pointer shadow-xs"
+                        >
+                          <ShoppingCart size={12} />
+                          <span>Add to Cart (x{sug.suggestedQty})</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            await api.snoozeReorderSuggestion(sug.medicineId, 7, '7_days');
+                            fetchReorderSuggestions();
+                            toastEvent.trigger(`Snoozed ${sug.medicineName} for 7 days`, 'info');
+                          }}
+                          className="p-1.5 rounded-xl bg-bg2 hover:bg-bg3 border border-glass-border text-muted hover:text-text text-xs transition-all cursor-pointer"
+                          title="Snooze for 7 days"
+                        >
+                          7d
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )
+            )}
           </div>
         </div>
       ) : (
@@ -3282,6 +4427,61 @@ export default function PharmarackCart() {
                   {/* ── Scrollable Distributor Cards Panel ── */}
                   <div className="flex-1 overflow-y-auto p-6 space-y-5 min-h-0 custom-scrollbar">
 
+                  {/* ── Top KPI Stat Cards ── */}
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-2 shrink-0">
+                    <div className="p-3 rounded-2xl bg-bg2/40 border border-glass-border/60 shadow-xs flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary shrink-0">
+                        <ShoppingCart size={15} />
+                      </div>
+                      <div className="min-w-0">
+                        <span className="text-[10px] text-muted font-bold uppercase tracking-wider block">Ready to Send</span>
+                        <span className="text-sm font-black text-text font-mono leading-none">
+                          {distributors.reduce((acc, d) => acc + (d.items || []).filter(i => isItemIncludedInDispatch(i, d)).length, 0)} Items
+                        </span>
+                      </div>
+                    </div>
+
+                    <div
+                      onClick={() => setSearchParams({ tab: 'reorder' })}
+                      className="p-3 rounded-2xl bg-amber-500/[0.07] border border-amber-500/30 shadow-xs flex items-center gap-3 cursor-pointer hover:bg-amber-500/[0.12] transition-all"
+                    >
+                      <div className="w-8 h-8 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
+                        <Clock size={15} />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <span className="text-[10px] text-amber-400 font-bold uppercase tracking-wider block">Previous Orders</span>
+                        <span className="text-sm font-black text-text font-mono leading-none flex items-center justify-between">
+                          <span>{previousOrderItemsInfo.length} Items</span>
+                          <span className="text-[10px] text-amber-400 font-bold">Review Hub ➔</span>
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="p-3 rounded-2xl bg-bg2/40 border border-glass-border/60 shadow-xs flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0">
+                        <Building2 size={15} />
+                      </div>
+                      <div className="min-w-0">
+                        <span className="text-[10px] text-muted font-bold uppercase tracking-wider block">Suppliers</span>
+                        <span className="text-sm font-black text-emerald-400 font-mono leading-none">
+                          {distributors.length} Mapped
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="p-3 rounded-2xl bg-bg2/40 border border-glass-border/60 shadow-xs flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center text-sky-400 shrink-0">
+                        <Truck size={15} />
+                      </div>
+                      <div className="min-w-0">
+                        <span className="text-[10px] text-muted font-bold uppercase tracking-wider block">Live Orders</span>
+                        <span className="text-xs font-bold text-text truncate block leading-none">
+                          Auto-Sync Active
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
                   {/* ── Previous Orders Reorder Banner ── */}
                   {previousOrderItemsInfo.length > 0 && (distributorFilterTab === 'active' || distributorFilterTab === 'unsent' || distributorFilterTab === 'all') && (() => {
                     const checkedCount = previousOrderItemsInfo.filter(x => x.isChecked).length;
@@ -3315,6 +4515,15 @@ export default function PharmarackCart() {
                             </div>
                           </div>
                           <div className="flex items-center gap-1.5 shrink-0">
+                            {/* Open Reorder Hub Button */}
+                            <button
+                              onClick={() => setSearchParams({ tab: 'reorder' })}
+                              className="text-[10px] font-bold px-2.5 py-1 rounded-lg bg-amber-500/30 text-amber-300 border border-amber-500/50 hover:bg-amber-500/40 transition-all active:scale-95 cursor-pointer flex items-center gap-1"
+                              title="Open dedicated Reorder Hub"
+                            >
+                              <span>Reorder Hub</span>
+                              <ArrowRight size={10} />
+                            </button>
                             {/* Select All */}
                             <button
                               onClick={() => handleToggleAllPreviousItems(true)}
@@ -3835,20 +5044,31 @@ export default function PharmarackCart() {
                                     ₹{getCartItemAmount(item).toFixed(2)}
                                   </td>
                                   <td className="px-3 py-2.5 text-center">
-                                    <button
-                                      type="button"
-                                      onClick={() => handleDeleteItem(item)}
-                                      disabled={isDeleting}
-                                      className="px-2 py-1 rounded-lg bg-rose-500/10 hover:bg-rose-500/25 border border-rose-500/30 text-rose-400 hover:text-rose-300 transition-all active:scale-95 disabled:opacity-40 flex items-center gap-1 font-bold text-[10px] mx-auto cursor-pointer"
-                                      title={`Delete ${item.productName} from Pharmarack live cart`}
-                                    >
-                                      {isDeleting ? (
-                                        <span className="w-2.5 h-2.5 border border-rose-400/30 border-t-rose-400 rounded-full animate-spin" />
-                                      ) : (
-                                        <Trash2 size={12} />
-                                      )}
-                                      <span>Delete</span>
-                                    </button>
+                                    <div className="flex items-center justify-center gap-1.5">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleOpenSwitchModal(item, dist)}
+                                        className="px-2 py-1 rounded-lg bg-sky-500/10 hover:bg-sky-500/25 border border-sky-500/30 text-sky-400 hover:text-sky-300 transition-all active:scale-95 flex items-center gap-1 font-bold text-[10px] cursor-pointer"
+                                        title={`Compare prices and switch supplier for ${item.productName}`}
+                                      >
+                                        <ArrowLeftRight size={11} />
+                                        <span>Switch</span>
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleDeleteItem(item)}
+                                        disabled={isDeleting}
+                                        className="px-2 py-1 rounded-lg bg-rose-500/10 hover:bg-rose-500/25 border border-rose-500/30 text-rose-400 hover:text-rose-300 transition-all active:scale-95 disabled:opacity-40 flex items-center gap-1 font-bold text-[10px] cursor-pointer"
+                                        title={`Delete ${item.productName} from Pharmarack live cart`}
+                                      >
+                                        {isDeleting ? (
+                                          <span className="w-2.5 h-2.5 border border-rose-400/30 border-t-rose-400 rounded-full animate-spin" />
+                                        ) : (
+                                          <Trash2 size={12} />
+                                        )}
+                                        <span>Delete</span>
+                                      </button>
+                                    </div>
                                   </td>
                                 </tr>
                               );
@@ -4071,81 +5291,407 @@ export default function PharmarackCart() {
         </div>
       )}
 
-      {/* Missing Delivery Boy Confirmation Modal */}
-      {showMissingBoyModal && createPortal(
-        <div className="fixed inset-0 z-submodal flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in">
-          <div className="bg-bg2 border border-glass-border rounded-2xl w-full max-w-md shadow-[0_0_50px_rgba(0,0,0,0.8)] overflow-hidden animate-scale-up">
-            <div className="px-6 py-4 border-b border-glass-border flex items-center justify-between bg-bg3/40">
+      {/* ── Switch Supplier / Compare Prices Modal ── */}
+      {switchModalTarget && createPortal(
+        <div className="fixed inset-0 z-modal bg-black/70 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-bg2 border border-glass-border rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 flex flex-col max-h-[85vh]">
+            {/* Modal Header */}
+            <div className="bg-bg3/80 px-6 py-4 border-b border-glass-border flex items-center justify-between shrink-0">
               <div className="flex items-center gap-2.5">
-                <Truck className="text-amber-400" size={20} />
+                <ArrowLeftRight className="text-sky-400" size={18} />
                 <div>
-                  <h3 className="font-extrabold text-text text-sm">Delivery Boy Details Missing</h3>
-                  <p className="text-[11px] text-muted">No delivery boy contacts found in database</p>
+                  <h3 className="font-extrabold text-text text-sm">Compare Suppliers & Switch Distributor</h3>
+                  <p className="text-[11px] text-muted truncate max-w-md">
+                    Medicine: <strong className="text-text">{switchModalTarget.item.productName}</strong> | Current: <strong className="text-primary">{switchModalTarget.dist.storeName}</strong> (₹{switchModalTarget.item.ptr?.toFixed(2) || '—'})
+                  </p>
                 </div>
               </div>
               <button
                 type="button"
-                onClick={() => setShowMissingBoyModal(false)}
-                className="p-1 rounded-lg text-muted hover:text-text hover:bg-bg3 transition-colors"
+                onClick={() => setSwitchModalTarget(null)}
+                className="p-1 rounded-lg text-muted hover:text-text hover:bg-bg3 transition-colors cursor-pointer"
               >
                 <X size={18} />
               </button>
             </div>
 
-            <div className="p-6 space-y-4">
-              <div className="p-3.5 bg-amber-500/10 border border-amber-500/20 rounded-xl text-xs text-amber-300">
-                <p className="font-semibold mb-1 font-bold">Notice:</p>
-                No delivery boy phone numbers were found in your database. Would you like to fill in the Delivery Boy details now, or proceed using the <strong>Admin Contact Number ({storeInfo.adminPhone || storeInfo.phone || 'Admin'})</strong> as the delivery contact so distributors can reach you directly?
+            {/* Search Input Bar */}
+            <div className="p-4 border-b border-glass-border/40 bg-bg/40 flex items-center gap-2 shrink-0">
+              <Search size={14} className="text-muted shrink-0" />
+              <input
+                type="text"
+                placeholder="Search across all connected distributor catalogs..."
+                value={switchSearchQuery}
+                onChange={(e) => handleSearchSwitchCatalog(e.target.value)}
+                className="flex-1 bg-bg border border-glass-border rounded-xl px-3 py-1.5 text-xs text-text focus:outline-none focus:border-sky-500 font-medium"
+              />
+              {switchSearching && (
+                <span className="w-4 h-4 border-2 border-sky-400/30 border-t-sky-400 rounded-full animate-spin shrink-0" />
+              )}
+            </div>
+
+            {/* Suppliers Comparison Table / List */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
+              {/* Section 1: Live Catalog Matches */}
+              <div>
+                <h4 className="text-[11px] font-extrabold uppercase text-sky-400 tracking-wider mb-2 flex items-center gap-1.5">
+                  <Building2 size={13} />
+                  Connected Distributor Catalogs ({switchCatalogResults.length})
+                </h4>
+
+                {switchSearching ? (
+                  <div className="text-center py-8 text-xs text-muted font-bold tracking-wider uppercase animate-pulse">
+                    Searching distributor inventories…
+                  </div>
+                ) : switchCatalogResults.length === 0 ? (
+                  <div className="text-center py-6 text-xs text-muted italic border border-glass-border/30 rounded-xl bg-bg/20">
+                    No active catalog matches found for "{switchSearchQuery}".
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {switchCatalogResults.map((prod, idx) => {
+                      const isCurrentDist = prod.storeId === switchModalTarget.dist.storeId;
+                      const rateDiff = (prod.rate || 0) - (switchModalTarget.item.ptr || 0);
+
+                      return (
+                        <div
+                          key={idx}
+                          className={`p-3 rounded-xl border flex items-center justify-between gap-3 transition-all ${
+                            isCurrentDist
+                              ? 'border-primary/40 bg-primary/5'
+                              : 'border-glass-border/50 bg-bg/40 hover:border-sky-500/40 hover:bg-bg/70'
+                          }`}
+                        >
+                          <div className="min-w-0 flex-1 space-y-0.5">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-extrabold text-xs text-text">{prod.storeName}</span>
+                              {isCurrentDist && (
+                                <span className="text-[9px] font-black uppercase px-1.5 py-0.2 rounded bg-primary/20 text-primary border border-primary/30">
+                                  Current Supplier
+                                </span>
+                              )}
+                              {prod.scheme && (
+                                <span className="text-[9px] font-bold text-green bg-green/10 px-1.5 py-0.2 rounded border border-green/20">
+                                  {prod.scheme}
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-3 text-[11px] text-muted flex-wrap">
+                              <span>Rate: <strong className="text-emerald-400 font-mono">₹{prod.rate ? prod.rate.toFixed(2) : '—'}</strong></span>
+                              <span>MRP: <strong className="text-text font-mono">₹{prod.mrp ? prod.mrp.toFixed(2) : '—'}</strong></span>
+                              <span>Stock: <strong className="text-text font-mono">{prod.stock || 'Available'}</strong></span>
+                              {prod.rate && switchModalTarget.item.ptr > 0 && Math.abs(rateDiff) > 0.05 && (
+                                <span className={`font-bold font-mono ${rateDiff < 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                  {rateDiff < 0 ? `(₹${Math.abs(rateDiff).toFixed(2)} cheaper)` : `(+₹${rateDiff.toFixed(2)})`}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="shrink-0">
+                            {isCurrentDist ? (
+                              <span className="text-xs text-muted font-bold px-3 py-1.5 rounded-xl bg-bg border border-glass-border block text-center">
+                                Current
+                              </span>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => handleConfirmSwitchSupplier(prod)}
+                                disabled={switchingDistributor}
+                                className="px-3.5 py-1.5 rounded-xl bg-sky-500 hover:bg-sky-600 text-white font-extrabold text-xs flex items-center gap-1.5 transition-all active:scale-95 disabled:opacity-50 cursor-pointer shadow-sm"
+                              >
+                                {switchingDistributor ? (
+                                  <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                                ) : (
+                                  <Check size={13} />
+                                )}
+                                <span>Switch to {prod.storeName.split(' ')[0]}</span>
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
 
-              {/* Form to add quick delivery boy */}
-              <div className="space-y-3 pt-1">
-                <p className="text-xs font-bold text-text">Fill Delivery Boy Details:</p>
-                <div>
-                  <label className="block text-[11px] font-bold text-muted mb-1">Delivery Boy Name</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Dinesh"
-                    value={quickBoyName}
-                    onChange={(e) => setQuickBoyName(e.target.value)}
-                    className="w-full bg-bg border border-glass-border rounded-xl px-3 py-2 text-xs text-text focus:outline-none focus:border-amber-500 font-medium"
-                  />
+              {/* Section 2: Purchase Invoice Price History */}
+              {(() => {
+                const hist = priceHistoryCache[switchModalTarget.item.productName] || [];
+                if (hist.length === 0) return null;
+
+                return (
+                  <div className="pt-2 border-t border-glass-border/30">
+                    <h4 className="text-[11px] font-extrabold uppercase text-emerald-400 tracking-wider mb-2 flex items-center gap-1.5">
+                      <Clock size={13} />
+                      Historical Purchase Invoices ({hist.length})
+                    </h4>
+                    <div className="space-y-1.5">
+                      {hist.slice(0, 5).map((h, i) => (
+                        <div key={i} className="p-2.5 rounded-xl border border-glass-border/40 bg-bg/30 flex items-center justify-between text-xs">
+                          <div className="min-w-0 flex-1">
+                            <span className="font-bold text-text">{h.distributor_name}</span>
+                            <span className="text-[10px] text-muted ml-2 font-mono">
+                              ({h.invoice_date ? new Date(h.invoice_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Past Bill'})
+                            </span>
+                            <div className="text-[11px] text-muted mt-0.5">
+                              Net Rate: <strong className="text-emerald-400 font-mono">₹{h.net_rate?.toFixed(2)}</strong> | Rate: ₹{h.rate?.toFixed(2)} {h.free_qty ? `| Free: ${h.free_qty}` : ''} {h.cd_per ? `| Disc: ${h.cd_per}%` : ''}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="bg-bg3/60 px-6 py-3 border-t border-glass-border flex items-center justify-end shrink-0">
+              <button
+                type="button"
+                onClick={() => setSwitchModalTarget(null)}
+                className="px-4 py-1.5 rounded-xl text-xs font-bold text-muted hover:text-text hover:bg-bg3 transition-all cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* ── Reorder Same Confirmation Modal ── */}
+      {reorderSameModalTarget && createPortal(
+        <div className="fixed inset-0 z-modal bg-black/75 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-bg2 border border-glass-border rounded-2xl w-full max-w-xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
+            {/* Modal Header */}
+            <div className="bg-bg3/80 px-6 py-4 border-b border-glass-border flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400">
+                  <RotateCw size={16} />
                 </div>
                 <div>
-                  <label className="block text-[11px] font-bold text-muted mb-1">WhatsApp Phone Number</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. 9876543210"
-                    value={quickBoyPhone}
-                    onChange={(e) => setQuickBoyPhone(sanitizePhoneInput(e.target.value))}
-                    maxLength={10}
-                    className="w-full bg-bg border border-glass-border rounded-xl px-3 py-2 text-xs text-text font-mono focus:outline-none focus:border-amber-500 font-bold"
-                  />
+                  <h3 className="font-extrabold text-text text-sm">REORDER SAME MEDICINE</h3>
+                  <p className="text-[11px] text-muted">{reorderSameModalTarget.medicineName} {reorderSameModalTarget.company ? `(${reorderSameModalTarget.company})` : ''}</p>
                 </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setReorderSameModalTarget(null)}
+                className="p-1 rounded-lg text-muted hover:text-text hover:bg-bg3 transition-colors cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 space-y-4 overflow-y-auto custom-scrollbar flex-1">
+              {/* Side-by-side: Previous Purchase vs Current Stock */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {/* Previous Purchase Record */}
+                <div className="p-3.5 rounded-xl border border-glass-border/60 bg-bg/40 space-y-2">
+                  <span className="text-[10px] font-black uppercase text-amber-400 block border-b border-glass-border/30 pb-1 flex items-center gap-1">
+                    <Clock size={11} /> Previous Purchase Record
+                  </span>
+                  {reorderSameModalTarget.hasPreviousPurchase && reorderSameModalTarget.previousPurchase ? (
+                    <div className="space-y-1 text-xs">
+                      <div>Supplier: <strong className="text-text font-bold">{reorderSameModalTarget.previousPurchase.supplierName}</strong></div>
+                      <div>Previous Qty: <strong className="font-mono text-text">{reorderSameModalTarget.previousPurchase.quantity} units</strong></div>
+                      <div>Price Paid: <strong className="font-mono text-emerald-400 font-bold">₹{reorderSameModalTarget.previousPurchase.price?.toFixed(2)}</strong></div>
+                      <div>Date: <strong className="font-mono text-muted">{formatDisplayDate(reorderSameModalTarget.previousPurchase.purchaseDate)}</strong></div>
+                    </div>
+                  ) : (
+                    <div className="text-xs text-muted italic py-2 space-y-1">
+                      <div className="text-amber-400 font-bold flex items-center gap-1">
+                        <AlertCircle size={12} /> No previous purchase found
+                      </div>
+                      <p className="text-[11px]">Select a supplier below to restock this medicine.</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Current Stock Status */}
+                <div className="p-3.5 rounded-xl border border-glass-border/60 bg-bg/40 space-y-2">
+                  <span className="text-[10px] font-black uppercase text-primary block border-b border-glass-border/30 pb-1 flex items-center gap-1">
+                    <Layers size={11} /> Current Stock Status
+                  </span>
+                  <div className="space-y-1 text-xs">
+                    <div>Current In-Stock: <strong className={`font-mono ${reorderSameModalTarget.currentStock <= 2 ? 'text-rose-400' : 'text-text'}`}>{reorderSameModalTarget.currentStock} units</strong></div>
+                    <div>Minimum / Safety: <strong className="font-mono text-muted">{reorderSameModalTarget.minStock} units</strong></div>
+                    <div>Suggested Order: <strong className="font-mono text-primary font-bold">{reorderSameModalTarget.suggestedQty} units</strong></div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Target Supplier & Quantity Adjuster */}
+              <div className="p-4 rounded-xl bg-bg3/30 border border-glass-border space-y-3">
+                <div>
+                  <label className="block text-[11px] font-bold text-muted mb-1">Target Supplier / Distributor</label>
+                  <select
+                    value={reorderModalSupplierId || ''}
+                    onChange={(e) => setReorderModalSupplierId(Number(e.target.value))}
+                    className="w-full bg-bg border border-glass-border rounded-xl px-3 py-2 text-xs text-text focus:outline-none focus:border-amber-500 font-bold"
+                  >
+                    {distributors.map(d => (
+                      <option key={d.storeId} value={d.storeId}>
+                        {d.storeName}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-muted mb-1">Quantity to Reorder (Strips / Units)</label>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setReorderModalQty(q => Math.max(1, q - 1))}
+                      className="w-8 h-8 rounded-xl bg-bg border border-glass-border hover:bg-bg2 text-sm font-bold flex items-center justify-center cursor-pointer"
+                    >
+                      -
+                    </button>
+                    <input
+                      type="number"
+                      min={1}
+                      value={reorderModalQty}
+                      onChange={(e) => setReorderModalQty(Math.max(1, parseInt(e.target.value) || 1))}
+                      className="w-24 text-center bg-bg border border-glass-border rounded-xl py-1.5 text-xs text-text font-mono font-black focus:outline-none focus:border-amber-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setReorderModalQty(q => q + 1)}
+                      className="w-8 h-8 rounded-xl bg-bg border border-glass-border hover:bg-bg2 text-sm font-bold flex items-center justify-center cursor-pointer"
+                    >
+                      +
+                    </button>
+                    <span className="text-xs text-muted ml-2">
+                      Estimated Total: <strong className="font-mono text-emerald-400 font-bold">₹{(reorderModalQty * (reorderSameModalTarget.ptr || reorderSameModalTarget.previousPurchase?.price || 0)).toFixed(2)}</strong>
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Workflow Reminder */}
+              <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-xs text-amber-300 space-y-1">
+                <div className="font-bold flex items-center gap-1">
+                  <AlertCircle size={13} /> Restocking Rule Reminder
+                </div>
+                <p className="text-[11px] text-amber-300/90 leading-relaxed">
+                  Confirming adds this medicine to the distributor's Purchase Order batch. It does <strong>NOT</strong> create the final PO immediately and does <strong>NOT</strong> increase inventory stock. Inventory updates ONLY when goods are received & verified in GRN.
+                </p>
               </div>
             </div>
 
-            <div className="bg-bg3/40 px-6 py-3.5 border-t border-glass-border flex flex-col gap-2">
+            {/* Modal Footer */}
+            <div className="bg-bg3/60 px-6 py-3.5 border-t border-glass-border flex items-center justify-end gap-2 shrink-0">
               <button
                 type="button"
-                onClick={handleSaveQuickDeliveryBoy}
-                disabled={isSavingQuickBoy || !quickBoyName.trim() || !quickBoyPhone.trim()}
-                className="w-full bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold py-2.5 rounded-xl flex items-center justify-center gap-1.5 disabled:opacity-50 transition-all shadow-md active:scale-95"
+                onClick={() => setReorderSameModalTarget(null)}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-muted hover:text-text hover:bg-bg3 transition-all cursor-pointer"
               >
-                {isSavingQuickBoy ? (
-                  <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                ) : (
-                  <Check size={14} />
-                )}
-                <span>Save Delivery Boy & Send Order</span>
+                Cancel
               </button>
-
               <button
                 type="button"
-                onClick={handleSkipMissingBoyAndUseAdmin}
-                className="w-full bg-bg border border-glass-border hover:bg-bg3 text-muted hover:text-text text-xs font-bold py-2.5 rounded-xl transition-all"
+                onClick={handleConfirmReorderSame}
+                className="px-5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-extrabold text-xs flex items-center gap-1.5 transition-all active:scale-95 shadow-md cursor-pointer"
               >
-                Skip & Use Admin Number ({storeInfo.adminPhone || storeInfo.phone || 'Admin'})
+                <Check size={14} />
+                <span>Confirm & Add to Reorder Cart</span>
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* ── Purchase History Modal ── */}
+      {purchaseHistoryModalTarget && createPortal(
+        <div className="fixed inset-0 z-modal bg-black/75 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-bg2 border border-glass-border rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
+            {/* Modal Header */}
+            <div className="bg-bg3/80 px-6 py-4 border-b border-glass-border flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400">
+                  <Clock size={16} />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-text text-sm">PURCHASE INVOICE HISTORY</h3>
+                  <p className="text-[11px] text-muted">{purchaseHistoryModalTarget.medicineName}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPurchaseHistoryModalTarget(null)}
+                className="p-1 rounded-lg text-muted hover:text-text hover:bg-bg3 transition-colors cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 space-y-4 overflow-y-auto custom-scrollbar flex-1">
+              {purchaseHistoryModalTarget.loading ? (
+                <div className="flex items-center justify-center py-16 text-muted gap-2 text-xs">
+                  <span className="w-4 h-4 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+                  <span>Loading purchase history from database...</span>
+                </div>
+              ) : purchaseHistoryModalTarget.history.length === 0 ? (
+                <div className="text-center py-16 space-y-2">
+                  <Clock size={36} className="text-muted/40 mx-auto" />
+                  <p className="text-sm font-bold text-text">No Purchase Invoices Found</p>
+                  <p className="text-xs text-muted">No historical purchase bills exist for this medicine in the database.</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <div className="text-xs text-muted flex items-center justify-between">
+                    <span>Found <strong className="text-text font-bold">{purchaseHistoryModalTarget.history.length}</strong> previous invoice records</span>
+                    <span className="text-[10px] text-emerald-400 font-bold">Sorted by most recent</span>
+                  </div>
+                  <div className="divide-y divide-glass-border/30 border border-glass-border rounded-xl overflow-hidden bg-bg/30">
+                    {purchaseHistoryModalTarget.history.map((h, i) => (
+                      <div key={i} className="p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs hover:bg-bg/60 transition-colors">
+                        <div className="space-y-0.5">
+                          <div className="flex items-center gap-2">
+                            <strong className="text-text font-bold">{h.distributor_name}</strong>
+                            {h.invoice_no && (
+                              <span className="text-[10px] font-mono text-muted bg-bg px-1.5 py-0.2 rounded border border-glass-border">
+                                Inv: {h.invoice_no}
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[11px] text-muted flex items-center gap-3 flex-wrap">
+                            <span>Date: <strong className="text-text font-mono">{h.invoice_date ? formatDisplayDate(h.invoice_date) : 'Past'}</strong></span>
+                            {h.batch_no && <span>Batch: <strong className="text-text font-mono">{h.batch_no}</strong></span>}
+                            {h.expiry_date && <span>Exp: <strong className="text-text font-mono">{h.expiry_date}</strong></span>}
+                            <span>Qty: <strong className="text-text font-mono">{h.quantity}</strong> {h.free_qty ? `(+${h.free_qty} Free)` : ''}</span>
+                          </div>
+                        </div>
+
+                        <div className="text-right sm:text-right shrink-0">
+                          <div className="text-[10px] text-muted">Net Rate / Unit</div>
+                          <div className="text-sm font-black font-mono text-emerald-400">
+                            ₹{h.net_rate?.toFixed(2) || h.rate?.toFixed(2)}
+                          </div>
+                          {h.mrp > 0 && <div className="text-[10px] text-muted font-mono">MRP: ₹{h.mrp.toFixed(2)}</div>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="bg-bg3/60 px-6 py-3 border-t border-glass-border flex items-center justify-end shrink-0">
+              <button
+                type="button"
+                onClick={() => setPurchaseHistoryModalTarget(null)}
+                className="px-4 py-1.5 rounded-xl text-xs font-bold text-muted hover:text-text hover:bg-bg3 transition-all cursor-pointer"
+              >
+                Close
               </button>
             </div>
           </div>

@@ -584,12 +584,12 @@ router.post('/ledger/pay', async (req, res) => {
 
     await db.run('COMMIT');
 
-    // Fetch updated customer info to send automated WhatsApp payment receipt
+    // Fetch updated customer info to send WhatsApp payment receipt ONLY IF user requested it
     const customer = await db.get('SELECT name, phone, credit_balance, language FROM customers WHERE id = ?', [customer_id]);
     let whatsappSent = false;
     let whatsappError = '';
 
-    if (customer && customer.phone) {
+    if (Boolean(req.body.sendWhatsApp) && customer && customer.phone) {
       try {
         const cleanPhone = normalizeWhatsAppPhone(customer.phone);
         if (cleanPhone && cleanPhone.length >= 10) {

@@ -1883,7 +1883,8 @@ router.post('/batch-last-purchase', async (req, res) => {
       const ph = ids.map(() => '?').join(',');
       let q = `
         SELECT pi.*, m.name as medicine_name, m.id as medicine_id,
-               d.name as distributor_name, d.id as distributor_id
+               d.name as distributor_name, d.id as distributor_id,
+               p.date as purchase_date, p.invoice_no
         FROM purchase_items pi
         JOIN purchases p ON pi.purchase_id = p.id
         JOIN medicines m ON pi.medicine_id = m.id
@@ -1915,11 +1916,14 @@ router.post('/batch-last-purchase', async (req, res) => {
         sgst_per: row.sgst_per,
         quantity: row.quantity,
         free_qty: row.free_qty || 0,
-        distributor_name: row.distributor_name
+        distributor_name: row.distributor_name,
+        distributor_id: row.distributor_id,
+        purchase_date: row.purchase_date,
+        invoice_no: row.invoice_no
       });
     }
 
-        res.json(results);
+    res.json(results);
   } catch (error) {
     console.error('Batch last purchase error:', error);
     res.status(500).json({ error: 'Internal server error' });

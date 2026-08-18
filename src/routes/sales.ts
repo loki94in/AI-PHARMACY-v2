@@ -535,8 +535,8 @@ router.post('/', async (req, res) => {
       }
     })();
 
-    // Trigger WhatsApp notification — same mechanism as CRM page (dynamic import + direct sendMessage)
-    if (sendWhatsApp || paymentMedium?.toUpperCase() === 'CREDIT' || paymentStatus?.toUpperCase() === 'UNPAID') {
+    // Trigger WhatsApp notification — ONLY IF user explicitly enabled sendWhatsApp
+    if (Boolean(sendWhatsApp)) {
       const rawDigits = (patient_phone || '').replace(/\D/g, '');
       const phoneForWA = rawDigits.length === 12 && rawDigits.startsWith('91')
         ? rawDigits.slice(2)
@@ -568,25 +568,27 @@ router.post('/', async (req, res) => {
                 const q = Number(it.quantity || it.qty || 1);
                 const m = Number(it.mrp || 0);
                 const itemTot = Number(it.total || (m * q));
-                itemLines += `${idx + 1}. *${med}* x ${q} strip(s) = ₹${itemTot.toFixed(2)}\n`;
+                itemLines += `${idx + 1}. *${med}* — ${q} unit${q > 1 ? 's' : ''} @ ₹${m.toFixed(2)} = ₹${itemTot.toFixed(2)}\n`;
               });
               itemLines += `\n`;
             }
 
             const isCredit = paymentMedium?.toUpperCase() === 'CREDIT' || paymentStatus?.toUpperCase() === 'UNPAID';
-            let waMsg = `Dear ${nameForWA},\n\n`;
+            let waMsg = `Hello *${nameForWA}*,\n\n`;
 
             if (isCredit) {
-              const custRow = customerId ? await db.get('SELECT credit_balance FROM customers WHERE id = ?', [customerId]) : null;
+              // Calculate accurate ledger balance
               let finalOutstanding = 0;
-              if (custRow?.credit_balance !== undefined && custRow?.credit_balance !== null) {
-                finalOutstanding = Number(custRow.credit_balance);
-              } else {
+              if (patient_name) {
                 const oldInvoices = customerId
                   ? await db.all(
-                      `SELECT total_amount FROM sales_invoices
-                       WHERE customer_id = ? AND id != ? AND (payment_medium = 'CREDIT' OR payment_status = 'UNPAID' OR payment_status = 'PENDING') AND payment_status != 'PAID'`,
+                      `SELECT total_amount FROM sales WHERE customer_id = ? AND (payment_status = 'UNPAID' OR payment_medium = 'CREDIT') AND id != ?`,
                       [customerId, invoiceId]
+                    )
+                  : patient_name
+                  ? await db.all(
+                      `SELECT total_amount FROM sales WHERE LOWER(patient_name) = LOWER(?) AND (payment_status = 'UNPAID' OR payment_medium = 'CREDIT') AND id != ?`,
+                      [patient_name.trim(), invoiceId]
                     )
                   : [];
                 const oldDuesSum = oldInvoices.reduce((sum: number, inv: any) => sum + Number(inv.total_amount || 0), 0);
@@ -641,10 +643,6 @@ router.post('/', async (req, res) => {
     }
 
     // Match special orders for each item in the saved POS bill.
-    // One batched SELECT for all distinct medicine names, then a per-item lookup
-    // against an in-memory index. consumedIds tracks orders already fulfilled
-    // earlier in this same request, replicating the old fresh-per-item-query
-    // behavior where a fulfilled order dropped out of subsequent items' matches.
     const matchedSpecialOrders: any[] = [];
     try {
       const distinctMedNames = Array.from(new Set(
@@ -685,33 +683,21 @@ router.post('/', async (req, res) => {
                 qty_sold: Number(item.quantity) || 1,
                 whatsapp_template: specMsg
               });
-              if (m.customer_phone) {
-                try {
-                  const { whatsappQueueWorker } = await import('../services/whatsappQueueWorker.js');
-                  const specPhone = m.customer_phone.replace(/\D/g, '').slice(-10);
-                  if (specPhone.length === 10) {
-                    await whatsappQueueWorker.enqueue(
-                      specPhone,
-                      specMsg,
-                      'special_order_fulfilled',
-                      m.requester || 'Customer'
-                    );
-                    await db.run(
-                      `UPDATE special_orders SET status = 'Fulfilled' WHERE id = ?`,
-                      [m.order_id]
-                    );
-                    console.log(`[Special Order WA] Enqueued fulfillment alert for order #${m.order_id} to ${specPhone}`);
-                  }
-                } catch (specWaErr) {
-                  console.warn(`[Special Order WA] Failed enqueue for order #${m.order_id}:`, specWaErr);
-                }
+              // Update special order to Fulfilled in DB without auto-sending message
+              try {
+                await db.run(
+                  `UPDATE special_orders SET status = 'Fulfilled' WHERE id = ?`,
+                  [m.order_id]
+                );
+              } catch (specErr) {
+                console.warn(`[Special Order] Failed to update fulfilled status for order #${m.order_id}:`, specErr);
               }
             }
           }
         }
       }
-    } catch (mErr) {
-      console.warn('[POS Sale] Failed to lookup matched special orders:', mErr);
+    } catch (soErr) {
+      console.warn('[POS Special Orders] Error processing matched special orders:', soErr);
     }
 
     res.json({ success: true, invoice_no, total, tax, matched_special_orders: matchedSpecialOrders });
@@ -2555,8 +2541,8 @@ router.post('/staged/:id/approve', async (req, res) => {
     await db.run('COMMIT');
     inventoryCache.invalidate();
 
-    // Automatically send WhatsApp Invoice PDF
-    if (invoiceId) {
+    // Send WhatsApp Invoice PDF only if user explicitly requested it
+    if (Boolean(req.body?.sendWhatsApp) && invoiceId) {
       try {
         const { whatsappInvoiceService } = await import('../services/whatsappInvoiceService.js');
         // Run in background to prevent blocking response

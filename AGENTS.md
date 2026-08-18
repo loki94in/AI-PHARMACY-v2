@@ -367,5 +367,19 @@ To maintain total data integrity across the pharmacy POS ecosystem:
      7. Data source and traceability.
      8. Any remaining risk or location that needs review.
 
+---
 
+## Strict Manual-Only Patient Messaging Contract
 
+To prevent unexpected or automated WhatsApp/SMS messages being sent to patients without explicit user intent:
+
+1. **Zero Automatic Patient Messaging**:
+   - The application **MUST NEVER** automatically send messages (WhatsApp, SMS, or direct messages) to patients/customers.
+   - When medicines arrive in inventory, when purchase invoices are saved/verified, when refills are evaluated, or when stock is reconciled, the system **MUST ONLY** update database statuses (e.g. `status = 'Ready'`, `notified = 0`, `is_ready = 1`) and stage actionable records.
+2. **Explicit User-Clicked UI Triggers Only**:
+   - All patient notifications require a manual, explicit user click in the UI:
+     - **Special Order Arrival**: User clicks `📱 Send Arrival WA` / `Resend` on the Special Requests panel (`/crm?tab=special_orders`).
+     - **Refill Reminder**: User clicks `📱 Remind Now` on the Refills panel (`/crm?tab=refills`).
+     - **POS / Sales Invoice**: Invoices are dispatched only when the user explicitly checks or enables the WhatsApp toggle at the point of sale.
+3. **No Background Worker Auto-Dispatch to Patients**:
+   - Background crons, inventory listeners, queue workers, and purchase reconcilers are strictly prohibited from dispatching patient messages autonomously.

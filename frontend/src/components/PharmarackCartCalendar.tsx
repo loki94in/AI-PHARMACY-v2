@@ -39,12 +39,18 @@ interface PharmarackCartCalendarProps {
   currentTab: string;
   onTabChange: (tab: string) => void;
   hasUnreadSentHistory?: boolean;
+  activeCount?: number;
+  reorderCount?: number;
+  shortageCount?: number;
 }
 
 export const PharmarackCartCalendar: React.FC<PharmarackCartCalendarProps> = ({
   currentTab,
   onTabChange,
   hasUnreadSentHistory = false,
+  activeCount = 0,
+  reorderCount = 0,
+  shortageCount = 0,
 }) => {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const todayCardRef = useRef<HTMLButtonElement>(null);
@@ -99,49 +105,32 @@ export const PharmarackCartCalendar: React.FC<PharmarackCartCalendarProps> = ({
     }
   };
 
-  const handleTimerChange = async (newSec: number) => {
-    if (newSec < 1) newSec = 1;
-    setTimerSec(newSec);
-    try {
-      const newMs = newSec * 1000;
-      await apiClient.post('/settings/save', {
-        whatsapp_pacing_min_ms: newMs.toString(),
-        whatsapp_pacing_max_ms: (newMs + 2000).toString()
-      });
-      whatsappQueueEvent.triggerUpdated();
-      toastEvent.trigger(`Timer set to ${newSec}s`, 'success');
-    } catch (err) {
-      toastEvent.trigger('Failed to save timer', 'error');
-    }
+  const handleTimerChange = (sec: number) => {
+    setTimerSec(sec);
+    localStorage.setItem('pharmarack_cart_timer_sec', String(sec));
+    toastEvent.trigger(`Auto-send delay set to ${sec}s per order`, 'info');
   };
 
-  // Generate 21 days starting from today
-  const dateCards: DateCardItem[] = useMemo(() => {
+  // Generate 21-day rolling date strip (-3 days ago to +17 days ahead)
+  const dateCards = useMemo(() => {
     const cards: DateCardItem[] = [];
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const now = new Date();
+    const todayStr = now.toISOString().split('T')[0];
 
-    for (let i = 0; i < 21; i++) {
-      const d = new Date(today);
-      d.setDate(d.getDate() + i);
-
-      const year = d.getFullYear();
-      const month = String(d.getMonth() + 1).padStart(2, '0');
-      const day = String(d.getDate()).padStart(2, '0');
-      const dateStr = `${year}-${month}-${day}`;
-
-      const dayName = d.toLocaleDateString('en-US', { weekday: 'short' });
-      const monthName = d.toLocaleDateString('en-US', { month: 'short' });
+    for (let offset = -3; offset <= 17; offset++) {
+      const d = new Date(now);
+      d.setDate(now.getDate() + offset);
+      const dateStr = d.toISOString().split('T')[0];
       const isSunday = d.getDay() === 0;
+      const isToday = dateStr === todayStr;
       const holidayName = INDIAN_HOLIDAYS_2026[dateStr];
-      const isToday = i === 0;
       const isPaused = pausedDates.includes(dateStr);
 
       cards.push({
         dateStr,
-        dayName,
+        dayName: d.toLocaleDateString('en-IN', { weekday: 'short' }),
         dateNum: d.getDate(),
-        monthName,
+        monthName: d.toLocaleDateString('en-IN', { month: 'short' }),
         isToday,
         isSunday,
         holidayName,
@@ -151,18 +140,14 @@ export const PharmarackCartCalendar: React.FC<PharmarackCartCalendarProps> = ({
     return cards;
   }, [pausedDates]);
 
-  // Auto-scroll to today's date on mount
+  // Center scroll on today's card on initial load
   useEffect(() => {
-    const timer = setTimeout(() => {
-      if (todayCardRef.current && scrollContainerRef.current) {
-        todayCardRef.current.scrollIntoView({
-          behavior: 'smooth',
-          block: 'nearest',
-          inline: 'center'
-        });
-      }
-    }, 150);
-    return () => clearTimeout(timer);
+    if (todayCardRef.current && scrollContainerRef.current) {
+      const container = scrollContainerRef.current;
+      const card = todayCardRef.current;
+      const scrollPos = card.offsetLeft - container.offsetWidth / 2 + card.offsetWidth / 2;
+      container.scrollTo({ left: Math.max(0, scrollPos), behavior: 'smooth' });
+    }
   }, []);
 
   const scrollLeft = () => {
@@ -184,31 +169,81 @@ export const PharmarackCartCalendar: React.FC<PharmarackCartCalendarProps> = ({
       <div className="flex flex-wrap items-center justify-between gap-2 pb-1.5 border-b border-glass-border/30">
         
         {/* Integrated Navigation Tabs */}
-        <div className="flex items-center gap-1.5 bg-bg p-1 rounded-xl border border-glass-border shrink-0">
+        <div className="flex items-center gap-1.5 bg-bg p-1 rounded-xl border border-glass-border shrink-0 overflow-x-auto">
+          {/* Tab 1: Reorder Hub */}
+          <button
+            type="button"
+            onClick={() => onTabChange('reorder')}
+            className={`flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer whitespace-nowrap ${
+              currentTab === 'reorder' || (!currentTab && activeCount === 0)
+                ? 'bg-amber-500/20 text-amber-400 font-black shadow-xs border border-amber-500/40'
+                : reorderCount > 0
+                  ? 'text-amber-400 hover:bg-amber-500/10'
+                  : 'text-muted hover:text-text hover:bg-bg3'
+            }`}
+            title="Review medicines requiring reorder with previous purchase history"
+          >
+            <Clock size={13} className={currentTab === 'reorder' || reorderCount > 0 ? 'text-amber-400' : 'text-muted'} />
+            <span>Reorder Hub</span>
+            {reorderCount > 0 && (
+              <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-amber-500/20 text-amber-400 border border-amber-500/40 font-mono font-bold">
+                {reorderCount}
+              </span>
+            )}
+          </button>
+
+          {/* Tab 2: Supplier PO Grouping */}
           <button
             type="button"
             onClick={() => onTabChange('cart')}
-            className={`flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer ${
-              currentTab === 'cart' || !currentTab
+            className={`flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer whitespace-nowrap ${
+              currentTab === 'cart'
                 ? 'bg-bg2 text-primary font-black shadow-xs border border-border'
                 : 'text-muted hover:text-text hover:bg-bg3'
             }`}
+            title="Review grouped distributor carts and create Purchase Orders"
           >
-            <ShoppingCart size={13} className={currentTab === 'cart' || !currentTab ? 'text-primary' : 'text-muted'} />
-            <span>Pharmarack Cart</span>
+            <ShoppingCart size={13} className={currentTab === 'cart' ? 'text-primary' : 'text-muted'} />
+            <span>Supplier PO Grouping</span>
+            {activeCount > 0 && (
+              <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-primary/15 text-primary border border-primary/20 font-mono font-bold">
+                {activeCount}
+              </span>
+            )}
           </button>
 
+          {/* Tab 3: Restock & Shortages */}
+          <button
+            type="button"
+            onClick={() => onTabChange('shortages')}
+            className={`flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer whitespace-nowrap ${
+              currentTab === 'shortages'
+                ? 'bg-bg2 text-primary font-black shadow-xs border border-border'
+                : 'text-muted hover:text-text hover:bg-bg3'
+            }`}
+            title="Special Patient Shortage Requests, Refills Due, and Sales Restock Suggestions"
+          >
+            <Building2 size={13} className={currentTab === 'shortages' ? 'text-primary' : 'text-muted'} />
+            <span>Demands & Shortages</span>
+            {shortageCount > 0 && (
+              <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-sky-500/15 text-sky-400 border border-sky-500/20 font-mono font-bold">
+                {shortageCount}
+              </span>
+            )}
+          </button>
+
+          {/* Tab 4: Sent Orders History */}
           <button
             type="button"
             onClick={() => onTabChange('sent-history')}
-            className={`flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer relative ${
+            className={`flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer whitespace-nowrap relative ${
               currentTab === 'sent-history'
                 ? 'bg-bg2 text-primary font-black shadow-xs border border-border'
                 : 'text-muted hover:text-text hover:bg-bg3'
             }`}
           >
             <Send size={13} className={currentTab === 'sent-history' ? 'text-primary' : 'text-muted'} />
-            <span>Sent Orders History</span>
+            <span>Sent PO History</span>
             {hasUnreadSentHistory && currentTab !== 'sent-history' && (
               <span className="flex h-2 w-2 relative">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
@@ -217,17 +252,18 @@ export const PharmarackCartCalendar: React.FC<PharmarackCartCalendarProps> = ({
             )}
           </button>
 
+          {/* Tab 5: Non-Mapped Distributors */}
           <button
             type="button"
             onClick={() => onTabChange('non-mapped')}
-            className={`flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+            className={`flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer whitespace-nowrap ${
               currentTab === 'non-mapped'
                 ? 'bg-bg2 text-primary font-black shadow-xs border border-border'
                 : 'text-muted hover:text-text hover:bg-bg3'
             }`}
           >
             <Building2 size={13} className={currentTab === 'non-mapped' ? 'text-primary' : 'text-muted'} />
-            <span>Non-Mapped Distributors</span>
+            <span>Distributor Catalogs</span>
           </button>
         </div>
 
