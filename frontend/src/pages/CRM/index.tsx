@@ -8,7 +8,7 @@ import {
   CheckCircle2, AlertCircle, Clock, Search, Repeat2, Bell,
   MessageCircle, Check, Package, Mail, ExternalLink, LogOut, Zap, Copy, FileText, X, Plus, Trash2, Sliders, ChevronDown, Info, ClipboardList, ShoppingCart, AlertTriangle, Pencil, Edit2
 } from 'lucide-react';
-import { toastEvent, specialOrdersEvent, liveCartAddEvent, refillEvent, messageSendEvent } from '../../services/events';
+import { toastEvent, specialOrdersEvent, liveCartAddEvent, refillEvent, messageSendEvent, whatsappQueueEvent } from '../../services/events';
 import { usePageActive } from '../../lib/keepAlive/PageActiveContext';
 import { useOnClickOutside } from '../../hooks/useOnClickOutside';
 import { getTodayString, getNDaysAgoString, formatDisplayDate, toDateInputValue } from '../../utils/date';
@@ -321,6 +321,7 @@ const RefillsSection: React.FC = () => {
     try {
       await apiClient.post('/refills/send-reminder-now', { patient_phone: phone });
       toastEvent.trigger(`WhatsApp reminder queued for ${phone}`, 'success', '/crm');
+      whatsappQueueEvent.triggerUpdated();
     } catch (err: any) {
       toastEvent.trigger(err.response?.data?.error || 'Failed to send reminder', 'error', '/crm');
     } finally { setSending(null); }
@@ -2842,6 +2843,7 @@ const SpecialOrdersSection: React.FC = () => {
       messageSendEvent.triggerSendProgress(order.requester || order.phone || 'Customer', `Arrival alert for ${order.product}`, 10);
       await api.notifySpecialOrderArrival(order.id);
       toastEvent.trigger(`Arrival WhatsApp sent to ${order.requester}!`, 'success', '/crm');
+      whatsappQueueEvent.triggerUpdated();
       await loadOrders();
     } catch (err: any) {
       toastEvent.trigger(err?.response?.data?.error || err?.message || 'Failed to send arrival notification', 'error', '/crm');
@@ -2857,6 +2859,7 @@ const SpecialOrdersSection: React.FC = () => {
       messageSendEvent.triggerSendProgress(order.requester || order.phone || 'Customer', `Booking confirmation for ${order.product}`, 10);
       await api.resendSpecialOrderBooking(order.id);
       toastEvent.trigger(`Booking WhatsApp resent to ${order.requester}!`, 'success', '/crm');
+      whatsappQueueEvent.triggerUpdated();
       await loadOrders();
     } catch (err: any) {
       toastEvent.trigger(err?.response?.data?.error || err?.message || 'Failed to resend booking message', 'error', '/crm');
@@ -4029,6 +4032,7 @@ const CustomerCreditSection: React.FC = () => {
     try {
       await apiClient.post(`/crm/credit-customers/${cust.id}/send-reminder`, {});
       toastEvent.trigger(`Manual credit reminder sent to ${cust.name}`, 'success', '/crm');
+      whatsappQueueEvent.triggerUpdated();
     } catch (err: any) {
       toastEvent.trigger(err.response?.data?.error || 'Failed to send WhatsApp reminder', 'error', '/crm');
     } finally {

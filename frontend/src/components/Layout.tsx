@@ -1979,19 +1979,24 @@ const QuickAssistSidebar = ({
 
   const handleSendRefillGroup = async (group: { patient_name: string; patient_phone: string; medicines: Array<{ id: number; medicine_name: string; quantity_needed: number }> }) => {
     try {
-      const medListStr = group.medicines.map(m => `• ${m.medicine_name} (Qty: ${m.quantity_needed})`).join('\n');
-      const msg = `🔔 *MEDICINE REFILL REMINDER — AI PHARMACY*\n\nDear ${group.patient_name},\nYour regular prescription is due for refill:\n\n${medListStr}\n\n*Please reply to confirm delivery or pickup.*`;
       if (group.patient_phone) {
-        const cleanPhone = group.patient_phone.replace(/\D/g, '');
-        const targetPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
-        const waUrl = `https://api.whatsapp.com/send?phone=${targetPhone}&text=${encodeURIComponent(msg)}`;
-        window.open(waUrl, '_blank');
+        await api.sendGroupedRefill({
+          patient_name: group.patient_name,
+          patient_phone: group.patient_phone,
+          medicines: group.medicines
+        });
+        toastEvent.trigger(`Consolidated refill reminder queued for ${group.patient_name}!`, 'success');
+        whatsappQueueEvent.triggerUpdated();
+      } else {
+        await Promise.all(group.medicines.map(m => api.sendRefillNow(m.id).catch(() => {})));
+        toastEvent.trigger(`Refill reminder queued for ${group.patient_name}!`, 'success');
+        whatsappQueueEvent.triggerUpdated();
       }
-      await Promise.all(group.medicines.map(m => api.sendRefillNow(m.id).catch(() => {})));
       refillEvent.triggerRefresh();
       onActionComplete();
-    } catch (e) {
+    } catch (e: any) {
       console.error('Failed to send refill group reminder:', e);
+      toastEvent.trigger(e?.response?.data?.error || 'Failed to send refill reminder', 'error');
     }
   };
 
@@ -2011,14 +2016,17 @@ const QuickAssistSidebar = ({
       const msg = `🏬 *QUICK SPECIAL ORDER — AI PHARMACY*\n\n📋 *Requested By:* ${group.requester} ${group.phone ? `(${group.phone})` : ''}\n\n📦 *Requested Items:*\n${itemsStr}\n\n*Please confirm receipt & order dispatch.*`;
 
       if (group.phone) {
-        const cleanPhone = group.phone.replace(/\D/g, '');
-        const targetPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
-        const waUrl = `https://api.whatsapp.com/send?phone=${targetPhone}&text=${encodeURIComponent(msg)}`;
-        window.open(waUrl, '_blank');
+        await api.enqueueSingleWhatsApp({
+          number: group.phone,
+          message: msg,
+          type: 'special_order',
+          targetName: group.requester
+        });
+        whatsappQueueEvent.triggerUpdated();
       }
 
       await Promise.all(targetItems.map(i => apiClient.post(`/orders/${i.id}/status`, { status: 'Ordered' })));
-      toastEvent.trigger(`Marked ${targetItems.length} request(s) for ${group.requester} as Ordered!`, 'success');
+      toastEvent.trigger(`Marked ${targetItems.length} request(s) for ${group.requester} as Ordered & queued WhatsApp!`, 'success');
       queryClient.invalidateQueries({ queryKey: ['orders'] });
       specialOrdersEvent.triggerUpdated();
       window.dispatchEvent(new CustomEvent('refresh-special-orders'));
@@ -2071,6 +2079,104 @@ const QuickAssistSidebar = ({
       setProcessingOrderIds(prev => {
         const next = new Set(prev);
         itemIds.forEach(id => next.delete(id));
+        return next;
+      });
+    }
+  };
+
+  const handleAcknowledge = async (id: number) => {
+    try {
+      await api.acknowledgeRefill(id);
+      refillEvent.triggerRefresh();
+      onActionComplete();
+    } catch (e) {
+      console.error('Failed to acknowledge refill:', e);
+    }
+  };
+
+  const handleSendSingleRefill = async (patientName: string, _patientPhone: string, med: { id: number; medicine_name: string; quantity_needed: number }) => {
+    try {
+      await api.sendRefillNow(med.id);
+      toastEvent.trigger(`Refill reminder queued for ${patientName} (${med.medicine_name})!`, 'success');
+      whatsappQueueEvent.triggerUpdated();
+      refillEvent.triggerRefresh();
+      onActionComplete();
+    } catch (e: any) {
+      console.error('Failed to send single refill reminder:', e);
+      toastEvent.trigger(e?.response?.data?.error || 'Failed to send refill reminder', 'error');
+    }
+  };
+
+  const handleUpdateSpecialOrderStatus = async (order: any, newStatus: string) => {
+    if (processingOrderIds.has(order.id)) return;
+
+    setProcessingOrderIds(prev => new Set(prev).add(order.id));
+    if (newStatus === 'Completed' || newStatus === 'Cancelled') {
+      setOptimisticHiddenOrderIds(prev => new Set(prev).add(order.id));
+    }
+
+    try {
+      await apiClient.post(`/orders/${order.id}/status`, { status: newStatus });
+      if (newStatus === 'Completed') {
+        toastEvent.trigger(`Marked "${order.product}" as Completed!`, 'success');
+      } else if (newStatus === 'Ready') {
+        toastEvent.trigger(`Marked "${order.product}" as Ready!`, 'success');
+      } else if (newStatus === 'Cancelled') {
+        toastEvent.trigger(`Cancelled request for "${order.product}"`, 'info');
+      } else {
+        toastEvent.trigger(`Updated status for "${order.product}" to ${newStatus}`, 'info');
+      }
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
+      specialOrdersEvent.triggerUpdated();
+      window.dispatchEvent(new CustomEvent('refresh-special-orders'));
+      onActionComplete();
+    } catch (err: any) {
+      console.error(`Failed to update status to ${newStatus}:`, err);
+      toastEvent.trigger('Failed to update request status', 'error');
+      setOptimisticHiddenOrderIds(prev => {
+        const next = new Set(prev);
+        next.delete(order.id);
+        return next;
+      });
+    } finally {
+      setProcessingOrderIds(prev => {
+        const next = new Set(prev);
+        next.delete(order.id);
+        return next;
+      });
+    }
+  };
+
+  const handleSendSpecialOrder = async (order: any) => {
+    if (processingOrderIds.has(order.id)) return;
+
+    setProcessingOrderIds(prev => new Set(prev).add(order.id));
+    try {
+      const msg = `🏬 *QUICK SPECIAL ORDER — AI PHARMACY*\n\n📦 *Item:* ${order.product}\n📊 *Qty:* ${order.qty || 1}\n📋 *Requested By:* ${order.requester || 'Customer'} (${order.phone || 'N/A'})\n\n*Please confirm receipt & order dispatch.*`;
+
+      if (order.phone) {
+        await api.enqueueSingleWhatsApp({
+          number: order.phone,
+          message: msg,
+          type: 'special_order',
+          targetName: order.requester || 'Customer'
+        });
+        whatsappQueueEvent.triggerUpdated();
+      }
+
+      await apiClient.post(`/orders/${order.id}/status`, { status: 'Ordered' });
+      toastEvent.trigger(`Marked special request "${order.product}" as Ordered & queued WhatsApp!`, 'success');
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
+      specialOrdersEvent.triggerUpdated();
+      window.dispatchEvent(new CustomEvent('refresh-special-orders'));
+      onActionComplete();
+    } catch (e: any) {
+      console.error('Failed to send special order:', e);
+      toastEvent.trigger('Failed to update special request status', 'error');
+    } finally {
+      setProcessingOrderIds(prev => {
+        const next = new Set(prev);
+        next.delete(order.id);
         return next;
       });
     }
@@ -2402,6 +2508,29 @@ const QuickAssistSidebar = ({
                                 Qty: {med.quantity_needed}
                               </span>
                               <span className="text-[9px] text-muted">{med.refill_interval_days}d</span>
+                              {med.hold_for_stock === 1 && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleAcknowledge(med.id);
+                                  }}
+                                  className="py-0.5 px-1.5 rounded bg-amber-600 hover:bg-amber-700 text-white text-[9px] font-black uppercase transition-colors shadow-sm cursor-pointer"
+                                  title="Acknowledge stock hold for this medicine"
+                                >
+                                  Ack
+                                </button>
+                              )}
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleSendSingleRefill(group.patient_name, group.patient_phone, med);
+                                }}
+                                className="py-0.5 px-2 rounded bg-purple-600/80 hover:bg-purple-600 text-white text-[9px] font-bold uppercase transition-colors flex items-center gap-1 shadow-sm cursor-pointer"
+                                title={`Send WhatsApp refill reminder for ${med.medicine_name}`}
+                              >
+                                <SendIcon size={10} />
+                                <span>Remind</span>
+                              </button>
                             </div>
                           </div>
                         ))}
@@ -2477,9 +2606,22 @@ const QuickAssistSidebar = ({
                               <Package size={11} className="text-emerald-400 shrink-0" />
                               <span className="font-medium text-text truncate">{med.medicine_name}</span>
                             </div>
-                            <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-[10px] font-mono font-bold shrink-0">
-                              Qty: {med.quantity_needed}
-                            </span>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-[10px] font-mono font-bold shrink-0">
+                                Qty: {med.quantity_needed}
+                              </span>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleSendSingleRefill(group.patient_name, group.patient_phone, med);
+                                }}
+                                className="py-0.5 px-2 rounded bg-emerald-600 hover:bg-emerald-700 text-white text-[9px] font-bold uppercase transition-colors flex items-center gap-1 shadow-sm cursor-pointer"
+                                title={`Send WhatsApp reminder for ${med.medicine_name}`}
+                              >
+                                <SendIcon size={10} />
+                                <span>Remind</span>
+                              </button>
+                            </div>
                           </div>
                         ))}
                       </div>
@@ -2627,13 +2769,13 @@ const QuickAssistSidebar = ({
                         {group.items.map((item) => (
                           <div
                             key={item.id}
-                            className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg bg-bg3/60 border border-border/30 text-[11px] min-w-0"
+                            className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg bg-bg3/60 border border-border/30 text-[11px] min-w-0 flex-wrap"
                           >
                             <div className="flex items-center gap-1.5 min-w-0 flex-1">
                               <Package size={11} className="text-amber-400 shrink-0" />
                               <span className="font-medium text-text truncate">{item.product}</span>
                             </div>
-                            <div className="flex items-center gap-1.5 shrink-0">
+                            <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
                               <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 text-[10px] font-mono font-bold">
                                 Qty: {item.qty}
                               </span>
@@ -2648,6 +2790,83 @@ const QuickAssistSidebar = ({
                               >
                                 {item.status}
                               </span>
+                              {item.status === 'Ready' ? (
+                                <button
+                                  disabled={processingOrderIds.has(item.id)}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleUpdateSpecialOrderStatus(item, 'Completed');
+                                  }}
+                                  className="py-0.5 px-1.5 rounded bg-purple-600 hover:bg-purple-700 text-white text-[9px] font-bold uppercase transition-colors flex items-center gap-0.5 shadow-sm cursor-pointer"
+                                  title="Mark item Completed"
+                                >
+                                  <Check size={9} />
+                                  <span>Done</span>
+                                </button>
+                              ) : item.status === 'Ordered' ? (
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    disabled={processingOrderIds.has(item.id)}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleUpdateSpecialOrderStatus(item, 'Ready');
+                                    }}
+                                    className="py-0.5 px-1.5 rounded bg-sky-600 hover:bg-sky-700 text-white text-[9px] font-bold uppercase transition-colors flex items-center gap-0.5 shadow-sm cursor-pointer"
+                                    title="Mark item Ready"
+                                  >
+                                    <Check size={9} />
+                                    <span>Ready</span>
+                                  </button>
+                                  <button
+                                    disabled={processingOrderIds.has(item.id)}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleUpdateSpecialOrderStatus(item, 'Completed');
+                                    }}
+                                    className="py-0.5 px-1.5 rounded bg-purple-600/80 hover:bg-purple-700 text-white text-[9px] font-bold uppercase transition-colors flex items-center gap-0.5 shadow-sm cursor-pointer"
+                                    title="Mark item Completed"
+                                  >
+                                    <Check size={9} />
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    disabled={processingOrderIds.has(item.id)}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleSendSpecialOrder(item);
+                                    }}
+                                    className="py-0.5 px-1.5 rounded bg-emerald-600 hover:bg-emerald-700 text-white text-[9px] font-bold uppercase transition-colors flex items-center gap-0.5 shadow-sm cursor-pointer"
+                                    title="Send WhatsApp Order for this item"
+                                  >
+                                    <SendIcon size={9} />
+                                    <span>Order</span>
+                                  </button>
+                                  <button
+                                    disabled={processingOrderIds.has(item.id)}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleUpdateSpecialOrderStatus(item, 'Completed');
+                                    }}
+                                    className="py-0.5 px-1.5 rounded bg-purple-600/80 hover:bg-purple-700 text-white text-[9px] font-bold uppercase transition-colors flex items-center gap-0.5 shadow-sm cursor-pointer"
+                                    title="Mark item Completed"
+                                  >
+                                    <Check size={9} />
+                                  </button>
+                                  <button
+                                    disabled={processingOrderIds.has(item.id)}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleUpdateSpecialOrderStatus(item, 'Cancelled');
+                                    }}
+                                    className="py-0.5 px-1.5 rounded bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 text-[9px] font-bold uppercase transition-colors flex items-center gap-0.5 cursor-pointer"
+                                    title="Cancel this item"
+                                  >
+                                    <X size={9} />
+                                  </button>
+                                </div>
+                              )}
                             </div>
                           </div>
                         ))}

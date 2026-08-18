@@ -832,13 +832,15 @@ export const api = {
   createRefill: (data: Partial<Refill>) => apiClient.post('/refills', data).then(res => res.data),
   updateRefill: (id: number, data: Partial<Refill>) => apiClient.put(`/refills/${id}`, data).then(res => res.data),
   deleteRefill: (id: number) => apiClient.delete(`/refills/${id}`).then(res => res.data),
-  sendRefillNow: (id: number) => apiClient.post(`/refills/${id}/send`).then(res => res.data),
+  sendRefillNow: (id: number) => apiClient.post<{ success: boolean; queueId?: number; message: string }>(`/refills/${id}/send`).then(res => res.data),
+  sendGroupedRefill: (data: { patient_phone: string; patient_name: string; refill_ids?: number[]; medicines?: Array<{ id: number; medicine_name: string; quantity_needed?: number }> }) =>
+    apiClient.post<{ success: boolean; queueId?: number; updatedRefillCount?: number; message: string }>('/refills/send-grouped', data).then(res => res.data),
   acknowledgeRefill: (id: number) => apiClient.post(`/refills/${id}/acknowledge`).then(res => res.data),
   skipRefill: (id: number) => apiClient.post(`/refills/${id}/skip`).then(res => res.data),
   getRefillsPanel: () => apiClient.get('/refills/panel').then(res => res.data),
   toggleRefillOverride: (id: number) => apiClient.post(`/refills/${id}/toggle-override`).then(res => res.data),
   fulfillRefill: (id: number) => apiClient.post(`/refills/${id}/fulfill`).then(res => res.data),
-  sendTomorrowReminder: (patientPhone: string) => apiClient.post('/refills/send-tomorrow-reminder', { patient_phone: patientPhone }).then(res => res.data),
+  sendTomorrowReminder: (patientPhone: string) => apiClient.post<{ success: boolean; queueId?: number; message: string }>('/refills/send-tomorrow-reminder', { patient_phone: patientPhone }).then(res => res.data),
 
   // Automation / Communication logs
   getAutomationNotifications: (params?: { type?: string; status?: string; search?: string; limit?: number }) =>
@@ -919,6 +921,7 @@ export const api = {
   }>('/whatsapp/queue/status').then(res => res.data),
   enqueueDistributorCollection: (data: { orderIds: number[]; deliveryBoyPhone: string; deliveryBoyName?: string }) => apiClient.post<{ success: boolean; enqueuedCount: number; queueIds: number[]; message: string }>('/whatsapp/queue/enqueue-distributor-collection', data).then(res => res.data),
   enqueuePharmarackBatch: (data: { orders: { storeName: string; storeId: number; phone: string; message: string; lineTotal?: number; items: any[] }[]; deliveryBoyPhone?: string; deliveryBoyName?: string }) => apiClient.post<{ success: boolean; enqueuedCount: number; queueIds: number[]; message: string }>('/whatsapp/queue/enqueue-pharmarack-batch', data).then(res => res.data),
+  enqueueSingleWhatsApp: (data: { number: string; message: string; type?: string; targetName?: string; explicitScheduledAt?: number }) => apiClient.post<{ success: boolean; queueId: number; message: string }>('/whatsapp/queue/enqueue-single', data).then(res => res.data),
   flushWhatsAppQueue: () => apiClient.post<{ success: boolean; message: string }>('/whatsapp/queue/flush').then(res => res.data),
   flushNextWhatsAppQueueItem: () => apiClient.post<{ success: boolean; forced: boolean; message: string; state: any }>('/whatsapp/queue/flush-next').then(res => res.data),
   retryFailedWhatsAppQueue: () => apiClient.post<{ success: boolean; retriedCount: number; message: string }>('/whatsapp/queue/retry-failed').then(res => res.data),

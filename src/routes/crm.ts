@@ -3,6 +3,8 @@ import { dbManager } from '../database/connection.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { sendDailyDoctorReports } from '../services/doctorReportingService.js';
+import { whatsappQueueWorker } from '../services/whatsappQueueWorker.js';
+import { normalizeWhatsAppPhone } from '../whatsappClient.js';
 import { getMessage } from '../i18n/getMessage.js';
 import { sanitizeDoctorName } from '../utils/doctorUtils.js';
 
@@ -468,7 +470,11 @@ router.post('/credit-customers/:id/send-reminder', async (req, res) => {
       return res.status(400).json({ error: 'Customer phone number not found' });
     }
 
-    const { sendMessage } = await import('../whatsappClient.js');
+    const cleanPhone = normalizeWhatsAppPhone(customer.phone);
+    if (!cleanPhone || cleanPhone.length < 10) {
+      return res.status(400).json({ error: 'Customer phone number is invalid' });
+    }
+
     const dueDateStr = customer.credit_due_date ? new Date(customer.credit_due_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'As agreed';
 
     const formatDate = (dStr?: string) => {
@@ -521,15 +527,22 @@ router.post('/credit-customers/:id/send-reminder', async (req, res) => {
       });
     }
 
-    await sendMessage(customer.phone, undefined, message);
+    const queueId = await whatsappQueueWorker.enqueue(
+      cleanPhone,
+      message,
+      'credit_reminder',
+      customer.name || 'Customer'
+    );
+
+    whatsappQueueWorker.triggerProcessing();
 
     await db.run(
       `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
        VALUES (?, ?, ?, ?, ?, ?)`,
-      ['manual_credit_reminder', customer.name, customer.phone, message, 'sent', `customer_${id}`]
+      ['manual_credit_reminder', customer.name, cleanPhone, message, 'queued', `customer_${id}`]
     );
 
-    res.json({ success: true, message: `Credit reminder sent to ${customer.name} (${customer.phone})` });
+    res.json({ success: true, queueId, message: `Credit reminder queued for ${customer.name} (${cleanPhone})` });
   } catch (error: any) {
     console.error('Failed to send credit reminder:', error);
     res.status(500).json({ error: 'Failed to send reminder: ' + error.message });
@@ -578,38 +591,47 @@ router.post('/ledger/pay', async (req, res) => {
 
     if (customer && customer.phone) {
       try {
-        const { sendMessage } = await import('../whatsappClient.js');
-        const remainingBal = (customer.credit_balance || 0);
-        const dateStr = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
-        const storeSetting = await db.get("SELECT value FROM app_settings WHERE key IN ('shop_name', 'pharmacy_name') AND value IS NOT NULL LIMIT 1");
-        const storeName = storeSetting?.value || 'AI Pharmacy';
-        const lang = (customer.language === 'hi' || customer.language === 'mr') ? customer.language : 'en';
+        const cleanPhone = normalizeWhatsAppPhone(customer.phone);
+        if (cleanPhone && cleanPhone.length >= 10) {
+          const remainingBal = (customer.credit_balance || 0);
+          const dateStr = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+          const storeSetting = await db.get("SELECT value FROM app_settings WHERE key IN ('shop_name', 'pharmacy_name') AND value IS NOT NULL LIMIT 1");
+          const storeName = storeSetting?.value || 'AI Pharmacy';
+          const lang = (customer.language === 'hi' || customer.language === 'mr') ? customer.language : 'en';
 
-        const message = getMessage(lang, 'whatsapp.paymentReceipt', {
-          name: customer.name || 'Customer',
-          amount: payAmt.toFixed(2),
-          remaining: remainingBal.toFixed(2),
-          date: dateStr,
-          storeName: storeName
-        });
+          const message = getMessage(lang, 'whatsapp.paymentReceipt', {
+            name: customer.name || 'Customer',
+            amount: payAmt.toFixed(2),
+            remaining: remainingBal.toFixed(2),
+            date: dateStr,
+            storeName: storeName
+          });
 
-        await sendMessage(customer.phone, undefined, message);
+          await whatsappQueueWorker.enqueue(
+            cleanPhone,
+            message,
+            'credit_payment_receipt',
+            customer.name || 'Customer'
+          );
 
-        await db.run(
-          `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
-           VALUES (?, ?, ?, ?, ?, ?)`,
-          ['credit_payment_receipt', customer.name, customer.phone, message, 'sent', `customer_${customer_id}`]
-        );
-        whatsappSent = true;
+          whatsappQueueWorker.triggerProcessing();
+
+          await db.run(
+            `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
+             VALUES (?, ?, ?, ?, ?, ?)`,
+            ['credit_payment_receipt', customer.name, cleanPhone, message, 'queued', `customer_${customer_id}`]
+          );
+          whatsappSent = true;
+        }
       } catch (waErr: any) {
-        console.error('Failed to send automated WhatsApp payment receipt:', waErr);
+        console.error('Failed to enqueue automated WhatsApp payment receipt:', waErr);
         whatsappError = waErr.message || 'WhatsApp message dispatch failed';
       }
     }
 
     res.json({
       success: true,
-      message: `Collected ₹${payAmt.toFixed(2)} payment successfully${whatsappSent ? ' & WhatsApp receipt sent to customer' : ''}`,
+      message: `Collected ₹${payAmt.toFixed(2)} payment successfully${whatsappSent ? ' & WhatsApp receipt queued for customer' : ''}`,
       whatsapp_sent: whatsappSent,
       whatsapp_error: whatsappError || undefined
     });

@@ -220,6 +220,41 @@ router.post('/enqueue-pharmarack-batch', async (req, res) => {
   }
 });
 
+// POST enqueue a single WhatsApp message into the background queue
+router.post('/enqueue-single', async (req, res) => {
+  const { number, message, type = 'crm_notification', targetName, explicitScheduledAt } = req.body || {};
+  if (!number || !message) {
+    return res.status(400).json({ error: 'number and message are required' });
+  }
+
+  const cleanPhone = normalizeWhatsAppPhone(number);
+  if (!cleanPhone || cleanPhone.length < 10) {
+    return res.status(400).json({ error: 'Valid 10+ digit phone number is required' });
+  }
+
+  try {
+    const queueId = await whatsappQueueWorker.enqueue(
+      cleanPhone,
+      String(message),
+      type,
+      targetName,
+      explicitScheduledAt
+    );
+
+    // Trigger queue processing instantly
+    whatsappQueueWorker.triggerProcessing();
+
+    res.json({
+      success: true,
+      queueId,
+      message: `Enqueued WhatsApp message for ${targetName || cleanPhone}`
+    });
+  } catch (err: any) {
+    console.error('Failed to enqueue single WhatsApp message:', err);
+    res.status(500).json({ error: err?.message || 'Failed to enqueue WhatsApp message' });
+  }
+});
+
 // POST force flush queue now
 router.post('/flush', async (_req, res) => {
   try {

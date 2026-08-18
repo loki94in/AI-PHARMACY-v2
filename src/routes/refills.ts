@@ -3,7 +3,8 @@ import { dbManager } from '../database/connection.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { checkAllRefills } from '../services/refillService.js';
-import { sendMessage } from '../whatsappClient.js';
+import { sendMessage, normalizeWhatsAppPhone } from '../whatsappClient.js';
+import { whatsappQueueWorker } from '../services/whatsappQueueWorker.js';
 import { getMessage } from '../i18n/getMessage.js';
 import { getConfiguredPharmacyName } from '../services/storeSettingsService.js';
 
@@ -583,11 +584,148 @@ router.post('/:id/fulfill', async (req, res) => {
   }
 });
 
+// Send WhatsApp reminder for a single refill item
+router.post('/:id/send', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const db = await dbManager.getConnection();
+    const refill = await db.get(
+      `SELECT pr.*, m.name as medicine_name 
+       FROM patient_refills pr 
+       LEFT JOIN medicines m ON pr.medicine_id = m.id 
+       WHERE pr.id = ?`,
+      [id]
+    );
+
+    if (!refill) {
+      return res.status(404).json({ error: 'Refill record not found' });
+    }
+
+    const cleanPhone = normalizeWhatsAppPhone(refill.patient_phone);
+    if (!cleanPhone || cleanPhone.length < 10) {
+      return res.status(400).json({ error: 'Patient phone number is invalid or missing' });
+    }
+
+    const medicalName = (await getConfiguredPharmacyName(db)) || 'AI Pharmacy';
+    const patientName = refill.patient_name || 'Customer';
+    const medName = refill.medicine_name || 'Prescribed Medicine';
+    const qtyNeeded = refill.quantity_needed || 1;
+
+    const msg = `🔔 *MEDICINE REFILL REMINDER — ${medicalName}*\n\nDear ${patientName},\nYour regular prescription is due for refill:\n\n• ${medName} (Qty: ${qtyNeeded})\n\n*Please reply to confirm delivery or pickup.*`;
+
+    const queueId = await whatsappQueueWorker.enqueue(
+      cleanPhone,
+      msg,
+      'refill_reminder',
+      patientName
+    );
+
+    await db.run(
+      `UPDATE patient_refills SET status = 'notified' WHERE id = ?`,
+      [id]
+    );
+
+    whatsappQueueWorker.triggerProcessing();
+
+    res.json({
+      success: true,
+      queueId,
+      message: `Refill reminder queued for ${patientName} (${cleanPhone})`
+    });
+  } catch (err: any) {
+    console.error('Failed to send single refill reminder:', err);
+    res.status(500).json({ error: 'Internal server error: ' + err.message });
+  }
+});
+
+// Send consolidated WhatsApp reminder for multiple medicines of a patient
+router.post('/send-grouped', async (req, res) => {
+  const { patient_phone, patient_name, refill_ids, medicines } = req.body || {};
+  const cleanPhone = normalizeWhatsAppPhone(patient_phone);
+  if (!cleanPhone || cleanPhone.length < 10) {
+    return res.status(400).json({ error: 'Valid 10+ digit patient_phone is required' });
+  }
+
+  try {
+    const db = await dbManager.getConnection();
+    const medicalName = (await getConfiguredPharmacyName(db)) || 'AI Pharmacy';
+    const patientName = patient_name || 'Customer';
+
+    let medListStr = '';
+    const idsToUpdate: number[] = Array.isArray(refill_ids) ? refill_ids : [];
+
+    if (Array.isArray(medicines) && medicines.length > 0) {
+      medListStr = medicines.map((m: any) => `• ${m.medicine_name || m.name || 'Medicine'} (Qty: ${m.quantity_needed || m.qty || 1})`).join('\n');
+      medicines.forEach((m: any) => {
+        if (m.id && !idsToUpdate.includes(m.id)) idsToUpdate.push(m.id);
+      });
+    } else if (idsToUpdate.length > 0) {
+      const placeholders = idsToUpdate.map(() => '?').join(',');
+      const rows = await db.all(
+        `SELECT pr.id, pr.quantity_needed, m.name as medicine_name 
+         FROM patient_refills pr 
+         LEFT JOIN medicines m ON pr.medicine_id = m.id 
+         WHERE pr.id IN (${placeholders})`,
+        idsToUpdate
+      );
+      medListStr = rows.map((r: any) => `• ${r.medicine_name || 'Medicine'} (Qty: ${r.quantity_needed || 1})`).join('\n');
+    } else {
+      // Fallback: fetch all active refills for this phone
+      const rows = await db.all(
+        `SELECT pr.id, pr.quantity_needed, m.name as medicine_name 
+         FROM patient_refills pr 
+         LEFT JOIN medicines m ON pr.medicine_id = m.id 
+         WHERE pr.patient_phone = ? AND pr.is_active = 1`,
+        [patient_phone]
+      );
+      if (rows.length === 0) {
+        return res.status(400).json({ error: 'No active refills found for this patient' });
+      }
+      medListStr = rows.map((r: any) => `• ${r.medicine_name || 'Medicine'} (Qty: ${r.quantity_needed || 1})`).join('\n');
+      rows.forEach((r: any) => idsToUpdate.push(r.id));
+    }
+
+    const msg = `🔔 *MEDICINE REFILL REMINDER — ${medicalName}*\n\nDear ${patientName},\nYour regular prescription is due for refill:\n\n${medListStr}\n\n*Please reply to confirm delivery or pickup.*`;
+
+    const queueId = await whatsappQueueWorker.enqueue(
+      cleanPhone,
+      msg,
+      'refill_reminder',
+      patientName
+    );
+
+    if (idsToUpdate.length > 0) {
+      const placeholders = idsToUpdate.map(() => '?').join(',');
+      await db.run(
+        `UPDATE patient_refills SET status = 'notified' WHERE id IN (${placeholders})`,
+        idsToUpdate
+      );
+    }
+
+    whatsappQueueWorker.triggerProcessing();
+
+    res.json({
+      success: true,
+      queueId,
+      updatedRefillCount: idsToUpdate.length,
+      message: `Consolidated refill reminder queued for ${patientName} (${cleanPhone})`
+    });
+  } catch (err: any) {
+    console.error('Failed to send grouped refill reminder:', err);
+    res.status(500).json({ error: 'Internal server error: ' + err.message });
+  }
+});
+
 // Send WhatsApp reminder for refills due tomorrow
 router.post('/send-tomorrow-reminder', async (req, res) => {
   const { patient_phone } = req.body;
   if (!patient_phone) {
     return res.status(400).json({ error: 'patient_phone is required' });
+  }
+
+  const cleanPhone = normalizeWhatsAppPhone(patient_phone);
+  if (!cleanPhone || cleanPhone.length < 10) {
+    return res.status(400).json({ error: 'Valid 10+ digit patient_phone is required' });
   }
 
   let db;
@@ -603,7 +741,7 @@ router.post('/send-tomorrow-reminder', async (req, res) => {
       [patient_phone]
     );
 
-    // Filter to only include those due tomorrow (in case SQL date checks are timezone-sensitive)
+    // Filter to only include those due tomorrow
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
     const tomorrowDateStr = tomorrow.toISOString().split('T')[0];
@@ -617,26 +755,17 @@ router.post('/send-tomorrow-reminder', async (req, res) => {
       return res.status(400).json({ error: 'No ready refills due tomorrow found for this patient' });
     }
 
-    const patientName = tomorrowRefills[0].patient_name;
+    const patientName = tomorrowRefills[0].patient_name || 'Customer';
     const medicineNames = tomorrowRefills.map(r => r.medicine_name).join(', ');
-
-    const medicalName = await getConfiguredPharmacyName(db);
-    if (!medicalName) {
-      return res.status(400).json({
-        error: 'Pharmacy name required in Settings. Please set your Pharmacy Name in Settings before sending refill reminders.'
-      });
-    }
+    const medicalName = (await getConfiguredPharmacyName(db)) || 'AI Pharmacy';
 
     const msg = `Hello ${patientName}, this is a friendly reminder that your refill for ${medicineNames} is due tomorrow. We have checked our stock and prepared it for you. Please collect it from ${medicalName} at your convenience.`;
 
-    // Queue WhatsApp message
-    const { messagingQueue } = await import('../services/messagingQueue.js');
-    await messagingQueue.queueMessage(
-      'refill_reminder',
-      patientName,
-      patient_phone,
+    const queueId = await whatsappQueueWorker.enqueue(
+      cleanPhone,
       msg,
-      String(tomorrowRefills[0].id)
+      'refill_reminder',
+      patientName
     );
 
     // Update status to notified, reset is_ready
@@ -647,7 +776,9 @@ router.post('/send-tomorrow-reminder', async (req, res) => {
       ids
     );
 
-    res.json({ success: true, message: 'Tomorrow reminder queued successfully' });
+    whatsappQueueWorker.triggerProcessing();
+
+    res.json({ success: true, queueId, message: 'Tomorrow reminder queued successfully via WhatsApp Queue' });
   } catch (err: any) {
     console.error('Failed to send tomorrow reminder:', err);
     res.status(500).json({ error: 'Internal server error: ' + err.message });
@@ -659,6 +790,11 @@ router.post('/send-reminder-now', async (req, res) => {
   const { patient_phone } = req.body;
   if (!patient_phone) {
     return res.status(400).json({ error: 'patient_phone is required' });
+  }
+
+  const cleanPhone = normalizeWhatsAppPhone(patient_phone);
+  if (!cleanPhone || cleanPhone.length < 10) {
+    return res.status(400).json({ error: 'Valid 10+ digit patient_phone is required' });
   }
 
   let db;
@@ -677,31 +813,32 @@ router.post('/send-reminder-now', async (req, res) => {
       return res.status(400).json({ error: 'No active refills found for this patient' });
     }
 
-    const patientName = rows[0].patient_name;
+    const patientName = rows[0].patient_name || 'Customer';
     const medicineNames = rows.map((r: any) => r.medicine_name).join(', ');
     const refillDate = rows[0].next_refill_date
       ? new Date(rows[0].next_refill_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
       : 'soon';
 
-    const medicalName = await getConfiguredPharmacyName(db);
-    if (!medicalName) {
-      return res.status(400).json({
-        error: 'Pharmacy name required in Settings. Please set your Pharmacy Name in Settings before sending refill reminders.'
-      });
-    }
-
+    const medicalName = (await getConfiguredPharmacyName(db)) || 'AI Pharmacy';
     const msg = `Hello ${patientName}, a friendly reminder that your prescription refill for ${medicineNames} is due on ${refillDate}. Please visit us at ${medicalName} to collect your medicines. Thank you! 🙏`;
 
-    const { messagingQueue } = await import('../services/messagingQueue.js');
-    await messagingQueue.queueMessage(
-      'refill_reminder',
-      patientName,
-      patient_phone,
+    const queueId = await whatsappQueueWorker.enqueue(
+      cleanPhone,
       msg,
-      String(rows[0].id)
+      'refill_reminder',
+      patientName
     );
 
-    res.json({ success: true, message: 'Refill reminder queued via WhatsApp' });
+    const ids = rows.map((r: any) => r.id);
+    const placeholders = ids.map(() => '?').join(',');
+    await db.run(
+      `UPDATE patient_refills SET status = 'notified' WHERE id IN (${placeholders})`,
+      ids
+    );
+
+    whatsappQueueWorker.triggerProcessing();
+
+    res.json({ success: true, queueId, message: 'Refill reminder queued via WhatsApp' });
   } catch (err: any) {
     console.error('Failed to send immediate reminder:', err);
     res.status(500).json({ error: 'Internal server error: ' + err.message });
