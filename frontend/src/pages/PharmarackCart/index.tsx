@@ -46,6 +46,38 @@ let cachedPendingRefills: Refill[] = [];
 let cachedPriceHistory: Record<string, any[]> = {};
 let cachedLastFetched: Date | null = null;
 
+const USER_CHECK_STORAGE_KEY = 'pharmacart_user_check_overrides_v1';
+const getTodayDateKey = () => new Date().toISOString().slice(0, 10);
+
+const loadUserCheckOverrides = (): Record<string, boolean> => {
+  try {
+    const saved = localStorage.getItem(USER_CHECK_STORAGE_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (parsed && typeof parsed.data === 'object' && parsed.date === getTodayDateKey()) {
+        return parsed.data;
+      }
+    }
+  } catch (_) { }
+  return {};
+};
+
+const saveUserCheckOverrides = (overrides: Record<string, boolean>) => {
+  try {
+    localStorage.setItem(USER_CHECK_STORAGE_KEY, JSON.stringify({
+      date: getTodayDateKey(),
+      timestamp: Date.now(),
+      data: overrides
+    }));
+  } catch (_) { }
+};
+
+const getItemCheckKey = (storeId: number, item: { productCode?: string; productId?: number | string | null; productName?: string; product?: string; name?: string }): string => {
+  const code = item.productCode || (item.productId !== null && item.productId !== undefined ? String(item.productId) : '');
+  const name = (item.productName || item.product || item.name || '').toLowerCase().trim();
+  return `${storeId}::${code}::${name}`;
+};
+
 let waWindowRef: Window | null = null;
 
 function openOrReuseWhatsappTab(url: string, phone?: string, text?: string) {
@@ -104,6 +136,10 @@ export default function PharmarackCart() {
   const navigate = useNavigate();
   const currentTab = searchParams.get('tab') || 'cart';
   const [distributors, setDistributors] = useState<Distributor[]>(() => cachedDistributors);
+  const [userCheckOverrides, setUserCheckOverrides] = useState<Record<string, boolean>>(() => loadUserCheckOverrides());
+  const userCheckOverridesRef = useRef(userCheckOverrides);
+  userCheckOverridesRef.current = userCheckOverrides;
+
   const [loading, setLoading] = useState(() => cachedDistributors.length === 0);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -117,6 +153,7 @@ export default function PharmarackCart() {
   const [pendingRefills, setPendingRefills] = useState<Refill[]>(() => cachedPendingRefills);
   const [addingRefillId, setAddingRefillId] = useState<number | null>(null);
   const [showAddedItems, setShowAddedItems] = useState<boolean>(false);
+  const [reorderBannerCollapsed, setReorderBannerCollapsed] = useState<boolean>(false);
 
   const [reorderSuggestions, setReorderSuggestions] = useState<any[]>([]);
   const [suggestionsLoading, setSuggestionsLoading] = useState<boolean>(false);
@@ -240,15 +277,47 @@ export default function PharmarackCart() {
     return false;
   };
 
-  const handleToggleItemCheck = (storeId: number, productKey: string, isChecked: boolean) => {
+  const isItemIncludedInDispatch = (item: CartLineItem, dist: Distributor): boolean => {
+    const pastInfo = getPastOrderedInfo(item, dist);
+    const isYesterdayOrPast = pastInfo.isPastOrdered && !pastInfo.isToday;
+    if (!isYesterdayOrPast) {
+      // Fresh new medicines are always included by default!
+      return true;
+    }
+    const key = getItemCheckKey(dist.storeId, item);
+    if (typeof userCheckOverridesRef.current[key] === 'boolean') {
+      return userCheckOverridesRef.current[key];
+    }
+    return false; // Old medicines are unchecked / excluded by default unless user ticks the box
+  };
+
+  const handleToggleItemCheck = (storeId: number, itemOrKey: any, isChecked: boolean) => {
+    let key = '';
+    if (typeof itemOrKey === 'object' && itemOrKey !== null) {
+      key = getItemCheckKey(storeId, itemOrKey);
+    } else {
+      const productKey = String(itemOrKey);
+      const targetDist = distributors.find(d => d.storeId === storeId);
+      const targetItem = targetDist?.items.find(i => (i.productCode && i.productCode === productKey) || i.productName === productKey);
+      key = targetItem ? getItemCheckKey(storeId, targetItem) : `${storeId}::${productKey}::${productKey.toLowerCase().trim()}`;
+    }
+
+    setUserCheckOverrides(prev => {
+      const next = { ...prev, [key]: isChecked };
+      userCheckOverridesRef.current = next;
+      saveUserCheckOverrides(next);
+      return next;
+    });
+
     setDistributors(prev => {
       const next = prev.map(dist => {
         if (dist.storeId !== storeId) return dist;
         return {
           ...dist,
           items: dist.items.map(item => {
-            const key = item.productCode || item.productName;
-            if (key === productKey || item.productCode === productKey || item.productName === productKey) {
+            const itKey = getItemCheckKey(dist.storeId, item);
+            const legacyKey = item.productCode || item.productName;
+            if (itKey === key || legacyKey === itemOrKey || item.productCode === itemOrKey || item.productName === itemOrKey) {
               return { ...item, isChecked };
             }
             return item;
@@ -261,15 +330,57 @@ export default function PharmarackCart() {
   };
 
   const handleToggleSelectAllInDist = (storeId: number, isChecked: boolean) => {
+    const updatedOverrides: Record<string, boolean> = {};
+
     setDistributors(prev => {
       const next = prev.map(dist => {
         if (dist.storeId !== storeId) return dist;
         return {
           ...dist,
-          items: dist.items.map(item => ({ ...item, isChecked }))
+          items: dist.items.map(item => {
+            const key = getItemCheckKey(dist.storeId, item);
+            updatedOverrides[key] = isChecked;
+            return { ...item, isChecked };
+          })
         };
       });
       cachedDistributors = next;
+      return next;
+    });
+
+    setUserCheckOverrides(prev => {
+      const next = { ...prev, ...updatedOverrides };
+      userCheckOverridesRef.current = next;
+      saveUserCheckOverrides(next);
+      return next;
+    });
+  };
+
+  // Toggle ALL previous-ordered items across ALL distributors at once (for the reorder banner).
+  const handleToggleAllPreviousItems = (isChecked: boolean) => {
+    const updatedOverrides: Record<string, boolean> = {};
+
+    setDistributors(prev => {
+      const next = prev.map(dist => ({
+        ...dist,
+        items: dist.items.map(item => {
+          const pastInfo = getPastOrderedInfo(item, dist);
+          if (pastInfo.isPastOrdered && !pastInfo.isToday) {
+            const key = getItemCheckKey(dist.storeId, item);
+            updatedOverrides[key] = isChecked;
+            return { ...item, isChecked };
+          }
+          return item;
+        })
+      }));
+      cachedDistributors = next;
+      return next;
+    });
+
+    setUserCheckOverrides(prev => {
+      const next = { ...prev, ...updatedOverrides };
+      userCheckOverridesRef.current = next;
+      saveUserCheckOverrides(next);
       return next;
     });
   };
@@ -812,7 +923,7 @@ export default function PharmarackCart() {
 
   const getDistributorCheckedTotal = (dist: Distributor): number => {
     return (dist.items || [])
-      .filter(item => item.isChecked !== false)
+      .filter(item => isItemIncludedInDispatch(item, dist))
       .reduce((sum, item) => sum + getCartItemAmount(item), 0);
   };
 
@@ -828,8 +939,8 @@ export default function PharmarackCart() {
         ...dist,
         lineTotal: checkedTotal
       };
-    }).filter(dist => dist.items.length > 0);
-  }, [distributors]);
+    }).filter(dist => dist.items.length > 0 && sentWaStatusMap[dist.storeId] !== 'success');
+  }, [distributors, sentWaStatusMap, userCheckOverrides, latestSentMap]);
 
   const sentCartDistributors = React.useMemo(() => {
     return distributors.map(dist => {
@@ -853,6 +964,14 @@ export default function PharmarackCart() {
     }).filter(dist => dist.items.length > 0);
   }, [distributors]);
 
+  const readyToSendDistributors = React.useMemo(() => {
+    return distributors.filter(d => 
+      isDistributorMapped(d) && 
+      (d.items || []).some(i => isItemIncludedInDispatch(i, d)) &&
+      sentWaStatusMap[d.storeId] !== 'success'
+    );
+  }, [distributors, customDistributorPhones, savedDistributorsList, distributorMappings, sentWaStatusMap, userCheckOverrides, latestSentMap]);
+
   const filteredDistributorList = React.useMemo(() => {
     if (distributorFilterTab === 'unsent' || distributorFilterTab === 'active') return unsentCartDistributors;
     if (distributorFilterTab === 'sent' || distributorFilterTab === 'success') return sentCartDistributors;
@@ -861,6 +980,26 @@ export default function PharmarackCart() {
     if (distributorFilterTab === 'all') return activeCartDistributors;
     return unsentCartDistributors;
   }, [distributorFilterTab, unsentCartDistributors, sentCartDistributors, failedDistributors, unmappedDistributors, activeCartDistributors]);
+
+  // Aggregate all previous-ordered items (yesterday/past) from the current cart for the reorder banner.
+  // Uses existing getPastOrderedInfo + isItemIncludedInDispatch — no new data fetching.
+  const previousOrderItemsInfo = React.useMemo(() => {
+    const result: { dist: Distributor; item: CartLineItem; isChecked: boolean; placedDateStr: string }[] = [];
+    for (const dist of distributors) {
+      for (const item of dist.items) {
+        const pastInfo = getPastOrderedInfo(item, dist);
+        if (pastInfo.isPastOrdered && !pastInfo.isToday) {
+          result.push({
+            dist,
+            item,
+            isChecked: isItemIncludedInDispatch(item, dist),
+            placedDateStr: pastInfo.placedDateStr
+          });
+        }
+      }
+    }
+    return result;
+  }, [distributors, latestSentMap, userCheckOverrides]);
 
   // ponytail: delivery boy data comes exclusively from /dispatch/delivery-boys (delivery_boys table)
   // Store info (name, phone, address) comes from /settings. No delivery boy keys read from app_settings.
@@ -1221,9 +1360,8 @@ export default function PharmarackCart() {
     const storePhone = storeInfo.phone || storeInfo.adminPhone || '';
     const formattedStorePhone = storePhone ? formatPhone(storePhone) : 'N/A';
 
-    // Filter to send ONLY checked items (unchecked items are excluded by user)
-    const checkedItems = dist.items.filter(item => item.isChecked !== false);
-    const itemsToSend = checkedItems.length > 0 ? checkedItems : dist.items;
+    // Filter to send ONLY included items (fresh items + user-checked past items)
+    const itemsToSend = dist.items.filter(item => isItemIncludedInDispatch(item, dist));
 
     let msg = `🏥 *${storeName}*\n`;
     msg += `📍 *Delivery Location:* ${address}\n`;
@@ -1320,10 +1458,9 @@ export default function PharmarackCart() {
       return;
     }
 
-    const checkedItems = dist.items.filter(item => item.isChecked !== false);
-    const itemsToOrder = checkedItems.length > 0 ? checkedItems : dist.items;
+    const itemsToOrder = dist.items.filter(item => isItemIncludedInDispatch(item, dist));
 
-    if (dist.items.filter(item => item.isChecked !== false).length === 0) {
+    if (itemsToOrder.length === 0) {
       toastEvent.trigger(`No items selected for ${dist.storeName}. Please check at least 1 item to send.`, 'info');
       return;
     }
@@ -1349,7 +1486,8 @@ export default function PharmarackCart() {
       // 1. Send silently via backend API (100% background delivery, no popups)
       const res = await apiClient.post('/messaging/send', {
         number: cleanPhone,
-        message: msg
+        message: msg,
+        target_name: dist.storeName
       });
 
       if (res?.status === 202 || res?.data?.queued) {
@@ -1506,12 +1644,11 @@ export default function PharmarackCart() {
       const ordersPayload: { storeName: string; storeId: number; phone: string; message: string; lineTotal?: number; items: any[] }[] = [];
 
       for (const dist of mapped) {
-        const checkedItems = dist.items.filter(item => item.isChecked !== false);
-        if (checkedItems.length === 0) {
+        const itemsForBatch = dist.items.filter(item => isItemIncludedInDispatch(item, dist));
+        if (itemsForBatch.length === 0) {
           toastEvent.trigger(`Skipped ${dist.storeName}: No items selected.`, 'info');
           continue;
         }
-        const itemsForBatch = checkedItems;
 
         let phoneNum = getDistributorPhoneNumber(dist);
         let cleanPhone = phoneNum.replace(/\D/g, '');
@@ -1797,19 +1934,17 @@ export default function PharmarackCart() {
 
   const normalizeItemsWithCheckStatus = (
     rawList: Distributor[],
-    prevDistributors: Distributor[] = distributors
+    overrides: Record<string, boolean> = userCheckOverridesRef.current
   ): Distributor[] => {
     return rawList.map(dist => {
-      const prevDist = prevDistributors.find(d => d.storeId === dist.storeId);
       const updatedItems = (dist.items || []).map(item => {
-        const prevItem = prevDist?.items.find(pi => (pi.productCode && pi.productCode === item.productCode) || pi.productName === item.productName);
-        if (prevItem && typeof prevItem.isChecked === 'boolean') {
-          return { ...item, isChecked: prevItem.isChecked };
-        }
-        if (typeof item.isChecked === 'boolean') {
-          return item;
+        const key = getItemCheckKey(dist.storeId, item);
+        // 1. User manual override has highest priority!
+        if (typeof overrides[key] === 'boolean') {
+          return { ...item, isChecked: overrides[key] };
         }
 
+        // 2. Default logic:
         const pastInfo = getPastOrderedInfo(item, dist);
         // Default to false (unchecked) if ordered yesterday or earlier
         // Default to true (checked) if fresh item or ordered today
@@ -1837,7 +1972,7 @@ export default function PharmarackCart() {
       const data = await api.getPharmarackCart();
       if (data && data.success) {
         const rawList = data.distributors || [];
-        const list = normalizeItemsWithCheckStatus(rawList, distributors);
+        const list = normalizeItemsWithCheckStatus(rawList, userCheckOverridesRef.current);
         setDistributors(list);
         cachedDistributors = list;
         const now = new Date();
@@ -1871,7 +2006,7 @@ export default function PharmarackCart() {
       const data = await api.getPharmarackCart();
       if (data && data.success) {
         const rawList = data.distributors || [];
-        const list = normalizeItemsWithCheckStatus(rawList, distributors);
+        const list = normalizeItemsWithCheckStatus(rawList, userCheckOverridesRef.current);
         setDistributors(list);
         cachedDistributors = list;
         const now = new Date();
@@ -2012,6 +2147,25 @@ export default function PharmarackCart() {
     }
   };
 
+  const handleTransferSentItemToUnsent = (dist: Distributor, item: CartLineItem) => {
+    const key = getItemCheckKey(dist.storeId, item);
+    setUserCheckOverrides(prev => {
+      const next = { ...prev, [key]: true };
+      userCheckOverridesRef.current = next;
+      saveUserCheckOverrides(next);
+      return next;
+    });
+
+    setSentWaStatusMap(prev => {
+      const next = { ...prev };
+      delete next[dist.storeId];
+      return next;
+    });
+
+    setDistributorFilterTab('unsent');
+    toastEvent.trigger(`✅ Transferred "${item.productName}" to Unsent Cart Orders!`, 'success');
+  };
+
   const handleReaddSingleSentItem = async (item: any, storeId?: number, storeName?: string) => {
     const medName = item.productName || item.product || item.name || '';
     const qty = item.qty || item.quantity || 1;
@@ -2047,13 +2201,22 @@ export default function PharmarackCart() {
             return next;
           });
         }
+        const key = getItemCheckKey(targetStoreId, { productCode: item.productCode, productId: item.productId, productName: medName });
+        setUserCheckOverrides(prev => {
+          const next = { ...prev, [key]: true };
+          userCheckOverridesRef.current = next;
+          saveUserCheckOverrides(next);
+          return next;
+        });
+
         cachedDistributors = [];
         await fetchCart();
         window.dispatchEvent(new CustomEvent('refresh-pharmarack-cart'));
 
-        toastEvent.trigger(`✅ Added "${medName}" (x${qty}) to Pharmarack cart!`, 'success');
+        toastEvent.trigger(`✅ Transferred "${medName}" (x${qty}) to Unsent Cart Orders!`, 'success');
         
-        // Auto-switch to Pharmarack Cart tab so user sees the item in cart immediately
+        // Auto-switch to Pharmarack Cart tab and 'unsent' filter
+        setDistributorFilterTab('unsent');
         setSearchParams({ tab: 'cart' });
         return;
       } else {
@@ -2291,7 +2454,15 @@ export default function PharmarackCart() {
 
                             return (
                               <div key={idx} className="flex justify-between items-center text-xs text-text bg-bg2/40 p-2.5 rounded-xl border border-glass-border/30 hover:border-glass-border transition-all">
-                                <div className="flex items-center gap-2 min-w-0 flex-1 pr-2">
+                                <div className="flex items-center gap-2.5 min-w-0 flex-1 pr-2">
+                                  <input
+                                    type="checkbox"
+                                    checked={false}
+                                    onChange={() => handleReaddSingleSentItem(item, order.store_id, order.store_name)}
+                                    disabled={readdingSentItems}
+                                    className="w-4 h-4 rounded text-emerald-500 focus:ring-emerald-500 cursor-pointer accent-emerald-500 shadow-sm shrink-0 disabled:opacity-50"
+                                    title="Click checkbox to transfer this medicine directly to Unsent Cart Orders"
+                                  />
                                   <span className="truncate font-semibold text-text" title={medName}>{medName}</span>
                                   <span className="font-mono font-extrabold text-primary shrink-0">x{itemQty}</span>
                                 </div>
@@ -2300,7 +2471,7 @@ export default function PharmarackCart() {
                                     onClick={() => handleReaddSingleSentItem(item, order.store_id, order.store_name)}
                                     disabled={readdingSentItems}
                                     className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white text-emerald-600 border border-emerald-500 hover:bg-emerald-50 text-[10px] font-bold transition-all active:scale-95 cursor-pointer disabled:opacity-50 shadow-sm"
-                                    title="Add this medicine to active cart (falls back to Live Cart search if out of stock)"
+                                    title="Transfer this medicine to Unsent Cart Orders"
                                   >
                                     <Plus size={11} /> Re-add
                                   </button>
@@ -2384,7 +2555,7 @@ export default function PharmarackCart() {
                 <span>
                   {isSendingBatchWhatsApp
                     ? 'Sending orders…'
-                    : `Send All via WhatsApp (${mappedDistributors.length})`}
+                    : `Send All via WhatsApp (${readyToSendDistributors.length})`}
                 </span>
               </button>
 
@@ -3109,6 +3280,117 @@ export default function PharmarackCart() {
                   {/* ── Scrollable Distributor Cards Panel ── */}
                   <div className="flex-1 overflow-y-auto p-6 space-y-5 min-h-0 custom-scrollbar">
 
+                  {/* ── Previous Orders Reorder Banner ── */}
+                  {previousOrderItemsInfo.length > 0 && (distributorFilterTab === 'active' || distributorFilterTab === 'unsent' || distributorFilterTab === 'all') && (() => {
+                    const checkedCount = previousOrderItemsInfo.filter(x => x.isChecked).length;
+                    const totalCount = previousOrderItemsInfo.length;
+                    const allChecked = checkedCount === totalCount;
+                    const noneChecked = checkedCount === 0;
+
+                    // Group by distributor for expanded view
+                    const byDist = new Map<number, { distName: string; items: typeof previousOrderItemsInfo }>();
+                    for (const entry of previousOrderItemsInfo) {
+                      const existing = byDist.get(entry.dist.storeId);
+                      if (existing) existing.items.push(entry);
+                      else byDist.set(entry.dist.storeId, { distName: entry.dist.storeName, items: [entry] });
+                    }
+
+                    return (
+                      <div className={`rounded-xl border transition-all mb-1 ${noneChecked ? 'border-amber-500/40 bg-amber-500/[0.06]' : checkedCount > 0 ? 'border-amber-500/60 bg-amber-500/[0.10]' : 'border-amber-500/30 bg-amber-500/[0.04]'}`}>
+                        {/* Header row */}
+                        <div className="flex items-center justify-between px-4 py-3 gap-3">
+                          <div className="flex items-center gap-2 min-w-0 flex-1">
+                            <Clock size={14} className="text-amber-400 shrink-0" />
+                            <div className="flex flex-col min-w-0">
+                              <span className="text-[11px] font-extrabold text-amber-400 leading-tight">
+                                Previous Order — {totalCount} {totalCount === 1 ? 'Medicine' : 'Medicines'} to Reorder
+                              </span>
+                              <span className="text-[10px] text-muted">
+                                {noneChecked
+                                  ? 'None selected — tick checkboxes to include in today\'s order'
+                                  : `${checkedCount} of ${totalCount} selected for reorder`}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {/* Select All */}
+                            <button
+                              onClick={() => handleToggleAllPreviousItems(true)}
+                              disabled={allChecked}
+                              className="text-[10px] font-bold px-2.5 py-1 rounded-lg bg-amber-500/20 text-amber-400 border border-amber-500/40 hover:bg-amber-500/30 disabled:opacity-40 transition-all active:scale-95 cursor-pointer"
+                              title="Select all previous order medicines for reorder"
+                            >
+                              Select All
+                            </button>
+                            {/* Deselect All */}
+                            <button
+                              onClick={() => handleToggleAllPreviousItems(false)}
+                              disabled={noneChecked}
+                              className="text-[10px] font-bold px-2.5 py-1 rounded-lg bg-bg2 text-muted border border-border hover:bg-bg3 disabled:opacity-40 transition-all active:scale-95 cursor-pointer"
+                              title="Deselect all — exclude previous order medicines from today's order"
+                            >
+                              Deselect All
+                            </button>
+                            {/* Expand / Collapse */}
+                            <button
+                              onClick={() => setReorderBannerCollapsed(v => !v)}
+                              className="text-[10px] font-bold px-2 py-1 rounded-lg bg-bg2 text-muted border border-border hover:bg-bg3 transition-all active:scale-95 cursor-pointer"
+                              title={reorderBannerCollapsed ? 'Show medicine list' : 'Collapse'}
+                            >
+                              {reorderBannerCollapsed ? '▸ Show' : '▾ Hide'}
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Expandable medicine list grouped by distributor */}
+                        {!reorderBannerCollapsed && (
+                          <div className="border-t border-amber-500/20 px-4 py-3 space-y-3">
+                            {Array.from(byDist.entries()).map(([storeId, group]) => (
+                              <div key={storeId}>
+                                <div className="text-[10px] font-extrabold text-amber-400/80 uppercase tracking-wider mb-1.5 flex items-center gap-1">
+                                  <Building2 size={10} />
+                                  {group.distName}
+                                </div>
+                                <div className="space-y-1">
+                                  {group.items.map(({ item, isChecked, placedDateStr }) => (
+                                    <div
+                                      key={item.productCode || item.productName}
+                                      className={`flex items-center gap-2 px-2 py-1.5 rounded-lg transition-all cursor-pointer hover:bg-amber-500/10 ${isChecked ? 'bg-amber-500/10' : 'bg-bg2/30'}`}
+                                      onClick={() => handleToggleItemCheck(storeId, item, !isChecked)}
+                                      title={isChecked ? 'Click to exclude from today\'s order' : 'Click to include in today\'s order'}
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked={isChecked}
+                                        onChange={e => handleToggleItemCheck(storeId, item, e.target.checked)}
+                                        onClick={e => e.stopPropagation()}
+                                        className="w-3.5 h-3.5 rounded text-amber-500 focus:ring-amber-500 cursor-pointer accent-amber-500 shrink-0"
+                                      />
+                                      <span className={`text-[11px] font-semibold flex-1 truncate ${isChecked ? 'text-text' : 'text-muted line-through opacity-70'}`}>
+                                        {item.productName}
+                                      </span>
+                                      <span className="text-[10px] font-mono text-muted shrink-0">×{item.qty}</span>
+                                      {isChecked ? (
+                                        <span className="text-[8px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shrink-0 flex items-center gap-0.5">
+                                          <Check size={8} />
+                                          Reordering
+                                        </span>
+                                      ) : (
+                                        <span className="text-[8px] font-bold px-1.5 py-0.5 rounded bg-bg3/70 text-muted/70 border border-border/30 shrink-0">
+                                          {placedDateStr}
+                                        </span>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+
                   {filteredDistributorList.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-12 text-center gap-2">
                       {distributorFilterTab === 'active' ? (
@@ -3203,11 +3485,13 @@ export default function PharmarackCart() {
                             )}
                             {(() => {
                               const totalCount = dist.items.length;
-                              const checkedCount = dist.items.filter(i => i.isChecked !== false).length;
-                              const yesterdayCount = dist.items.filter(i => {
+                              const includedCount = dist.items.filter(i => isItemIncludedInDispatch(i, dist)).length;
+                              const yesterdayItems = dist.items.filter(i => {
                                 const p = getPastOrderedInfo(i, dist);
                                 return p.isPastOrdered && !p.isToday;
-                              }).length;
+                              });
+                              const yesterdayCount = yesterdayItems.length;
+                              const checkedYesterdayCount = yesterdayItems.filter(i => isItemIncludedInDispatch(i, dist)).length;
                               const checkedTotal = getDistributorCheckedTotal(dist);
 
                               return (
@@ -3216,15 +3500,15 @@ export default function PharmarackCart() {
                                     ₹{checkedTotal.toFixed(2)}
                                   </span>
                                   <span className="text-muted/40">•</span>
-                                  <span className={checkedCount > 0 ? "text-primary font-bold" : "text-muted"}>
-                                    {checkedCount}/{totalCount} selected
+                                  <span className={includedCount > 0 ? "text-primary font-bold" : "text-muted"}>
+                                    {includedCount}/{totalCount} to send
                                   </span>
                                   {yesterdayCount > 0 && (
                                     <>
                                       <span className="text-muted/40">•</span>
-                                      <span className="text-amber-400 font-extrabold flex items-center gap-0.5">
+                                      <span className="text-amber-400 font-extrabold flex items-center gap-0.5" title={`${checkedYesterdayCount} of ${yesterdayCount} past items reordered`}>
                                         <Clock size={10} />
-                                        {yesterdayCount} past
+                                        {checkedYesterdayCount > 0 ? `${checkedYesterdayCount}/${yesterdayCount} reordered` : `${yesterdayCount} past (tick to reorder)`}
                                       </span>
                                     </>
                                   )}
@@ -3353,14 +3637,8 @@ export default function PharmarackCart() {
                           <table className="w-full text-xs">
                             <thead>
                               <tr className="border-b border-glass-border/30 text-muted font-bold uppercase tracking-wider text-[10px]">
-                                <th className="text-center px-3 py-2 w-10">
-                                  <input
-                                    type="checkbox"
-                                    checked={dist.items.length > 0 && dist.items.every(i => i.isChecked !== false)}
-                                    onChange={(e) => handleToggleSelectAllInDist(dist.storeId, e.target.checked)}
-                                    className="w-4 h-4 rounded text-primary focus:ring-primary cursor-pointer accent-primary"
-                                    title="Select / Deselect all items for this distributor"
-                                  />
+                                <th className="text-center px-2 py-2 w-12 text-[9px] font-extrabold text-muted" title="Check old medicines if you want to re-order them">
+                                  Reorder
                                 </th>
                                 <th className="text-left px-3 py-2">Product</th>
                                 <th className="text-left px-3 py-2">Company</th>
@@ -3378,42 +3656,50 @@ export default function PharmarackCart() {
                               {dist.items.map((item, idx) => {
                                 const isSent = isItemAlreadySent(item, dist);
                                 const pastInfo = getPastOrderedInfo(item, dist);
-                                const isChecked = item.isChecked !== false;
                                 const isYesterdayOrPast = pastInfo.isPastOrdered && !pastInfo.isToday;
+                                const isIncluded = isItemIncludedInDispatch(item, dist);
                                 const isDeleting = updatingItemId === (item.productCode || String(item.productId || item.productName));
 
                                 return (
                                   <tr
                                     key={`${item.productCode}-${idx}`}
                                     className={`transition-colors ${
-                                      !isChecked
-                                        ? 'bg-bg3/10 opacity-70 hover:opacity-100 text-muted'
-                                        : isYesterdayOrPast
-                                          ? 'bg-amber-500/[0.06] hover:bg-amber-500/[0.12] border-l-2 border-l-amber-500'
-                                          : isSent
-                                            ? 'bg-bg3/20 opacity-75 hover:opacity-100 text-muted'
-                                            : 'bg-emerald-500/[0.04] hover:bg-emerald-500/[0.09]'
+                                      isYesterdayOrPast
+                                        ? isIncluded
+                                          ? 'bg-amber-500/[0.08] hover:bg-amber-500/[0.14] border-l-2 border-l-amber-500'
+                                          : 'bg-amber-500/[0.03] hover:bg-amber-500/[0.07] border-l-2 border-l-amber-500/40 text-muted'
+                                        : isSent
+                                          ? 'bg-bg3/20 opacity-75 hover:opacity-100 text-muted'
+                                          : 'bg-emerald-500/[0.04] hover:bg-emerald-500/[0.09]'
                                     }`}
                                   >
-                                    <td className="px-3 py-2.5 text-center w-10">
-                                      <input
-                                        type="checkbox"
-                                        checked={isChecked}
-                                        onChange={(e) => handleToggleItemCheck(dist.storeId, item.productCode || item.productName, e.target.checked)}
-                                        className="w-4 h-4 rounded text-primary focus:ring-primary cursor-pointer accent-primary"
-                                        title={
-                                          isYesterdayOrPast
-                                            ? `Ordered previously on ${pastInfo.placedDateStr}. Check box to include in today's order.`
-                                            : isChecked
-                                              ? "Included in order. Uncheck to skip."
-                                              : "Excluded from order. Check to include."
-                                        }
-                                      />
+                                    <td className="px-2 py-2.5 text-center w-12">
+                                      {isYesterdayOrPast ? (
+                                        <input
+                                          type="checkbox"
+                                          checked={isIncluded}
+                                          onChange={(e) => handleToggleItemCheck(dist.storeId, item, e.target.checked)}
+                                          className="w-4 h-4 rounded text-amber-500 focus:ring-amber-500 cursor-pointer accent-amber-500 shadow-sm"
+                                          title={`Ordered previously on ${pastInfo.placedDateStr}. Check box to include in today's order.`}
+                                        />
+                                      ) : isSent ? (
+                                        <input
+                                          type="checkbox"
+                                          checked={false}
+                                          onChange={() => handleTransferSentItemToUnsent(dist, item)}
+                                          className="w-4 h-4 rounded text-emerald-500 focus:ring-emerald-500 cursor-pointer accent-emerald-500 shadow-sm"
+                                          title="Sent today. Tick checkbox to re-add / transfer to Unsent Cart Orders"
+                                        />
+                                      ) : (
+                                        <span className="inline-flex items-center justify-center text-emerald-400/80 font-bold select-none text-xs" title="New medicine (included in order)">
+                                          ●
+                                        </span>
+                                      )}
                                     </td>
                                     <td className="px-3 py-2.5">
                                       <div className="flex flex-col gap-1">
                                         <div className="flex items-center gap-1.5 flex-wrap">
-                                          <span className={`font-bold text-[11px] ${!isChecked ? 'text-muted line-through opacity-80' : isSent ? 'text-muted' : 'text-text'}`}>
+                                          <span className={`font-bold text-[11px] ${isYesterdayOrPast && !isIncluded ? 'text-muted line-through opacity-80' : isSent ? 'text-muted' : 'text-text'}`}>
                                             {item.productName}
                                           </span>
                                           {isYesterdayOrPast && (
@@ -3421,6 +3707,18 @@ export default function PharmarackCart() {
                                               <Clock size={9} />
                                               <span>⚡ {pastInfo.isYesterday ? 'ORDERED YESTERDAY' : `ORDERED ON ${pastInfo.placedDateStr.toUpperCase()}`}</span>
                                             </span>
+                                          )}
+                                          {isYesterdayOrPast && (
+                                            isIncluded ? (
+                                              <span className="text-[8px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shrink-0 select-none flex items-center gap-0.5">
+                                                <Check size={8} />
+                                                <span>REORDERING</span>
+                                              </span>
+                                            ) : (
+                                              <span className="text-[8px] font-bold px-1.5 py-0.5 rounded bg-bg3/70 text-muted border border-border/40 shrink-0 select-none">
+                                                Excluded
+                                              </span>
+                                            )
                                           )}
                                           {!isYesterdayOrPast && isSent && (
                                             <span className="text-[8px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-bg3 text-muted border border-border/40 shrink-0 select-none flex items-center gap-0.5">
@@ -3431,11 +3729,6 @@ export default function PharmarackCart() {
                                           {!isYesterdayOrPast && !isSent && (
                                             <span className="text-[8px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shrink-0 select-none flex items-center gap-0.5">
                                               <span>✨ NEW</span>
-                                            </span>
-                                          )}
-                                          {!isChecked && (
-                                            <span className="text-[8px] font-bold px-1.5 py-0.5 rounded bg-bg3/60 text-muted border border-border/40 shrink-0 select-none">
-                                              Excluded
                                             </span>
                                           )}
                                         </div>

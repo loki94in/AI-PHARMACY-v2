@@ -311,6 +311,19 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
   const isCustomer = (t: string) => 
     !isPurchase(t) && !isDelivery(t) && !isSpecialOrder(t);
 
+  // If target_name is a raw numeric string (store ID leaked in), fall back gracefully
+  const resolveDisplayName = (item: QueueItem): string => {
+    const raw = item.target_name;
+    if (isPurchase(item.type)) {
+      // Numeric-only strings are store IDs, not user-friendly names
+      if (!raw || /^\d+$/.test(raw.trim())) return 'Purchase / Distributor';
+      return raw;
+    }
+    if (isDelivery(item.type)) return raw || 'Delivery Staff';
+    if (isSpecialOrder(item.type)) return raw || 'Special Order';
+    return raw || 'Customer';
+  };
+
   // Helper to consolidate multiple same-day delivery boy summary dispatches into a single entry
   const consolidateDeliveryBoyItems = (rawItems: QueueItem[]): QueueItem[] => {
     const deliveryByDate: Record<string, QueueItem[]> = {};
@@ -439,7 +452,7 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
 
   const renderQueueItem = (item: QueueItem) => {
     const isExpanded = Boolean(expandedIds[item.id]);
-    const displayName = item.target_name || (isDelivery(item.type) ? 'Delivery Staff' : isPurchase(item.type) ? 'Purchase / Distributor' : 'Customer');
+    const displayName = resolveDisplayName(item);
 
     return (
       <div 

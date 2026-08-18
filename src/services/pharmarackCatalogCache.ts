@@ -184,7 +184,7 @@ export async function syncCatalog(): Promise<{ synced: number; errors: number }>
         const catalogRes = await fetchPharmarackApi('https://pharmretail-elasticsearch.pharmarack.com/open-search/api/v2/search', {
           method: 'POST',
           body: JSON.stringify(searchPayload),
-          signal: AbortSignal.timeout(8000)
+          signal: AbortSignal.timeout(18000)
         }).catch((err) => {
           errReason = err.message || 'Fetch failed';
           return null;

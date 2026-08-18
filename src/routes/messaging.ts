@@ -322,7 +322,7 @@ router.post('/reconnect', async (req, res) => {
 
 // Send a WhatsApp message via the hub — waits up to 8 seconds for real result
 router.post('/send', async (req, res) => {
-  const { number, message, mediaUrl, file } = req.body;
+  const { number, message, mediaUrl, file, target_name } = req.body;
   if (!number || (!message && !file)) {
     return res.status(400).json({ error: 'number and either message or file are required' });
   }
@@ -348,9 +348,9 @@ router.post('/send', async (req, res) => {
       try {
         const db = await dbManager.getConnection();
         await db.run(
-          `INSERT INTO whatsapp_send_queue (number, message, created_at) VALUES (?, ?, ?)
+          `INSERT INTO whatsapp_send_queue (number, message, created_at, target_name) VALUES (?, ?, ?, ?)
            ON CONFLICT DO NOTHING`,
-          [number, message || '', Date.now()]
+          [number, message || '', Date.now(), target_name || null]
         );
         console.log(`[Messaging] Send timed out for ${number}, queued for retry.`);
       } catch (qErr: any) {

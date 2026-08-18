@@ -400,7 +400,9 @@ export function extractMedicinesWithPython(messageText: string): Promise<string[
 const PORT = config.port;
 
 // Start HTTP server immediately to accept requests in <20ms
-const server = app.listen(PORT, async () => {
+// ponytail: bind to 127.0.0.1 explicitly — on Windows, Node 17+ resolves bare
+// 'localhost' to ::1 (IPv6) while Vite proxy targets 127.0.0.1 (IPv4), causing ECONNREFUSED.
+const server = app.listen(PORT, '127.0.0.1', async () => {
   const serverUrl = `http://localhost:${PORT}`;
   console.log(`Server is running on ${serverUrl}`);
 

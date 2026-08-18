@@ -1840,7 +1840,7 @@ router.get('/live-cart-summary', async (req, res) => {
       try {
         const response = await fetchPharmarack('https://pharmretail-api.pharmarack.com/cart/api/v1/GetUserCartDetails', {
           method: 'GET',
-          signal: AbortSignal.timeout(10000)
+          signal: AbortSignal.timeout(20000)
         });
 
         if (response.ok) {
