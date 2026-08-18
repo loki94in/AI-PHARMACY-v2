@@ -3,7 +3,8 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { pdfInvoiceService } from './pdfInvoiceService.js';
-import { sendMessage, isReady } from '../whatsappClient.js';
+import { whatsappQueueWorker } from './whatsappQueueWorker.js';
+import { isReady } from '../whatsappClient.js';
 import { getAppDataDir } from '../config/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -70,22 +71,27 @@ export class WhatsappInvoiceService {
       }
       caption += `— AI Pharmacy OS`;
 
-      // 1. Send Instant Text Message immediately (identical mechanism to CRM page)
-      let textSent = false;
+      // 1. Enqueue text message into centralized queue
+      let textQueued = false;
       try {
-        await sendMessage(phone, undefined, caption);
-        console.log(`Successfully dispatched instant text WhatsApp notification for invoice ${invoice.invoice_no} to ${phone}`);
+        const queueId = await whatsappQueueWorker.enqueue(
+          phone,
+          caption,
+          invoice.payment_medium === 'CREDIT' ? 'pos_credit_invoice' : 'pos_sale_invoice',
+          invoice.customer_name || 'Customer'
+        );
+        console.log(`Dispatched WhatsApp notification for invoice ${invoice.invoice_no} to centralized queue (#${queueId})`);
         await db.run(
           `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
            VALUES (?, ?, ?, ?, ?, ?)`,
           ['credit_sale_invoice', invoice.customer_name || 'Customer', phone, caption, 'sent', `invoice_${invoiceId}`]
         );
-        textSent = true;
+        textQueued = true;
       } catch (textErr: any) {
-        console.error(`Failed to send instant text WhatsApp notification for invoice ${invoice.invoice_no}:`, textErr);
+        console.error(`Failed to enqueue WhatsApp notification for invoice ${invoice.invoice_no}:`, textErr);
       }
 
-      // 2. Asynchronously attempt to generate and send PDF attachment if PDF service is available
+      // 2. Asynchronously attempt to generate and enqueue PDF attachment if PDF service is available
       try {
         if (!fs.existsSync(UPLOADS_DIR)) {
           fs.mkdirSync(UPLOADS_DIR, { recursive: true });
@@ -94,13 +100,20 @@ export class WhatsappInvoiceService {
         const pdfPath = path.join(UPLOADS_DIR, pdfFilename);
         await pdfInvoiceService.generateInvoicePdf(invoiceId, pdfPath);
         const pdfCaption = `📄 Attached PDF Bill for Invoice #${invoice.invoice_no}`;
-        await sendMessage(phone, pdfPath, pdfCaption);
-        console.log(`Successfully dispatched PDF attachment for invoice ${invoice.invoice_no} to ${phone}`);
+        await whatsappQueueWorker.enqueue(
+          phone,
+          pdfCaption,
+          'invoice_pdf_document',
+          invoice.customer_name || 'Customer',
+          undefined,
+          pdfPath
+        );
+        console.log(`Enqueued PDF attachment for invoice ${invoice.invoice_no} into centralized WhatsApp queue`);
       } catch (pdfErr) {
-        console.warn(`PDF invoice attachment dispatch skipped/failed for invoice ${invoice.invoice_no}:`, pdfErr);
+        console.warn(`PDF invoice attachment generation skipped/failed for invoice ${invoice.invoice_no}:`, pdfErr);
       }
 
-      return textSent;
+      return textQueued;
     } catch (err) {
       console.error(`Error sending invoice ${invoiceId} via WhatsApp:`, err);
       return false;

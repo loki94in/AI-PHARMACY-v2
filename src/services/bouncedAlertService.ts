@@ -1,6 +1,6 @@
 import { dbManager } from '../database/connection.js';
 import { emailService, isNonMedicineNoise, cleanMedicineName } from './emailService.js';
-import { sendMessage } from '../whatsappClient.js';
+import { whatsappQueueWorker } from './whatsappQueueWorker.js';
 import fs from 'fs';
 
 export class BouncedAlertService {
@@ -197,9 +197,9 @@ export class BouncedAlertService {
       }
       message += `— AI Pharmacy OS`;
 
-      // 5. Dispatch via WhatsApp
-      await sendMessage(recipientPhone, undefined, message);
-      console.log(`[BouncedAlert] Successfully sent morning notification to ${recipientPhone}`);
+      // 5. Dispatch via centralized WhatsApp queue
+      await whatsappQueueWorker.enqueue(recipientPhone, message, 'bounced_products_alert', 'Dinesh');
+      console.log(`[BouncedAlert] Successfully enqueued morning notification for ${recipientPhone}`);
 
       // Log action
       await db.run(

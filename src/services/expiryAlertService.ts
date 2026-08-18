@@ -41,8 +41,8 @@ export async function runExpiryScanAndAlert(days = 90): Promise<boolean> {
       return true; // Scan completed successfully, optional notification skipped
     }
 
-    // Load WhatsApp client and send message
-    const { sendMessage } = await import('../whatsappClient.js');
+    // Load WhatsApp queue worker and enqueue message
+    const { whatsappQueueWorker } = await import('./whatsappQueueWorker.js');
     const cleanPhone = targetPhone.replace(/\D/g, '');
     const formattedPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
 
@@ -59,8 +59,8 @@ export async function runExpiryScanAndAlert(days = 90): Promise<boolean> {
       msg += `\n...and others. Please log in to the dashboard Expiry Monitor for the full report.`;
     }
 
-    await sendMessage(formattedPhone, undefined, msg);
-    console.log(`[ExpiryScan] Auto WhatsApp alert summary successfully dispatched to ${targetPhone}`);
+    await whatsappQueueWorker.enqueue(formattedPhone, msg, 'expiry_report', 'Pharmacy Owner / Admin');
+    console.log(`[ExpiryScan] Auto WhatsApp alert summary queued for dispatch to ${targetPhone}`);
 
     // Record in action_logs for Activity Alerts
     await db.run(

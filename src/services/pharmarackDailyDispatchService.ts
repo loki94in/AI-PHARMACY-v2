@@ -8,7 +8,7 @@
  * every 45 days (pre-computed 2 days before the cycle ends).
  */
 import { dbManager } from '../database/connection.js';
-import { sendMessage } from '../whatsappClient.js';
+import { whatsappQueueWorker } from './whatsappQueueWorker.js';
 import { formatDisplayPhone } from './notificationService.js';
 import { resolveDistributorContact } from '../utils/distributorSyncHelper.js';
 
@@ -284,21 +284,19 @@ async function sendBatchToDeliveryBoys(db: any, orders: any[], isLate = false): 
 
   for (const boy of boys) {
     try {
-      // 1. Send individual distributor order messages
+      // 1. Enqueue individual distributor order messages
       for (const distObj of distMessages) {
-        await sendMessage(boy.phone, undefined, distObj.message);
+        await whatsappQueueWorker.enqueue(boy.phone, distObj.message, 'pharmarack_daily_batch', boy.name);
         await db.run(
           `INSERT INTO automation_notifications
              (type, recipient_name, recipient_phone, message, status, reference_id)
            VALUES (?, ?, ?, ?, ?, ?)`,
           ['pharmarack_daily_batch', boy.name, boy.phone, distObj.message, 'sent', `batch_${todayIST()}_${distObj.distName}`]
         );
-        // Brief 1-2s gap between separate messages
-        await new Promise(r => setTimeout(r, 1500));
       }
 
-      // 2. Send separate final summary message
-      await sendMessage(boy.phone, undefined, summaryMessage);
+      // 2. Enqueue separate final summary message
+      await whatsappQueueWorker.enqueue(boy.phone, summaryMessage, 'pharmarack_daily_batch_summary', boy.name);
       await db.run(
         `INSERT INTO automation_notifications
            (type, recipient_name, recipient_phone, message, status, reference_id)
@@ -309,17 +307,17 @@ async function sendBatchToDeliveryBoys(db: any, orders: any[], isLate = false): 
       // Record in action_logs for Activity Alerts
       await db.run(
         'INSERT INTO action_logs (action_type, description) VALUES (?, ?)',
-        ['PHARMARACK_DISPATCH_BATCH_SENT', `Dispatched daily order pickup list to ${boy.name} (${boy.phone}) for ${distMessages.length} distributors`]
+        ['PHARMARACK_DISPATCH_BATCH_SENT', `Enqueued daily order pickup list for ${boy.name} (${boy.phone}) for ${distMessages.length} distributors`]
       );
 
-      console.log(`[PharmarackBatch] Sent ${distMessages.length} separate distributor messages + 1 summary message to ${boy.name} (${boy.phone})`);
+      console.log(`[PharmarackBatch] Enqueued ${distMessages.length} separate distributor messages + 1 summary message for ${boy.name} (${boy.phone})`);
     } catch (err: any) {
-      console.error(`[PharmarackBatch] Failed to send to ${boy.name}:`, err.message);
+      console.error(`[PharmarackBatch] Failed to enqueue for ${boy.name}:`, err.message);
       await db.run(
         `INSERT INTO automation_notifications
            (type, recipient_name, recipient_phone, message, status, error_message, reference_id)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        ['pharmarack_daily_batch', boy.name, boy.phone, 'Failed sending batch', 'failed', err.message, `batch_${todayIST()}`]
+        ['pharmarack_daily_batch', boy.name, boy.phone, 'Failed enqueuing batch', 'failed', err.message, `batch_${todayIST()}`]
       );
     }
   }

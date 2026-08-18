@@ -45,6 +45,7 @@ interface SaleInvoice {
   cgst_value?: number;
   sgst_value?: number;
   igst_value?: number;
+  customer_id?: number;
   customer_name?: string;
   customer_phone?: string;
   doctor_name?: string;
@@ -355,6 +356,42 @@ const Sells = () => {
       navigate('/pos', { state: { editSale: full } });
     } catch (err) {
       toastEvent.trigger('Failed to load invoice for editing in POS', 'error');
+    }
+  };
+
+  const handleRepeatSale = async (invoice: SaleInvoice) => {
+    try {
+      const full = await api.getSale(invoice.id);
+      const items = Array.isArray(full.items) ? full.items : [];
+      
+      const prefillPayload = {
+        patientName: full.customer_name || invoice.customer_name || '',
+        patientPhone: full.customer_phone || invoice.customer_phone || '',
+        selectedCustomerId: full.customer_id || invoice.customer_id || null,
+        doctorName: full.doctor_name || invoice.doctor_name || '',
+        discount: 0,
+        refillPatient: true,
+        medicines: items.map((it: any) => ({
+          medicineId: it.medicine_id,
+          medicineName: it.medicine_name || it.name,
+          inventory_id: it.inventory_id,
+          batch_no: it.batch_no || it.batch_number || '',
+          expiry_date: it.expiry_date || '',
+          mrp: it.mrp || 0,
+          sell_price: it.sell_price || null,
+          quantity: it.quantity || 1,
+          loose_qty: it.loose_qty || 0,
+          unit_price: it.unit_price || it.sell_price || it.mrp || 0,
+          discount: it.discount_per || it.discount || 0,
+          pack_size: it.pack_size || 1
+        }))
+      };
+
+      toastEvent.trigger(`Transferring prescription for ${prefillPayload.patientName || 'patient'} to POS...`, 'info', '/pos');
+      setViewInvoice(null);
+      navigate('/pos', { state: { prefill: prefillPayload } });
+    } catch (err: any) {
+      toastEvent.trigger('Failed to load bill for repeat sale', 'error');
     }
   };
 
@@ -785,6 +822,13 @@ const Sells = () => {
                               title="View & Print Barcodes (Return Invoice & Product Labels)"
                             >
                               <QrCode size={14} />
+                            </button>
+                            <button
+                              onClick={() => handleRepeatSale(inv)}
+                              className="p-2 rounded-lg bg-emerald-500/10 hover:bg-emerald-500 hover:text-white border border-emerald-500/20 hover:border-emerald-500 shadow-sm text-emerald-400 transition-all transform hover:scale-105 active:scale-95 cursor-pointer"
+                              title="Repeat Sale / Refill in POS"
+                            >
+                              <RotateCcw size={14} />
                             </button>
                             <button
                               onClick={() => openEdit(inv)}
@@ -1323,6 +1367,15 @@ const Sells = () => {
                     Delete Invoice
                   </button>
                 )}
+
+                <button
+                  onClick={() => handleRepeatSale(viewInvoice)}
+                  className="flex items-center gap-2 px-4 py-2 bg-emerald-500/15 hover:bg-emerald-500 text-emerald-400 hover:text-white border border-emerald-500/30 rounded-lg text-sm font-bold transition-all cursor-pointer shadow-sm"
+                  title="Load all items and patient from this bill into POS for repeat sale / refill"
+                >
+                  <RotateCcw size={15} />
+                  Repeat Sale / Refill
+                </button>
 
                 <button
                   onClick={() => openEdit(viewInvoice)}

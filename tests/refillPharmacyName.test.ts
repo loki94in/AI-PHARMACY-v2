@@ -3,7 +3,11 @@ import { jest } from '@jest/globals';
 jest.unstable_mockModule('../src/whatsappClient.js', () => ({
   __esModule: true,
   sendMessage: jest.fn(() => Promise.resolve(true)),
-  initClient: jest.fn(() => Promise.resolve(true))
+  initClient: jest.fn(() => Promise.resolve(true)),
+  getWhatsAppStatus: jest.fn(() => Promise.resolve({ isConnected: true, status: 'CONNECTED' })),
+  shouldRouteToBusiness: jest.fn(() => false),
+  hashMessageBody: jest.fn(() => 'mock-hash'),
+  normalizeWhatsAppPhone: jest.fn((p: string) => p ? String(p).replace(/\D/g, '') : '')
 }));
 
 jest.unstable_mockModule('../src/telegramBot.js', () => ({

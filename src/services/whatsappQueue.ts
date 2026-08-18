@@ -1,106 +1,30 @@
 import { dbManager } from '../database/connection.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { sendMessage, isReady } from '../whatsappClient.js';
+import { whatsappQueueWorker } from './whatsappQueueWorker.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const DB_PATH = process.env.DB_PATH || path.resolve(__dirname, '..', '..', 'data', 'app.db');
 
 export class WhatsappQueue {
-  private isProcessing = false;
-
   async queueJob(invoiceId: number, phone: string, pdfPath: string, caption: string, explicitScheduledAt?: number): Promise<void> {
-    let db;
     try {
-      db = await dbManager.getConnection();
-      const now = Date.now();
-      let scheduledAt = explicitScheduledAt;
-      if (scheduledAt === undefined || scheduledAt === null) {
-        const delayRow = await db.get("SELECT value FROM app_settings WHERE key = 'whatsapp_delay_credit_bill'");
-        const delayMins = delayRow ? parseInt(delayRow.value, 10) : 0;
-        if (!isNaN(delayMins) && delayMins > 0) {
-          scheduledAt = now + (delayMins * 60 * 1000);
-        } else {
-          scheduledAt = now;
-        }
-      }
-
-      await db.run(
-        `INSERT INTO pending_whatsapp_jobs (invoice_id, recipient_phone, pdf_path, caption, scheduled_at) VALUES (?, ?, ?, ?, ?)`,
-        [invoiceId, phone, pdfPath, caption, scheduledAt]
+      const queueId = await whatsappQueueWorker.enqueue(
+        phone,
+        caption,
+        'credit_sale_invoice',
+        undefined,
+        explicitScheduledAt,
+        pdfPath
       );
-      console.log(`Queued pending WhatsApp transmission for Invoice ID ${invoiceId} (scheduled_at: ${new Date(scheduledAt).toISOString()})`);
-      
-      // Try immediate processing if due
-      if (scheduledAt <= now) {
-        this.processQueue().catch(console.error);
-      }
+      console.log(`Queued pending WhatsApp transmission for Invoice ID ${invoiceId} in centralized queue (#${queueId})`);
     } catch (err) {
       console.error('Failed to queue WhatsApp job:', err);
     }
   }
 
   async processQueue(): Promise<void> {
-    if (this.isProcessing) return;
-    
-    // Check if WhatsApp and background automations are enabled in settings
-    let dbCheck;
-    try {
-      dbCheck = await dbManager.getConnection();
-      const autoRow = await dbCheck.get("SELECT value FROM app_settings WHERE key = 'automation_enabled'");
-      if (!autoRow || autoRow.value !== 'true') {
-        // Silent return if automations are disabled
-        return;
-      }
-
-      const row = await dbCheck.get("SELECT value FROM app_settings WHERE key = 'whatsapp_enabled'");
-      if (!row || row.value !== 'true') {
-        // Silent return if disabled to prevent background spam logs
-        return;
-      }
-    } catch (dbErr) {
-      console.error('Failed to check if WhatsApp/automation is enabled in queue worker:', dbErr);
-    }
-
-    if (!isReady) {
-      console.log('WhatsApp client not ready. Delaying queue processing.');
-      return;
-    }
-
-    this.isProcessing = true;
-    let db;
-    try {
-      db = await dbManager.getConnection();
-      const now = Date.now();
-      const jobs = await db.all('SELECT * FROM pending_whatsapp_jobs WHERE (scheduled_at IS NULL OR scheduled_at <= ?) ORDER BY created_at ASC', [now]);
-
-      for (const job of jobs) {
-        try {
-          console.log(`Attempting to send queued WhatsApp bill for invoice ${job.invoice_id} to ${job.recipient_phone}`);
-          await sendMessage(job.recipient_phone, job.pdf_path, job.caption);
-          
-          // Delete on success
-          await db.run('DELETE FROM pending_whatsapp_jobs WHERE id = ?', [job.id]);
-          console.log(`Successfully sent queued WhatsApp bill for invoice ${job.invoice_id}`);
-        } catch (jobErr: any) {
-          console.error(`Failed to send queued WhatsApp job ${job.id}:`, jobErr?.message || jobErr);
-          
-          const isInvalidNumber = jobErr?.message?.includes('Invalid phone number') || jobErr?.message?.includes('not registered') || jobErr?.message?.includes('No LID');
-          if (job.retries >= 5 || isInvalidNumber) {
-            console.error(`Max retries reached or invalid number for queued WhatsApp job ${job.id}. Deleting job to prevent lockups.`);
-            await db.run('DELETE FROM pending_whatsapp_jobs WHERE id = ?', [job.id]);
-          } else {
-            await db.run('UPDATE pending_whatsapp_jobs SET retries = retries + 1 WHERE id = ?', [job.id]);
-          }
-        }
-      }
-      
-          } catch (err) {
-      console.error('Error processing WhatsApp queue:', err);
-    } finally {
-      this.isProcessing = false;
-    }
+    await whatsappQueueWorker.processQueue();
   }
 
   async startWorker(): Promise<void> {

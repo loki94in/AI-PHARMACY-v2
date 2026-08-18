@@ -648,7 +648,12 @@ router.post('/send-grouped', async (req, res) => {
 
   try {
     const db = await dbManager.getConnection();
-    const medicalName = (await getConfiguredPharmacyName(db)) || 'AI Pharmacy';
+    const medicalName = await getConfiguredPharmacyName(db);
+    if (!medicalName) {
+      return res.status(400).json({
+        error: 'Pharmacy name required in Settings. Please set your Pharmacy Name in Settings before sending refill reminders.'
+      });
+    }
     const patientName = patient_name || 'Customer';
 
     let medListStr = '';
@@ -700,6 +705,13 @@ router.post('/send-grouped', async (req, res) => {
         `UPDATE patient_refills SET status = 'notified' WHERE id IN (${placeholders})`,
         idsToUpdate
       );
+      for (const rId of idsToUpdate) {
+        await db.run(
+          `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          ['refill_reminder', patientName, cleanPhone, msg, 'queued', String(rId)]
+        );
+      }
     }
 
     whatsappQueueWorker.triggerProcessing();
@@ -732,6 +744,13 @@ router.post('/send-tomorrow-reminder', async (req, res) => {
   try {
     db = await dbManager.getConnection();
 
+    const medicalName = await getConfiguredPharmacyName(db);
+    if (!medicalName) {
+      return res.status(400).json({
+        error: 'Pharmacy name required in Settings. Please set your Pharmacy Name in Settings before sending refill reminders.'
+      });
+    }
+
     // Query ready/override-verified refills due tomorrow
     const rows = await db.all(
       `SELECT pr.*, m.name as medicine_name FROM patient_refills pr
@@ -757,7 +776,6 @@ router.post('/send-tomorrow-reminder', async (req, res) => {
 
     const patientName = tomorrowRefills[0].patient_name || 'Customer';
     const medicineNames = tomorrowRefills.map(r => r.medicine_name).join(', ');
-    const medicalName = (await getConfiguredPharmacyName(db)) || 'AI Pharmacy';
 
     const msg = `Hello ${patientName}, this is a friendly reminder that your refill for ${medicineNames} is due tomorrow. We have checked our stock and prepared it for you. Please collect it from ${medicalName} at your convenience.`;
 
@@ -775,6 +793,14 @@ router.post('/send-tomorrow-reminder', async (req, res) => {
       `UPDATE patient_refills SET status = 'notified', is_ready = 0 WHERE id IN (${placeholders})`,
       ids
     );
+
+    for (const r of tomorrowRefills) {
+      await db.run(
+        `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        ['refill_reminder', patientName, cleanPhone, msg, 'queued', String(r.id)]
+      );
+    }
 
     whatsappQueueWorker.triggerProcessing();
 
@@ -801,6 +827,13 @@ router.post('/send-reminder-now', async (req, res) => {
   try {
     db = await dbManager.getConnection();
 
+    const medicalName = await getConfiguredPharmacyName(db);
+    if (!medicalName) {
+      return res.status(400).json({
+        error: 'Pharmacy name required in Settings. Please set your Pharmacy Name in Settings before sending refill reminders.'
+      });
+    }
+
     const rows = await db.all(
       `SELECT pr.*, m.name as medicine_name FROM patient_refills pr
        JOIN medicines m ON pr.medicine_id = m.id
@@ -819,7 +852,6 @@ router.post('/send-reminder-now', async (req, res) => {
       ? new Date(rows[0].next_refill_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
       : 'soon';
 
-    const medicalName = (await getConfiguredPharmacyName(db)) || 'AI Pharmacy';
     const msg = `Hello ${patientName}, a friendly reminder that your prescription refill for ${medicineNames} is due on ${refillDate}. Please visit us at ${medicalName} to collect your medicines. Thank you! 🙏`;
 
     const queueId = await whatsappQueueWorker.enqueue(
@@ -835,6 +867,14 @@ router.post('/send-reminder-now', async (req, res) => {
       `UPDATE patient_refills SET status = 'notified' WHERE id IN (${placeholders})`,
       ids
     );
+
+    for (const r of rows) {
+      await db.run(
+        `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        ['refill_reminder', patientName, cleanPhone, msg, 'queued', String(r.id)]
+      );
+    }
 
     whatsappQueueWorker.triggerProcessing();
 

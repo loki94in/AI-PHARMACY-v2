@@ -1,5 +1,6 @@
 import { dbManager } from '../database/connection.js';
-import { sendMessage, isReady, isPuppeteerDetachedError } from '../whatsappClient.js';
+import { whatsappQueueWorker } from './whatsappQueueWorker.js';
+import { isReady, isPuppeteerDetachedError } from '../whatsappClient.js';
 import { getAppDataDir } from '../config/index.js';
 import PDFDocument from 'pdfkit';
 import XLSX from 'xlsx';
@@ -511,7 +512,7 @@ export class MonthlyReportService {
     for (const theme of themes) {
       const pdfPath = await this.generateReportPdf(reportData, 'trend', theme.key);
       const caption = `🎨 *PDF REPORT TEMPLATE STYLE: ${theme.name.toUpperCase()}*\n\nReview this sample PDF report layout on your phone to choose your preferred design for monthly pharmacy billing & expiry reports.`;
-      await sendMessage(recipientPhone, pdfPath, caption);
+      await whatsappQueueWorker.enqueue(recipientPhone, caption, 'monthly_report_sample', 'Pharmacy Owner / Admin', undefined, pdfPath);
       count++;
     }
 
@@ -651,16 +652,16 @@ export class MonthlyReportService {
 
       if (format === 'pdf') {
         const caption = `📊 *${reportData.pharmacyName} — ${reportData.periodLabel}*\nPDF Report Document attached.`;
-        await sendMessage(recipientPhone, generatedFilePath, caption);
+        await whatsappQueueWorker.enqueue(recipientPhone, caption, `scheduled_report_${periodType}`, 'Pharmacy Owner / Admin', undefined, generatedFilePath);
       } else if (format === 'excel') {
         const caption = `📊 *${reportData.pharmacyName} — ${reportData.periodLabel}*\nExcel Spreadsheet Report attached.`;
-        await sendMessage(recipientPhone, generatedFilePath, caption);
+        await whatsappQueueWorker.enqueue(recipientPhone, caption, `scheduled_report_${periodType}`, 'Pharmacy Owner / Admin', undefined, generatedFilePath);
       } else if (format === 'combined') {
-        // Send WhatsApp text message AND attach PDF document
-        await sendMessage(recipientPhone, generatedFilePath, messageText);
+        // Enqueue WhatsApp text message AND attach PDF document
+        await whatsappQueueWorker.enqueue(recipientPhone, messageText, `scheduled_report_${periodType}`, 'Pharmacy Owner / Admin', undefined, generatedFilePath);
       } else {
         // Text format only
-        await sendMessage(recipientPhone, undefined, messageText);
+        await whatsappQueueWorker.enqueue(recipientPhone, messageText, `scheduled_report_${periodType}`, 'Pharmacy Owner / Admin');
       }
 
       // Record in action_logs for Activity Alerts

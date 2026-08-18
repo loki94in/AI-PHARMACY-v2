@@ -1,14 +1,15 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Database as DatabaseIcon, Search, RefreshCw, BookOpen, ArrowDownAZ, Clock, X, Edit, Trash2, Plus, Upload, Unlock } from 'lucide-react';
+import { Database as DatabaseIcon, Search, RefreshCw, BookOpen, ArrowDownAZ, Clock, X, Edit, Trash2, Plus, Upload, Unlock, ShoppingCart } from 'lucide-react';
 import { api } from '../../services/api';
-import { UniversalMedicineEditModal, updateMedicineNameWithPackSize } from '../../components/UniversalMedicineEditModal';
+import { UniversalMedicineEditModal, updateMedicineNameWithPackSize, parsePackSizeFromPackaging } from '../../components/UniversalMedicineEditModal';
 import { useApiQuery } from '../../hooks/useApiQuery';
 import { useQueryClient } from '@tanstack/react-query';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import CatalogUpload from '../CatalogUpload';
 import { formatDisplayDate } from '../../utils/date';
 import { invalidateAfterStockWrite } from '../../utils/cacheInvalidation';
+import { toastEvent } from '../../services/events';
 
 interface MedicineRow {
   id: number;
@@ -23,6 +24,7 @@ interface MedicineRow {
   category?: string;
   api_reference?: string;
   mrp?: number;
+  sell_price?: number;
   last_purchase_rate?: number;
   last_purchase_mrp?: number;
   last_distributor_name?: string;
@@ -40,6 +42,7 @@ interface MedicineRow {
 let cachedMedicines: MedicineRow[] | null = null;
 
 const DatabasePage = () => {
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const currentTab = searchParams.get('tab') || 'db';
   const queryClient = useQueryClient();
@@ -121,6 +124,83 @@ const DatabasePage = () => {
   const [priceHistory, setPriceHistory] = useState<any[]>([]);
   const [priceHistoryMedicine, setPriceHistoryMedicine] = useState('');
   const [loadingHistory, setLoadingHistory] = useState(false);
+
+  const handleSellMedicine = async (item: MedicineRow) => {
+    try {
+      const refillInfo = await api.getMedicineRefillInfo(item.id);
+      const lastSale = refillInfo?.last_sale;
+      const bestInv = refillInfo?.best_inventory;
+
+      const prefillPayload: any = {
+        medicineId: item.id,
+        medicineName: item.name,
+        quantity: lastSale?.quantity || 1,
+        looseQty: lastSale?.loose_qty || 0,
+        patientName: lastSale?.customer_name || '',
+        patientPhone: lastSale?.customer_phone || '',
+        selectedCustomerId: lastSale?.customer_id || null,
+        doctorName: lastSale?.doctor_name || '',
+        medicines: [{
+          medicineId: item.id,
+          medicineName: item.name,
+          inventory_id: bestInv?.inventory_id || undefined,
+          batch_no: bestInv?.batch_no || '',
+          expiry_date: bestInv?.expiry_date || '',
+          mrp: bestInv?.mrp || item.mrp || 0,
+          sell_price: item.sell_price || null,
+          quantity: lastSale?.quantity || 1,
+          loose_qty: lastSale?.loose_qty || 0,
+          unit_price: lastSale?.unit_price || bestInv?.unit_price || item.sell_price || item.mrp || 0,
+          discount: lastSale?.discount || 0,
+          packaging: item.packaging,
+          pack_size: parsePackSizeFromPackaging(item.packaging) || 1
+        }]
+      };
+
+      if (refillInfo?.sibling_items && Array.isArray(refillInfo.sibling_items) && refillInfo.sibling_items.length > 0) {
+        for (const sib of refillInfo.sibling_items) {
+          prefillPayload.medicines.push({
+            medicineId: sib.medicine_id,
+            medicineName: sib.medicine_name,
+            inventory_id: sib.inventory_id || undefined,
+            batch_no: sib.batch_no || '',
+            expiry_date: sib.expiry_date || '',
+            mrp: sib.mrp || 0,
+            sell_price: sib.sell_price || null,
+            quantity: sib.sold_quantity || 1,
+            loose_qty: sib.sold_loose_qty || 0,
+            unit_price: sib.sold_unit_price || sib.sell_price || sib.mrp || 0,
+            discount: sib.sold_discount || 0,
+            packaging: sib.packaging,
+            pack_size: sib.pack_size || 1
+          });
+        }
+      }
+
+      if (lastSale?.customer_name) {
+        toastEvent.trigger(`Transferring "${item.name}" (Qty: ${lastSale.quantity || 1}) for ${lastSale.customer_name} to POS...`, 'info', '/pos');
+      } else {
+        toastEvent.trigger(`Transferring "${item.name}" to POS...`, 'info', '/pos');
+      }
+
+      navigate('/pos', { state: { prefill: prefillPayload } });
+    } catch (err: any) {
+      const prefillPayload = {
+        medicineId: item.id,
+        medicineName: item.name,
+        quantity: 1,
+        medicines: [{
+          medicineId: item.id,
+          medicineName: item.name,
+          mrp: item.mrp || 0,
+          sell_price: item.sell_price || null,
+          quantity: 1
+        }]
+      };
+      toastEvent.trigger(`Transferring "${item.name}" to POS...`, 'info', '/pos');
+      navigate('/pos', { state: { prefill: prefillPayload } });
+    }
+  };
 
   const openPriceHistory = (medicineName: string) => {
     setPriceHistoryMedicine(medicineName);
@@ -746,6 +826,14 @@ const DatabasePage = () => {
                     </td>
                     <td className="p-4 text-center">
                       <div className="flex items-center justify-center gap-1.5">
+                        <button
+                          onClick={() => handleSellMedicine(item)}
+                          className="px-2.5 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/25 text-emerald-400 hover:bg-emerald-500 hover:text-white transition-all font-bold text-[10px] uppercase flex items-center gap-1 shadow-sm"
+                          title="Sell / Refill this medicine in POS"
+                        >
+                          <ShoppingCart size={10} />
+                          Sell
+                        </button>
                         <button
                           onClick={() => openPriceHistory(item.name)}
                           className="px-2.5 py-1 rounded-lg bg-sky-500/10 border border-sky-500/20 text-sky-400 hover:bg-sky-500 hover:text-white transition-all font-bold text-[10px] uppercase"

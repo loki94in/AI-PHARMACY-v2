@@ -424,6 +424,10 @@ export async function ensureSchema(dbPath: string) {
       FOREIGN KEY(invoice_id) REFERENCES sales_invoices(id),
       FOREIGN KEY(inventory_id) REFERENCES inventory_master(id)
     );
+    CREATE INDEX IF NOT EXISTS idx_sales_invoices_customer_id ON sales_invoices (customer_id);
+    CREATE INDEX IF NOT EXISTS idx_sales_invoices_date ON sales_invoices (date);
+    CREATE INDEX IF NOT EXISTS idx_sale_items_invoice_id ON sale_items (invoice_id);
+    CREATE INDEX IF NOT EXISTS idx_sale_items_inventory_id ON sale_items (inventory_id);
     CREATE TABLE IF NOT EXISTS returns (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       return_no TEXT UNIQUE,
@@ -773,6 +777,8 @@ export async function ensureSchema(dbPath: string) {
       error_message TEXT,
       target_name TEXT,
       scheduled_at INTEGER,
+      media_url TEXT,
+      file_json TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       sent_at INTEGER DEFAULT NULL
     );
@@ -2138,6 +2144,12 @@ export async function ensureSchema(dbPath: string) {
     }
     if (!colNames.includes('scheduled_at')) {
       await db.run("ALTER TABLE whatsapp_send_queue ADD COLUMN scheduled_at INTEGER");
+    }
+    if (!colNames.includes('media_url')) {
+      await db.run("ALTER TABLE whatsapp_send_queue ADD COLUMN media_url TEXT DEFAULT NULL");
+    }
+    if (!colNames.includes('file_json')) {
+      await db.run("ALTER TABLE whatsapp_send_queue ADD COLUMN file_json TEXT DEFAULT NULL");
     }
   } catch (colErr) {
     console.warn('[Database Schema] Column check warning for whatsapp_send_queue:', colErr);

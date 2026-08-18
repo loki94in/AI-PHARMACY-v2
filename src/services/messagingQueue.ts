@@ -1,5 +1,5 @@
 import { dbManager } from '../database/connection.js';
-import { sendMessage } from '../whatsappClient.js';
+import { whatsappQueueWorker } from './whatsappQueueWorker.js';
 
 export class MessagingQueue {
   private static instance: MessagingQueue;
@@ -91,8 +91,13 @@ export class MessagingQueue {
             throw new Error('Recipient phone is missing');
           }
 
-          // Try sending the message
-          await sendMessage(item.recipient_phone, undefined, item.message);
+          // Enqueue into centralized queue
+          await whatsappQueueWorker.enqueue(
+            item.recipient_phone,
+            item.message,
+            item.type || 'automation_notification',
+            item.recipient_name
+          );
 
           // Update status to 'sent'
           await db.run(
@@ -102,7 +107,7 @@ export class MessagingQueue {
             [item.id]
           );
           
-          console.log(`[MessagingQueue] Successfully sent message ID ${item.id} to ${item.recipient_phone}`);
+          console.log(`[MessagingQueue] Successfully queued message ID ${item.id} to ${item.recipient_phone}`);
         } catch (err: any) {
           console.error(`[MessagingQueue] Failed to send message ID ${item.id} to ${item.recipient_phone}:`, err.message);
           

@@ -3,7 +3,14 @@ import { jest } from '@jest/globals';
 // whatsappIntentService transitively imports the WhatsApp client — mock it out
 jest.unstable_mockModule('../src/whatsappClient.js', () => ({
   __esModule: true,
-  sendMessage: jest.fn(() => Promise.resolve())
+  sendMessage: jest.fn(() => Promise.resolve()),
+  getWhatsAppStatus: jest.fn(() => Promise.resolve({ isReady: true, initializing: false, isSyncing: false })),
+  isReady: true,
+  currentQr: null,
+  shouldRouteToBusiness: jest.fn(() => Promise.resolve(false)),
+  initClient: jest.fn(() => Promise.resolve()),
+  hashMessageBody: (msg: string) => String(msg).slice(0, 16),
+  normalizeWhatsAppPhone: (phone: string) => String(phone).replace(/\D/g, '')
 }));
 
 describe('WhatsApp Intent Confidence Gate', () => {

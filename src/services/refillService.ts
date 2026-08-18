@@ -1,5 +1,5 @@
 import { Database } from 'sqlite';
-import { sendMessage } from '../whatsappClient.js';
+import { whatsappQueueWorker } from './whatsappQueueWorker.js';
 import { telegramBotService } from '../telegramBot.js';
 import { getStoreMedicalName, getStoreMedicalNameAndPhone, getConfiguredPharmacyName, getStorePhone } from './storeSettingsService.js';
 
@@ -270,7 +270,7 @@ export async function sendConsolidatedSpecialOrderNotification(db: Database, pho
   const msg = `Hi ${requester},\n\nAll of your requested medicines are now READY for collection at ${medicalName}:\n\n${productList}\n\nPlease visit us to collect them.`;
 
   try {
-    await sendMessage(formattedPhone, undefined, msg);
+    await whatsappQueueWorker.enqueue(formattedPhone, msg, 'order_ready', requester);
 
     // Update notified statuses to 1
     for (const order of readyOrders) {

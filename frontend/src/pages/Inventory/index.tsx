@@ -1,10 +1,12 @@
 import { useState, useEffect, useCallback, lazy, Suspense } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useDeferredEffect } from '../../hooks/useDeferredEffect';
 import { useApiQuery } from '../../hooks/useApiQuery';
 import { useQueryClient } from '@tanstack/react-query';
-import { PackageSearch, Plus, Minus, RefreshCw, X, AlertTriangle, ShieldAlert, BookOpen, Factory, Send, ChevronDown, Edit, Save, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Loader2, Columns3, Check, Download } from 'lucide-react';
+import { PackageSearch, Plus, Minus, RefreshCw, X, AlertTriangle, ShieldAlert, BookOpen, Factory, Send, ChevronDown, Edit, Save, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Loader2, Columns3, Check, Download, ShoppingCart } from 'lucide-react';
 import { api, type InventoryItem } from '../../services/api';
 import { toastEvent } from '../../services/events';
+import { parsePackSizeFromPackaging } from '../../components/UniversalMedicineEditModal';
 // import { UniversalMedicineEditModal } from '../../components/UniversalMedicineEditModal';
 import { createPortal } from 'react-dom';
 import { DateRangeFilter } from '../../components/DateRangeFilter';
@@ -71,6 +73,7 @@ let cachedItems: any[] | null = null;
 let cachedSpecialOrders: any[] | null = null;
 
 const Inventory = () => {
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [colFilters, setColFilters] = useState({
     medicine: '', id: '', batch: '', expiry: '', packs: '', loose: '', mrp: '', rack: ''
@@ -138,6 +141,87 @@ const Inventory = () => {
   };
 
   // Close col menu on outside click
+  const handleSellItem = async (item: any) => {
+    try {
+      const medId = item.medicine_id || item.id;
+      const refillInfo = await api.getMedicineRefillInfo(medId);
+      const lastSale = refillInfo?.last_sale;
+
+      const prefillPayload: any = {
+        medicineId: medId,
+        medicineName: item.name || item.medicine_name,
+        quantity: lastSale?.quantity || 1,
+        looseQty: lastSale?.loose_qty || 0,
+        patientName: lastSale?.customer_name || '',
+        patientPhone: lastSale?.customer_phone || '',
+        selectedCustomerId: lastSale?.customer_id || null,
+        doctorName: lastSale?.doctor_name || '',
+        medicines: [{
+          medicineId: medId,
+          medicineName: item.name || item.medicine_name,
+          inventory_id: item.id || item.inventory_id,
+          batch_no: item.batch_number || item.batch_no || '',
+          expiry_date: item.expiry_date || '',
+          mrp: item.mrp || 0,
+          sell_price: item.sell_price || null,
+          quantity: lastSale?.quantity || 1,
+          loose_qty: lastSale?.loose_qty || 0,
+          unit_price: lastSale?.unit_price || item.sell_price || item.mrp || 0,
+          discount: lastSale?.discount || 0,
+          pack_size: item.pack_size || parsePackSizeFromPackaging(item.packaging) || 1
+        }]
+      };
+
+      if (refillInfo?.sibling_items && Array.isArray(refillInfo.sibling_items) && refillInfo.sibling_items.length > 0) {
+        for (const sib of refillInfo.sibling_items) {
+          prefillPayload.medicines.push({
+            medicineId: sib.medicine_id,
+            medicineName: sib.medicine_name,
+            inventory_id: sib.inventory_id || undefined,
+            batch_no: sib.batch_no || '',
+            expiry_date: sib.expiry_date || '',
+            mrp: sib.mrp || 0,
+            sell_price: sib.sell_price || null,
+            quantity: sib.sold_quantity || 1,
+            loose_qty: sib.sold_loose_qty || 0,
+            unit_price: sib.sold_unit_price || sib.sell_price || sib.mrp || 0,
+            discount: sib.sold_discount || 0,
+            packaging: sib.packaging,
+            pack_size: sib.pack_size || 1
+          });
+        }
+      }
+
+      if (lastSale?.customer_name) {
+        toastEvent.trigger(`Transferring "${item.name || item.medicine_name}" (Qty: ${lastSale.quantity || 1}) for ${lastSale.customer_name} to POS...`, 'info', '/pos');
+      } else {
+        toastEvent.trigger(`Transferring "${item.name || item.medicine_name}" to POS...`, 'info', '/pos');
+      }
+
+      setPanelOpen(false);
+      navigate('/pos', { state: { prefill: prefillPayload } });
+    } catch (err: any) {
+      const prefillPayload = {
+        medicineId: item.medicine_id || item.id,
+        medicineName: item.name || item.medicine_name,
+        quantity: 1,
+        medicines: [{
+          medicineId: item.medicine_id || item.id,
+          medicineName: item.name || item.medicine_name,
+          inventory_id: item.id || item.inventory_id,
+          batch_no: item.batch_number || item.batch_no || '',
+          expiry_date: item.expiry_date || '',
+          mrp: item.mrp || 0,
+          sell_price: item.sell_price || null,
+          quantity: 1
+        }]
+      };
+      setPanelOpen(false);
+      toastEvent.trigger(`Transferring "${item.name || item.medicine_name}" to POS...`, 'info', '/pos');
+      navigate('/pos', { state: { prefill: prefillPayload } });
+    }
+  };
+
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (colMenuRef.current && !colMenuRef.current.contains(e.target as Node)) {
@@ -706,6 +790,14 @@ const Inventory = () => {
                     </>
                   ) : (
                     <>
+                      <button
+                        onClick={() => handleSellItem(selectedItem)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/15 border border-emerald-500/30 hover:bg-emerald-500/25 text-emerald-400 text-[12px] font-bold transition-all"
+                        title="Sell / Refill this medicine in POS"
+                      >
+                        <ShoppingCart size={13} />
+                        Sell → POS
+                      </button>
                       <button
                         onClick={() => setIsEditing(true)}
                         className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-bg3 border border-glass-border hover:bg-bg2 text-muted hover:text-text text-[12px] font-semibold transition-all"

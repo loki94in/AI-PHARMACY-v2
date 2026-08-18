@@ -3,7 +3,11 @@ import { jest } from '@jest/globals';
 jest.unstable_mockModule('../src/whatsappClient.js', () => ({
   __esModule: true,
   sendMessage: jest.fn(() => Promise.resolve(true)),
-  initClient: jest.fn(() => Promise.resolve(true))
+  initClient: jest.fn(() => Promise.resolve(true)),
+  getWhatsAppStatus: jest.fn(() => Promise.resolve({ isConnected: true, status: 'CONNECTED' })),
+  shouldRouteToBusiness: jest.fn(() => false),
+  hashMessageBody: jest.fn(() => 'mock-hash'),
+  normalizeWhatsAppPhone: jest.fn((p: string) => p ? String(p).replace(/\D/g, '') : '')
 }));
 
 jest.unstable_mockModule('../src/telegramBot.js', () => ({
@@ -183,6 +187,64 @@ describe('Patient Refills & POS Auto-Save Integration', () => {
 
     expect(refill.is_ready).toBe(1);
     expect(mockSendMessage).not.toHaveBeenCalled();
+  });
+
+  test('Medicine Refill Detection & Prefill endpoints return previous sale history and sibling items', async () => {
+    const { open } = await import('sqlite');
+    const sqlite3 = await import('sqlite3');
+    const db = await open({ filename: dbPath, driver: sqlite3.default.Database });
+
+    // Insert 2 medicines and inventory
+    await db.run('INSERT INTO medicines (id, name, mrp, sell_price, pack_size) VALUES (201, "Telma 40", 150, 140, 15)');
+    await db.run('INSERT INTO medicines (id, name, mrp, sell_price, pack_size) VALUES (202, "Amlodipine 5mg", 60, 55, 10)');
+    await db.run('INSERT INTO inventory_master (id, medicine_id, batch_no, expiry_date, quantity, unit_price, mrp) VALUES (10, 201, "B-TEL01", "2027-12-31", 50, 9.33, 150)');
+    await db.run('INSERT INTO inventory_master (id, medicine_id, batch_no, expiry_date, quantity, unit_price, mrp) VALUES (11, 202, "B-AML01", "2027-10-31", 30, 5.5, 60)');
+
+    // Insert customer
+    const custRes = await db.run('INSERT INTO customers (name, phone, address) VALUES ("Rajesh Kumar", "9898989898", "45 Park Road")');
+    const custId = custRes.lastID;
+
+    // Create a previous sale invoice with both items
+    const invRes = await db.run('INSERT INTO sales_invoices (invoice_no, customer_id, total_amount, date) VALUES ("INV-TEST-001", ?, 400, "2026-07-01 10:00:00")', [custId]);
+    const invId = invRes.lastID;
+
+    await db.run('INSERT INTO sale_items (invoice_id, inventory_id, quantity, unit_price, discount_per) VALUES (?, 10, 30, 9.33, 5)', [invId]);
+    await db.run('INSERT INTO sale_items (invoice_id, inventory_id, quantity, unit_price, discount_per) VALUES (?, 11, 15, 5.5, 0)', [invId]);
+
+    await db.close();
+
+    // 1. Test /api/sales/medicine-refill-info/201
+    const refillInfoRes = await request(app).get('/api/sales/medicine-refill-info/201');
+    expect(refillInfoRes.status).toBe(200);
+    expect(refillInfoRes.body.success).toBe(true);
+    expect(refillInfoRes.body.medicine.name).toBe('Telma 40');
+    expect(refillInfoRes.body.best_inventory.batch_no).toBe('B-TEL01');
+    expect(refillInfoRes.body.last_sale).toBeDefined();
+    expect(refillInfoRes.body.last_sale.customer_name).toBe('Rajesh Kumar');
+    expect(refillInfoRes.body.last_sale.customer_phone).toBe('9898989898');
+    expect(refillInfoRes.body.last_sale.quantity).toBe(30);
+    expect(refillInfoRes.body.sibling_items.length).toBe(1);
+    expect(refillInfoRes.body.sibling_items[0].medicine_name).toBe('Amlodipine 5mg');
+    expect(refillInfoRes.body.sibling_items[0].sold_quantity).toBe(15);
+
+    // 2. Test /api/sales/patient-refill-medicines?phone=9898989898
+    const patientRefillsRes = await request(app).get('/api/sales/patient-refill-medicines?phone=9898989898');
+    expect(patientRefillsRes.status).toBe(200);
+    expect(patientRefillsRes.body.success).toBe(true);
+    expect(patientRefillsRes.body.customer.name).toBe('Rajesh Kumar');
+    expect(patientRefillsRes.body.medicines.length).toBe(2);
+    const medNames = patientRefillsRes.body.medicines.map((m: any) => m.medicine_name);
+    expect(medNames).toContain('Telma 40');
+    // 3. Test /api/sales/reorder-suggestions and /snoozed
+    const reorderRes = await request(app).get('/api/sales/reorder-suggestions');
+    expect(reorderRes.status).toBe(200);
+    expect(reorderRes.body.success).toBe(true);
+    expect(Array.isArray(reorderRes.body.items)).toBe(true);
+
+    const snoozedRes = await request(app).get('/api/sales/reorder-suggestions/snoozed');
+    expect(snoozedRes.status).toBe(200);
+    expect(snoozedRes.body.success).toBe(true);
+    expect(Array.isArray(snoozedRes.body.items)).toBe(true);
   });
 
   afterAll(async () => {

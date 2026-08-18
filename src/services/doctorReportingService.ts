@@ -1,5 +1,6 @@
 import { dbManager } from '../database/connection.js';
-import { sendMessage, isReady } from '../whatsappClient.js';
+import { whatsappQueueWorker } from './whatsappQueueWorker.js';
+import { isReady } from '../whatsappClient.js';
 
 export async function sendDailyDoctorReports(dateString?: string): Promise<{ success: boolean; count: number; messagesSent: string[] }> {
   const db = await dbManager.getConnection();
@@ -50,10 +51,10 @@ export async function sendDailyDoctorReports(dateString?: string): Promise<{ suc
     msg += `*Total Billing Value*: *₹${grandTotal.toFixed(2)}*\n\n`;
     msg += `This is an automated transparency notification. Thank you for your partnership!`;
 
-    // Send WhatsApp message
+    // Enqueue WhatsApp message into centralized queue
     try {
-      await sendMessage(doc.phone, undefined, msg);
-      messagesSent.push(`Sent report to Dr. ${doc.name} (${doc.phone})`);
+      await whatsappQueueWorker.enqueue(doc.phone, msg, 'doctor_daily_summary', `Dr. ${doc.name}`);
+      messagesSent.push(`Queued report for Dr. ${doc.name} (${doc.phone})`);
       count++;
 
       // Record in action_logs for Activity Alerts

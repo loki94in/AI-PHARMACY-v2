@@ -404,7 +404,7 @@ router.post('/send-alerts', async (req, res) => {
             return res.json({ success: true, message: 'No expiring items found to report.' });
     }
 
-    const { sendMessage } = await import('../whatsappClient.js');
+    const { whatsappQueueWorker } = await import('../services/whatsappQueueWorker.js');
     const cleanPhone = targetPhone.replace(/\D/g, '');
     const formattedPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
 
@@ -421,11 +421,16 @@ router.post('/send-alerts', async (req, res) => {
       msg += `\n...and others. Please view the dashboard Expiry Monitor for the full report.`;
     }
 
-    await sendMessage(formattedPhone, undefined, msg);
-        res.json({ success: true, message: `Alert summary successfully sent to ${targetPhone}` });
+    const queueId = await whatsappQueueWorker.enqueue(
+      formattedPhone,
+      msg,
+      'expiry_alert_report',
+      'Pharmacy Owner / Admin'
+    );
+    res.json({ success: true, queueId, message: `Alert summary successfully queued for delivery to ${targetPhone}` });
   } catch (error) {
     console.error('Trigger expiry alert error:', error);
-    res.status(500).json({ error: 'Failed to send summary report alerts via WhatsApp' });
+    res.status(500).json({ error: 'Failed to queue summary report alerts via WhatsApp' });
   }
 });
 

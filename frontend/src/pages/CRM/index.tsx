@@ -6,7 +6,7 @@ import type { SpecialOrder } from '../../services/api';
 import {
   RefreshCw, Send, Users, MessageSquare, Phone, Calendar,
   CheckCircle2, AlertCircle, Clock, Search, Repeat2, Bell,
-  MessageCircle, Check, Package, Mail, ExternalLink, LogOut, Zap, Copy, FileText, X, Plus, Trash2, Sliders, ChevronDown, Info, ClipboardList, ShoppingCart, AlertTriangle, Pencil, Edit2
+  MessageCircle, Check, Package, Mail, ExternalLink, LogOut, Zap, Copy, FileText, X, Plus, Trash2, Sliders, ChevronDown, Info, ClipboardList, ShoppingCart, AlertTriangle, Pencil, Edit2, RotateCcw
 } from 'lucide-react';
 import { toastEvent, specialOrdersEvent, liveCartAddEvent, refillEvent, messageSendEvent, whatsappQueueEvent } from '../../services/events';
 import { usePageActive } from '../../lib/keepAlive/PageActiveContext';
@@ -35,6 +35,7 @@ async function withSilentRetry<T>(fn: () => Promise<T>, retries = 2, delayMs = 2
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface RefillPatient {
+  customer_id?: number;
   patient_name: string;
   patient_phone: string;
   next_refill_date: string;
@@ -51,6 +52,12 @@ interface RefillPatient {
     is_active?: number;
     status: string;
     quick_bill_id: number | null;
+    inventory_id?: number;
+    batch_no?: string;
+    expiry_date?: string;
+    mrp?: number;
+    sell_price?: number;
+    unit_price?: number;
   }[];
 }
 
@@ -334,11 +341,21 @@ const RefillsSection: React.FC = () => {
         prefill: {
           patientName: patient.patient_name,
           patientPhone: patient.patient_phone,
+          customerId: patient.customer_id || undefined,
           refillPatient: true,
           medicines: patient.medicines.map(m => ({
+            medicineId: m.medicine_id,
+            medicine_id: m.medicine_id,
             medicine_name: m.medicine_name,
             medicineName: m.medicine_name,
-            quantity_needed: m.quantity_needed || 1
+            quantity_needed: m.quantity_needed || 1,
+            quantity: m.quantity_needed || 1,
+            inventory_id: m.inventory_id,
+            batch_no: m.batch_no,
+            expiry_date: m.expiry_date,
+            mrp: m.mrp,
+            sell_price: m.sell_price,
+            unit_price: m.unit_price || m.sell_price || m.mrp || 0
           }))
         }
       }
@@ -4474,13 +4491,56 @@ const CustomerCreditSection: React.FC = () => {
                             </td>
                             <td className="p-2.5 font-extrabold text-amber-400 text-right">₹{(inv.total_amount || 0).toFixed(2)}</td>
                             <td className="p-2.5 text-center">
-                              <button
-                                onClick={() => setViewInvoice(inv)}
-                                className="px-2.5 py-1 rounded-lg bg-bg3 border border-border text-[11px] font-semibold text-text hover:text-primary transition-all flex items-center gap-1 mx-auto"
-                              >
-                                <FileText size={11} />
-                                <span>View Bill</span>
-                              </button>
+                              <div className="flex items-center justify-center gap-1.5">
+                                <button
+                                  onClick={() => setViewInvoice(inv)}
+                                  className="px-2 py-1 rounded-lg bg-bg3 border border-border text-[11px] font-semibold text-text hover:text-primary transition-all flex items-center gap-1"
+                                >
+                                  <FileText size={11} />
+                                  <span>View</span>
+                                </button>
+                                <button
+                                  onClick={async () => {
+                                    try {
+                                      const full = await api.getSale(inv.id);
+                                      const items = Array.isArray(full.items) ? full.items : [];
+                                      navigate('/pos', {
+                                        state: {
+                                          prefill: {
+                                            patientName: selectedCustomer.name,
+                                            patientPhone: selectedCustomer.phone,
+                                            selectedCustomerId: selectedCustomer.id,
+                                            doctorName: full.doctor_name || inv.doctor_name || '',
+                                            refillPatient: true,
+                                            medicines: items.map((it: any) => ({
+                                              medicineId: it.medicine_id,
+                                              medicineName: it.medicine_name || it.name,
+                                              inventory_id: it.inventory_id,
+                                              batch_no: it.batch_no || it.batch_number || '',
+                                              expiry_date: it.expiry_date || '',
+                                              mrp: it.mrp || 0,
+                                              sell_price: it.sell_price || null,
+                                              quantity: it.quantity || 1,
+                                              loose_qty: it.loose_qty || 0,
+                                              unit_price: it.unit_price || it.sell_price || it.mrp || 0,
+                                              discount: it.discount_per || it.discount || 0,
+                                              pack_size: it.pack_size || 1
+                                            }))
+                                          }
+                                        }
+                                      });
+                                      toastEvent.trigger(`Transferring repeat prescription for ${selectedCustomer.name} to POS...`, 'info', '/pos');
+                                    } catch (err) {
+                                      toastEvent.trigger('Failed to load bill items for POS', 'error');
+                                    }
+                                  }}
+                                  className="px-2 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-[11px] font-bold text-emerald-400 hover:bg-emerald-500 hover:text-white transition-all flex items-center gap-1 shadow-sm"
+                                  title="Load this previous prescription into POS for refill sale"
+                                >
+                                  <RotateCcw size={11} />
+                                  <span>Refill</span>
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         ))}

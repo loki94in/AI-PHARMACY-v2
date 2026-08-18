@@ -603,8 +603,14 @@ router.post('/', async (req, res) => {
             }
             waMsg += `— AI Pharmacy OS`;
 
-            await sendMessage(phoneForWA, undefined, waMsg);
-            console.log(`[POS WhatsApp] Sent bill notification for ${invoice_no} to ${phoneForWA}`);
+            const { whatsappQueueWorker } = await import('../services/whatsappQueueWorker.js');
+            const queueId = await whatsappQueueWorker.enqueue(
+              phoneForWA,
+              waMsg,
+              isCredit ? 'pos_credit_invoice' : 'pos_sale_invoice',
+              nameForWA
+            );
+            console.log(`[POS WhatsApp] Enqueued bill notification for ${invoice_no} to ${phoneForWA} (queue ID: #${queueId})`);
 
             await db.run(
               `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
@@ -612,12 +618,12 @@ router.post('/', async (req, res) => {
               ['pos_credit_invoice', nameForWA, phoneForWA, waMsg, 'sent', `invoice_${invoiceId}`]
             );
           } catch (waErr: any) {
-            console.error(`[POS WhatsApp] Failed to send notification for ${invoice_no}:`, waErr);
+            console.error(`[POS WhatsApp] Failed to enqueue notification for ${invoice_no}:`, waErr);
             try {
               await db.run(
                 `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
                  VALUES (?, ?, ?, ?, ?, ?)`,
-                ['pos_invoice_failed', nameForWA, phoneForWA, `Failed to send WhatsApp: ${waErr?.message || String(waErr)}`, 'failed', `invoice_${invoiceId}`]
+                ['pos_invoice_failed', nameForWA, phoneForWA, `Failed to enqueue WhatsApp: ${waErr?.message || String(waErr)}`, 'failed', `invoice_${invoiceId}`]
               );
             } catch (logErr) {
               console.error('[POS WhatsApp] Failed to log failure:', logErr);
@@ -676,18 +682,23 @@ router.post('/', async (req, res) => {
               });
               if (m.customer_phone) {
                 try {
-                  const { sendMessage } = await import('../whatsappClient.js');
+                  const { whatsappQueueWorker } = await import('../services/whatsappQueueWorker.js');
                   const specPhone = m.customer_phone.replace(/\D/g, '').slice(-10);
                   if (specPhone.length === 10) {
-                    await sendMessage(specPhone, undefined, specMsg);
+                    await whatsappQueueWorker.enqueue(
+                      specPhone,
+                      specMsg,
+                      'special_order_fulfilled',
+                      m.requester || 'Customer'
+                    );
                     await db.run(
                       `UPDATE special_orders SET status = 'Fulfilled' WHERE id = ?`,
                       [m.order_id]
                     );
-                    console.log(`[Special Order WA] Dispatched fulfillment alert for order #${m.order_id} to ${specPhone}`);
+                    console.log(`[Special Order WA] Enqueued fulfillment alert for order #${m.order_id} to ${specPhone}`);
                   }
                 } catch (specWaErr) {
-                  console.warn(`[Special Order WA] Failed dispatch for order #${m.order_id}:`, specWaErr);
+                  console.warn(`[Special Order WA] Failed enqueue for order #${m.order_id}:`, specWaErr);
                 }
               }
             }
@@ -1939,11 +1950,15 @@ router.get('/invoice-barcode', handleInvoiceBarcode);
 router.get('/invoice-barcode/:invoiceNo', handleInvoiceBarcode);
 
 // Get single sale invoice with items
-router.get('/:id', async (req, res) => {
+router.get('/:id', async (req, res, next) => {
+  const rawId = req.params.id;
+  if (!/^\d+$/.test(rawId)) {
+    return next();
+  }
   let db;
   try {
     db = await dbManager.getConnection();
-    const id = parseInt(req.params.id, 10);
+    const id = parseInt(rawId, 10);
 
     const invoices = await queryAllWithRetry(
       db,
@@ -2608,7 +2623,6 @@ router.get('/reorder-suggestions', async (_req, res) => {
           m.name as medicine_name,
           m.manufacturer as company,
           m.packaging,
-          m.ptr,
           m.mrp,
           SUM(si.quantity) as two_day_qty
         FROM sale_items si
@@ -2646,13 +2660,12 @@ router.get('/reorder-suggestions', async (_req, res) => {
     try {
       const purchaseRows = await db.all(`
         SELECT 
-          im.medicine_id,
+          pi.medicine_id,
           SUM(pi.quantity) as total_qty
         FROM purchase_items pi
         JOIN purchases p ON pi.purchase_id = p.id
-        JOIN inventory_master im ON pi.inventory_id = im.id
         WHERE p.date >= DATETIME('now', '-180 days')
-        GROUP BY im.medicine_id
+        GROUP BY pi.medicine_id
       `);
       for (const row of purchaseRows) {
         sixMonthPurchasesMap[row.medicine_id] = Number(row.total_qty || 0);
@@ -2666,7 +2679,7 @@ router.get('/reorder-suggestions', async (_req, res) => {
         m.name as medicine_name,
         m.manufacturer as company,
         m.packaging,
-        m.ptr,
+        COALESCE(MAX(im.cost_price), 0) as ptr,
         m.mrp,
         COALESCE(SUM(im.quantity), 0) as current_stock
       FROM medicines m
@@ -2824,7 +2837,7 @@ router.get('/reorder-suggestions/snoozed', async (_req, res) => {
         m.name as medicine_name,
         m.manufacturer as company,
         m.packaging,
-        m.ptr,
+        COALESCE((SELECT cost_price FROM inventory_master WHERE medicine_id = m.id AND cost_price > 0 LIMIT 1), 0) as ptr,
         m.mrp,
         COALESCE((SELECT SUM(quantity) FROM inventory_master WHERE medicine_id = m.id), 0) as current_stock,
         COALESCE((
@@ -2838,8 +2851,7 @@ router.get('/reorder-suggestions/snoozed', async (_req, res) => {
           SELECT SUM(pi.quantity) 
           FROM purchase_items pi 
           JOIN purchases p ON pi.purchase_id = p.id 
-          JOIN inventory_master im ON pi.inventory_id = im.id 
-          WHERE im.medicine_id = m.id AND p.date >= DATETIME('now', '-180 days')
+          WHERE pi.medicine_id = m.id AND p.date >= DATETIME('now', '-180 days')
         ), 0) as six_month_purchases
       FROM inventory_reorder_snooze s
       JOIN medicines m ON s.medicine_id = m.id
@@ -2867,6 +2879,306 @@ router.get('/reorder-suggestions/snoozed', async (_req, res) => {
   } catch (err: any) {
     console.error('Failed to fetch snoozed reorders:', err);
     res.status(500).json({ error: err.message || 'Failed to fetch snoozed reorders' });
+  }
+});
+
+// Get medicine refill & last sale details for prefilling POS
+router.get('/medicine-refill-info/:medicineId', async (req, res) => {
+  const { medicineId } = req.params;
+  const medId = parseInt(medicineId, 10);
+  if (isNaN(medId) || medId <= 0) {
+    return res.status(400).json({ error: 'Valid medicine ID required' });
+  }
+
+  let db;
+  try {
+    db = await dbManager.getConnection();
+
+    // 1. Fetch medicine record
+    const medicine = await db.get(
+      `SELECT id, name, generic_name, mrp, sell_price, pack_size, packaging, manufacturer, schedule_type, category, allow_loose_sale
+       FROM medicines WHERE id = ?`,
+      [medId]
+    );
+    if (!medicine) {
+      return res.status(404).json({ error: 'Medicine not found' });
+    }
+
+    // 2. Fetch best in-stock inventory batch (earliest expiry with positive stock)
+    const inStockBatch = await db.get(
+      `SELECT id as inventory_id, batch_no, expiry_date, quantity, loose_quantity, unit_price, mrp, rack_location
+       FROM inventory_master
+       WHERE medicine_id = ? AND (quantity > 0 OR loose_quantity > 0)
+       ORDER BY (CASE WHEN expiry_date IS NOT NULL AND expiry_date != '' THEN expiry_date ELSE '9999-12-31' END) ASC
+       LIMIT 1`,
+      [medId]
+    );
+
+    // If no positive stock batch found, fetch latest batch record if exists
+    const anyBatch = inStockBatch || await db.get(
+      `SELECT id as inventory_id, batch_no, expiry_date, quantity, loose_quantity, unit_price, mrp, rack_location
+       FROM inventory_master
+       WHERE medicine_id = ?
+       ORDER BY id DESC
+       LIMIT 1`,
+      [medId]
+    );
+
+    // 3. Query the latest sales invoice containing this medicine to identify customer, quantity, and doctor
+    const lastSaleItem = await db.get(
+      `SELECT si.id as sale_item_id, si.invoice_id, si.quantity as sold_quantity, si.loose_qty as sold_loose_qty,
+              si.unit_price as sold_unit_price, si.discount_per as sold_discount,
+              inv.invoice_no, inv.date as sale_date, inv.doctor_id,
+              c.id as customer_id, c.name as customer_name, c.phone as customer_phone, c.address as customer_address,
+              d.name as doctor_name
+       FROM sale_items si
+       JOIN sales_invoices inv ON si.invoice_id = inv.id
+       JOIN inventory_master im ON si.inventory_id = im.id
+       LEFT JOIN customers c ON inv.customer_id = c.id
+       LEFT JOIN doctors d ON inv.doctor_id = d.id
+       WHERE im.medicine_id = ?
+       ORDER BY inv.date DESC, inv.id DESC
+       LIMIT 1`,
+      [medId]
+    );
+
+    // 4. If a previous sale exists, fetch other medicines from that same invoice for full prescription context
+    let siblingItems: any[] = [];
+    if (lastSaleItem && lastSaleItem.invoice_id) {
+      siblingItems = await db.all(
+        `SELECT si.id as sale_item_id, si.quantity as sold_quantity, si.loose_qty as sold_loose_qty,
+                si.unit_price as sold_unit_price, si.discount_per as sold_discount,
+                m.id as medicine_id, m.name as medicine_name, m.mrp, m.sell_price, m.packaging,
+                COALESCE(m.pack_size, 1) as pack_size,
+                im.id as inventory_id, im.batch_no, im.expiry_date, im.quantity as in_stock_qty, im.loose_quantity as in_stock_loose_qty
+         FROM sale_items si
+         JOIN inventory_master im ON si.inventory_id = im.id
+         JOIN medicines m ON im.medicine_id = m.id
+         WHERE si.invoice_id = ? AND m.id != ?`,
+        [lastSaleItem.invoice_id, medId]
+      );
+    }
+
+    res.json({
+      success: true,
+      medicine,
+      best_inventory: anyBatch || null,
+      last_sale: lastSaleItem ? {
+        invoice_id: lastSaleItem.invoice_id,
+        invoice_no: lastSaleItem.invoice_no,
+        sale_date: lastSaleItem.sale_date,
+        quantity: lastSaleItem.sold_quantity || 1,
+        loose_qty: lastSaleItem.sold_loose_qty || 0,
+        unit_price: lastSaleItem.sold_unit_price || medicine.sell_price || medicine.mrp || 0,
+        discount: lastSaleItem.sold_discount || 0,
+        customer_id: lastSaleItem.customer_id || null,
+        customer_name: lastSaleItem.customer_name || '',
+        customer_phone: lastSaleItem.customer_phone || '',
+        customer_address: lastSaleItem.customer_address || '',
+        doctor_id: lastSaleItem.doctor_id || null,
+        doctor_name: lastSaleItem.doctor_name || ''
+      } : null,
+      sibling_items: siblingItems
+    });
+  } catch (err: any) {
+    console.error('Failed to get medicine refill info:', err);
+    res.status(500).json({ error: err.message || 'Failed to get medicine refill info' });
+  }
+});
+
+// Get all previously purchased / prescribed refill medicines for a patient
+router.get('/patient-refill-medicines', async (req, res) => {
+  const { customerId, phone, name } = req.query;
+  if (!customerId && !phone && !name) {
+    return res.status(400).json({ error: 'customerId, phone, or name is required' });
+  }
+
+  let db;
+  try {
+    db = await dbManager.getConnection();
+
+    let customer: any = null;
+    const cleanPhone = phone ? String(phone).trim() : '';
+    const digitsOnly = cleanPhone.replace(/\D/g, '').slice(-10);
+    const cleanName = name ? String(name).trim() : '';
+
+    if (customerId) {
+      customer = await db.get('SELECT * FROM customers WHERE id = ?', [customerId]);
+    }
+    if (!customer && digitsOnly.length === 10) {
+      customer = await db.get(
+        `SELECT * FROM customers 
+         WHERE phone = ? OR REPLACE(REPLACE(REPLACE(phone, ' ', ''), '-', ''), '+', '') LIKE ? LIMIT 1`,
+        [cleanPhone, `%${digitsOnly}`]
+      );
+    }
+    if (!customer && cleanName && cleanName.toLowerCase() !== 'walk-in' && cleanName.toLowerCase() !== 'customer') {
+      customer = await db.get('SELECT * FROM customers WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) LIMIT 1', [cleanName]);
+    }
+
+    // Resolve all matching customer IDs
+    let customerIds: number[] = customer ? [customer.id] : [];
+    if (digitsOnly.length === 10 || (cleanName && cleanName.length > 2)) {
+      const dupeRows = await db.all(
+        `SELECT id FROM customers 
+         WHERE (length(?) = 10 AND (phone = ? OR REPLACE(REPLACE(REPLACE(phone, ' ', ''), '-', ''), '+', '') LIKE ?))
+            OR (length(?) > 2 AND LOWER(TRIM(name)) = LOWER(TRIM(?)))`,
+        [digitsOnly, cleanPhone, `%${digitsOnly}`, cleanName, cleanName]
+      );
+      if (dupeRows && dupeRows.length > 0) {
+        customerIds = Array.from(new Set([...customerIds, ...dupeRows.map(r => r.id)]));
+      }
+    }
+
+    // 1. Check active records in patient_refills table
+    let scheduledRefills: any[] = [];
+    if (customerIds.length > 0 || digitsOnly.length === 10) {
+      const phoneParam = digitsOnly.length === 10 ? `%${digitsOnly}%` : 'NON_EXISTENT';
+      const cIdPlaceholders = customerIds.length > 0 ? customerIds.map(() => '?').join(',') : 'NULL';
+      scheduledRefills = await db.all(
+        `SELECT pr.id as refill_id, pr.medicine_id, pr.quantity_needed, pr.refill_interval_days, pr.next_refill_date,
+                m.name as medicine_name, m.mrp, m.sell_price, m.packaging, COALESCE(m.pack_size, 1) as pack_size
+         FROM patient_refills pr
+         JOIN medicines m ON pr.medicine_id = m.id
+         WHERE (pr.customer_id IN (${cIdPlaceholders}) OR pr.patient_phone LIKE ?) AND pr.is_active = 1`,
+        [...customerIds, phoneParam]
+      );
+    }
+
+    // 2. Query recent sales invoices & items for this customer (latest 5 invoices)
+    let pastSaleMedicines: any[] = [];
+    let lastDoctorName = '';
+    if (customerIds.length > 0) {
+      const placeholders = customerIds.map(() => '?').join(',');
+      const rows = await db.all(
+        `SELECT m.id as medicine_id, m.name as medicine_name, m.mrp, m.sell_price, m.packaging,
+                COALESCE(m.pack_size, 1) as pack_size,
+                si.quantity as last_sold_qty, si.loose_qty as last_sold_loose_qty, si.unit_price as last_unit_price, si.discount_per as last_discount,
+                inv.id as invoice_id, inv.invoice_no, inv.date as sale_date, d.name as doctor_name
+         FROM sale_items si
+         JOIN sales_invoices inv ON si.invoice_id = inv.id
+         JOIN inventory_master im ON si.inventory_id = im.id
+         JOIN medicines m ON im.medicine_id = m.id
+         LEFT JOIN doctors d ON inv.doctor_id = d.id
+         WHERE inv.customer_id IN (${placeholders})
+         ORDER BY inv.date DESC, inv.id DESC
+         LIMIT 20`,
+        customerIds
+      );
+
+      // Deduplicate by medicine_id to get most recent purchase per medicine
+      const seenMeds = new Set<number>();
+      for (const row of rows) {
+        if (row.doctor_name && !lastDoctorName) lastDoctorName = row.doctor_name;
+        if (!seenMeds.has(row.medicine_id)) {
+          seenMeds.add(row.medicine_id);
+          pastSaleMedicines.push(row);
+        }
+      }
+    }
+
+    // 3. Combine medicines & enrich with live inventory availability
+    const combinedMap = new Map<number, any>();
+
+    // First add from scheduled refills
+    for (const sr of scheduledRefills) {
+      combinedMap.set(sr.medicine_id, {
+        medicine_id: sr.medicine_id,
+        medicine_name: sr.medicine_name,
+        mrp: sr.mrp,
+        sell_price: sr.sell_price,
+        packaging: sr.packaging,
+        pack_size: sr.pack_size,
+        quantity: sr.quantity_needed || 1,
+        loose_qty: 0,
+        refill_id: sr.refill_id,
+        refill_interval_days: sr.refill_interval_days,
+        next_refill_date: sr.next_refill_date,
+        source: 'scheduled_refill'
+      });
+    }
+
+    // Then merge from past sales history (if not present or update with recent sale date)
+    for (const ps of pastSaleMedicines) {
+      if (!combinedMap.has(ps.medicine_id)) {
+        combinedMap.set(ps.medicine_id, {
+          medicine_id: ps.medicine_id,
+          medicine_name: ps.medicine_name,
+          mrp: ps.mrp,
+          sell_price: ps.sell_price,
+          packaging: ps.packaging,
+          pack_size: ps.pack_size,
+          quantity: ps.last_sold_qty || 1,
+          loose_qty: ps.last_sold_loose_qty || 0,
+          unit_price: ps.last_unit_price,
+          discount: ps.last_discount,
+          last_sale_date: ps.sale_date,
+          last_invoice_no: ps.invoice_no,
+          source: 'sales_history'
+        });
+      } else {
+        const existing = combinedMap.get(ps.medicine_id);
+        existing.last_sale_date = ps.sale_date;
+        existing.last_invoice_no = ps.invoice_no;
+        if (!existing.quantity || existing.quantity <= 1) {
+          existing.quantity = ps.last_sold_qty || 1;
+        }
+        existing.loose_qty = ps.last_sold_loose_qty || 0;
+      }
+    }
+
+    // Enrich with current in-stock inventory details
+    const medicineList = Array.from(combinedMap.values());
+    if (medicineList.length > 0) {
+      const medIds = medicineList.map(m => m.medicine_id);
+      const placeholders = medIds.map(() => '?').join(',');
+      const invRows = await db.all(
+        `SELECT im.id as inventory_id, im.medicine_id, im.batch_no, im.expiry_date,
+                im.quantity as in_stock_qty, im.loose_quantity as in_stock_loose_qty,
+                im.unit_price as current_unit_price, im.mrp as batch_mrp
+         FROM inventory_master im
+         WHERE im.medicine_id IN (${placeholders}) AND (im.quantity > 0 OR im.loose_quantity > 0)
+         ORDER BY im.expiry_date ASC`,
+        medIds
+      );
+
+      const invMap: Record<number, any> = {};
+      for (const inv of invRows) {
+        if (!invMap[inv.medicine_id]) {
+          invMap[inv.medicine_id] = inv;
+        }
+      }
+
+      for (const m of medicineList) {
+        const inv = invMap[m.medicine_id];
+        if (inv) {
+          m.inventory_id = inv.inventory_id;
+          m.batch_no = inv.batch_no;
+          m.expiry_date = inv.expiry_date;
+          m.in_stock_qty = inv.in_stock_qty;
+          m.in_stock_loose_qty = inv.in_stock_loose_qty;
+          m.has_stock = (inv.in_stock_qty > 0 || inv.in_stock_loose_qty > 0);
+        } else {
+          m.has_stock = false;
+        }
+      }
+    }
+
+    res.json({
+      success: true,
+      customer: customer ? {
+        id: customer.id,
+        name: customer.name,
+        phone: customer.phone || '',
+        address: customer.address || '',
+        credit_balance: customer.credit_balance || 0
+      } : null,
+      doctor_name: lastDoctorName,
+      medicines: medicineList
+    });
+  } catch (err: any) {
+    console.error('Failed to get patient refill medicines:', err);
+    res.status(500).json({ error: err.message || 'Failed to get patient refill medicines' });
   }
 });
 

@@ -428,20 +428,6 @@ const POS = () => {
       if (cartItems.length > 0) {
         cartGenerationRef.current += 1;
         setCart(cartItems);
-        setTabs(prev => prev.map(t => {
-          if (t.id === activeTabId) {
-            return {
-              ...t,
-              items: cartItems,
-              patientName: editSale.customer_name || '',
-              patientPhone: editSale.customer_phone || '',
-              doctor: editSale.doctor_name || '',
-              discount: Number(editSale.discount || 0),
-              paymentMedium: editSale.payment_medium || 'CASH'
-            };
-          }
-          return t;
-        }));
       }
       toastEvent.trigger(`Loaded Bill #${editSale.invoice_no || editSale.id} into POS for Editing`, 'info');
       navigate(location.pathname, { replace: true, state: {} });
@@ -450,11 +436,19 @@ const POS = () => {
 
     if (location.state && (location.state as any).prefill) {
       const prefill = (location.state as any).prefill;
-      const { patientName: name, patientPhone: phone, advancePayment, specialOrderId, refillPatient, refillId, refillDays: rDays } = prefill;
+      const { patientName: name, patientPhone: phone, advancePayment, specialOrderId, refillPatient, refillId, refillDays: rDays, doctorName, doctor: docName, selectedCustomerId: prefCustId, customerId: prefCId } = prefill;
       if (name) setPatientName(name);
       if (phone) {
         setPatientPhone(phone);
         setSendWhatsApp(true); // Auto-enable WhatsApp toggle when prefilled for customer
+      }
+      if (prefCustId || prefCId) {
+        const resolvedCId = Number(prefCustId || prefCId);
+        setSelectedCustomerId(resolvedCId);
+        selectedCustomerIdRef.current = resolvedCId;
+      }
+      if (doctorName || docName) {
+        setDoctor(doctorName || docName);
       }
       if (refillPatient || refillId) {
         setRefillEnabled(true);
@@ -467,92 +461,164 @@ const POS = () => {
 
       const fetchAndAdd = async () => {
         try {
-          // Multi-medicine array from CRM "Bill Now / Sell → POS"
-          if (Array.isArray(prefill.medicines) && prefill.medicines.length > 0) {
-            // D2: resolve every medicine's lookup concurrently instead of one
-            // sequential await per item. Each item keeps its own try/catch so a
-            // single failed/unmatched lookup still falls back to a "special
-            // request" cart line instead of aborting the whole batch, and
-            // Promise.all preserves the original input order in the result.
-            const cartItems: any[] = await Promise.all(prefill.medicines.map(async (med: any) => {
-              const targetName = med.medicineName || med.medicine_name || '';
-              const targetQty = Number(med.quantity_needed || med.qty) || 1;
-              try {
-                const matched = await api.searchMedicine(targetName);
-                if (matched && matched.length > 0) {
-                  const m = matched[0];
-                  const sellPrice = Number(m.sell_price || 0);
-                  const mrp = Number(m.mrp || 0);
-                  const autoDisc = (sellPrice > 0 && mrp > 0 && sellPrice < mrp)
-                    ? parseFloat((((mrp - sellPrice) / mrp) * 100).toFixed(2))
-                    : 0;
-                  return {
-                    id: m.id,
-                    name: m.name,
-                    batch: m.batch_no || m.batch_number || '',
-                    expiry: m.expiry_date || '',
-                    mrp: m.mrp || 0,
-                    sell_price: m.sell_price || null,
-                    qty: targetQty,
-                    quantity: targetQty,
-                    unitPrice: m.unit_price || m.sell_price || m.mrp || 0,
-                    looseQty: 0,
-                    discount: autoDisc,
-                    packSize: parsePackSizeFromPackaging(m.packaging) || m.pack_size || 1
-                  };
-                }
+          const rawMedsList = Array.isArray(prefill.medicines) && prefill.medicines.length > 0
+            ? prefill.medicines
+            : (prefill.medicineId || prefill.medicineName || prefill.item || prefill.medicine)
+            ? [prefill.item || prefill.medicine || { medicineId: prefill.medicineId, medicineName: prefill.medicineName, quantity: prefill.quantity || prefill.qty || 1 }]
+            : [];
+
+          if (rawMedsList.length > 0) {
+            const resolvedCartItems: any[] = await Promise.all(rawMedsList.map(async (med: any) => {
+              const targetId = Number(med.medicineId || med.medicine_id || med.id || 0);
+              const targetName = (med.medicineName || med.medicine_name || med.name || '').trim();
+              const targetQty = Number(med.quantity_needed || med.quantity || med.qty) || 1;
+              const targetLooseQty = Number(med.looseQty || med.loose_qty || med.loose_quantity) || 0;
+
+              // 1. If batch & inventory data is already provided in the item payload, use directly
+              if (med.inventory_id && med.batch_no) {
+                const sellPrice = Number(med.sell_price || 0);
+                const mrp = Number(med.mrp || 0);
+                const autoDisc = (sellPrice > 0 && mrp > 0 && sellPrice < mrp)
+                  ? parseFloat((((mrp - sellPrice) / mrp) * 100).toFixed(2))
+                  : (Number(med.discount || 0));
                 return {
-                  id: 'special_' + Date.now() + '_' + Math.random(),
-                  name: targetName || 'Special Request Medicine',
-                  batch: '',
-                  expiry: '',
-                  mrp: 0,
+                  id: med.inventory_id,
+                  name: targetName,
+                  batch: med.batch_no,
+                  expiry: med.expiry_date || '',
+                  mrp: mrp,
+                  sell_price: med.sell_price || null,
                   qty: targetQty,
                   quantity: targetQty,
-                  unitPrice: 0,
-                  looseQty: 0,
-                  discount: 0,
-                  packSize: 1
-                };
-              } catch {
-                return {
-                  id: 'special_' + Date.now() + '_' + Math.random(),
-                  name: targetName || 'Special Request Medicine',
-                  batch: '',
-                  expiry: '',
-                  mrp: 0,
-                  qty: targetQty,
-                  quantity: targetQty,
-                  unitPrice: 0,
-                  looseQty: 0,
-                  discount: 0,
-                  packSize: 1
+                  unitPrice: Number(med.unit_price || med.unitPrice || sellPrice || mrp || 0),
+                  looseQty: targetLooseQty,
+                  discount: autoDisc,
+                  packSize: parsePackSizeFromPackaging(med.packaging) || med.pack_size || 1,
+                  isEmptyRow: false
                 };
               }
+
+              // 2. Query medicine refill info / inventory lookup
+              try {
+                if (targetId > 0) {
+                  const refillInfo = await api.getMedicineRefillInfo(targetId);
+                  if (refillInfo && refillInfo.medicine) {
+                    const m = refillInfo.medicine;
+                    const bestInv = refillInfo.best_inventory || {};
+                    const lastSale = refillInfo.last_sale;
+
+                    // If patient info wasn't provided at top level, populate from last sale
+                    if (!name && lastSale?.customer_name) setPatientName(lastSale.customer_name);
+                    if (!phone && lastSale?.customer_phone) setPatientPhone(lastSale.customer_phone);
+                    if (!doctor && lastSale?.doctor_name) setDoctor(lastSale.doctor_name);
+                    if (lastSale?.customer_id && !selectedCustomerIdRef.current) {
+                      setSelectedCustomerId(lastSale.customer_id);
+                      selectedCustomerIdRef.current = lastSale.customer_id;
+                    }
+
+                    const sellPrice = Number(m.sell_price || 0);
+                    const mrp = Number(bestInv.mrp || m.mrp || 0);
+                    const autoDisc = (sellPrice > 0 && mrp > 0 && sellPrice < mrp)
+                      ? parseFloat((((mrp - sellPrice) / mrp) * 100).toFixed(2))
+                      : (lastSale?.discount || 0);
+
+                    const finalQty = med.quantity_needed || med.quantity || med.qty || lastSale?.quantity || 1;
+                    const finalLooseQty = targetLooseQty || lastSale?.loose_qty || 0;
+
+                    return {
+                      id: bestInv.inventory_id || m.id,
+                      name: m.name,
+                      batch: bestInv.batch_no || '',
+                      expiry: bestInv.expiry_date || '',
+                      mrp: mrp,
+                      sell_price: m.sell_price || null,
+                      qty: Number(finalQty),
+                      quantity: Number(finalQty),
+                      unitPrice: Number(bestInv.unit_price || m.sell_price || m.mrp || 0),
+                      looseQty: Number(finalLooseQty),
+                      discount: autoDisc,
+                      packSize: parsePackSizeFromPackaging(m.packaging) || m.pack_size || 1,
+                      isEmptyRow: false
+                    };
+                  }
+                }
+
+                // Fallback to name search in inventory
+                if (targetName) {
+                  const matched = await api.searchMedicine(targetName);
+                  if (matched && matched.length > 0) {
+                    const m = matched[0];
+                    const sellPrice = Number(m.sell_price || 0);
+                    const mrp = Number(m.mrp || 0);
+                    const autoDisc = (sellPrice > 0 && mrp > 0 && sellPrice < mrp)
+                      ? parseFloat((((mrp - sellPrice) / mrp) * 100).toFixed(2))
+                      : 0;
+                    return {
+                      id: m.id,
+                      name: m.name,
+                      batch: m.batch_no || m.batch_number || '',
+                      expiry: m.expiry_date || '',
+                      mrp: m.mrp || 0,
+                      sell_price: m.sell_price || null,
+                      qty: targetQty,
+                      quantity: targetQty,
+                      unitPrice: m.unit_price || m.sell_price || m.mrp || 0,
+                      looseQty: targetLooseQty,
+                      discount: autoDisc,
+                      packSize: parsePackSizeFromPackaging(m.packaging) || m.pack_size || 1,
+                      isEmptyRow: false
+                    };
+                  }
+                }
+              } catch (e) {
+                console.warn('Medicine prefill resolution warning:', e);
+              }
+
+              // Fallback placeholder item
+              return {
+                id: 'prefill_' + Date.now() + '_' + Math.random(),
+                name: targetName || 'Prefilled Medicine',
+                batch: med.batch || med.batch_no || '',
+                expiry: med.expiry || med.expiry_date || '',
+                mrp: Number(med.mrp || 0),
+                sell_price: med.sell_price || null,
+                qty: targetQty,
+                quantity: targetQty,
+                unitPrice: Number(med.unitPrice || med.unit_price || med.mrp || 0),
+                looseQty: targetLooseQty,
+                discount: Number(med.discount || 0),
+                packSize: Number(med.packSize || med.pack_size || 1),
+                isEmptyRow: false
+              };
             }));
-            if (cartItems.length > 0) {
-              cartGenerationRef.current += 1;
-              setCart(cartItems);
-            }
-          } else if (prefill.medicineId) {
-            // Single-medicine path (e.g. Refills panel "Sell Now")
-            const response = await api.getQuickEditMedicine(Number(prefill.medicineId));
-            const med = response?.medicine || response;
-            const inv = response?.inventory || {};
-            if (med && (med.id || med.name)) {
-              setCart([{
-                id: med.id || Number(prefill.medicineId),
-                name: med.name || 'Refill Medicine',
-                batch: inv.batch_no || med.batch_no || '',
-                expiry: inv.expiry_date || med.expiry_date || '',
-                mrp: med.mrp || 0,
-                qty: Number(prefill.quantity) || 1,
-                quantity: Number(prefill.quantity) || 1,
-                unitPrice: med.rate || med.sell_price || med.mrp || 0,
+
+            if (resolvedCartItems.length > 0) {
+              const deduped: any[] = [];
+              const seenMeds = new Set<string>();
+              for (const ci of resolvedCartItems.filter(ci => !ci.isEmptyRow && (ci.name || '').trim())) {
+                const key = (ci.name || '').toLowerCase().trim();
+                if (!seenMeds.has(key)) {
+                  seenMeds.add(key);
+                  deduped.push(ci);
+                }
+              }
+
+              const emptyTrailingRow = {
+                id: 'empty_row_' + Date.now(),
+                name: '',
+                batch: '',
+                expiry: '',
+                mrp: 0,
+                qty: 0,
                 looseQty: 0,
                 discount: 0,
-                packSize: med.pack_size || 1
-              }]);
+                packSize: 1,
+                isEmptyRow: true
+              };
+              const finalCart = [...deduped, emptyTrailingRow];
+              cartGenerationRef.current += 1;
+              setCart(finalCart);
+              toastEvent.trigger(`Loaded ${deduped.length} prefilled medicine(s) into POS`, 'success', '/pos');
             }
           }
         } catch (err) {
@@ -1206,14 +1272,38 @@ const POS = () => {
   // subsequent patientName keystrokes, instead of re-hitting the API per keystroke.
   const refillsPanelCacheRef = useRef<any[] | null>(null);
 
-  // Search for pending refills matching the patient's name to display the name-match alert banner
+  // Search for pending refills / previous prescriptions matching the patient
   useEffect(() => {
-    if (patientName.trim().length < 2) {
+    const cleanPName = patientName.trim();
+    const cleanPPhone = patientPhone.trim();
+    if (cleanPName.length < 2 && cleanPPhone.length < 5) {
       setMatchedRefill(null);
       return;
     }
     const delayCheck = setTimeout(async () => {
       try {
+        // 1. Check patient previous sales & refills
+        const res = await api.getPatientRefillMedicines({
+          customerId: selectedCustomerIdRef.current || undefined,
+          phone: cleanPPhone || undefined,
+          name: cleanPName || undefined
+        });
+
+        if (res && res.success && Array.isArray(res.medicines) && res.medicines.length > 0) {
+          const firstMedId = res.medicines[0].refill_id || res.medicines[0].medicine_id;
+          if (firstMedId !== dismissedRefillId) {
+            setMatchedRefill({
+              id: firstMedId,
+              patient_name: res.customer?.name || cleanPName,
+              patient_phone: res.customer?.phone || cleanPPhone,
+              doctor_name: res.doctor_name || '',
+              medicines: res.medicines
+            });
+            return;
+          }
+        }
+
+        // 2. Fallback to panel cache
         let panelData = refillsPanelCacheRef.current;
         if (!panelData) {
           const response = await apiClient.get('/refills/panel');
@@ -1221,10 +1311,10 @@ const POS = () => {
           refillsPanelCacheRef.current = panelData;
         }
         const match = panelData.find((group: any) =>
-          group.patient_name.toLowerCase().trim() === patientName.toLowerCase().trim()
+          (cleanPName.length >= 2 && group.patient_name?.toLowerCase().trim() === cleanPName.toLowerCase()) ||
+          (cleanPPhone.length >= 5 && group.patient_phone?.includes(cleanPPhone))
         );
         if (match && match.medicines.length > 0) {
-          // Find a medicine in the group that is ready (or override set) and not checked out
           const med = match.medicines.find((m: any) => m.is_ready === 1 || m.stock_verified_override === 1);
           if (med && med.id !== dismissedRefillId) {
             setMatchedRefill({
@@ -1233,7 +1323,8 @@ const POS = () => {
               patient_phone: match.patient_phone,
               medicine_id: med.medicine_id,
               medicine_name: med.medicine_name,
-              quantity: med.quantity_needed || 1
+              quantity: med.quantity_needed || 1,
+              medicines: match.medicines
             });
             return;
           }
@@ -1244,50 +1335,129 @@ const POS = () => {
       }
     }, 450);
     return () => clearTimeout(delayCheck);
-  }, [patientName, dismissedRefillId]);
+  }, [patientName, patientPhone, selectedCustomerId, dismissedRefillId]);
 
   const handleAcceptRefill = async () => {
     if (!matchedRefill) return;
     try {
-      const results = await api.searchMedicine(matchedRefill.medicine_name);
-      const matched = (results && results.length > 0) ? results[0] : null;
-      if (!matched) {
-        toastEvent.trigger(`Refill medicine "${matchedRefill.medicine_name}" is not in current inventory stock.`, "error");
-        return;
+      const medsToAdd = Array.isArray(matchedRefill.medicines) && matchedRefill.medicines.length > 0
+        ? matchedRefill.medicines
+        : [matchedRefill];
+
+      const newItems: any[] = [];
+      for (const med of medsToAdd) {
+        const medName = med.medicine_name || med.name || '';
+        const targetQty = Number(med.quantity || med.quantity_needed || med.qty || 1);
+        const targetLooseQty = Number(med.loose_qty || med.looseQty || 0);
+
+        let cartItem: any = null;
+        if (med.inventory_id && med.batch_no) {
+          const sellPrice = Number(med.sell_price || 0);
+          const mrp = Number(med.mrp || 0);
+          const autoDisc = (sellPrice > 0 && mrp > 0 && sellPrice < mrp)
+            ? parseFloat((((mrp - sellPrice) / mrp) * 100).toFixed(2))
+            : (Number(med.discount || 0));
+          cartItem = {
+            id: med.inventory_id,
+            name: medName,
+            batch: med.batch_no || '',
+            expiry: med.expiry_date || '',
+            mrp: mrp,
+            sell_price: med.sell_price || null,
+            qty: targetQty,
+            quantity: targetQty,
+            unitPrice: med.unit_price || med.current_unit_price || med.sell_price || mrp || 0,
+            looseQty: targetLooseQty,
+            discount: autoDisc,
+            packSize: parsePackSizeFromPackaging(med.packaging) || med.pack_size || 1,
+            isEmptyRow: false
+          };
+        } else {
+          try {
+            const results = await api.searchMedicine(medName);
+            if (results && results.length > 0) {
+              const matched = results[0];
+              const sellPrice = Number(matched.sell_price || 0);
+              const mrp = Number(matched.mrp || 0);
+              const autoDisc = (sellPrice > 0 && mrp > 0 && sellPrice < mrp)
+                ? parseFloat((((mrp - sellPrice) / mrp) * 100).toFixed(2))
+                : 0;
+              cartItem = {
+                id: matched.id,
+                name: matched.name || medName,
+                batch: matched.batch_no || matched.batch_number || '',
+                expiry: matched.expiry_date || '',
+                mrp: matched.mrp || 0,
+                sell_price: matched.sell_price || null,
+                qty: targetQty,
+                quantity: targetQty,
+                unitPrice: matched.unit_price || matched.sell_price || matched.mrp || 0,
+                looseQty: targetLooseQty,
+                discount: autoDisc,
+                packSize: parsePackSizeFromPackaging(matched.packaging) || matched.pack_size || 1,
+                isEmptyRow: false
+              };
+            }
+          } catch (searchErr) {
+            console.warn('Refill item search error:', searchErr);
+          }
+        }
+
+        if (!cartItem) {
+          cartItem = {
+            id: 'refill_' + Date.now() + '_' + Math.random(),
+            name: medName,
+            batch: '',
+            expiry: '',
+            mrp: Number(med.mrp || 0),
+            sell_price: med.sell_price || null,
+            qty: targetQty,
+            quantity: targetQty,
+            unitPrice: Number(med.unit_price || med.mrp || 0),
+            looseQty: targetLooseQty,
+            discount: Number(med.discount || 0),
+            packSize: Number(med.pack_size || 1),
+            isEmptyRow: false
+          };
+        }
+
+        newItems.push(cartItem);
       }
-      const sellPrice = Number(matched.sell_price || 0);
-      const mrp = Number(matched.mrp || 0);
-      const autoDisc = (sellPrice > 0 && mrp > 0 && sellPrice < mrp)
-        ? parseFloat((((mrp - sellPrice) / mrp) * 100).toFixed(2))
-        : 0;
-      const cartItem = {
-        id: matched.id,
-        name: matchedRefill.medicine_name,
-        batch: matched.batch_no || matched.batch_number || '',
-        expiry: matched.expiry_date || '',
-        mrp: matched.mrp || 0,
-        sell_price: matched.sell_price || null,
-        qty: Number(matchedRefill.quantity),
-        quantity: Number(matchedRefill.quantity),
-        unitPrice: matched.unit_price || matched.sell_price || matched.mrp || 0,
-        looseQty: 0,
-        discount: autoDisc,
-        packSize: parsePackSizeFromPackaging(matched.packaging) || matched.pack_size || 1
-      };
 
-      setCart(prev => {
-        const clean = prev.filter(item => !item.isEmptyRow);
-        return [...clean, cartItem];
-      });
+      if (newItems.length > 0) {
+        setCart(prev => {
+          const clean = prev.filter(item => !item.isEmptyRow);
+          // Avoid duplicate lines for medicines already in cart
+          const existingMedNames = new Set(clean.map(c => (c.name || '').toLowerCase().trim()));
+          const itemsToAdd = newItems.filter(ni => !existingMedNames.has((ni.name || '').toLowerCase().trim()));
+          const combined = [...clean, ...itemsToAdd];
+          combined.push({
+            id: 'empty_row_' + Date.now(),
+            name: '',
+            batch: '',
+            expiry: '',
+            mrp: 0,
+            qty: 0,
+            looseQty: 0,
+            discount: 0,
+            packSize: 1,
+            isEmptyRow: true
+          });
+          return combined;
+        });
 
-      if (matchedRefill.patient_phone) {
-        setPatientPhone(matchedRefill.patient_phone);
+        if (matchedRefill.patient_phone && !patientPhone) {
+          setPatientPhone(matchedRefill.patient_phone);
+        }
+        if (matchedRefill.doctor_name && !doctor) {
+          setDoctor(matchedRefill.doctor_name);
+        }
+        if (matchedRefill.id) {
+          setActiveRefillId(matchedRefill.id);
+        }
+
+        toastEvent.trigger(`Added ${newItems.length} refill item(s) to POS cart`, 'success', '/pos');
       }
-
-      setActiveRefillId(matchedRefill.id);
-      toastEvent.trigger(`Added refill medication: ${matchedRefill.medicine_name}`, 'success', '/pos');
-      // Invalidate the cached refills panel so a subsequent name search reflects
-      // this refill's now-changed (checked-out) status instead of stale cached data.
       refillsPanelCacheRef.current = null;
     } catch (err) {
       console.error('Failed to accept refill:', err);
@@ -2678,22 +2848,36 @@ const POS = () => {
           {/* Top Control Ribbon: Patient, WhatsApp, Doctor, Date, Tabs */}
           <div className="glass-panel p-2.5 bg-glass-bg border-glass-border shrink-0 relative z-40 shadow-sm rounded-2xl w-full min-w-0 flex flex-col gap-2">
             {matchedRefill && (
-              <div className="p-2.5 rounded-xl bg-violet-500/10 border border-violet-500/20 text-violet-300 text-xs font-semibold flex justify-between items-center shadow-sm">
-                <div className="flex items-center gap-2">
-                  <span className="h-2 w-2 rounded-full bg-violet-400 animate-pulse" />
-                  <span>
-                    <strong className="text-text">{matchedRefill.patient_name}</strong> has a pending refill for <strong className="text-violet-300">{matchedRefill.medicine_name}</strong>.
+              <div className="p-2.5 rounded-xl bg-violet-500/10 border border-violet-500/20 text-violet-300 text-xs font-semibold flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 shadow-sm animate-fade-in">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="h-2 w-2 rounded-full bg-violet-400 animate-pulse shrink-0" />
+                  <span className="truncate">
+                    <strong className="text-text">{matchedRefill.patient_name}</strong> has previous prescription / refill: {
+                      Array.isArray(matchedRefill.medicines) && matchedRefill.medicines.length > 0 ? (
+                        matchedRefill.medicines.map((m: any, idx: number) => (
+                          <span key={idx} className="text-violet-300 font-bold">
+                            {idx > 0 && ', '}
+                            {m.medicine_name || m.name} (Qty: {m.quantity || m.quantity_needed || 1})
+                          </span>
+                        ))
+                      ) : (
+                        <strong className="text-violet-300">{matchedRefill.medicine_name} (Qty: {matchedRefill.quantity || 1})</strong>
+                      )
+                    }
+                    {matchedRefill.doctor_name ? ` · Dr. ${matchedRefill.doctor_name}` : ''}
                   </span>
                 </div>
-                <div className="flex gap-1.5">
+                <div className="flex gap-1.5 shrink-0">
                   <button
+                    type="button"
                     onClick={handleAcceptRefill}
-                    className="px-3 py-1 bg-violet-500 hover:bg-violet-600 text-text rounded-lg font-bold text-[10px] transition-all shadow-sm cursor-pointer"
+                    className="px-3 py-1 bg-violet-500 hover:bg-violet-600 text-white rounded-lg font-bold text-[10px] transition-all shadow-sm cursor-pointer flex items-center gap-1"
                   >
-                    Accept
+                    + Add to Bill
                   </button>
                   <button
-                    onClick={() => { setDismissedRefillId(matchedRefill.id); setMatchedRefill(null); }}
+                    type="button"
+                    onClick={() => { setDismissedRefillId(matchedRefill.id || 999999); setMatchedRefill(null); }}
                     className="px-2.5 py-1 bg-bg3/50 hover:bg-bg3 text-muted hover:text-text rounded-lg font-bold text-[10px] transition-all border border-glass-border cursor-pointer"
                   >
                     Ignore

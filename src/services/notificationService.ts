@@ -1,4 +1,5 @@
 import { sendMessage, type SendMessageResult } from '../whatsappClient.js';
+import { whatsappQueueWorker } from './whatsappQueueWorker.js';
 import { telegramBotService } from '../telegramBot.js';
 import { whatsappBusinessService } from './whatsappBusinessService.js';
 import { emailService } from './emailService.js';
@@ -65,13 +66,17 @@ export class NotificationService {
     caption?: string
   ): Promise<NotificationResult> {
     try {
-      const result = await sendMessage(phoneNumber, mediaPath, message);
-      if (isSendSuccess(result)) {
-        return { success: true, suppressed: result.suppressed };
-      }
-      return { success: false, error: 'Message was not sent' };
+      const queueId = await whatsappQueueWorker.enqueue(
+        phoneNumber,
+        message || caption || '',
+        'whatsapp_notification',
+        undefined,
+        Date.now(),
+        mediaPath
+      );
+      return { success: true, messageId: `queue_${queueId}` };
     } catch (error) {
-      console.error('Failed to send WhatsApp message:', error);
+      console.error('Failed to enqueue WhatsApp message:', error);
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'
@@ -376,23 +381,23 @@ export class NotificationService {
       console.log(`[DistributorNotif] Preparing WhatsApp auto-notification to ${purchase.distributor_name} at: ${uniqueDistPhones.join(', ')}`);
 
       let sentCount = 0;
-      let suppressedCount = 0;
       for (const phone of uniqueDistPhones) {
         try {
-          const sendResult = await sendMessage(phone, undefined, message);
-          const logStatus = sendLogStatus(sendResult);
-          if (isSendSuccess(sendResult)) {
-            sentCount++;
-            if (sendResult.suppressed) suppressedCount++;
-          }
+          const queueId = await whatsappQueueWorker.enqueue(
+            phone,
+            message,
+            'distributor_invoice_order',
+            purchase.distributor_name
+          );
+          sentCount++;
 
           await db.run(
             `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
              VALUES (?, ?, ?, ?, ?, ?)`,
-            ['distributor_invoice_order', purchase.distributor_name, phone, message, logStatus, `inv_${purchase.invoice_no}`]
+            ['distributor_invoice_order', purchase.distributor_name, phone, message, 'sent', `inv_${purchase.invoice_no}`]
           );
         } catch (wsError: any) {
-          console.error(`[DistributorNotif] Failed to send WhatsApp to distributor number ${phone}:`, wsError);
+          console.error(`[DistributorNotif] Failed to enqueue WhatsApp to distributor number ${phone}:`, wsError);
           const errMsg = wsError.message || 'Unknown error';
 
           await db.run(
@@ -557,16 +562,17 @@ export class NotificationService {
       if (uniqueDistPhones.length > 0) {
         for (const phone of uniqueDistPhones) {
           try {
-            const sendResult = await sendMessage(phone, undefined, message);
-            const logStatus = sendLogStatus(sendResult);
-            if (isSendSuccess(sendResult)) {
-              sentCount++;
-              if (sendResult.suppressed) suppressedCount++;
-            }
+            const queueId = await whatsappQueueWorker.enqueue(
+              phone,
+              message,
+              'distributor_cart_order',
+              storeName
+            );
+            sentCount++;
             await db.run(
               `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
                VALUES (?, ?, ?, ?, ?, ?)`,
-              ['distributor_cart_order', storeName, phone, message, logStatus, `store_${storeId}`]
+              ['distributor_cart_order', storeName, phone, message, 'sent', `store_${storeId}`]
             );
           } catch (err: any) {
             console.error(`[CartOrderNotif] Failed to notify distributor ${storeName} at ${phone}:`, err);
@@ -586,23 +592,24 @@ export class NotificationService {
           continue;
         }
         try {
-          const sendResult = await sendMessage(boy.phone, undefined, message);
-          const logStatus = sendLogStatus(sendResult);
-          if (isSendSuccess(sendResult)) {
-            sentCount++;
-            if (sendResult.suppressed) suppressedCount++;
-          }
+          const queueId = await whatsappQueueWorker.enqueue(
+            boy.phone,
+            message,
+            'delivery_boy_cart_order',
+            boy.name
+          );
+          sentCount++;
           await db.run(
             `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
              VALUES (?, ?, ?, ?, ?, ?)`,
-            ['delivery_boy_cart_order', boy.name, boy.phone, message, logStatus, `store_${storeId}`]
+            ['delivery_boy_cart_order', boy.name, boy.phone, message, 'sent', `store_${storeId}`]
           );
         } catch (err: any) {
           console.error(`[CartOrderNotif] Failed to notify delivery boy ${boy.name} at ${boy.phone}:`, err);
         }
       }
 
-      return { ok: sentCount > 0, sentCount, suppressedCount };
+      return { ok: sentCount > 0, sentCount, suppressedCount: 0 };
     } catch (err) {
       console.error('[CartOrderNotif] Error sending cart order notifications:', err);
       return { ok: false, sentCount: 0, suppressedCount: 0 };
@@ -750,47 +757,39 @@ export class NotificationService {
         distMessages.push({ distName: order.storeName, message: msg.trim() });
       }
 
-      // 5. Send to each delivery boy (Summary FIRST, then per-distributor messages with 1.5s gap)
+      // 5. Enqueue to each delivery boy in centralized queue
       let sentCount = 0;
-      let suppressedCount = 0;
       for (const boy of resolvedDeliveryBoys) {
         try {
-          // A. Send Summary Message
-          const summaryResult = await sendMessage(boy.phone, undefined, summaryMessage);
-          if (isSendSuccess(summaryResult)) {
-            sentCount++;
-            if (summaryResult.suppressed) suppressedCount++;
-          }
+          // A. Enqueue Summary Message
+          await whatsappQueueWorker.enqueue(boy.phone, summaryMessage, 'delivery_boy_batch_summary', boy.name);
+          sentCount++;
           await db.run(
             `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
              VALUES (?, ?, ?, ?, ?, ?)`,
-            ['delivery_boy_batch_summary', boy.name, boy.phone, summaryMessage, summaryResult.suppressed ? 'suppressed' : 'sent', `batch_summary_${Date.now()}`]
+            ['delivery_boy_batch_summary', boy.name, boy.phone, summaryMessage, 'sent', `batch_summary_${Date.now()}`]
           );
 
-          // B. Send Individual Distributor Messages with 1.5s gap
+          // B. Enqueue Individual Distributor Messages
           for (const distObj of distMessages) {
-            await new Promise(r => setTimeout(r, 1500));
-            const distResult = await sendMessage(boy.phone, undefined, distObj.message);
-            if (isSendSuccess(distResult)) {
-              sentCount++;
-              if (distResult.suppressed) suppressedCount++;
-            }
+            await whatsappQueueWorker.enqueue(boy.phone, distObj.message, 'delivery_boy_batch_order', boy.name);
+            sentCount++;
             await db.run(
               `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
                VALUES (?, ?, ?, ?, ?, ?)`,
-              ['delivery_boy_batch_order', boy.name, boy.phone, distObj.message, distResult.suppressed ? 'suppressed' : 'sent', `batch_${Date.now()}_${distObj.distName}`]
+              ['delivery_boy_batch_order', boy.name, boy.phone, distObj.message, 'sent', `batch_${Date.now()}_${distObj.distName}`]
             );
           }
 
-          console.log(`[CartBatchNotif] Sent summary + ${distMessages.length} distributor order messages to delivery boy ${boy.name}`);
+          console.log(`[CartBatchNotif] Enqueued summary + ${distMessages.length} distributor order messages for delivery boy ${boy.name}`);
         } catch (err: any) {
-          console.error(`[CartBatchNotif] Failed to send batch to ${boy.name}:`, err.message);
+          console.error(`[CartBatchNotif] Failed to enqueue batch for ${boy.name}:`, err.message);
         }
       }
 
       return sentCount > 0;
     } catch (err) {
-      console.error('[CartBatchNotif] Error sending batch notification:', err);
+      console.error('[CartBatchNotif] Error enqueuing batch notification:', err);
       return false;
     }
   }
@@ -866,32 +865,30 @@ export class NotificationService {
             .replace(/\{phone\}/g, boyPhone)
             .replace(/\{store_name\}/g, storeName);
         } else {
-          // Ultra-short message format:
-          // "📦 Has today's order been dispatched or collected by [Delivery Boy Name] ([Delivery Boy Phone])? - [Store Name]"
           message = `📦 Has today's order been dispatched or collected by ${boyName} (${boyPhone})? - ${storeName}`;
         }
       }
 
-      console.log(`[DistributorReminder] Sending reminder to ${reminder.distributor_name} (${recipientPhone}): ${message}`);
-      const sendResult = await sendMessage(recipientPhone, undefined, message);
+      console.log(`[DistributorReminder] Enqueuing reminder to ${reminder.distributor_name} (${recipientPhone}): ${message}`);
+      const queueId = await whatsappQueueWorker.enqueue(
+        recipientPhone,
+        message,
+        'distributor_dispatch_reminder',
+        reminder.distributor_name
+      );
 
-      const statusStr = sendLogStatus(sendResult);
-      const isOk = isSendSuccess(sendResult);
-
-      if (isOk) {
-        await db.run(
-          `UPDATE distributor_dispatch_reminders SET last_reminded_at = CURRENT_TIMESTAMP WHERE id = ?`,
-          [reminderId]
-        );
-      }
+      await db.run(
+        `UPDATE distributor_dispatch_reminders SET last_reminded_at = CURRENT_TIMESTAMP WHERE id = ?`,
+        [reminderId]
+      );
 
       await db.run(
         `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
          VALUES (?, ?, ?, ?, ?, ?)`,
-        ['distributor_dispatch_reminder', reminder.distributor_name, recipientPhone, message, statusStr, `reminder_${reminderId}_${Date.now()}`]
+        ['distributor_dispatch_reminder', reminder.distributor_name, recipientPhone, message, 'sent', `reminder_${reminderId}_${Date.now()}`]
       );
 
-      return isOk;
+      return Boolean(queueId);
     } catch (err: any) {
       console.error(`[DistributorReminder] Error sending reminder for ID ${reminderId}:`, err.message);
       return false;
@@ -969,21 +966,24 @@ export class NotificationService {
       msg += `─────────────────────────\n`;
       msg += `📝 *Note:* Please verify bills with distributor counter and collect invoices for ${store.storeName}.`;
 
-      console.log(`[ConsolidatedDispatch] Sending afternoon dispatch summary to ${boyName} (${boyPhone})`);
-      const sendResult = await sendMessage(boyPhone, undefined, msg);
-      const statusStr = sendLogStatus(sendResult);
-      const isOk = isSendSuccess(sendResult);
+      console.log(`[ConsolidatedDispatch] Enqueuing afternoon dispatch summary for ${boyName} (${boyPhone})`);
+      const queueId = await whatsappQueueWorker.enqueue(
+        boyPhone,
+        msg,
+        'afternoon_delivery_boy_dispatch',
+        boyName
+      );
 
       const todayIso = new Date().toISOString().split('T')[0];
       await db.run(
         `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
          VALUES (?, ?, ?, ?, ?, ?)`,
-        ['afternoon_delivery_boy_dispatch', boyName, boyPhone, msg, statusStr, `afternoon_dispatch_${todayIso}_${Date.now()}`]
+        ['afternoon_delivery_boy_dispatch', boyName, boyPhone, msg, 'sent', `afternoon_dispatch_${todayIso}_${Date.now()}`]
       );
 
-      return { ok: isOk, message: isOk ? 'Afternoon dispatch summary sent to Delivery Boy!' : 'Failed to send WhatsApp message.' };
+      return { ok: Boolean(queueId), message: 'Afternoon dispatch summary enqueued for Delivery Boy!' };
     } catch (err: any) {
-      console.error('[ConsolidatedDispatch] Error sending afternoon dispatch summary:', err);
+      console.error('[ConsolidatedDispatch] Error enqueuing afternoon dispatch summary:', err);
       return { ok: false, message: err.message || 'Internal error' };
     }
   }

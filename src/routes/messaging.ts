@@ -320,52 +320,29 @@ router.post('/reconnect', async (req, res) => {
   }
 });
 
-// Send a WhatsApp message via the hub — waits up to 8 seconds for real result
+// Send a WhatsApp message via the centralized queue
 router.post('/send', async (req, res) => {
-  const { number, message, mediaUrl, file, target_name } = req.body;
+  const { number, message, mediaUrl, file, target_name, type } = req.body;
   if (!number || (!message && !file)) {
     return res.status(400).json({ error: 'number and either message or file are required' });
   }
 
-  // Race: actual send vs 8-second timeout
-  // - Resolves in time  → return real success/failure to frontend
-  // - Times out         → fall back to queue + 202 (client may still be initializing)
-  const SEND_TIMEOUT_MS = 8000;
-
-  let timedOut = false;
-  const timeoutPromise = new Promise<'timeout'>(resolve =>
-    setTimeout(() => { timedOut = true; resolve('timeout'); }, SEND_TIMEOUT_MS)
-  );
-
   try {
-    const result = await Promise.race([
-      sendMessage(number, mediaUrl, message, file).then(() => 'ok' as const),
-      timeoutPromise
-    ]);
+    const queueId = await whatsappQueueWorker.enqueue(
+      number,
+      message || '',
+      type || 'manual_chat',
+      target_name,
+      Date.now(),
+      mediaUrl,
+      file
+    );
 
-    if (result === 'timeout') {
-      // Client is slow to init — queue for retry and return 202
-      try {
-        const db = await dbManager.getConnection();
-        await db.run(
-          `INSERT INTO whatsapp_send_queue (number, message, created_at, target_name) VALUES (?, ?, ?, ?)
-           ON CONFLICT DO NOTHING`,
-          [number, message || '', Date.now(), target_name || null]
-        );
-        console.log(`[Messaging] Send timed out for ${number}, queued for retry.`);
-      } catch (qErr: any) {
-        console.error('[Messaging] Failed to queue timed-out message:', qErr?.message || qErr);
-      }
-      return res.status(202).json({ success: true, queued: true, message: 'Message queued for delivery (client initializing)' });
-    }
-
-    // Real success
-    console.log(`[Messaging] Send OK → ${number}`);
-    return res.status(200).json({ success: true });
+    console.log(`[Messaging] Message to ${number} enqueued in centralized WhatsApp queue (#${queueId})`);
+    return res.status(200).json({ success: true, queueId, queued: true });
   } catch (err: any) {
-    // Real failure — surface the error message to the frontend
-    const errMsg = err?.message || String(err) || 'Failed to send WhatsApp message';
-    console.warn(`[Messaging] Send failed for ${number}:`, errMsg);
+    const errMsg = err?.message || String(err) || 'Failed to queue WhatsApp message';
+    console.warn(`[Messaging] Enqueue failed for ${number}:`, errMsg);
     return res.status(400).json({ error: errMsg });
   }
 });

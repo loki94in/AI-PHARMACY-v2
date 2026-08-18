@@ -371,6 +371,8 @@ export const api = {
   getHeldBills: () => apiClient.get('/sales/hold').then(res => res.data),
   // ponytail: restoreHeldBill removed — never called; restore flow uses getHeldBills() + DELETE /hold/:id
   searchMedicine: (q: string) => apiClient.get('/sales/search-medicine', { params: { q } }).then(res => res.data),
+  getMedicineRefillInfo: (medicineId: number) => apiClient.get(`/sales/medicine-refill-info/${medicineId}`).then(res => res.data),
+  getPatientRefillMedicines: (params: { customerId?: number; phone?: string; name?: string }) => apiClient.get('/sales/patient-refill-medicines', { params }).then(res => res.data),
   
   // Verification Layer APIs
   verifyHealth: () => apiClient.get('/verification/health').then(res => res.data),

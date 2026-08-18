@@ -510,8 +510,9 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
               </span>
             )}
             {item.status === 'sent' && (
-              <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
-                <CheckCircle2 size={10} /> Sent
+              <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center gap-1 font-mono">
+                <CheckCircle2 size={10} /> 
+                <span>Sent {item.sent_at ? `(${new Date(item.sent_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })})` : ''}</span>
               </span>
             )}
             {item.status === 'failed_offline' && (
@@ -652,66 +653,175 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
 
         {/* Live Status & Quick Actions Bar */}
         <div className="p-4 bg-bg2/40 border-b border-glass-border/30 space-y-3 shrink-0">
-          <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
-            
-            {/* Status Pills */}
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="px-2.5 py-1 rounded-lg bg-sky-500/10 border border-sky-500/20 text-sky font-semibold">
-                Today Pending: {todayPendingCount}
+          {/* Live Progress Bar & Comprehensive Metric Chips */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between text-xs font-bold">
+              <div className="flex items-center gap-2">
+                <span className="text-text">Queue Dispatch Progress:</span>
+                <span className="text-sky font-mono">
+                  {queueState?.counts?.total > 0 ? `${queueState.counts.sent} / ${queueState.counts.total}` : `${todaySentCount} / ${todayAllCount}`}
+                </span>
+              </div>
+              <span className="text-sky font-mono font-extrabold text-sm">
+                {queueState?.progressPercent !== undefined ? `${queueState.progressPercent}%` : `${todayAllCount > 0 ? Math.round((todaySentCount / todayAllCount) * 100) : 100}%`}
               </span>
-              <span className="px-2.5 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-semibold">
-                Today Sent: {todaySentCount}
+            </div>
+
+            {/* Progress Bar with smooth transition */}
+            <div className="w-full bg-bg3/80 h-2 rounded-full overflow-hidden border border-glass-border/40 relative">
+              <div 
+                className="h-full bg-gradient-to-r from-sky-500 via-emerald-400 to-emerald-500 transition-all duration-500 rounded-full"
+                style={{ 
+                  width: `${queueState?.progressPercent !== undefined ? queueState.progressPercent : (todayAllCount > 0 ? (todaySentCount / todayAllCount) * 100 : 100)}%` 
+                }}
+              />
+            </div>
+
+            {/* Status Metric Chips */}
+            <div className="flex items-center gap-1.5 flex-wrap pt-1 text-[11px]">
+              <span className="px-2 py-0.5 rounded-lg bg-bg border border-glass-border font-bold text-text">
+                Total: {queueState?.counts?.total || todayAllCount}
               </span>
-              {todayFailedCount > 0 && (
-                <span className="px-2.5 py-1 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-400 font-semibold flex items-center gap-1">
-                  <AlertTriangle size={12} /> Today Failed: {todayFailedCount}
+              <span className="px-2 py-0.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-bold">
+                ✓ Sent: {queueState?.counts?.sent || todaySentCount}
+              </span>
+              {(queueState?.counts?.sending || 0) > 0 && (
+                <span className="px-2 py-0.5 rounded-lg bg-sky-500/15 border border-sky-500/30 text-sky font-bold flex items-center gap-1 animate-pulse">
+                  <RefreshCw size={10} className="animate-spin" /> Sending: {queueState.counts.sending}
+                </span>
+              )}
+              {((queueState?.nextDispatchCountdownSeconds || 0) > 0 && queueState?.isProcessing) && (
+                <span className="px-2 py-0.5 rounded-lg bg-amber-500/15 border border-amber-500/30 text-amber-300 font-bold flex items-center gap-1">
+                  <Clock size={10} /> Waiting Delay: {queueState.nextDispatchCountdownSeconds}s
+                </span>
+              )}
+              {(queueState?.counts?.remaining || 0) > 0 && (
+                <span className="px-2 py-0.5 rounded-lg bg-sky-500/10 border border-sky-500/20 text-sky font-semibold">
+                  Remaining: {queueState?.counts?.remaining}
+                </span>
+              )}
+              {((queueState?.counts?.failed || 0) > 0 || todayFailedCount > 0) && (
+                <span className="px-2 py-0.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-400 font-bold flex items-center gap-1">
+                  <AlertTriangle size={11} /> Failed: {queueState?.counts?.failed || todayFailedCount}
                 </span>
               )}
             </div>
+          </div>
 
-            {/* Speed Pacing Toggle & Quick Actions */}
-            <div className="flex items-center gap-2 flex-wrap">
-              {/* Pacing Preset Pills */}
-              <div className="flex items-center bg-bg/60 p-0.5 rounded-xl border border-glass-border/40 text-[10px] font-bold">
-                <button
-                  type="button"
-                  onClick={() => handleSetPacingPreset('turbo')}
-                  className={`px-2 py-1 rounded-lg transition-all flex items-center gap-1 cursor-pointer ${
-                    queueState?.pacingPreset === 'turbo' || queueState?.currentPacingMinMs === 100
-                      ? 'bg-rose-500 text-white font-extrabold shadow-sm animate-pulse'
-                      : 'text-muted hover:text-text'
-                  }`}
-                  title="Ultra-Fast Speed: 100ms (0.1s) instant queue dispatch"
-                >
-                  <Zap size={10} className="fill-current text-amber-300" />
-                  <span>Turbo (100ms)</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleSetPacingPreset('fast')}
-                  className={`px-2 py-1 rounded-lg transition-all flex items-center gap-1 cursor-pointer ${
-                    queueState?.pacingPreset === 'fast' || queueState?.currentPacingMinMs === 1000
-                      ? 'bg-amber-500 text-black font-extrabold shadow-sm'
-                      : 'text-muted hover:text-text'
-                  }`}
-                  title="Fast Pacing: 1-3 seconds between messages"
-                >
-                  <span>Fast (1-3s)</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleSetPacingPreset('safe')}
-                  className={`px-2 py-1 rounded-lg transition-all flex items-center gap-1 cursor-pointer ${
-                    queueState?.pacingPreset === 'safe' || (queueState?.currentPacingMinMs === 8000 && queueState?.pacingPreset !== 'fast' && queueState?.pacingPreset !== 'turbo')
-                      ? 'bg-emerald-500 text-black font-extrabold shadow-sm'
-                      : 'text-muted hover:text-text'
-                  }`}
-                  title="Safe Pacing: 8-12 seconds anti-detection pacing"
-                >
-                  <span>Safe (8-12s)</span>
-                </button>
+          {/* Currently Sending / Next Message Hero Cards */}
+          {(queueState?.currentItem || queueState?.nextItem || (queueState?.counts?.sending || 0) > 0) && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+              {/* Currently Active Card */}
+              {queueState?.currentItem ? (
+                <div className="p-2.5 rounded-2xl bg-sky-500/10 border border-sky-500/30 space-y-1 text-xs animate-fadeIn">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] uppercase font-bold text-sky flex items-center gap-1">
+                      <span className="w-2 h-2 rounded-full bg-sky animate-ping" /> Currently Sending
+                    </span>
+                    <span className="text-[10px] font-mono text-sky font-bold">+{queueState.currentItem.number}</span>
+                  </div>
+                  <div className="font-bold text-text truncate">
+                    {resolveDisplayName(queueState.currentItem)}
+                  </div>
+                  <p className="text-[10px] font-mono text-muted line-clamp-1 truncate">
+                    {queueState.currentItem.message}
+                  </p>
+                </div>
+              ) : (
+                <div className="p-2.5 rounded-2xl bg-bg2/40 border border-glass-border/40 space-y-1 text-xs opacity-75">
+                  <span className="text-[10px] uppercase font-bold text-muted">Currently Active Send</span>
+                  <div className="text-xs text-muted font-semibold">Idle / Ready for next</div>
+                </div>
+              )}
+
+              {/* Next Waiting / Countdown Card */}
+              {queueState?.nextItem ? (
+                <div className="p-2.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 space-y-1 text-xs animate-fadeIn">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] uppercase font-bold text-amber-300 flex items-center gap-1">
+                      <Clock size={11} /> Next in Queue
+                    </span>
+                    {queueState?.nextDispatchCountdownSeconds > 0 ? (
+                      <span className="text-[10px] font-mono font-extrabold text-amber-300 bg-amber-500/20 px-1.5 py-0.2 rounded border border-amber-500/30 animate-pulse">
+                        Wait: {queueState.nextDispatchCountdownSeconds}s
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-mono text-muted">Ready</span>
+                    )}
+                  </div>
+                  <div className="font-bold text-text truncate">
+                    {resolveDisplayName(queueState.nextItem)}
+                  </div>
+                  <p className="text-[10px] font-mono text-muted line-clamp-1 truncate">
+                    +{queueState.nextItem.number} • {queueState.nextItem.message}
+                  </p>
+                </div>
+              ) : (
+                <div className="p-2.5 rounded-2xl bg-bg2/40 border border-glass-border/40 space-y-1 text-xs opacity-75">
+                  <span className="text-[10px] uppercase font-bold text-muted">Next in Queue</span>
+                  <div className="text-xs text-muted font-semibold">No more pending items</div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Completed State Banner */}
+          {queueState?.isCompleted && (queueState?.counts?.sent || todaySentCount) > 0 && (
+            <div className="p-2.5 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-between text-xs text-emerald-300 animate-fadeIn">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 size={16} className="text-emerald-400 shrink-0" />
+                <div>
+                  <span className="font-bold">BULK DISPATCH COMPLETED:</span> All {queueState?.counts?.sent || todaySentCount} queued messages delivered successfully.
+                </div>
               </div>
+              <span className="text-[10px] font-mono font-bold bg-emerald-500/20 px-2 py-0.5 rounded-full border border-emerald-500/30">100% COMPLETE</span>
+            </div>
+          )}
 
+          {/* Quick Actions & Speed Pacing Controls */}
+          <div className="flex flex-wrap items-center justify-between gap-3 text-xs pt-1">
+            {/* Pacing Preset Pills */}
+            <div className="flex items-center bg-bg/60 p-0.5 rounded-xl border border-glass-border/40 text-[10px] font-bold">
+              <button
+                type="button"
+                onClick={() => handleSetPacingPreset('turbo')}
+                className={`px-2 py-1 rounded-lg transition-all flex items-center gap-1 cursor-pointer ${
+                  queueState?.pacingPreset === 'turbo' || queueState?.currentPacingMinMs === 100
+                    ? 'bg-rose-500 text-white font-extrabold shadow-sm animate-pulse'
+                    : 'text-muted hover:text-text'
+                }`}
+                title="Ultra-Fast Speed: 100ms (0.1s) instant queue dispatch"
+              >
+                <Zap size={10} className="fill-current text-amber-300" />
+                <span>Turbo (100ms)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSetPacingPreset('fast')}
+                className={`px-2 py-1 rounded-lg transition-all flex items-center gap-1 cursor-pointer ${
+                  queueState?.pacingPreset === 'fast' || queueState?.currentPacingMinMs === 1000
+                    ? 'bg-amber-500 text-black font-extrabold shadow-sm'
+                    : 'text-muted hover:text-text'
+                }`}
+                title="Fast Pacing: 1-3 seconds between messages"
+              >
+                <span>Fast (1-3s)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSetPacingPreset('safe')}
+                className={`px-2 py-1 rounded-lg transition-all flex items-center gap-1 cursor-pointer ${
+                  queueState?.pacingPreset === 'safe' || (queueState?.currentPacingMinMs === 10000 && queueState?.pacingPreset !== 'fast' && queueState?.pacingPreset !== 'turbo')
+                    ? 'bg-emerald-500 text-black font-extrabold shadow-sm'
+                    : 'text-muted hover:text-text'
+                }`}
+                title="Safe Pacing: 10-12 seconds (default 11s) anti-detection spacing"
+              >
+                <span>Safe (10-12s)</span>
+              </button>
+            </div>
+
+            <div className="flex items-center gap-2 flex-wrap">
               <button
                 onClick={handleTogglePause}
                 className={`px-2.5 py-1.5 font-semibold text-xs rounded-xl active:scale-95 transition-all flex items-center gap-1.5 shadow-sm cursor-pointer ${

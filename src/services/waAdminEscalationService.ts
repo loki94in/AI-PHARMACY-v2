@@ -1,5 +1,5 @@
 import { dbManager } from '../database/connection.js';
-import { sendMessage } from '../whatsappClient.js';
+import { whatsappQueueWorker } from './whatsappQueueWorker.js';
 
 interface EscalationPayload {
   customer: { id: number; name: string; phone: string } | null;
@@ -121,7 +121,7 @@ export async function notifyAdminOfUnprocessedMedia(
   caption += `\n📝 ${opts.reason}\n`;
   caption += `Please check this chat manually.`;
 
-  await sendMessage(adminWhatsapp, opts.imagePath, caption);
+  await whatsappQueueWorker.enqueue(adminWhatsapp, caption, 'admin_escalation_image', 'Admin / Store Owner', undefined, opts.imagePath);
   return true;
 }
 
@@ -345,13 +345,13 @@ ${matchBlock}${contextBlock}
 📋 Added to approval queue (Review #${reviewId}). Approve in the app to add to inventory.`;
     }
 
-    // 6. Send WhatsApp message
+    // 6. Enqueue WhatsApp message in centralized queue
     try {
-      await sendMessage(adminWhatsapp, undefined, messageText);
+      await whatsappQueueWorker.enqueue(adminWhatsapp, messageText, 'admin_escalation', 'Admin / Store Owner');
       await db.run(`UPDATE wa_admin_escalations SET status = 'sent' WHERE id = ?`, [escalationId]);
-      console.log(`[Admin Escalation] Escalated query for "${payload.medicineName}" to admin ${adminWhatsapp}.`);
+      console.log(`[Admin Escalation] Enqueued escalation for "${payload.medicineName}" to admin ${adminWhatsapp}.`);
     } catch (sendErr: any) {
-      console.error(`[Admin Escalation] Failed to send message via whatsappClient:`, sendErr);
+      console.error(`[Admin Escalation] Failed to enqueue message:`, sendErr);
       await db.run(`UPDATE wa_admin_escalations SET status = 'failed' WHERE id = ?`, [escalationId]);
     }
 

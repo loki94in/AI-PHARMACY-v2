@@ -6,13 +6,15 @@ export interface QueueItem {
   number: string;
   message: string;
   type: string;
-  status: 'pending' | 'sending' | 'sent' | 'failed_offline' | 'failed_perm';
+  status: 'pending' | 'sending' | 'waiting' | 'sent' | 'failed_offline' | 'failed_perm' | 'cancelled' | 'review_required';
   retry_count: number;
   created_at: number;
   sent_at: number | null;
   error_message?: string;
   target_name?: string;
   scheduled_at?: number | null;
+  media_url?: string | null;
+  file_json?: string | null;
 }
 
 export interface QueueWorkerState {
@@ -20,18 +22,27 @@ export interface QueueWorkerState {
   isPaused: boolean;
   isOnline: boolean;
   nextDispatchCountdownMs: number;
+  nextDispatchCountdownSeconds: number;
   nextDispatchTimestamp: number | null;
   currentPacingMinMs: number;
   currentPacingMaxMs: number;
   pacingPreset: 'turbo' | 'fast' | 'safe' | 'custom';
   currentSendingItemId: number | null;
   activeTargetName?: string | null;
+  currentItem?: QueueItem | null;
+  nextItem?: QueueItem | null;
+  isCompleted?: boolean;
+  progressPercent?: number;
   counts: {
+    total: number;
     pending: number;
     sending: number;
+    waiting: number;
     sent: number;
     failed_offline: number;
     failed_perm: number;
+    failed: number;
+    remaining: number;
   };
   delaySettings?: {
     whatsapp_delay_credit_bill: number;
@@ -49,7 +60,7 @@ class WhatsAppQueueWorker {
   private lastOfflineLogTime = 0;
   private nextDispatchTimestamp: number | null = null;
   private currentSendingItemId: number | null = null;
-  private pacingMinMs = 8000;
+  private pacingMinMs = 10000;
   private pacingMaxMs = 12000;
 
   public isWorkerPaused(): boolean {
@@ -70,17 +81,46 @@ class WhatsAppQueueWorker {
     this.startWorkerLoop();
   }
 
+  private schemaEnsured = false;
+  private async ensureSchema(db: any): Promise<void> {
+    if (this.schemaEnsured) return;
+    try {
+      const cols = await db.all("PRAGMA table_info(whatsapp_send_queue)");
+      const colNames = new Set(cols.map((c: any) => c.name));
+      if (!colNames.has('media_url')) {
+        await db.run("ALTER TABLE whatsapp_send_queue ADD COLUMN media_url TEXT");
+      }
+      if (!colNames.has('file_json')) {
+        await db.run("ALTER TABLE whatsapp_send_queue ADD COLUMN file_json TEXT");
+      }
+      if (!colNames.has('target_name')) {
+        await db.run("ALTER TABLE whatsapp_send_queue ADD COLUMN target_name TEXT");
+      }
+      if (!colNames.has('scheduled_at')) {
+        await db.run("ALTER TABLE whatsapp_send_queue ADD COLUMN scheduled_at INTEGER");
+      }
+      this.schemaEnsured = true;
+    } catch (_) {}
+  }
+
   /** Reload pacing settings from DB app_settings */
   public async loadPacingConfig(): Promise<{ minMs: number; maxMs: number }> {
     try {
       const db = await dbManager.getConnection();
+      await this.ensureSchema(db);
       const minRow = await db.get("SELECT value FROM app_settings WHERE key = 'whatsapp_queue_pacing_min'");
       const maxRow = await db.get("SELECT value FROM app_settings WHERE key = 'whatsapp_queue_pacing_max'");
       
-      const min = minRow ? parseInt(minRow.value, 10) : 8000;
-      const max = maxRow ? parseInt(maxRow.value, 10) : 12000;
+      let min = minRow ? parseInt(minRow.value, 10) : 10000;
+      let max = maxRow ? parseInt(maxRow.value, 10) : 12000;
 
-      this.pacingMinMs = isNaN(min) ? 8000 : Math.max(100, min);
+      // Upgrade legacy default (5000 / 8000) to standard 10-12s
+      if (min === 5000 || min === 8000) {
+        min = 10000;
+        max = 12000;
+      }
+
+      this.pacingMinMs = isNaN(min) ? 10000 : Math.max(100, min);
       this.pacingMaxMs = isNaN(max) ? 12000 : Math.max(this.pacingMinMs, max);
     } catch (err) {
       // Use defaults
@@ -101,14 +141,14 @@ class WhatsAppQueueWorker {
     this.pacingMaxMs = maxMs;
   }
 
-  /** Set pacing preset: 'turbo' (100ms), 'fast' (1-3s) vs 'safe' (8-12s) */
+  /** Set pacing preset: 'turbo' (100ms), 'fast' (1-3s) vs 'safe' (10-12s, default 11s) */
   public async setPacingPreset(preset: 'turbo' | 'fast' | 'safe'): Promise<{ minMs: number; maxMs: number; preset: string }> {
     if (preset === 'turbo') {
       await this.setPacingConfig(0.1, 0.3);
     } else if (preset === 'fast') {
       await this.setPacingConfig(1, 3);
     } else {
-      await this.setPacingConfig(8, 12);
+      await this.setPacingConfig(10, 12);
     }
     return { minMs: this.pacingMinMs, maxMs: this.pacingMaxMs, preset };
   }
@@ -192,9 +232,12 @@ class WhatsAppQueueWorker {
     message: string, 
     type = 'distributor_collection', 
     targetName?: string,
-    explicitScheduledAt?: number
+    explicitScheduledAt?: number,
+    mediaUrl?: string,
+    file?: { mimetype: string; data: string; filename?: string }
   ): Promise<number> {
     const db = await dbManager.getConnection();
+    await this.ensureSchema(db);
     const cleanPhone = normalizeWhatsAppPhone(number);
     const now = Date.now();
 
@@ -300,16 +343,18 @@ class WhatsAppQueueWorker {
       }
     }
 
+    const fileJsonStr = file ? JSON.stringify(file) : null;
+
     // Atomic dedup + insert: the WHERE NOT EXISTS runs inside the same statement as the INSERT,
     // so two near-simultaneous enqueue() calls for the same number+message can't both pass a
     // separate SELECT check and both insert (that race caused duplicate WhatsApp sends).
     const result = await db.run(
-      `INSERT INTO whatsapp_send_queue (number, message, type, status, retry_count, created_at, scheduled_at, target_name)
-       SELECT ?, ?, ?, 'pending', 0, ?, ?, ?
+      `INSERT INTO whatsapp_send_queue (number, message, type, status, retry_count, created_at, scheduled_at, target_name, media_url, file_json)
+       SELECT ?, ?, ?, 'pending', 0, ?, ?, ?, ?, ?
        WHERE NOT EXISTS (
          SELECT 1 FROM whatsapp_send_queue WHERE number = ? AND message = ? AND created_at >= ?
        )`,
-      [cleanPhone, message, type, now, scheduledAt, resolvedTargetName || null, cleanPhone, message, startOfDayMs]
+      [cleanPhone, message, type, now, scheduledAt, resolvedTargetName || null, mediaUrl || null, fileJsonStr, cleanPhone, message, startOfDayMs]
     );
 
     if (!result.changes) {
@@ -331,10 +376,24 @@ class WhatsAppQueueWorker {
     return result.lastID || 0;
   }
 
-  /** Purge sent items older than 24 hours to keep active send queue clear and daily synced */
+  /** Purge sent items older than 24 hours and recover any interrupted items from app restarts */
   public async cleanupOldSentItems(): Promise<number> {
     try {
       const db = await dbManager.getConnection();
+      
+      // RESTART SAFETY: check if any items were left in 'sending' status during an unexpected shutdown
+      try {
+        const interruptedItems = await db.all("SELECT id, number, message FROM whatsapp_send_queue WHERE status = 'sending'");
+        for (const item of interruptedItems || []) {
+          const outboxMatch = await this.hasRecentOutboxMatch(db, item.number, item.message);
+          if (outboxMatch) {
+            await db.run("UPDATE whatsapp_send_queue SET status = 'sent', sent_at = ? WHERE id = ?", [Date.now(), item.id]);
+          } else {
+            await db.run("UPDATE whatsapp_send_queue SET status = 'review_required', error_message = 'App restarted during send — review before dispatching' WHERE id = ?", [item.id]);
+          }
+        }
+      } catch (_) {}
+
       const oneDayAgo = Date.now() - (24 * 60 * 60 * 1000);
       const res = await db.run(
         "DELETE FROM whatsapp_send_queue WHERE status = 'sent' AND (sent_at IS NULL OR sent_at < ?)",
@@ -360,7 +419,7 @@ class WhatsAppQueueWorker {
     if (this.isLoopRunning) return;
     this.isLoopRunning = true;
 
-    // Run initial cleanup of old sent items
+    // Run initial cleanup of old sent items & restart recovery
     await this.cleanupOldSentItems();
 
     const scheduleNextRun = () => {
@@ -380,7 +439,7 @@ class WhatsAppQueueWorker {
     await this.processQueueInternal();
   }
 
-  /** Internal queue processor that returns true if items were actively processed */
+  /** Internal queue processor that processes items one-by-one with 10–12 second pacing */
   private async processQueueInternal(): Promise<boolean> {
     if (this.isProcessing || this.isPaused) return false;
     this.isProcessing = true;
@@ -430,6 +489,7 @@ class WhatsAppQueueWorker {
       for (let i = 0; i < pendingItems.length; i++) {
         const item = pendingItems[i];
         this.currentSendingItemId = item.id;
+        this.nextDispatchTimestamp = null; // Currently sending, not waiting
 
         // Verify connection status before sending each message
         const isBizNow = await shouldRouteToBusiness();
@@ -443,15 +503,21 @@ class WhatsAppQueueWorker {
         await db.run("UPDATE whatsapp_send_queue SET status = 'sending' WHERE id = ?", [item.id]);
 
         try {
-          // Send message via WhatsApp (sendMessage handles Business API routing and Web client sending)
-          const sendResult = await sendMessage(item.number, undefined, item.message);
+          let fileObj: any = undefined;
+          if (item.file_json) {
+            try {
+              fileObj = JSON.parse(item.file_json);
+            } catch (_) {}
+          }
+
+          // Send message via WhatsApp provider (strictly ONE active send)
+          const sendResult = await sendMessage(item.number, item.media_url || undefined, item.message, fileObj);
 
           if (!sendResult.sent) {
             throw new Error('sendMessage returned without sending');
           }
 
           // STRICT OUTBOX VERIFICATION:
-          // Check if an outbound message record (from_me = 1) exists in whatsapp_messages sent in the last 120 seconds
           const last10 = item.number.replace(/\D/g, '').slice(-10);
           const minTs = Math.floor((Date.now() - 120000) / 1000);
           const outboxRecord = await db.get(
@@ -495,33 +561,44 @@ class WhatsAppQueueWorker {
               await this.markPharmarackOrderSent(db, item.target_name);
             }
             console.log(`[WhatsAppQueueWorker] Outbox match — marking #${item.id} as sent despite error: ${errMsg}`);
-            continue;
-          }
+          } else {
+            const newRetryCount = item.retry_count + 1;
+            const newStatus = newRetryCount >= 3 ? 'failed_perm' : 'failed_offline';
 
-          const newRetryCount = item.retry_count + 1;
-          const newStatus = newRetryCount >= 3 ? 'failed_perm' : 'failed_offline';
+            console.warn(`[WhatsAppQueueWorker] Failed to send #${item.id} (attempt ${newRetryCount}/3): ${errMsg}`);
+            await db.run(
+              "UPDATE whatsapp_send_queue SET status = ?, retry_count = ?, error_message = ? WHERE id = ?",
+              [newStatus, newRetryCount, errMsg, item.id]
+            );
 
-          console.warn(`[WhatsAppQueueWorker] Failed to send #${item.id} (attempt ${newRetryCount}/3): ${errMsg}`);
-          await db.run(
-            "UPDATE whatsapp_send_queue SET status = ?, retry_count = ?, error_message = ? WHERE id = ?",
-            [newStatus, newRetryCount, errMsg, item.id]
-          );
-
-          // Log failure notification into automation_notifications if permanently failed
-          if (newStatus === 'failed_perm') {
-            try {
-              await db.run(
-                `INSERT INTO automation_notifications 
-                 (type, recipient_name, recipient_phone, message, status, error_message, reference_id, created_at)
-                 VALUES (?, ?, ?, ?, 'failed', ?, ?, ?)`,
-                ['whatsapp_queue_failure', item.target_name || 'Distributor', item.number, item.message, errMsg, `queue-${item.id}`, Date.now()]
-              );
-            } catch (_) {}
+            // Log failure notification into automation_notifications if permanently failed
+            if (newStatus === 'failed_perm') {
+              try {
+                await db.run(
+                  `INSERT INTO automation_notifications 
+                   (type, recipient_name, recipient_phone, message, status, error_message, reference_id, created_at)
+                   VALUES (?, ?, ?, ?, 'failed', ?, ?, ?)`,
+                  ['whatsapp_queue_failure', item.target_name || 'Distributor', item.number, item.message, errMsg, `queue-${item.id}`, Date.now()]
+                );
+              } catch (_) {}
+            }
           }
         }
 
-        // Pacing delay before next item if more items remain
-        if (i < pendingItems.length - 1) {
+        // Check dynamically if more pending items exist in the database (including newly arrived manual messages)
+        const remainingCheck = await db.get(
+          `SELECT COUNT(*) as cnt FROM whatsapp_send_queue
+           WHERE status IN ('pending', 'failed_offline')
+             AND (scheduled_at IS NULL OR scheduled_at <= ?)
+             AND retry_count < 3
+             AND id != ?`,
+          [Date.now(), item.id]
+        );
+
+        const hasMoreItems = (remainingCheck?.cnt || 0) > 0 || (i < pendingItems.length - 1);
+
+        // 10–12 second pacing delay before next item if more items remain
+        if (hasMoreItems) {
           const delayRange = this.pacingMaxMs - this.pacingMinMs;
           const randomDelay = this.pacingMinMs + Math.floor(Math.random() * (delayRange + 1));
           this.nextDispatchTimestamp = Date.now() + randomDelay;
@@ -550,7 +627,7 @@ class WhatsAppQueueWorker {
   public async retryAllFailed(): Promise<number> {
     const db = await dbManager.getConnection();
     const result = await db.run(
-      "UPDATE whatsapp_send_queue SET status = 'pending', retry_count = 0, error_message = NULL WHERE status IN ('failed_offline', 'failed_perm')"
+      "UPDATE whatsapp_send_queue SET status = 'pending', retry_count = 0, error_message = NULL WHERE status IN ('failed_offline', 'failed_perm', 'review_required')"
     );
     this.triggerProcessing();
     return result.changes || 0;
@@ -582,7 +659,7 @@ class WhatsAppQueueWorker {
     const db = await dbManager.getConnection();
     let totalCleared = 0;
     try {
-      const res1 = await db.run("DELETE FROM whatsapp_send_queue WHERE status IN ('failed_offline', 'failed_perm')");
+      const res1 = await db.run("DELETE FROM whatsapp_send_queue WHERE status IN ('failed_offline', 'failed_perm', 'review_required')");
       totalCleared += (res1.changes || 0);
       const res2 = await db.run("DELETE FROM automation_notifications WHERE status IN ('failed', 'error')");
       totalCleared += (res2.changes || 0);
@@ -627,7 +704,7 @@ class WhatsAppQueueWorker {
         SUM(CASE WHEN status = 'sending' THEN 1 ELSE 0 END) as sending,
         SUM(CASE WHEN status = 'sent' THEN 1 ELSE 0 END) as sent,
         SUM(CASE WHEN status = 'failed_offline' THEN 1 ELSE 0 END) as failed_offline,
-        SUM(CASE WHEN status = 'failed_perm' THEN 1 ELSE 0 END) as failed_perm
+        SUM(CASE WHEN status = 'failed_perm' OR status = 'review_required' THEN 1 ELSE 0 END) as failed_perm
       FROM whatsapp_send_queue
     `);
 
@@ -655,7 +732,7 @@ class WhatsAppQueueWorker {
     const mappedAutoNotifs: QueueItem[] = automationNotifs
       .filter(n => !existingQueueIds.has(`${n.number}-${new Date(n.created_at).getTime()}`))
       .map(n => {
-        let mappedStatus: 'pending' | 'sending' | 'sent' | 'failed_offline' | 'failed_perm' = 'sent';
+        let mappedStatus: 'pending' | 'sending' | 'waiting' | 'sent' | 'failed_offline' | 'failed_perm' | 'cancelled' | 'review_required' = 'sent';
         if (n.status === 'pending' || n.status === 'queued') {
           mappedStatus = 'pending';
         } else if (n.status === 'failed' || n.status === 'error') {
@@ -720,23 +797,42 @@ class WhatsAppQueueWorker {
 
     const recentItems: QueueItem[] = [...queueItems, ...mappedAutoNotifs, ...mappedDirectMsgs].sort((a, b) => b.created_at - a.created_at);
 
+    // Identify currently sending item and next waiting item
+    let currentItem: QueueItem | null = null;
+    let nextItem: QueueItem | null = null;
+
+    if (this.currentSendingItemId) {
+      currentItem = recentItems.find(i => i.id === this.currentSendingItemId) || null;
+    }
+    if (!currentItem) {
+      currentItem = recentItems.find(i => i.status === 'sending') || null;
+    }
+
+    // Next item is the oldest pending item
+    nextItem = recentItems.slice().reverse().find(i => (i.status === 'pending' || i.status === 'failed_offline') && (!currentItem || i.id !== currentItem.id)) || null;
+
     // Determine current sending or next pending item target name for live status display
     let activeTargetName: string | null = null;
-    if (this.currentSendingItemId) {
-      const sendingItem = recentItems.find(i => i.id === this.currentSendingItemId);
-      if (sendingItem) {
-        activeTargetName = sendingItem.target_name || (sendingItem.type === 'delivery_boy_summary' ? 'Delivery Boy' : 'Distributor');
-      }
-    }
-    if (!activeTargetName) {
-      const nextPending = recentItems.slice().reverse().find(i => i.status === 'pending' || i.status === 'sending');
-      if (nextPending) {
-        activeTargetName = nextPending.target_name || (nextPending.type === 'delivery_boy_summary' ? 'Delivery Boy' : 'Distributor');
-      }
+    if (currentItem) {
+      activeTargetName = currentItem.target_name || (currentItem.type === 'delivery_boy_summary' ? 'Delivery Boy' : 'Distributor');
+    } else if (nextItem) {
+      activeTargetName = nextItem.target_name || (nextItem.type === 'delivery_boy_summary' ? 'Delivery Boy' : 'Distributor');
     }
 
     const now = Date.now();
-    const countdown = this.nextDispatchTimestamp ? Math.max(0, Math.ceil((this.nextDispatchTimestamp - now) / 1000)) : 0;
+    const countdownSec = this.nextDispatchTimestamp ? Math.max(0, Math.ceil((this.nextDispatchTimestamp - now) / 1000)) : 0;
+    const isWaiting = countdownSec > 0 && Boolean(this.nextDispatchTimestamp);
+
+    const pendingCount = Number(countsRow?.pending || 0);
+    const sendingCount = Number(countsRow?.sending || 0);
+    const sentCount = Number(countsRow?.sent || 0);
+    const failedOfflineCount = Number(countsRow?.failed_offline || 0);
+    const failedPermCount = Number(countsRow?.failed_perm || 0);
+    const failedTotal = failedOfflineCount + failedPermCount;
+    const remainingCount = pendingCount + sendingCount;
+    const totalCount = pendingCount + sendingCount + sentCount + failedTotal;
+    const progressPercent = totalCount > 0 ? Math.min(100, Math.round((sentCount / totalCount) * 100)) : 100;
+    const isCompleted = remainingCount === 0 && !this.isProcessing;
 
     const delayCreditRow = await db.get("SELECT value FROM app_settings WHERE key = 'whatsapp_delay_credit_bill'");
     const delayDistRow = await db.get("SELECT value FROM app_settings WHERE key = 'whatsapp_delay_distributor'");
@@ -747,7 +843,7 @@ class WhatsAppQueueWorker {
       preset = 'turbo';
     } else if (this.pacingMinMs === 1000 && this.pacingMaxMs === 3000) {
       preset = 'fast';
-    } else if (this.pacingMinMs === 8000 && this.pacingMaxMs === 12000) {
+    } else if (this.pacingMinMs === 10000 && this.pacingMaxMs === 12000) {
       preset = 'safe';
     }
 
@@ -755,19 +851,28 @@ class WhatsAppQueueWorker {
       isProcessing: this.isProcessing,
       isPaused: this.isPaused,
       isOnline: waStatus.isReady,
-      nextDispatchCountdownMs: countdown,
+      nextDispatchCountdownMs: countdownSec * 1000,
+      nextDispatchCountdownSeconds: countdownSec,
       nextDispatchTimestamp: this.nextDispatchTimestamp,
       currentPacingMinMs: this.pacingMinMs,
       currentPacingMaxMs: this.pacingMaxMs,
       pacingPreset: preset,
       currentSendingItemId: this.currentSendingItemId,
       activeTargetName,
+      currentItem,
+      nextItem,
+      isCompleted,
+      progressPercent,
       counts: {
-        pending: countsRow?.pending || 0,
-        sending: countsRow?.sending || 0,
-        sent: countsRow?.sent || 0,
-        failed_offline: countsRow?.failed_offline || 0,
-        failed_perm: countsRow?.failed_perm || 0
+        total: totalCount,
+        pending: pendingCount,
+        sending: sendingCount,
+        waiting: isWaiting ? 1 : 0,
+        sent: sentCount,
+        failed_offline: failedOfflineCount,
+        failed_perm: failedPermCount,
+        failed: failedTotal,
+        remaining: remainingCount
       },
       delaySettings: {
         whatsapp_delay_credit_bill: Number(delayCreditRow?.value || 0),
