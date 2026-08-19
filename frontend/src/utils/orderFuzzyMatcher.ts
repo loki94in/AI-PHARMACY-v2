@@ -40,9 +40,23 @@ function normalizeStr(str: string | undefined | null): string {
     .trim();
 }
 
+const PACKAGING_STOP_WORDS = new Set([
+  'strip', 'strips', 'of', 'tab', 'tabs', 'tablet', 'tablets', 'cap', 'caps', 'capsule', 'capsules',
+  'syp', 'syrup', 'susp', 'suspension', 'inj', 'injection', 'oint', 'ointment', 'crm', 'cream', 'gel',
+  'drop', 'drops', 'sol', 'solution', 'lot', 'lotion', 'respule', 'respules', 'sachet', 'sachets',
+  'soap', 'wash', 'shampoo', 'spray', 'powder', 'drg', 'oil', 'emulsion', 'pc', 'pcs', 'pack', 'pck',
+  'box', 'btl', 'bottle', 'vial', 'amp', 'ampoule', 'gm', 'mg', 'ml', 'mcg', 'iu', 'kg', 'ltr',
+  '10s', '15s', '20s', '30s', '5s', '1s', '6s', '10', '15', '20', '30', '50', '100', '200', '500'
+]);
+
 function getTokens(str: string): Set<string> {
   const words = normalizeStr(str).split(' ').filter(w => w.length > 0);
   return new Set(words);
+}
+
+function getCoreMedicineTokens(str: string): Set<string> {
+  const words = normalizeStr(str).split(' ').filter(w => w.length > 0 && !PACKAGING_STOP_WORDS.has(w));
+  return new Set(words.length > 0 ? words : normalizeStr(str).split(' ').filter(w => w.length > 0));
 }
 
 /**
@@ -68,38 +82,46 @@ export function evaluateOrderCartMatch(
   const noSpaceOrder = normOrder.replace(/\s/g, '');
   const noSpaceItem = normItem.replace(/\s/g, '');
 
+  const coreTokensOrder = getCoreMedicineTokens(orderTitle);
+  const coreTokensItem = getCoreMedicineTokens(itemTitle);
+  const coreOrderStr = Array.from(coreTokensOrder).join('');
+  const coreItemStr = Array.from(coreTokensItem).join('');
+
   let titleScore = 0;
   if (noSpaceOrder === noSpaceItem) {
     titleScore = 1.0;
     matchReasons.push('Exact title match');
+  } else if (coreOrderStr && coreItemStr && coreOrderStr === coreItemStr) {
+    titleScore = 1.0;
+    matchReasons.push('Core medicine match');
   } else if (noSpaceItem.includes(noSpaceOrder) || noSpaceOrder.includes(noSpaceItem)) {
-    titleScore = 0.85;
+    titleScore = 0.90;
     matchReasons.push('Substring match');
+  } else if (coreOrderStr && coreItemStr && (coreItemStr.includes(coreOrderStr) || coreOrderStr.includes(coreItemStr))) {
+    titleScore = 0.90;
+    matchReasons.push('Core substring match');
   } else {
     // Levenshtein string similarity
     const levSim = calculateSimilarity(normOrder, normItem);
     
-    // Jaccard Token Overlap
-    const tokensOrder = getTokens(orderTitle);
-    const tokensItem = getTokens(itemTitle);
-
+    // Jaccard Token Overlap on core medicine tokens
     let intersectionCount = 0;
-    tokensOrder.forEach(token => {
-      if (tokensItem.has(token)) intersectionCount++;
+    coreTokensOrder.forEach(token => {
+      if (coreTokensItem.has(token)) intersectionCount++;
     });
 
-    const unionCount = new Set([...tokensOrder, ...tokensItem]).size;
+    const unionCount = new Set([...coreTokensOrder, ...coreTokensItem]).size;
     const tokenSim = unionCount > 0 ? intersectionCount / unionCount : 0;
 
     // Combined Title Score (60% Token overlap, 40% Levenshtein)
     titleScore = tokenSim * 0.6 + levSim * 0.4;
     if (tokenSim > 0.5) {
-      matchReasons.push(`${Math.round(tokenSim * 100)}% token overlap`);
+      matchReasons.push(`${Math.round(tokenSim * 100)}% core token overlap`);
     }
   }
 
-  // Weight title score out of 70 points
-  let score = titleScore * 70;
+  // Weight title score out of 75 points
+  let score = titleScore * 75;
 
   // 2. Price / Rate Proximity (+15 pts max)
   const orderRate = order.pharmarack_rate ? Number(order.pharmarack_rate) : 0;

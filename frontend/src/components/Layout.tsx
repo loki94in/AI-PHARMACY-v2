@@ -1391,7 +1391,7 @@ const Topbar = ({
           );
         }
       } catch (_) {}
-    }, 16000);
+    }, 46000);
 
     return () => clearTimeout(timer);
   }, []);
@@ -2094,16 +2094,79 @@ const QuickAssistSidebar = ({
     }
   };
 
-  const handleSendSingleRefill = async (patientName: string, _patientPhone: string, med: { id: number; medicine_name: string; quantity_needed: number }) => {
+  const [sendingNotifKeys, setSendingNotifKeys] = useState<Set<string>>(new Set());
+
+  const handleSendStagedNotificationGroup = async (group: {
+    key: string;
+    recipient_name: string;
+    recipient_phone: string;
+    consolidatedMessage: string;
+    messages: Array<{ id: number; message: string; type?: string; reference_id?: string }>;
+  }) => {
+    if (sendingNotifKeys.has(group.key)) return;
+    setSendingNotifKeys(prev => new Set(prev).add(group.key));
+
     try {
-      await api.sendRefillNow(med.id);
-      toastEvent.trigger(`Refill reminder queued for ${patientName} (${med.medicine_name})!`, 'success');
-      whatsappQueueEvent.triggerUpdated();
+      const { apiClient } = await import('../services/api.js');
+      if (group.recipient_phone) {
+        await api.enqueueSingleWhatsApp({
+          number: group.recipient_phone,
+          message: group.consolidatedMessage,
+          type: 'refill_collection',
+          targetName: group.recipient_name
+        });
+        whatsappQueueEvent.triggerUpdated();
+      }
+
+      // Mark staged notifications as sent manually
+      await Promise.all(
+        group.messages.map(m =>
+          apiClient.post(`/automation/notifications/${m.id}/manual`).catch(() => {})
+        )
+      );
+
+      // Also update referenced patient_refills status
+      for (const m of group.messages) {
+        if (m.reference_id) {
+          const ids = m.reference_id.split(',').map(s => Number(s.trim())).filter(Boolean);
+          for (const refId of ids) {
+            try {
+              await apiClient.post(`/refills/${refId}/status`, { status: 'notified' });
+            } catch (_) {}
+          }
+        }
+      }
+
+      toastEvent.trigger(`Consolidated WhatsApp message queued for ${group.recipient_name}!`, 'success');
       refillEvent.triggerRefresh();
       onActionComplete();
-    } catch (e: any) {
-      console.error('Failed to send single refill reminder:', e);
-      toastEvent.trigger(e?.response?.data?.error || 'Failed to send refill reminder', 'error');
+    } catch (err: any) {
+      console.error('Failed to send staged message group:', err);
+      toastEvent.trigger('Failed to send WhatsApp message', 'error');
+    } finally {
+      setSendingNotifKeys(prev => {
+        const next = new Set(prev);
+        next.delete(group.key);
+        return next;
+      });
+    }
+  };
+
+  const handleDismissStagedNotificationGroup = async (group: {
+    key: string;
+    messages: Array<{ id: number }>;
+  }) => {
+    try {
+      const { apiClient } = await import('../services/api.js');
+      await Promise.all(
+        group.messages.map(m =>
+          apiClient.post(`/automation/notifications/${m.id}/cancel`).catch(() => {})
+        )
+      );
+      toastEvent.trigger('Staged message dismissed', 'info');
+      onActionComplete();
+    } catch (err) {
+      console.error('Failed to dismiss staged notification:', err);
     }
   };
 
@@ -2361,10 +2424,47 @@ const QuickAssistSidebar = ({
     return list;
   }, [activeSpecialOrders]);
 
+  const groupedNotifications = useMemo(() => {
+    if (!Array.isArray(notifications)) return [];
+    const map = new Map<string, {
+      key: string;
+      recipient_name: string;
+      recipient_phone: string;
+      messages: Array<{ id: number; message: string; type?: string; reference_id?: string }>;
+      consolidatedMessage: string;
+    }>();
+
+    for (const notif of notifications) {
+      const key = (notif.recipient_phone || notif.recipient_name || String(notif.id)).trim();
+      let existing = map.get(key);
+      if (!existing) {
+        existing = {
+          key,
+          recipient_name: notif.recipient_name || 'Customer',
+          recipient_phone: notif.recipient_phone || '',
+          messages: [],
+          consolidatedMessage: notif.message || ''
+        };
+        map.set(key, existing);
+      }
+      existing.messages.push({
+        id: notif.id,
+        message: notif.message,
+        type: notif.type,
+        reference_id: notif.reference_id
+      });
+      if (notif.message && notif.message.length >= existing.consolidatedMessage.length) {
+        existing.consolidatedMessage = notif.message;
+      }
+    }
+
+    return Array.from(map.values());
+  }, [notifications]);
+
   if (!expanded) {
     const activeRefillsCount = groupedActionableRefills.length;
     const activeSpecialOrdersCount = groupedSpecialOrders.length;
-    const stagedNotificationsCount = Array.isArray(notifications) ? notifications.length : 0;
+    const stagedNotificationsCount = groupedNotifications.length;
 
     return (
       <div
@@ -2763,23 +2863,63 @@ const QuickAssistSidebar = ({
         <div>
           <div className="flex items-center gap-2 mb-2 text-xs font-bold uppercase tracking-wider text-purple-400">
             <MessageSquareIcon size={14} />
-            <span>Staged Messages ({notifications.length})</span>
+            <span>Staged Messages ({groupedNotifications.length})</span>
           </div>
-          {notifications.length === 0 ? (
+          {groupedNotifications.length === 0 ? (
             <p className="text-xs text-muted/60 pl-2">No staged messages</p>
           ) : (
             <div className="flex flex-col gap-2.5">
-              {notifications.map(msg => (
-                <div key={msg.id} className="p-3 rounded-xl bg-purple-500/[0.03] border border-purple-500/20 flex flex-col gap-2 min-w-0 overflow-hidden">
-                  <div className="flex items-center justify-between gap-2 min-w-0">
-                    <span className="font-semibold text-text truncate flex-1 min-w-0">{msg.recipient_name}</span>
-                    <span className="text-[10px] text-purple-400 font-bold font-mono truncate shrink-0 max-w-[110px]">{msg.recipient_phone}</span>
+              {groupedNotifications.map(group => {
+                const isSending = sendingNotifKeys.has(group.key);
+                return (
+                  <div key={group.key} className="p-3 rounded-xl bg-purple-500/[0.03] border border-purple-500/20 flex flex-col gap-2 min-w-0 overflow-hidden shadow-sm">
+                    <div className="flex items-center justify-between gap-2 min-w-0">
+                      <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                        <span className="font-semibold text-text truncate">{group.recipient_name}</span>
+                        {group.messages.length > 1 && (
+                          <span className="px-1.5 py-0.2 rounded-full bg-purple-500/15 text-purple-400 text-[9px] font-bold shrink-0">
+                            {group.messages.length} meds
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-[10px] text-purple-400 font-bold font-mono truncate shrink-0 max-w-[110px]">{group.recipient_phone}</span>
+                    </div>
+
+                    <p className="text-[11px] text-muted leading-snug italic bg-bg3 p-2 rounded-lg border border-glass-border break-words">
+                      "{group.consolidatedMessage}"
+                    </p>
+
+                    <div className="flex items-center justify-end gap-1.5 pt-1 border-t border-border/30">
+                      <button
+                        type="button"
+                        onClick={() => handleDismissStagedNotificationGroup(group)}
+                        className="py-1 px-2.5 rounded bg-bg2 hover:bg-bg3 text-muted hover:text-text text-[9px] font-bold uppercase transition-colors border border-border cursor-pointer flex items-center gap-1"
+                        title="Dismiss staged message without sending"
+                      >
+                        <X size={10} /> Dismiss
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={isSending}
+                        onClick={() => handleSendStagedNotificationGroup(group)}
+                        className="py-1 px-2.5 rounded bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-[9px] font-black tracking-wide uppercase transition-colors shadow-sm cursor-pointer flex items-center gap-1 shrink-0"
+                        title="Send consolidated WhatsApp message to customer"
+                      >
+                        {isSending ? (
+                          <>
+                            <Loader2 size={10} className="animate-spin" /> Sending...
+                          </>
+                        ) : (
+                          <>
+                            <SendIcon size={10} /> Send WhatsApp
+                          </>
+                        )}
+                      </button>
+                    </div>
                   </div>
-                  <p className="text-[11px] text-muted leading-snug italic bg-bg3 p-1.5 rounded-lg border border-glass-border break-words">
-                    "{msg.message}"
-                  </p>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

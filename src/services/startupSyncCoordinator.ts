@@ -11,15 +11,15 @@ class StartupSyncCoordinator {
   private cartLoaded: boolean = false;
   private syncPending: boolean = true;
   private startupTime: number = Date.now();
-  private maxTimeoutMs: number = 15000;
+  private maxTimeoutMs: number = 45000;
   private resolveCallbacks: Array<() => void> = [];
   private timeoutHandle: NodeJS.Timeout | null = null;
 
   constructor() {
-    // Auto-release after safety timeout (15 seconds) so background scanning is never blocked forever
+    // Auto-release after safety timeout (45 seconds) so background scanning is never blocked forever
     this.timeoutHandle = setTimeout(() => {
       if (this.syncPending && !this.cartLoaded) {
-        console.log('[StartupSyncCoordinator] 15s startup window elapsed. Releasing background scanners.');
+        console.log('[StartupSyncCoordinator] 45s startup window elapsed. Releasing background scanners.');
         this.releaseWaiters();
       }
     }, this.maxTimeoutMs);

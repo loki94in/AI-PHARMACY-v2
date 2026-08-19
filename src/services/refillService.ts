@@ -185,20 +185,87 @@ export async function createQuickBillForRefill(db: any, refill: any): Promise<nu
      VALUES (?, ?, ?, ?, ?, ?)`,
     [invoice_no, temp_label, refill.patient_name, refill.patient_phone, 'AUTO_REFILL_BILL', cart_data]
   );
-  
+
+  await syncStagedRefillNotificationForPatient(db, refill.patient_name, refill.patient_phone);
+
+  return billResult.lastID;
+}
+
+export async function syncStagedRefillNotificationForPatient(db: any, patientName: string, patientPhone: string): Promise<void> {
   const configuredName = await getConfiguredPharmacyName(db);
-  if (configuredName) {
-    const storePhone = await getStorePhone(db);
-    const storeLabel = storePhone ? `${configuredName} (Ph: ${storePhone})` : configuredName;
-    const msg = `Hi ${refill.patient_name}, your refill for ${refill.medicine_name} is in stock and ready. You may collect your medicine anytime from ${storeLabel}.`;
+  if (!configuredName || (!patientName && !patientPhone)) return;
+  const storePhone = await getStorePhone(db);
+  const storeLabel = storePhone ? `${configuredName} (Ph: ${storePhone})` : configuredName;
+
+  // Find all active, ready patient refills for this patient that have not been notified/completed
+  const readyRefills = await db.all(
+    `SELECT pr.id, m.name as medicine_name 
+     FROM patient_refills pr
+     JOIN medicines m ON pr.medicine_id = m.id
+     WHERE (pr.patient_phone = ? OR pr.patient_name = ?)
+       AND pr.is_active = 1
+       AND pr.status NOT IN ('completed', 'canceled', 'notified')
+       AND (pr.is_ready = 1 OR pr.hold_for_stock = 0)
+     ORDER BY pr.id ASC`,
+    [patientPhone, patientName]
+  );
+
+  if (!readyRefills || readyRefills.length === 0) {
+    // If no ready refills remain, remove any stale staged notification for this patient
+    await db.run(
+      `DELETE FROM automation_notifications 
+       WHERE type = 'refill_collection' AND status = 'staged' AND (recipient_phone = ? OR recipient_name = ?)`,
+      [patientPhone, patientName]
+    );
+    return;
+  }
+
+  // Deduplicate medicine names
+  const medNames = Array.from(new Set(readyRefills.map((r: any) => r.medicine_name).filter(Boolean)));
+  const refillIds = readyRefills.map((r: any) => r.id);
+
+  let formattedMeds = '';
+  if (medNames.length === 1) {
+    formattedMeds = medNames[0];
+  } else if (medNames.length === 2) {
+    formattedMeds = `${medNames[0]} and ${medNames[1]}`;
+  } else {
+    formattedMeds = `${medNames.slice(0, -1).join(', ')}, and ${medNames[medNames.length - 1]}`;
+  }
+
+  const noun = medNames.length > 1 ? 'refills' : 'refill';
+  const medNoun = medNames.length > 1 ? 'medicines' : 'medicine';
+  const msg = `Hi ${patientName}, your ${noun} for ${formattedMeds} ${medNames.length > 1 ? 'are' : 'is'} in stock and ready. You may collect your ${medNoun} anytime from ${storeLabel}.`;
+  const referenceIdStr = refillIds.join(',');
+
+  // Check if a staged notification already exists for this patient
+  const existing = await db.get(
+    `SELECT id FROM automation_notifications 
+     WHERE type = 'refill_collection' AND status = 'staged' AND (recipient_phone = ? OR recipient_name = ?)
+     ORDER BY id ASC LIMIT 1`,
+    [patientPhone, patientName]
+  );
+
+  if (existing) {
+    await db.run(
+      `UPDATE automation_notifications 
+       SET message = ?, reference_id = ?, recipient_name = ?, recipient_phone = ?, needs_confirmation = 1
+       WHERE id = ?`,
+      [msg, referenceIdStr, patientName, patientPhone, existing.id]
+    );
+    // Remove any duplicate staged rows for this patient
+    await db.run(
+      `DELETE FROM automation_notifications 
+       WHERE type = 'refill_collection' AND status = 'staged' AND (recipient_phone = ? OR recipient_name = ?) AND id != ?`,
+      [patientPhone, patientName, existing.id]
+    );
+  } else {
     await db.run(
       `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, needs_confirmation, reference_id)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      ['refill_collection', refill.patient_name, refill.patient_phone, msg, 'staged', 1, String(refill.id)]
+      ['refill_collection', patientName, patientPhone, msg, 'staged', 1, referenceIdStr]
     );
   }
-
-  return billResult.lastID;
 }
 
 export async function triggerPendingRefillsForMedicine(db: Database, medicineId: number): Promise<void> {
@@ -217,6 +284,8 @@ export async function triggerPendingRefillsForMedicine(db: Database, medicineId:
     [medicineId]
   );
 
+  const affectedPatients = new Set<string>();
+
   for (const refill of pendingRefills) {
     let quickBillId = refill.quick_bill_id;
     if (!quickBillId) {
@@ -226,6 +295,12 @@ export async function triggerPendingRefillsForMedicine(db: Database, medicineId:
       "UPDATE patient_refills SET is_ready = 1, hold_for_stock = 0, quick_bill_id = ? WHERE id = ?",
       [quickBillId, refill.id]
     );
+    affectedPatients.add(`${refill.patient_name || ''}|||${refill.patient_phone || ''}`);
+  }
+
+  for (const p of affectedPatients) {
+    const [name, phone] = p.split('|||');
+    await syncStagedRefillNotificationForPatient(db, name, phone);
   }
 }
 

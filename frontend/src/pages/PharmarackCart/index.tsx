@@ -1112,14 +1112,11 @@ export default function PharmarackCart() {
   };
 
   const getRefillItemInCart = (refill: Refill) => {
-    const refillNameNorm = (refill.medicine_name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-    for (const dist of distributors) {
-      for (const item of dist.items) {
-        const cartNameNorm = item.productName.toLowerCase().replace(/[^a-z0-9]/g, '');
-        if (cartNameNorm.includes(refillNameNorm) || refillNameNorm.includes(cartNameNorm)) {
-          return item;
-        }
-      }
+    const refillName = refill.medicine_name || '';
+    if (!refillName) return null;
+    const { matchedItem, result } = findBestCartMatchForOrder({ product: refillName }, distributors);
+    if (result && result.isMatch) {
+      return matchedItem;
     }
     return null;
   };

@@ -635,13 +635,15 @@ server.on('error', (err: any) => {
           console.log('[Boot] Background initialization sequence completed');
         });
 
-        // Auto-start WhatsApp client on server boot if saved session exists
-        import('./whatsappClient.js').then(async (m) => {
-          if (m.hasSavedSession()) {
-            console.log('[Boot] Saved WhatsApp session detected. Auto-starting WhatsApp client...');
-            await m.initClient().catch(err => console.error('[Boot] Auto WhatsApp init failed:', err));
-          }
-        }).catch(err => console.error('[Boot] WhatsApp client module load failed:', err));
+        // Auto-start WhatsApp client on server boot if saved session exists (staggered T+45s to avoid Chrome resource contention with Pharmarack on boot)
+        setTimeout(() => {
+          import('./whatsappClient.js').then(async (m) => {
+            if (m.hasSavedSession()) {
+              console.log('[Boot] Saved WhatsApp session detected. Auto-starting WhatsApp client (staggered T+45s)...');
+              await m.initClient().catch(err => console.error('[Boot] Auto WhatsApp init failed:', err));
+            }
+          }).catch(err => console.error('[Boot] WhatsApp client module load failed:', err));
+        }, 45_000);
 
         // WhatsApp Queue Worker — self-gating: only starts 30s interval if whatsapp_enabled + automation_enabled
         import('./services/whatsappQueue.js').then(m => m.whatsappQueue.startWorker()).catch(err => console.error('[Boot] WhatsApp queue worker start failed:', err));

@@ -516,8 +516,8 @@ class WhatsAppQueueWorker {
           // Send message via WhatsApp provider (strictly ONE active send)
           const sendResult = await sendMessage(item.number, item.media_url || undefined, item.message, fileObj);
 
-          if (!sendResult.sent) {
-            throw new Error('sendMessage returned without sending');
+          if (!sendResult || !sendResult.sent) {
+            throw new Error('WhatsApp message could not be sent (client not ready or disconnected)');
           }
 
           // STRICT OUTBOX VERIFICATION:
