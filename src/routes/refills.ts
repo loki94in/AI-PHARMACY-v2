@@ -554,6 +554,101 @@ router.post('/:id/fulfill', async (req, res) => {
   }
 });
 
+// Update refill status specifically (supports POST /:id/status and PUT /:id/status)
+const handleRefillStatusUpdate = async (req: express.Request, res: express.Response) => {
+  const { id } = req.params;
+  const { status } = req.body;
+  if (!status || typeof status !== 'string') {
+    return res.status(400).json({ error: 'Valid status is required' });
+  }
+
+  const normalizedStatus = status.toLowerCase().trim();
+  let db;
+  try {
+    db = await dbManager.getConnection();
+    const refill = await db.get('SELECT * FROM patient_refills WHERE id = ?', [id]);
+    if (!refill) {
+      return res.status(404).json({ error: 'Refill not found' });
+    }
+
+    if (normalizedStatus === 'completed' || normalizedStatus === 'fulfilled') {
+      const interval = refill.refill_interval_days || 30;
+      const nextDate = new Date();
+      nextDate.setDate(nextDate.getDate() + interval);
+      const nextDateStr = nextDate.toISOString().slice(0, 19).replace('T', ' ');
+
+      await db.run(
+        `UPDATE patient_refills 
+         SET last_refill_date = datetime('now'),
+             next_refill_date = ?,
+             stock_verified_override = 0,
+             ordering_triggered = 0,
+             is_ready = 0,
+             hold_for_stock = 0,
+             quick_bill_id = NULL,
+             status = 'pending',
+             reminder_status = 'NOT_SENT',
+             reminder_sent_at = NULL,
+             reminder_job_id = NULL,
+             reminder_occurrence_date = NULL
+         WHERE id = ?`,
+        [nextDateStr, id]
+      );
+
+      // Clean up staged notification for this refill
+      await db.run(
+        `UPDATE automation_notifications 
+         SET status = 'sent_manually', lifecycle_status = 'sent' 
+         WHERE type = 'refill_collection' AND (reference_id = ? OR reference_id LIKE ? OR reference_id LIKE ?) AND status = 'staged'`,
+        [String(id), `${id},%`, `%,${id}%`]
+      );
+
+      await checkAllRefills(db);
+      return res.json({ success: true, message: 'Refill completed and advanced to next cycle' });
+    } else if (normalizedStatus === 'notified' || normalizedStatus === 'dismissed') {
+      await db.run(
+        `UPDATE patient_refills 
+         SET status = 'notified', reminder_status = 'SENT', reminder_sent_at = datetime('now')
+         WHERE id = ?`,
+        [id]
+      );
+      await db.run(
+        `UPDATE automation_notifications 
+         SET status = 'cancelled', lifecycle_status = 'cancelled' 
+         WHERE type = 'refill_collection' AND (reference_id = ? OR reference_id LIKE ? OR reference_id LIKE ?) AND status = 'staged'`,
+        [String(id), `${id},%`, `%,${id}%`]
+      );
+      return res.json({ success: true, message: 'Refill status updated to notified' });
+    } else if (normalizedStatus === 'canceled' || normalizedStatus === 'cancelled') {
+      await db.run(
+        `UPDATE patient_refills 
+         SET status = 'canceled', is_active = 0, is_ready = 0, hold_for_stock = 0
+         WHERE id = ?`,
+        [id]
+      );
+      await db.run(
+        `UPDATE automation_notifications 
+         SET status = 'cancelled', lifecycle_status = 'cancelled' 
+         WHERE type = 'refill_collection' AND (reference_id = ? OR reference_id LIKE ? OR reference_id LIKE ?) AND status = 'staged'`,
+        [String(id), `${id},%`, `%,${id}%`]
+      );
+      return res.json({ success: true, message: 'Refill cancelled' });
+    } else {
+      await db.run(
+        `UPDATE patient_refills SET status = ? WHERE id = ?`,
+        [status, id]
+      );
+      return res.json({ success: true, message: `Refill status updated to ${status}` });
+    }
+  } catch (err: any) {
+    console.error('Failed to update refill status:', err);
+    res.status(500).json({ error: 'Internal server error: ' + err.message });
+  }
+};
+
+router.post('/:id/status', handleRefillStatusUpdate);
+router.put('/:id/status', handleRefillStatusUpdate);
+
 // Send WhatsApp reminder for a single refill item
 router.post('/:id/send', async (req, res) => {
   const { id } = req.params;

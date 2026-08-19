@@ -55,17 +55,38 @@ router.post('/notifications/:id/retry', async (req, res) => {
   }
 });
 
-// Cancel a notification in queue
+// Cancel / dismiss a notification in queue or staged
 router.post('/notifications/:id/cancel', async (req, res) => {
   const { id } = req.params;
   try {
-    const { messagingQueue } = await import('../services/messagingQueue.js');
-    const success = await messagingQueue.cancelMessage(Number(id));
-    if (success) {
-      res.json({ success: true, message: 'Notification successfully cancelled' });
-    } else {
-      res.status(400).json({ error: 'Failed to cancel notification. Message might not be in pending or failed status.' });
+    const db = await dbManager.getConnection();
+    const existing = await db.get('SELECT * FROM automation_notifications WHERE id = ?', [id]);
+    if (!existing) {
+      return res.status(404).json({ error: 'Notification not found' });
     }
+
+    await db.run(
+      'UPDATE automation_notifications SET status = "cancelled", lifecycle_status = "cancelled" WHERE id = ?',
+      [id]
+    );
+
+    // If this was a refill staged notification, mark the referenced refills as notified so background sync does not immediately re-stage them
+    if (existing.reference_id && (existing.type === 'refill_collection' || existing.type === 'refill_reminder')) {
+      const refIds = String(existing.reference_id).split(',').map((s: string) => Number(s.trim())).filter(Boolean);
+      for (const refId of refIds) {
+        await db.run(
+          "UPDATE patient_refills SET status = 'notified', reminder_status = 'SENT', reminder_sent_at = datetime('now') WHERE id = ?",
+          [refId]
+        ).catch(() => {});
+      }
+    }
+
+    try {
+      const { messagingQueue } = await import('../services/messagingQueue.js');
+      await messagingQueue.cancelMessage(Number(id));
+    } catch (_) {}
+
+    res.json({ success: true, message: 'Notification successfully cancelled / dismissed' });
   } catch (err: any) {
     console.error('Failed to cancel notification:', err);
     res.status(500).json({ error: 'Internal server error: ' + err.message });

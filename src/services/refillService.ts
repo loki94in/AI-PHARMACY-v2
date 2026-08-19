@@ -197,7 +197,7 @@ export async function syncStagedRefillNotificationForPatient(db: any, patientNam
   const storePhone = await getStorePhone(db);
   const storeLabel = storePhone ? `${configuredName} (Ph: ${storePhone})` : configuredName;
 
-  // Find all active, ready patient refills for this patient that have not been notified/completed
+  // Find all active, ready patient refills for this patient that have not been notified/completed and due within upcoming 7 calendar days
   const readyRefills = await db.all(
     `SELECT pr.id, m.name as medicine_name 
      FROM patient_refills pr
@@ -206,6 +206,7 @@ export async function syncStagedRefillNotificationForPatient(db: any, patientNam
        AND pr.is_active = 1
        AND pr.status NOT IN ('completed', 'canceled', 'notified')
        AND (pr.is_ready = 1 OR pr.hold_for_stock = 0)
+       AND (pr.next_refill_date IS NULL OR pr.next_refill_date <= date('now', '+7 days'))
      ORDER BY pr.id ASC`,
     [patientPhone, patientName]
   );
@@ -221,7 +222,7 @@ export async function syncStagedRefillNotificationForPatient(db: any, patientNam
   }
 
   // Deduplicate medicine names
-  const medNames = Array.from(new Set(readyRefills.map((r: any) => r.medicine_name).filter(Boolean)));
+  const medNames = Array.from(new Set(readyRefills.map((r: any) => r.medicine_name).filter(Boolean))) as string[];
   const refillIds = readyRefills.map((r: any) => r.id);
 
   let formattedMeds = '';

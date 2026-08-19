@@ -2107,7 +2107,6 @@ const QuickAssistSidebar = ({
     setSendingNotifKeys(prev => new Set(prev).add(group.key));
 
     try {
-      const { apiClient } = await import('../services/api.js');
       if (group.recipient_phone) {
         await api.enqueueSingleWhatsApp({
           number: group.recipient_phone,
@@ -2121,14 +2120,14 @@ const QuickAssistSidebar = ({
       // Mark staged notifications as sent manually
       await Promise.all(
         group.messages.map(m =>
-          apiClient.post(`/automation/notifications/${m.id}/manual`).catch(() => {})
+          api.manualNotification(m.id).catch(() => {})
         )
       );
 
       // Also update referenced patient_refills status
       for (const m of group.messages) {
         if (m.reference_id) {
-          const ids = m.reference_id.split(',').map(s => Number(s.trim())).filter(Boolean);
+          const ids = String(m.reference_id).split(',').map(s => Number(s.trim())).filter(Boolean);
           for (const refId of ids) {
             try {
               await apiClient.post(`/refills/${refId}/status`, { status: 'notified' });
@@ -2152,21 +2151,71 @@ const QuickAssistSidebar = ({
     }
   };
 
+  const [optimisticDismissedIds, setOptimisticDismissedIds] = useState<Set<number>>(new Set());
+  const [optimisticHiddenRefillIds, setOptimisticHiddenRefillIds] = useState<Set<number>>(new Set());
+
   const handleDismissStagedNotificationGroup = async (group: {
     key: string;
-    messages: Array<{ id: number }>;
+    messages: Array<{ id: number; reference_id?: string }>;
   }) => {
+    const ids = group.messages.map(m => m.id);
+    setOptimisticDismissedIds(prev => {
+      const next = new Set(prev);
+      ids.forEach(id => next.add(id));
+      return next;
+    });
+
     try {
-      const { apiClient } = await import('../services/api.js');
       await Promise.all(
-        group.messages.map(m =>
-          apiClient.post(`/automation/notifications/${m.id}/cancel`).catch(() => {})
+        ids.map(id =>
+          api.cancelNotification(id).catch(() => {})
         )
       );
+
+      // Await referenced patient_refills status updates so background sync does not re-stage them
+      const refIdPromises: Promise<any>[] = [];
+      for (const m of group.messages) {
+        if (m.reference_id) {
+          const refIds = String(m.reference_id).split(',').map(s => Number(s.trim())).filter(Boolean);
+          for (const refId of refIds) {
+            refIdPromises.push(apiClient.post(`/refills/${refId}/status`, { status: 'notified' }).catch(() => {}));
+          }
+        }
+      }
+      if (refIdPromises.length > 0) {
+        await Promise.all(refIdPromises);
+      }
+
       toastEvent.trigger('Staged message dismissed', 'info');
+      refillEvent.triggerRefresh();
       onActionComplete();
     } catch (err) {
       console.error('Failed to dismiss staged notification:', err);
+    }
+  };
+
+  const handleCompleteRefillGroup = async (group: { patient_name: string; medicines: Array<{ id: number }> }) => {
+    const ids = group.medicines.map(m => m.id);
+    setOptimisticHiddenRefillIds(prev => {
+      const next = new Set(prev);
+      ids.forEach(id => next.add(id));
+      return next;
+    });
+
+    try {
+      await Promise.all(ids.map(id => apiClient.post(`/refills/${id}/status`, { status: 'completed' }).catch(() => {})));
+      toastEvent.trigger(`Marked refills for ${group.patient_name} as Completed!`, 'success');
+      queryClient.invalidateQueries({ queryKey: ['refills'] });
+      refillEvent.triggerRefresh();
+      onActionComplete();
+    } catch (err) {
+      console.error('Failed to complete refills:', err);
+      toastEvent.trigger('Failed to complete refills', 'error');
+      setOptimisticHiddenRefillIds(prev => {
+        const next = new Set(prev);
+        ids.forEach(id => next.delete(id));
+        return next;
+      });
     }
   };
 
@@ -2245,20 +2294,29 @@ const QuickAssistSidebar = ({
     }
   };
 
-  // Filter actionable refills: active and due within today + upcoming 7 calendar days (diffDays <= 7)
+  // Filter actionable refills: active, non-completed, and due within today + upcoming 7 calendar days (diffDays <= 7)
   const actionableRefills = useMemo(() => {
     const today = new Date();
     const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
 
     return (Array.isArray(refills) ? refills : []).filter(r => {
-      if (r.is_active !== 1 || !r.next_refill_date) return false;
+      if (
+        r.is_active !== 1 ||
+        !r.next_refill_date ||
+        r.status === 'completed' ||
+        r.status === 'fulfilled' ||
+        r.status === 'canceled' ||
+        optimisticHiddenRefillIds.has(r.id)
+      ) {
+        return false;
+      }
       const d = new Date(r.next_refill_date);
       if (isNaN(d.getTime())) return false;
       const dueStart = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
       const diffDays = Math.round((dueStart - todayStart) / 86400000);
       return diffDays <= 7;
     });
-  }, [refills]);
+  }, [refills, optimisticHiddenRefillIds]);
 
   const groupedActionableRefills = useMemo(() => {
     const today = new Date();
@@ -2434,7 +2492,35 @@ const QuickAssistSidebar = ({
       consolidatedMessage: string;
     }>();
 
+    const normalizePhone = (p?: string | null) => (p || '').replace(/\D/g, '').slice(-10);
+
+    // 7-Day Rule: Collect normalized patient phones & lowercased names for actionable refills (due within 7 days) and active special requests
+    const active7DayPhoneSet = new Set<string>();
+    const active7DayNameSet = new Set<string>();
+
+    for (const r of groupedActionableRefills) {
+      const normP = normalizePhone(r.patient_phone);
+      if (normP) active7DayPhoneSet.add(normP);
+      if (r.patient_name) active7DayNameSet.add(r.patient_name.trim().toLowerCase());
+    }
+    for (const s of groupedSpecialOrders) {
+      const normP = normalizePhone(s.phone);
+      if (normP) active7DayPhoneSet.add(normP);
+      if (s.requester) active7DayNameSet.add(s.requester.trim().toLowerCase());
+    }
+
     for (const notif of notifications) {
+      if (optimisticDismissedIds.has(notif.id)) continue;
+
+      const notifPhoneNorm = normalizePhone(notif.recipient_phone);
+      const notifNameNorm = (notif.recipient_name || '').trim().toLowerCase();
+
+      // Enforce strict upcoming 7-day rule: ONLY display staged messages for patients with active 7-day refills or special requests
+      const has7DayMatch = (notifPhoneNorm && active7DayPhoneSet.has(notifPhoneNorm)) || (notifNameNorm && active7DayNameSet.has(notifNameNorm));
+      if (!has7DayMatch) {
+        continue;
+      }
+
       const key = (notif.recipient_phone || notif.recipient_name || String(notif.id)).trim();
       let existing = map.get(key);
       if (!existing) {
@@ -2459,7 +2545,7 @@ const QuickAssistSidebar = ({
     }
 
     return Array.from(map.values());
-  }, [notifications]);
+  }, [notifications, optimisticDismissedIds, groupedActionableRefills, groupedSpecialOrders]);
 
   if (!expanded) {
     const activeRefillsCount = groupedActionableRefills.length;
@@ -2694,6 +2780,18 @@ const QuickAssistSidebar = ({
                             <span>Send</span>
                           </button>
                         )}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleCompleteRefillGroup(group);
+                          }}
+                          className="py-0.5 px-2 rounded bg-bg3 hover:bg-emerald-600/30 text-muted hover:text-emerald-300 border border-border/40 text-[9px] font-bold uppercase transition-colors flex items-center gap-1 cursor-pointer"
+                          title={`Mark all refills for ${group.patient_name} as Completed`}
+                        >
+                          <Check size={10} />
+                          <span>Complete All</span>
+                        </button>
                       </div>
                     </div>
                   </div>

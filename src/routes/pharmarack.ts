@@ -1977,12 +1977,21 @@ router.get('/live-cart-summary', async (req, res) => {
     }
 
     const db = await dbManager.getConnection();
-    const pendingOrders = await db.all("SELECT * FROM special_orders WHERE status = 'Pending' OR status = 'Ordered' ORDER BY id DESC");
+    const [pendingOrders, ignoredRows] = await Promise.all([
+      db.all("SELECT * FROM special_orders WHERE status = 'Pending' OR status = 'Ordered' ORDER BY id DESC"),
+      db.all("SELECT word FROM permanently_ignored_words").catch(() => [])
+    ]);
+
+    const ignoredWordsSet = new Set((ignoredRows || []).map((r: any) => String(r.word || '').toLowerCase().trim()).filter(Boolean));
+    const filteredOrders = (pendingOrders || []).filter((o: any) => {
+      const p = (o.product || '').toLowerCase().trim();
+      return p && !ignoredWordsSet.has(p);
+    });
 
     return res.json({
       success: true,
       cart: { distributors: cartDistributors },
-      orders: pendingOrders || [],
+      orders: filteredOrders,
       autoRefills: []
     });
   } catch (err: any) {

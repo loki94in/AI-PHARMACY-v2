@@ -201,13 +201,49 @@ const toTitleCase = (str: string): string => {
   return str.toLowerCase().replace(/(?:^|\s|-|\/|\()\S/g, (match) => match.toUpperCase());
 };
 
+// Helper to check if a medicine name is permanently ignored
+export const isMedicineIgnored = (name: string | undefined | null, ignoredList: Array<{ word: string }>): boolean => {
+  if (!name || !name.trim()) return false;
+  const clean = name.trim().toLowerCase();
+  for (const item of ignoredList) {
+    const w = (item.word || '').trim().toLowerCase();
+    if (!w) continue;
+    if (clean === w || clean.includes(w) || w.includes(clean)) {
+      return true;
+    }
+  }
+  return false;
+};
+
 // Module-Level Variable Cache (Preserved across mounts for <5ms instant rendering)
+const loadInitialSkippedKeys = (): Set<string> => {
+  try {
+    const raw = localStorage.getItem('pharmarack_live_skipped_keys') || sessionStorage.getItem('pharmarack_live_skipped_keys');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return new Set(parsed);
+      }
+    }
+  } catch {}
+  return new Set();
+};
+
+const saveSkippedKeys = (keys: Set<string>) => {
+  try {
+    const serialized = JSON.stringify(Array.from(keys));
+    localStorage.setItem('pharmarack_live_skipped_keys', serialized);
+    sessionStorage.setItem('pharmarack_live_skipped_keys', serialized);
+  } catch {}
+};
+
 let cachedCartDistributors: Distributor[] = [];
 let cachedPendingOrders: SpecialOrder[] = [];
 let cachedPendingRefills: Refill[] = [];
 let cachedReconOrders: any[] = [];
 let cachedAutoRefillItems: any[] = [];
 let cachedIgnoredWords: Array<{ id: number; word: string; source: string; created_at: string }> = [];
+let cachedSkippedItemKeys: Set<string> = loadInitialSkippedKeys();
 let cachedPrMode: 'Live' | 'Unknown' = 'Live';
 
 export interface LiveCartAddModalProps {
@@ -429,24 +465,20 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
   // Pending Filter Tab State
   const [pendingFilterTab, setPendingFilterTab] = useState<'all' | 'bounced' | 'orders' | 'minstock' | 'skipped'>('all');
 
-  // Temporary Session Skip Handlers (valid medicines skipped for current order run only)
-  const [skippedItemKeys, setSkippedItemKeys] = useState<Set<string>>(new Set());
+  // Temporary Session Skip Handlers (valid medicines skipped for current order run only - preserved in module cache)
+  const [skippedItemKeys, setSkippedItemKeys] = useState<Set<string>>(() => new Set(cachedSkippedItemKeys));
 
   const handleSkipItem = (itemKey: string, medicineName: string) => {
-    setSkippedItemKeys((prev) => {
-      const next = new Set(prev);
-      next.add(itemKey);
-      return next;
-    });
+    cachedSkippedItemKeys.add(itemKey);
+    saveSkippedKeys(cachedSkippedItemKeys);
+    setSkippedItemKeys(new Set(cachedSkippedItemKeys));
     toastEvent.trigger(`Skipped "${medicineName}" for this order run`, 'info');
   };
 
   const handleUnskipItem = (itemKey: string, medicineName: string) => {
-    setSkippedItemKeys((prev) => {
-      const next = new Set(prev);
-      next.delete(itemKey);
-      return next;
-    });
+    cachedSkippedItemKeys.delete(itemKey);
+    saveSkippedKeys(cachedSkippedItemKeys);
+    setSkippedItemKeys(new Set(cachedSkippedItemKeys));
     toastEvent.trigger(`Restored "${medicineName}" to pending list`, 'success');
   };
 
@@ -470,6 +502,20 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
       if (Array.isArray(data)) {
         cachedIgnoredWords = data;
         setIgnoredWords(data);
+
+        if (data.length > 0) {
+          setPendingOrders(prev => prev.filter(o => !isMedicineIgnored(o.product, data)));
+          setPendingRefills(prev => prev.filter(r => !isMedicineIgnored(r.medicine_name, data)));
+          setAutoRefillItems(prev => prev.filter(i => !isMedicineIgnored(i.medicine_name, data)));
+          setReconOrders(prev =>
+            prev
+              .map(r => ({
+                ...r,
+                medicine_names: r.medicine_names ? r.medicine_names.filter((m: string) => !isMedicineIgnored(m, data)) : []
+              }))
+              .filter(r => r.medicine_names && r.medicine_names.length > 0)
+          );
+        }
       }
     } catch (err) {
       console.error('Failed to fetch ignored words in modal:', err);
@@ -480,17 +526,29 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
     if (!word || !word.trim()) return;
     const clean = word.trim();
     try {
-      await api.addIgnoredWord(clean, 'recon');
+      await api.addIgnoredWord(clean, 'user_ignore');
+
+      // 1. Immediately update ignoredWords state so the badge count increments instantly
+      const newEntry = { id: Date.now(), word: clean, source: 'user_ignore', created_at: new Date().toISOString() };
+      const updatedIgnored = [newEntry, ...cachedIgnoredWords.filter((w) => w.word.toLowerCase() !== clean.toLowerCase())];
+      cachedIgnoredWords = updatedIgnored;
+      setIgnoredWords(updatedIgnored);
+
+      // 2. Immediately filter out of all active pending lists in UI
+      setPendingOrders((prev) => prev.filter((o) => !isMedicineIgnored(o.product, updatedIgnored)));
+      setPendingRefills((prev) => prev.filter((r) => !isMedicineIgnored(r.medicine_name, updatedIgnored)));
+      setAutoRefillItems((prev) => prev.filter((i) => !isMedicineIgnored(i.medicine_name, updatedIgnored)));
       setReconOrders((prev) =>
         prev
           .map((r) => ({
             ...r,
-            medicine_names: r.medicine_names ? r.medicine_names.filter((m: string) => m.toLowerCase() !== clean.toLowerCase()) : []
+            medicine_names: r.medicine_names ? r.medicine_names.filter((m: string) => !isMedicineIgnored(m, updatedIgnored)) : []
           }))
           .filter((r) => r.medicine_names && r.medicine_names.length > 0)
       );
-      await fetchIgnoredWords();
-      toastEvent.trigger(`Ignored "${clean}" from Recon & OCR`, 'success');
+
+      fetchIgnoredWords();
+      toastEvent.trigger(`Ignored "${clean}" and removed from pending lists`, 'success');
     } catch (err) {
       console.error('Failed to ignore word:', err);
       toastEvent.trigger('Failed to ignore word', 'error');
@@ -656,7 +714,10 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
     try {
       const data = await api.getOrders();
       if (Array.isArray(data)) {
-        const filtered = data.filter(o => o.status === 'Pending' || o.status === 'Ordered');
+        const filtered = data.filter(o => 
+          (o.status === 'Pending' || o.status === 'Ordered') &&
+          !isMedicineIgnored(o.product, cachedIgnoredWords)
+        );
         cachedPendingOrders = filtered;
         setPendingOrders(filtered);
       }
@@ -677,6 +738,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
 
           patient.medicines.forEach((m: any) => {
             if (m.status === 'canceled' || m.is_active === 0) return;
+            if (isMedicineIgnored(m.medicine_name, cachedIgnoredWords)) return;
 
             const dueDate = new Date(patient.next_refill_date);
             const diffMs = dueDate.getTime() - today.getTime();
@@ -718,7 +780,10 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
     try {
       const data = await api.getRefills();
       if (Array.isArray(data)) {
-        const filtered = data.filter(r => Boolean(r.is_active) && r.status !== 'completed' && r.status !== 'canceled');
+        const filtered = data.filter(r => {
+          if (!r.is_active || r.status === 'completed' || r.status === 'canceled') return false;
+          return !isMedicineIgnored(r.medicine_name, cachedIgnoredWords);
+        });
         cachedPendingRefills = filtered;
         setPendingRefills(filtered);
       }
@@ -731,8 +796,14 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
     try {
       const data = await api.getReconciliationList();
       if (Array.isArray(data)) {
-        // Only show unresolved / missing reconcile items
-        const filtered = data.filter((r: any) => !r.is_saved && r.status !== 'Matched');
+        // Only show unresolved / missing reconcile items and filter ignored words
+        const filtered = data
+          .filter((r: any) => !r.is_saved && r.status !== 'Matched')
+          .map((r: any) => ({
+            ...r,
+            medicine_names: r.medicine_names ? r.medicine_names.filter((m: string) => !isMedicineIgnored(m, cachedIgnoredWords)) : []
+          }))
+          .filter((r: any) => r.medicine_names && r.medicine_names.length > 0);
         cachedReconOrders = filtered;
         setReconOrders(filtered);
       }
@@ -984,7 +1055,8 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
   };
 
   const handleConfirmReconDistributor = async (recon: any, medName: string, picked: SuggestionMedicine) => {
-    setAddingOrderId(recon.email_uid); // Re-use addingOrderId as generic loading state
+    const reconUid = recon.uid || recon.email_uid || recon.id || 'recon';
+    setAddingOrderId(reconUid); // Re-use addingOrderId as generic loading state
     try {
       const payload = [{
         productId: picked.productId!,
@@ -1006,7 +1078,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
         // Track added medicine in session
         setAddedReconMedicines(prev => ({
           ...prev,
-          [recon.email_uid]: [...(prev[recon.email_uid] || []), medName]
+          [reconUid]: [...(prev[reconUid] || []), medName]
         }));
         
         setDistributorPickerReconMedicine('');
@@ -1082,13 +1154,16 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
         } else {
           await fetchCart(true);
         }
+
         if (Array.isArray(summary.orders)) {
-          cachedPendingOrders = summary.orders;
-          setPendingOrders(summary.orders);
+          const filteredOrders = summary.orders.filter((o: any) => !isMedicineIgnored(o.product, cachedIgnoredWords));
+          cachedPendingOrders = filteredOrders;
+          setPendingOrders(filteredOrders);
         }
         if (Array.isArray(summary.autoRefills)) {
-          cachedAutoRefillItems = summary.autoRefills;
-          setAutoRefillItems(summary.autoRefills);
+          const filteredRefills = summary.autoRefills.filter((a: any) => !isMedicineIgnored(a.medicine_name, cachedIgnoredWords));
+          cachedAutoRefillItems = filteredRefills;
+          setAutoRefillItems(filteredRefills);
         }
       } else {
         await fetchCart(true);
@@ -1120,6 +1195,10 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
 
   useEffect(() => {
     if (isOpen) {
+      const freshSkipped = loadInitialSkippedKeys();
+      cachedSkippedItemKeys = freshSkipped;
+      setSkippedItemKeys(new Set(freshSkipped));
+
       const hasCache = cachedCartDistributors.length > 0;
       // Fetch consolidated live cart summary immediately without 350ms delay
       fetchLiveCartSummary(hasCache);
@@ -1521,7 +1600,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
             <div className="flex items-center justify-between pb-2 shrink-0 border-b border-glass-border/30 gap-1.5 flex-wrap">
               <div className="flex items-center gap-1.5">
                 <span className="text-xs font-bold uppercase tracking-widest text-muted">
-                  Pending ({pendingOrders.filter(o => !skippedItemKeys.has(`order-${o.id}`)).length + pendingRefills.filter(r => !skippedItemKeys.has(`refill-${r.id}`)).length + reconOrders.filter(rc => (rc.medicine_names || [rc.subject]).some((m: string) => !skippedItemKeys.has(`recon-${rc.email_uid || m}-${m}`))).length + autoRefillItems.filter(a => !skippedItemKeys.has(`minstock-${a.medicine_id}`)).length})
+                  Pending ({pendingOrders.filter(o => !skippedItemKeys.has(`order-${o.id}`)).length + pendingRefills.filter(r => !skippedItemKeys.has(`refill-${r.id}`)).length + reconOrders.flatMap((rc, rcIdx) => (rc.medicine_names && rc.medicine_names.length > 0 ? rc.medicine_names : [rc.subject || 'Recon Medicine']).filter((m: string) => !skippedItemKeys.has(`recon-${rc.uid || rc.email_uid || rc.id || rcIdx}-${m.trim().toLowerCase()}`))).length + autoRefillItems.filter(a => !skippedItemKeys.has(`minstock-${a.medicine_id}`)).length})
                 </span>
               </div>
               <div className="flex gap-1 text-[8.5px] font-bold uppercase select-none flex-wrap">
@@ -1630,11 +1709,12 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
 
                     {/* 1. TOP PRIORITY: Reconcile & Bounced Email Orders */}
                     {reconOrders.flatMap((recon, reconIdx) => {
-                      const addedList = addedReconMedicines[recon.email_uid] || [];
+                      const reconUid = recon.uid || recon.email_uid || recon.id || `recon-${reconIdx}`;
+                      const addedList = addedReconMedicines[reconUid] || [];
                       const medNames: string[] = recon.medicine_names && recon.medicine_names.length > 0 ? recon.medicine_names : [recon.subject || 'Recon Medicine'];
 
                       return medNames.map((medName: string, medIdx: number) => {
-                        const itemKey = `recon-${recon.email_uid || reconIdx}-${medName}`;
+                        const itemKey = `recon-${reconUid}-${medName.trim().toLowerCase()}`;
                         const isSkipped = skippedItemKeys.has(itemKey);
                         const isAdded = addedList.includes(medName);
 
