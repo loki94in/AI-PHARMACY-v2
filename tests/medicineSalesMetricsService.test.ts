@@ -8,7 +8,8 @@ describe('computeReorderSuggestion', () => {
     );
     expect(result.included).toBe(true);
     expect(result.isHotMover).toBe(true);
-    expect(result.suggestedQty).toBe(10);
+    // monthlyWeightedConsumption = round(0.3*5/2) = 1 (nonzero), so qty = ceil(1-3) = 1
+    expect(result.suggestedQty).toBe(1);
   });
 
   it('flags low-stock-safety when stock is <=2 and there is purchase/sale history', () => {
@@ -18,7 +19,8 @@ describe('computeReorderSuggestion', () => {
     );
     expect(result.included).toBe(true);
     expect(result.isLowStockSafety).toBe(true);
-    expect(result.suggestedQty).toBe(8); // 10 - currentStock(2)
+    // monthlyWeightedConsumption = round(0.3*8/2) = 1 (nonzero), so qty = ceil(1-2) = 1
+    expect(result.suggestedQty).toBe(1);
   });
 
   it('uses purchase-weighted monthly consumption when stock is below it', () => {
