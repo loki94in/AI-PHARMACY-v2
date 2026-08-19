@@ -45,6 +45,9 @@ let cachedPendingOrders: SpecialOrder[] = [];
 let cachedPendingRefills: Refill[] = [];
 let cachedPriceHistory: Record<string, any[]> = {};
 let cachedLastFetched: Date | null = null;
+let cachedSentDates: string[] = [];
+let cachedSelectedSentDate: string = '';
+let cachedSentOrdersMap: Record<string, any[]> = {};
 
 const USER_CHECK_STORAGE_KEY = 'pharmacart_user_check_overrides_v1';
 const getTodayDateKey = () => new Date().toISOString().slice(0, 10);
@@ -172,9 +175,12 @@ export default function PharmarackCart() {
     }
   };
 
-  const [sentDates, setSentDates] = useState<string[]>([]);
-  const [selectedSentDate, setSelectedSentDate] = useState<string>('');
-  const [sentOrders, setSentOrders] = useState<any[]>([]);
+  const [sentDates, setSentDates] = useState<string[]>(() => cachedSentDates);
+  const [selectedSentDate, setSelectedSentDate] = useState<string>(() => cachedSelectedSentDate || (cachedSentDates[0] || ''));
+  const [sentOrders, setSentOrders] = useState<any[]>(() => {
+    const initDate = cachedSelectedSentDate || cachedSentDates[0];
+    return (initDate && cachedSentOrdersMap[initDate]) ? cachedSentOrdersMap[initDate] : [];
+  });
   const [sentOrdersLoading, setSentOrdersLoading] = useState<boolean>(false);
   const [readdingSentItems, setReaddingSentItems] = useState<boolean>(false);
 
@@ -417,9 +423,14 @@ export default function PharmarackCart() {
       const res = await api.getPharmarackSentDates();
       if (res && res.success && Array.isArray(res.dates)) {
         setSentDates(res.dates);
+        cachedSentDates = res.dates;
         if (res.dates.length > 0) {
           const targetDate = (!selectedSentDate || !res.dates.includes(selectedSentDate)) ? res.dates[0] : selectedSentDate;
           setSelectedSentDate(targetDate);
+          cachedSelectedSentDate = targetDate;
+          if (cachedSentOrdersMap[targetDate]) {
+            setSentOrders(cachedSentOrdersMap[targetDate]);
+          }
           loadSentOrdersForDate(targetDate);
         }
       }
@@ -430,11 +441,14 @@ export default function PharmarackCart() {
 
   const loadSentOrdersForDate = async (dateStr: string) => {
     if (!dateStr) return;
-    setSentOrdersLoading(true);
+    if (!cachedSentOrdersMap[dateStr] || cachedSentOrdersMap[dateStr].length === 0) {
+      setSentOrdersLoading(true);
+    }
     try {
       const res = await api.getPharmarackSentOrders(dateStr);
       if (res && res.success && Array.isArray(res.orders)) {
         setSentOrders(res.orders);
+        cachedSentOrdersMap[dateStr] = res.orders;
       }
     } catch (err) {
       console.error('Failed to load sent orders for date:', err);
@@ -443,17 +457,20 @@ export default function PharmarackCart() {
     }
   };
 
+  const handleSelectSentDate = (dateStr: string) => {
+    setSelectedSentDate(dateStr);
+    cachedSelectedSentDate = dateStr;
+    if (cachedSentOrdersMap[dateStr]) {
+      setSentOrders(cachedSentOrdersMap[dateStr]);
+    }
+    loadSentOrdersForDate(dateStr);
+  };
+
   useEffect(() => {
     if (sidebarTab === 'history' || currentTab === 'sent-history') {
       loadSentDates();
     }
   }, [sidebarTab, currentTab]);
-
-  useEffect(() => {
-    if ((sidebarTab === 'history' || currentTab === 'sent-history') && selectedSentDate) {
-      loadSentOrdersForDate(selectedSentDate);
-    }
-  }, [sidebarTab, currentTab, selectedSentDate]);
 
   const handleCopySentItemsToCart = async (items: any[]) => {
     if (!items || items.length === 0) return;
@@ -2819,8 +2836,8 @@ export default function PharmarackCart() {
             {/* Dates List */}
             <div className="flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar">
               {sentDates.length === 0 ? (
-                <div className="text-center py-10 text-xs text-muted italic">
-                  No historical dates found
+                <div className="text-center py-10 text-xs text-muted animate-pulse">
+                  Loading history dates…
                 </div>
               ) : (
                 sentDates.map(d => {
@@ -2834,7 +2851,7 @@ export default function PharmarackCart() {
                   return (
                     <button
                       key={d}
-                      onClick={() => setSelectedSentDate(d)}
+                      onClick={() => handleSelectSentDate(d)}
                       className={`w-full text-left p-3 rounded-xl transition-all cursor-pointer flex items-center justify-between gap-2 border ${
                         isSelected
                           ? 'bg-primary/15 border-primary/40 text-text shadow-md shadow-primary/5'
@@ -2884,13 +2901,13 @@ export default function PharmarackCart() {
 
             {/* Orders Grid / Cards */}
             <div className="flex-1 overflow-y-auto pr-1 space-y-4 custom-scrollbar">
-              {sentOrdersLoading ? (
+              {sentOrdersLoading && sentOrders.length === 0 ? (
                 <div className="text-center py-16 text-xs text-muted font-bold tracking-wider uppercase animate-pulse">
-                  Loading sent order history for {selectedSentDate}…
+                  Loading sent order history for {selectedSentDate || 'selected date'}…
                 </div>
               ) : sentOrders.length === 0 ? (
                 <div className="text-center py-20 text-xs text-muted italic select-none">
-                  No order dispatches found for date {selectedSentDate || 'selected'}.
+                  {selectedSentDate ? `No order dispatches found for date ${selectedSentDate}.` : 'Select a date from the left sidebar to view orders.'}
                 </div>
               ) : (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
