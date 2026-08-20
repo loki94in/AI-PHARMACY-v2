@@ -494,6 +494,7 @@ const Purchases: React.FC = () => {
   );
   const [distributorSearch, setDistributorSearch] = useState(initialActiveTab?.distributorSearch || '');
   const [showDistributorDropdown, setShowDistributorDropdown] = useState(false);
+  const [distributorHighlightIndex, setDistributorHighlightIndex] = useState(-1);
   const [invoiceNo, setInvoiceNo] = useState(initialActiveTab?.invoiceNo || '');
   const [grnNo, setGrnNo] = useState(initialActiveTab?.grnNo || '');
   const [invoiceDate, setInvoiceDate] = useState(initialActiveTab?.invoiceDate || '');
@@ -541,6 +542,18 @@ const Purchases: React.FC = () => {
   // Mapped distributors filter & state
   const [mappedDistributorIds, setMappedDistributorIds] = useState<Set<number>>(new Set());
   const [onlyMappedFilter, setOnlyMappedFilter] = useState(false);
+
+  // Auto-focus Distributor search on mount for keyboard-first entry
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const distEl = document.getElementById('distributor-search-input') as HTMLInputElement | null;
+      if (distEl && document.activeElement !== distEl) {
+        distEl.focus();
+        distEl.select?.();
+      }
+    }, 150);
+    return () => clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
     // B4: distributor-mapping lookups are non-essential at mount; wait for the
@@ -1245,8 +1258,20 @@ const Purchases: React.FC = () => {
       if (el) {
         el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
         el.focus();
+        el.select?.();
       }
     }, 60);
+  };
+
+  const focusRowField = (rowIndex: number, fieldName: string) => {
+    setTimeout(() => {
+      const el = document.querySelector(`input[data-row-index="${rowIndex}"][data-field="${fieldName}"]`) as HTMLInputElement | null;
+      if (el) {
+        el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        el.focus();
+        el.select?.();
+      }
+    }, 50);
   };
 
   // Auto-scroll row and dropdown into view when search dropdown opens
@@ -1264,12 +1289,7 @@ const Purchases: React.FC = () => {
       e.preventDefault();
       const targetIndex = index + 1;
       if (targetIndex < items.length) {
-        const el = document.querySelector(`input[data-row-index="${targetIndex}"][data-field="${fieldName}"]`) as HTMLInputElement;
-        if (el) {
-          el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-          el.focus();
-          el.select();
-        }
+        focusRowField(targetIndex, fieldName);
       }
       return;
     }
@@ -1278,23 +1298,123 @@ const Purchases: React.FC = () => {
       e.preventDefault();
       const targetIndex = index - 1;
       if (targetIndex >= 0) {
-        const el = document.querySelector(`input[data-row-index="${targetIndex}"][data-field="${fieldName}"]`) as HTMLInputElement;
-        if (el) {
-          el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-          el.focus();
-          el.select();
-        }
+        focusRowField(targetIndex, fieldName);
       }
       return;
     }
 
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      const targetIndex = index + 1;
-      if (index === items.length - 1) {
-        setItems(prev => [...prev, createEmptyItem()]);
+    // Forward Navigation: Enter or Tab (without Shift)
+    if (e.key === 'Enter' || (e.key === 'Tab' && !e.shiftKey)) {
+      if (fieldName === 'medicine_name') {
+        e.preventDefault();
+        focusRowField(index, 'batch_no');
+      } else if (fieldName === 'batch_no') {
+        e.preventDefault();
+        focusRowField(index, 'expiry_date');
+      } else if (fieldName === 'expiry_date') {
+        e.preventDefault();
+        focusRowField(index, 'rate');
+      } else if (fieldName === 'rate') {
+        e.preventDefault();
+        focusRowField(index, 'mrp');
+      } else if (fieldName === 'mrp') {
+        e.preventDefault();
+        focusRowField(index, 'qty');
+      } else if (fieldName === 'qty') {
+        e.preventDefault();
+        focusRowField(index, 'free_qty');
+      } else if (fieldName === 'free_qty') {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          if (index === items.length - 1) {
+            setItems(prev => [...prev, createEmptyItem()]);
+          }
+          focusRowMedicineName(index + 1);
+        } else {
+          // Normal Tab on Free moves to sgst_per
+          e.preventDefault();
+          focusRowField(index, 'sgst_per');
+        }
+      } else if (fieldName === 'sgst_per') {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          if (index === items.length - 1) { setItems(prev => [...prev, createEmptyItem()]); }
+          focusRowMedicineName(index + 1);
+        } else {
+          e.preventDefault();
+          focusRowField(index, 'cgst_per');
+        }
+      } else if (fieldName === 'cgst_per') {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          if (index === items.length - 1) { setItems(prev => [...prev, createEmptyItem()]); }
+          focusRowMedicineName(index + 1);
+        } else {
+          e.preventDefault();
+          focusRowField(index, 'cd_per');
+        }
+      } else if (fieldName === 'cd_per') {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          if (index === items.length - 1) { setItems(prev => [...prev, createEmptyItem()]); }
+          focusRowMedicineName(index + 1);
+        } else {
+          e.preventDefault();
+          focusRowField(index, 'cd_rs');
+        }
+      } else if (fieldName === 'cd_rs') {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          if (index === items.length - 1) { setItems(prev => [...prev, createEmptyItem()]); }
+          focusRowMedicineName(index + 1);
+        } else {
+          e.preventDefault();
+          focusRowField(index, 'additional_discount');
+        }
+      } else if (fieldName === 'additional_discount') {
+        e.preventDefault();
+        if (index === items.length - 1) {
+          setItems(prev => [...prev, createEmptyItem()]);
+        }
+        focusRowMedicineName(index + 1);
       }
-      focusRowMedicineName(targetIndex);
+      return;
+    }
+
+    // Backward Navigation: Shift + Tab
+    if (e.key === 'Tab' && e.shiftKey) {
+      e.preventDefault();
+      if (fieldName === 'medicine_name') {
+        if (index === 0) {
+          const dateEl = document.getElementById('purchase-date-input') as HTMLInputElement | null;
+          if (dateEl) { dateEl.focus(); }
+        } else {
+          focusRowField(index - 1, 'free_qty');
+        }
+      } else if (fieldName === 'batch_no') {
+        focusRowMedicineName(index);
+      } else if (fieldName === 'expiry_date') {
+        focusRowField(index, 'batch_no');
+      } else if (fieldName === 'rate') {
+        focusRowField(index, 'expiry_date');
+      } else if (fieldName === 'mrp') {
+        focusRowField(index, 'rate');
+      } else if (fieldName === 'qty') {
+        focusRowField(index, 'mrp');
+      } else if (fieldName === 'free_qty') {
+        focusRowField(index, 'qty');
+      } else if (fieldName === 'sgst_per') {
+        focusRowField(index, 'free_qty');
+      } else if (fieldName === 'cgst_per') {
+        focusRowField(index, 'sgst_per');
+      } else if (fieldName === 'cd_per') {
+        focusRowField(index, 'cgst_per');
+      } else if (fieldName === 'cd_rs') {
+        focusRowField(index, 'cd_per');
+      } else if (fieldName === 'additional_discount') {
+        focusRowField(index, 'cd_rs');
+      }
+      return;
     }
   };
 
@@ -1319,18 +1439,14 @@ const Purchases: React.FC = () => {
     item.scheme_free = medicine.scheme_free;
     item.amount = calculateItemAmount(item);
 
-    const targetRowIndex = index + 1;
-    if (index === items.length - 1) {
-      newItems.push(createEmptyItem());
-    }
-
     // Apply immediately so the UI feels instant
     setItems(newItems);
     setSearchResults([]);
     setActiveSearchIndex(null);
     setSearchHighlightIndex(-1);
 
-    focusRowMedicineName(targetRowIndex);
+    // Focus Batch field of the current row so the user can enter batch and price details!
+    focusRowField(index, 'batch_no');
 
     // Alias creation: fire-and-forget in background
     if (item.original_name && item.original_name !== medicine.name) {
@@ -2339,11 +2455,13 @@ const Purchases: React.FC = () => {
             <div className="flex gap-1">
               <div className="flex-1 min-w-0 relative">
                 <input
+                  id="distributor-search-input"
                   type="text"
                   value={distributorSearch}
                   onChange={(e) => {
                     setDistributorSearch(e.target.value);
                     setShowDistributorDropdown(true);
+                    setDistributorHighlightIndex(-1);
                     if (e.target.value === '') {
                       setSelectedDistributor(null);
                     }
@@ -2351,12 +2469,45 @@ const Purchases: React.FC = () => {
                   onFocus={() => setShowDistributorDropdown(true)}
                   onClick={() => setShowDistributorDropdown(true)}
                   onBlur={() => setTimeout(() => setShowDistributorDropdown(false), 200)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'ArrowDown') {
+                      if (filteredDistributors.length > 0) {
+                        e.preventDefault();
+                        setShowDistributorDropdown(true);
+                        setDistributorHighlightIndex(i => Math.min(i + 1, Math.min(filteredDistributors.length - 1, 49)));
+                      }
+                    } else if (e.key === 'ArrowUp') {
+                      if (filteredDistributors.length > 0) {
+                        e.preventDefault();
+                        setShowDistributorDropdown(true);
+                        setDistributorHighlightIndex(i => Math.max(i - 1, 0));
+                      }
+                    } else if (e.key === 'Enter' || (e.key === 'Tab' && !e.shiftKey)) {
+                      if (showDistributorDropdown && filteredDistributors.length > 0) {
+                        const targetIdx = distributorHighlightIndex >= 0 ? distributorHighlightIndex : 0;
+                        const dist = filteredDistributors[targetIdx];
+                        if (dist) {
+                          setSelectedDistributor(dist.id);
+                          setDistributorSearch(dist.name || dist.distributor_name || 'Unnamed Distributor');
+                        }
+                      }
+                      setShowDistributorDropdown(false);
+                      setDistributorHighlightIndex(-1);
+                      e.preventDefault();
+                      const dateEl = document.getElementById('purchase-date-input') as HTMLInputElement | null;
+                      if (dateEl) { dateEl.focus(); }
+                    } else if (e.key === 'Escape') {
+                      setShowDistributorDropdown(false);
+                      setDistributorHighlightIndex(-1);
+                    }
+                  }}
                   className={`w-full bg-bg3 border rounded-lg px-3 py-2 text-text text-sm focus:outline-none focus:ring-2 transition-all ${
                     (!selectedDistributor && (!distributorSearch.trim() || !isValidDistributorName(distributorSearch)))
                       ? 'border-rose-500/40 focus:ring-rose-500'
                       : 'border-glass-border focus:ring-sky'
                   }`}
                   placeholder="Type to search distributor..."
+                  autoComplete="off"
                 />
                 {showDistributorDropdown && (
                   <div className="absolute z-dropdown w-full mt-1 bg-bg2 border border-glass-border rounded-xl overflow-hidden max-h-64 overflow-y-auto shadow-2xl">
@@ -2385,19 +2536,23 @@ const Purchases: React.FC = () => {
                           : distributorSearch === '' ? 'No distributors available' : 'No match found. Click + to add.'}
                       </div>
                     ) : (
-                      filteredDistributors.slice(0, 50).map((dist) => {
+                      filteredDistributors.slice(0, 50).map((dist, idx) => {
                         const distName = dist.name || dist.distributor_name || 'Unnamed Distributor';
                         const isMapped = mappedDistributorIds.has(dist.id);
+                        const isHighlighted = idx === distributorHighlightIndex;
                         return (
                           <button
                             key={dist.id}
+                            data-highlighted={isHighlighted ? "true" : "false"}
                             onMouseDown={(e) => {
                               e.preventDefault();
                               setSelectedDistributor(dist.id);
                               setDistributorSearch(distName);
                               setShowDistributorDropdown(false);
                             }}
-                            className="w-full text-left px-4 py-2 hover:bg-bg3 text-text text-sm flex items-center justify-between transition-colors border-b border-glass-border/20 last:border-0"
+                            className={`w-full text-left px-4 py-2 text-text text-sm flex items-center justify-between transition-colors border-b border-glass-border/20 last:border-0 ${
+                              isHighlighted ? 'bg-primary/20 font-bold' : 'hover:bg-bg3'
+                            }`}
                           >
                             <div className="flex items-center gap-1.5 min-w-0">
                               <span className="font-semibold truncate text-text">{distName}</span>
@@ -2503,9 +2658,23 @@ const Purchases: React.FC = () => {
               ) : null}
             </div>
             <input
+              id="purchase-date-input"
               type="date"
               value={toDateInputValue(invoiceDate)}
               onChange={(e) => setInvoiceDate(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || (e.key === 'Tab' && !e.shiftKey)) {
+                  e.preventDefault();
+                  if (items.length === 0) {
+                    setItems([createEmptyItem()]);
+                  }
+                  focusRowMedicineName(0);
+                } else if (e.key === 'Tab' && e.shiftKey) {
+                  e.preventDefault();
+                  const distEl = document.getElementById('distributor-search-input') as HTMLInputElement | null;
+                  if (distEl) { distEl.focus(); distEl.select?.(); }
+                }
+              }}
               className={`w-full bg-white/10 border rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${
                 !invoiceDate ? 'border-amber-500/80 bg-amber-500/10 ring-1 ring-amber-500/50' : 'border-white/20'
               }`}
@@ -2723,6 +2892,13 @@ const Purchases: React.FC = () => {
                               }}
                               onKeyDown={e => {
                                 if (activeSearchIndex === index) {
+                                  if (e.key === 'Tab' && e.shiftKey) {
+                                    setActiveSearchIndex(null);
+                                    setSearchResults([]);
+                                    setSearchHighlightIndex(-1);
+                                    handleRowInputKeyDown(e, index, 'medicine_name');
+                                    return;
+                                  }
                                   if (e.key === 'ArrowDown') {
                                     e.preventDefault();
                                     setSearchHighlightIndex(i => Math.min(i + 1, searchResults.length));
@@ -2731,15 +2907,21 @@ const Purchases: React.FC = () => {
                                     e.preventDefault();
                                     setSearchHighlightIndex(i => Math.max(i - 1, 0));
                                     return;
-                                  } else if (e.key === 'Enter' || e.key === 'Tab') {
+                                  } else if (e.key === 'Enter' || (e.key === 'Tab' && !e.shiftKey)) {
                                     if (searchHighlightIndex >= 0 && searchHighlightIndex < searchResults.length) {
                                       e.preventDefault();
                                       selectMedicine(searchResults[searchHighlightIndex], index);
                                       return;
-                                    } else if (searchHighlightIndex === searchResults.length || searchResults.length === 0) {
+                                    } else if (searchResults.length > 0 && searchHighlightIndex === -1) {
                                       e.preventDefault();
-                                      openAddMedicineModal(index);
+                                      selectMedicine(searchResults[0], index);
                                       return;
+                                    } else if (searchHighlightIndex === searchResults.length || searchResults.length === 0) {
+                                      if (e.key === 'Enter' && item.medicine_name.trim().length > 0) {
+                                        e.preventDefault();
+                                        openAddMedicineModal(index);
+                                        return;
+                                      }
                                     }
                                   } else if (e.key === 'Escape') {
                                     setActiveSearchIndex(null);

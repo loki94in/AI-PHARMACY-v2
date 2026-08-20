@@ -2935,7 +2935,7 @@ const POS = () => {
                     onFocus={() => { if (selectedCustomerIdRef.current === null && !justSelectedPatientRef.current && patientSuggestions.length > 0) setShowPatientSuggestions(true); }}
                     onBlur={() => setTimeout(() => setShowPatientSuggestions(false), 180)}
                     onKeyDown={e => {
-                      if (e.key === 'Enter') {
+                      if (e.key === 'Enter' || (e.key === 'Tab' && !e.shiftKey)) {
                         if (showPatientSuggestions && patientSuggestions.length > 0 && patientHighlightIndex >= 0) {
                           const sel = patientSuggestions[patientHighlightIndex];
                           justSelectedPatientRef.current = true;
@@ -2951,17 +2951,6 @@ const POS = () => {
                           const docEl = document.getElementById('doctor-name-input');
                           if (docEl) { docEl.focus(); (docEl as HTMLInputElement).select?.(); }
                         }, 50);
-                      } else if (e.key === 'Tab') {
-                        if (showPatientSuggestions && patientSuggestions.length > 0 && patientHighlightIndex >= 0) {
-                          const sel = patientSuggestions[patientHighlightIndex];
-                          justSelectedPatientRef.current = true;
-                          selectedCustomerIdRef.current = sel.id;
-                          updatePatientName(sel.name);
-                          setPatientPhone(sel.phone || '');
-                          setSelectedCustomerId(sel.id);
-                          setShowPatientSuggestions(false);
-                          setPatientHighlightIndex(-1);
-                        }
                       } else if (showPatientSuggestions && patientSuggestions.length > 0) {
                         if (e.key === 'ArrowDown') {
                           e.preventDefault();
@@ -3045,10 +3034,14 @@ const POS = () => {
                     onChange={e => setPatientPhone(sanitizePhoneInput(e.target.value))}
                     maxLength={10}
                     onKeyDown={e => {
-                      if (e.key === 'Enter') {
+                      if (e.key === 'Enter' || (e.key === 'Tab' && !e.shiftKey)) {
                         e.preventDefault();
                         const docEl = document.getElementById('doctor-name-input');
                         if (docEl) { docEl.focus(); (docEl as HTMLInputElement).select?.(); }
+                      } else if (e.key === 'Tab' && e.shiftKey) {
+                        e.preventDefault();
+                        const patEl = document.getElementById('patient-name-input');
+                        if (patEl) { patEl.focus(); (patEl as HTMLInputElement).select?.(); }
                       }
                     }}
                     aria-label="Phone Number"
@@ -3095,7 +3088,15 @@ const POS = () => {
                     }}
                     onBlur={() => setTimeout(() => setIsDoctorDropdownOpen(false), 200)}
                     onKeyDown={e => {
-                      if (e.key === 'Enter') {
+                      if (e.key === 'Tab' && e.shiftKey) {
+                        e.preventDefault();
+                        setIsDoctorDropdownOpen(false);
+                        setDoctorHighlightIndex(-1);
+                        const patEl = document.getElementById('patient-name-input');
+                        if (patEl) { patEl.focus(); (patEl as HTMLInputElement).select?.(); }
+                        return;
+                      }
+                      if (e.key === 'Enter' || (e.key === 'Tab' && !e.shiftKey)) {
                         e.preventDefault();
                         if (isDoctorDropdownOpen && filteredDoctors.length > 0) {
                           const targetIdx = doctorHighlightIndex >= 0 ? doctorHighlightIndex : 0;
@@ -3110,18 +3111,6 @@ const POS = () => {
                         setIsDoctorDropdownOpen(false);
                         setDoctorHighlightIndex(-1);
                         focusMedicineSearch();
-                      } else if (e.key === 'Tab') {
-                        if (isDoctorDropdownOpen && filteredDoctors.length > 0 && doctorHighlightIndex >= 0) {
-                          const sel = filteredDoctors[doctorHighlightIndex];
-                          if (sel) {
-                            justSelectedDoctorRef.current = true;
-                            selectedDoctorIdRef.current = sel.id;
-                            setDoctor(sel.name);
-                            setSelectedDoctorId(sel.id);
-                          }
-                        }
-                        setIsDoctorDropdownOpen(false);
-                        setDoctorHighlightIndex(-1);
                       } else if (isDoctorDropdownOpen && filteredDoctors.length > 0) {
                         if (e.key === 'ArrowDown') {
                           e.preventDefault();
@@ -3270,22 +3259,36 @@ const POS = () => {
                       }
                     }}
                     onKeyDown={e => {
-                      if (searchResults.length === 0) return;
+                      if (e.key === 'Tab' && e.shiftKey) {
+                        e.preventDefault();
+                        setShowSearchDropdown(false);
+                        setSearchHighlightIndex(-1);
+                        const docEl = document.getElementById('doctor-name-input');
+                        if (docEl) { docEl.focus(); (docEl as HTMLInputElement).select?.(); }
+                        return;
+                      }
                       if (e.key === 'ArrowDown') {
-                        e.preventDefault();
-                        setSearchHighlightIndex(i => Math.min(i + 1, searchResults.length - 1));
+                        if (searchResults.length > 0) {
+                          e.preventDefault();
+                          setSearchHighlightIndex(i => Math.min(i + 1, searchResults.length - 1));
+                        }
                       } else if (e.key === 'ArrowUp') {
-                        e.preventDefault();
-                        setSearchHighlightIndex(i => Math.max(i - 1, 0));
-                      } else if ((e.key === 'Enter' || e.key === 'Tab') && searchHighlightIndex >= 0) {
-                        e.preventDefault();
-                        const item = searchResults[searchHighlightIndex];
-                        if (item) {
-                          fetchDetailsAndAddToCart(item);
-                          setSearchTerm('');
-                          setSearchResults([]);
-                          setSearchHighlightIndex(-1);
-                          setShowSearchDropdown(false);
+                        if (searchResults.length > 0) {
+                          e.preventDefault();
+                          setSearchHighlightIndex(i => Math.max(i - 1, 0));
+                        }
+                      } else if (e.key === 'Enter' || (e.key === 'Tab' && !e.shiftKey && showSearchDropdown && searchResults.length > 0)) {
+                        if (searchResults.length > 0) {
+                          e.preventDefault();
+                          const targetIdx = searchHighlightIndex >= 0 ? searchHighlightIndex : 0;
+                          const item = searchResults[targetIdx];
+                          if (item) {
+                            fetchDetailsAndAddToCart(item);
+                            setSearchTerm('');
+                            setSearchResults([]);
+                            setSearchHighlightIndex(-1);
+                            setShowSearchDropdown(false);
+                          }
                         }
                       } else if (e.key === 'Escape') {
                         setShowSearchDropdown(false);
@@ -3804,6 +3807,21 @@ const POS = () => {
                                 }}
                                 onKeyDown={e => {
                                   const idx = cart.indexOf(item);
+                                  if (e.key === 'Tab' && e.shiftKey) {
+                                    e.preventDefault();
+                                    setActiveRowSearchIndex(null);
+                                    setRowSearchTerm('');
+                                    setRowSearchResults([]);
+                                    setRowSearchHighlightIndex(-1);
+                                    if (idx > 0) {
+                                      const prevQty = document.getElementById(`row-qty-input-${idx - 1}`);
+                                      if (prevQty) { prevQty.focus(); (prevQty as HTMLInputElement).select?.(); }
+                                    } else {
+                                      const docEl = document.getElementById('doctor-name-input');
+                                      if (docEl) { docEl.focus(); (docEl as HTMLInputElement).select?.(); }
+                                    }
+                                    return;
+                                  }
                                   if (activeRowSearchIndex !== idx || rowSearchResults.length === 0) return;
                                   if (e.key === 'ArrowDown') {
                                     e.preventDefault();
@@ -4009,22 +4027,43 @@ const POS = () => {
                                     onKeyDown={e => {
                                       if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
                                         handlePosRowInputKeyDown(e, cart.indexOf(item), 'qty');
-                                      } else if (e.key === 'Enter' || e.key === 'Tab') {
+                                      } else if (e.key === 'Enter') {
                                         e.preventDefault();
-                                        const curIdx = cart.indexOf(item);
                                         if ((e.target as HTMLInputElement).value === '0' || (e.target as HTMLInputElement).value === '') {
                                           updateCartItem(item.id, 'qty', 0);
                                         }
-                                        const looseInput = document.getElementById(`row-loose-input-${curIdx}`) as HTMLInputElement | null;
-                                        const batchSel = document.getElementById(`row-batch-select-${curIdx}`) as HTMLSelectElement | null;
-                                        if (looseInput && !looseInput.disabled) {
-                                          looseInput.focus();
-                                          looseInput.select?.();
-                                        } else if (batchSel) {
-                                          batchSel.focus();
+                                        focusMedicineSearch();
+                                      } else if (e.key === 'Tab') {
+                                        const curIdx = cart.indexOf(item);
+                                        if (e.shiftKey) {
+                                          e.preventDefault();
+                                          if (curIdx > 0) {
+                                            const prevLoose = document.getElementById(`row-loose-input-${curIdx - 1}`) as HTMLInputElement | null;
+                                            if (prevLoose && !prevLoose.disabled) {
+                                              prevLoose.focus();
+                                              prevLoose.select?.();
+                                            } else {
+                                              const prevQty = document.getElementById(`row-qty-input-${curIdx - 1}`);
+                                              if (prevQty) { prevQty.focus(); (prevQty as HTMLInputElement).select?.(); }
+                                            }
+                                          } else {
+                                            focusMedicineSearch();
+                                          }
                                         } else {
-                                          const discIn = document.getElementById(`row-disc-input-${curIdx}`) as HTMLInputElement | null;
-                                          if (discIn) { discIn.focus(); discIn.select?.(); }
+                                          e.preventDefault();
+                                          const looseInput = document.getElementById(`row-loose-input-${curIdx}`) as HTMLInputElement | null;
+                                          if (looseInput && !looseInput.disabled) {
+                                            looseInput.focus();
+                                            looseInput.select?.();
+                                          } else {
+                                            const discIn = document.getElementById(`row-disc-input-${curIdx}`) as HTMLInputElement | null;
+                                            if (discIn) {
+                                              discIn.focus();
+                                              discIn.select?.();
+                                            } else {
+                                              focusMedicineSearch();
+                                            }
+                                          }
                                         }
                                       }
                                     }}
@@ -4072,16 +4111,14 @@ const POS = () => {
                                     onKeyDown={e => {
                                       if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
                                         handlePosRowInputKeyDown(e, cart.indexOf(item), 'looseQty');
-                                      } else if (e.key === 'Enter' || e.key === 'Tab') {
+                                      } else if (e.key === 'Enter' || (e.key === 'Tab' && !e.shiftKey)) {
+                                        e.preventDefault();
+                                        focusMedicineSearch();
+                                      } else if (e.key === 'Tab' && e.shiftKey) {
                                         e.preventDefault();
                                         const curIdx = cart.indexOf(item);
-                                        const discIn = document.getElementById(`row-disc-input-${curIdx}`) as HTMLInputElement | null;
-                                        if (discIn) {
-                                          discIn.focus();
-                                          discIn.select?.();
-                                        } else {
-                                          focusMedicineSearch();
-                                        }
+                                        const qtyIn = document.getElementById(`row-qty-input-${curIdx}`) as HTMLInputElement | null;
+                                        if (qtyIn) { qtyIn.focus(); qtyIn.select?.(); }
                                       }
                                     }}
                                   />
@@ -4179,11 +4216,24 @@ const POS = () => {
                             onKeyDown={e => {
                               if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
                                 handlePosRowInputKeyDown(e, cart.indexOf(item), 'discount');
-                              } else if (e.key === 'Enter' || e.key === 'Tab') {
+                              } else if (e.key === 'Enter') {
                                 e.preventDefault();
-                                const mrpIn = document.getElementById(`row-mrp-input-${cart.indexOf(item)}`) as HTMLInputElement | null;
-                                if (mrpIn) {
-                                  const rateIn = document.getElementById(`row-rate-input-${cart.indexOf(item)}`) as HTMLInputElement | null;
+                                focusMedicineSearch();
+                              } else if (e.key === 'Tab') {
+                                const curIdx = cart.indexOf(item);
+                                if (e.shiftKey) {
+                                  e.preventDefault();
+                                  const looseIn = document.getElementById(`row-loose-input-${curIdx}`) as HTMLInputElement | null;
+                                  if (looseIn && !looseIn.disabled) {
+                                    looseIn.focus();
+                                    looseIn.select?.();
+                                  } else {
+                                    const qtyIn = document.getElementById(`row-qty-input-${curIdx}`) as HTMLInputElement | null;
+                                    if (qtyIn) { qtyIn.focus(); qtyIn.select?.(); }
+                                  }
+                                } else {
+                                  e.preventDefault();
+                                  const rateIn = document.getElementById(`row-rate-input-${curIdx}`) as HTMLInputElement | null;
                                   if (rateIn) {
                                     rateIn.focus();
                                     rateIn.select?.();
@@ -4215,14 +4265,27 @@ const POS = () => {
                             onKeyDown={e => {
                               if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
                                 handlePosRowInputKeyDown(e, cart.indexOf(item), 'unitPrice');
-                              } else if (e.key === 'Enter' || e.key === 'Tab') {
+                              } else if (e.key === 'Enter') {
                                 e.preventDefault();
-                                const mrpIn = document.getElementById(`row-mrp-input-${cart.indexOf(item)}`) as HTMLInputElement | null;
-                                if (mrpIn) {
-                                  mrpIn.focus();
-                                  mrpIn.select?.();
+                                focusMedicineSearch();
+                              } else if (e.key === 'Tab') {
+                                const curIdx = cart.indexOf(item);
+                                if (e.shiftKey) {
+                                  e.preventDefault();
+                                  const discIn = document.getElementById(`row-disc-input-${curIdx}`) as HTMLInputElement | null;
+                                  if (discIn) {
+                                    discIn.focus();
+                                    discIn.select?.();
+                                  }
                                 } else {
-                                  focusMedicineSearch();
+                                  e.preventDefault();
+                                  const mrpIn = document.getElementById(`row-mrp-input-${curIdx}`) as HTMLInputElement | null;
+                                  if (mrpIn) {
+                                    mrpIn.focus();
+                                    mrpIn.select?.();
+                                  } else {
+                                    focusMedicineSearch();
+                                  }
                                 }
                               }
                             }}
@@ -4245,9 +4308,22 @@ const POS = () => {
                             onKeyDown={e => {
                               if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
                                 handlePosRowInputKeyDown(e, cart.indexOf(item), 'mrp');
-                              } else if (e.key === 'Enter' || e.key === 'Tab') {
+                              } else if (e.key === 'Enter') {
                                 e.preventDefault();
                                 focusMedicineSearch();
+                              } else if (e.key === 'Tab') {
+                                const curIdx = cart.indexOf(item);
+                                if (e.shiftKey) {
+                                  e.preventDefault();
+                                  const rateIn = document.getElementById(`row-rate-input-${curIdx}`) as HTMLInputElement | null;
+                                  if (rateIn) {
+                                    rateIn.focus();
+                                    rateIn.select?.();
+                                  }
+                                } else {
+                                  e.preventDefault();
+                                  focusMedicineSearch();
+                                }
                               }
                             }}
                           />

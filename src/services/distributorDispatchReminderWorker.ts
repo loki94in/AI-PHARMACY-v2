@@ -377,10 +377,10 @@ export async function syncTodayActiveDistributors(): Promise<any[]> {
       );
 
       const todayPurchases = await db.all(
-        `SELECT p.id, p.invoice_no, p.date, d.name as distributor_name, d.id as distributor_id, p.created_at
+        `SELECT p.id, p.invoice_no, p.date, d.name as distributor_name, d.id as distributor_id
          FROM purchases p
          JOIN distributors d ON p.distributor_id = d.id
-         WHERE (p.date IS NOT NULL AND DATE(p.date) = ?) OR (p.created_at IS NOT NULL AND DATE(p.created_at) = ?)
+         WHERE (p.date IS NOT NULL AND (DATE(p.date) = ? OR DATE(p.date, 'localtime') = ?))
          ORDER BY p.id ASC`,
         [todayStr, todayStr]
       );
@@ -429,7 +429,7 @@ export async function syncTodayActiveDistributors(): Promise<any[]> {
         }
 
         for (const p of matchingPurchases) {
-          const timeStr = p.created_at ? new Date(p.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Today';
+          const timeStr = p.date ? new Date(p.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Today';
           ordersList.push({
             id: `purch_${p.id}`,
             source: 'purchase',
