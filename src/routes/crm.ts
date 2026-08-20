@@ -215,29 +215,21 @@ router.get('/history-by-phone/:phone', async (req, res) => {
       matchingCustomerIds = customers.map((c: any) => c.id);
     }
 
-    let query = `
+    if (matchingCustomerIds.length === 0) {
+      return res.json([]);
+    }
+
+    const placeholders = matchingCustomerIds.map(() => '?').join(',');
+    const query = `
       SELECT si.*, c.name as customer_name, c.phone as customer_phone, d.name as doctor_name
       FROM sales_invoices si
       LEFT JOIN customers c ON si.customer_id = c.id
       LEFT JOIN doctors d ON d.id = si.doctor_id
-      WHERE 0 = 1
+      WHERE si.customer_id IN (${placeholders})
+      ORDER BY si.date DESC LIMIT 100
     `;
-    const params: any[] = [];
 
-    if (matchingCustomerIds.length > 0) {
-      const placeholders = matchingCustomerIds.map(() => '?').join(',');
-      query += ` OR si.customer_id IN (${placeholders})`;
-      params.push(...matchingCustomerIds);
-    }
-
-    if (digitsOnly.length === 10) {
-      query += ` OR (si.patient_phone IS NOT NULL AND length(si.patient_phone) >= 10 AND REPLACE(REPLACE(REPLACE(si.patient_phone, ' ', ''), '-', ''), '+', '') LIKE ?)`;
-      params.push(`%${digitsOnly}`);
-    }
-
-    query += ` ORDER BY si.date DESC LIMIT 100`;
-
-    const invoices = await db.all(query, params);
+    const invoices = await db.all(query, matchingCustomerIds);
 
     for (const inv of invoices) {
       const items = await db.all(

@@ -94,6 +94,7 @@ export interface SpecialOrder {
   pharmarack_scheme?: string;
   advance_payment?: number;
   cart_add_error?: string | null;
+  sendWhatsApp?: boolean;
 }
 
 export interface Refill {

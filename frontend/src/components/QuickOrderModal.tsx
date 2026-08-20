@@ -22,7 +22,8 @@ import {
   Trash2,
   Zap,
   Package,
-  Clock
+  Clock,
+  MessageCircle
 } from 'lucide-react';
 import { api } from '../services/api';
 import { toastEvent, quickOrderEvent, specialOrdersEvent } from '../services/events';
@@ -124,6 +125,7 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
   const [advancePayment, setAdvancePayment] = useState<number | ''>('');
   const [priority, setPriority] = useState<'Low' | 'Normal' | 'High'>('Normal');
   const [language, setLanguage] = useState('en');
+  const [sendWhatsApp, setSendWhatsApp] = useState(true);
   
   const [selectedDistributor, setSelectedDistributor] = useState('');
   const [selectedRate, setSelectedRate] = useState<number | ''>('');
@@ -478,16 +480,25 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
   };
 
   // Submit Order Form
-  const processSubmissionQueue = async (items: any[], customerName: string, customerPhone: string, orderPriority: 'Low' | 'Normal' | 'High', advanceAmt: number, messageLang: string) => {
+  const processSubmissionQueue = async (
+    items: any[],
+    customerName: string,
+    customerPhone: string,
+    orderPriority: 'Low' | 'Normal' | 'High',
+    advanceAmt: number,
+    messageLang: string,
+    shouldSendWhatsApp: boolean
+  ) => {
     try {
-      // 1. Log all requested medicines in a single batch call (sends 1 consolidated WhatsApp message to customer)
+      // 1. Log all requested medicines in a single batch call (sends 1 consolidated WhatsApp message to customer if enabled)
       await api.createBatchOrders({
         items,
         requester: customerName,
         phone: customerPhone,
         priority: orderPriority,
         advance_payment: advanceAmt,
-        language: messageLang
+        language: messageLang,
+        sendWhatsApp: Boolean(shouldSendWhatsApp && customerPhone && customerPhone.length >= 10)
       });
 
       toastEvent.trigger(`Successfully logged request for ${items.length} medicine(s)!`, 'success');
@@ -571,6 +582,7 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
     setQty(1);
     setAdvancePayment('');
     setPriority('Normal');
+    setSendWhatsApp(true);
     setSelectedDistributor('');
     setSelectedRate('');
     setSelectedMrp('');
@@ -582,7 +594,7 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
 
     // Trigger background queue processing (non-blocking)
     toastEvent.trigger(`Starting background logging for ${finalItems.length} request(s)...`, 'info');
-    processSubmissionQueue(finalItems, customerName, customerPhone, orderPriority, advanceAmt, language);
+    processSubmissionQueue(finalItems, customerName, customerPhone, orderPriority, advanceAmt, language, sendWhatsApp);
   };
 
   if (!isOpen) return null;
@@ -951,6 +963,26 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
                       <option value="hi">🇮🇳 Hindi</option>
                       <option value="mr">🇮🇳 Marathi</option>
                     </select>
+                  </div>
+
+                  {/* WhatsApp Notification Toggle */}
+                  <div className="flex items-center justify-between p-2 rounded-2xl bg-bg3/30 border border-glass-border">
+                    <div className="flex items-center gap-2">
+                      <MessageCircle size={13} className={sendWhatsApp ? "text-emerald-400" : "text-muted"} />
+                      <span className="text-[11px] font-semibold text-text">WhatsApp Alert</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setSendWhatsApp(!sendWhatsApp)}
+                      className={`px-2.5 py-0.5 rounded-xl text-[11px] font-bold transition-all flex items-center gap-1 cursor-pointer ${
+                        sendWhatsApp 
+                          ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 shadow-sm' 
+                          : 'bg-bg3 text-muted border border-border'
+                      }`}
+                    >
+                      <span className={`w-1.5 h-1.5 rounded-full ${sendWhatsApp ? 'bg-emerald-400 animate-pulse' : 'bg-muted'}`} />
+                      {sendWhatsApp ? 'ON' : 'OFF'}
+                    </button>
                   </div>
                 </div>
               </div>

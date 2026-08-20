@@ -437,7 +437,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
     if (targetName && targetName.length >= 2) {
       const timer = setTimeout(() => {
         triggerOverstockCheck(targetName, qty);
-      }, 200);
+      }, 300);
       return () => clearTimeout(timer);
     } else {
       setOverstockInfo(null);
@@ -1388,7 +1388,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
       } finally {
         setSearchLoading(false);
       }
-    }, 80);
+    }, 300);
 
     return () => {
       clearTimeout(delayDebounce);

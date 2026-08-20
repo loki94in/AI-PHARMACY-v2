@@ -1230,7 +1230,7 @@ const Purchases: React.FC = () => {
       } catch (error) {
         console.error('Error searching medicines:', error);
       }
-    }, 120);
+    }, 300);
   }, []);
 
   useEffect(() => {

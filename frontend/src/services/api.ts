@@ -727,7 +727,7 @@ export const api = {
   // Orders & Special Requests
   getOrders: () => apiClient.get<SpecialOrder[]>('/orders').then(res => res.data),
   createOrder: (data: Partial<SpecialOrder>) => apiClient.post('/orders', data).then(res => res.data),
-  createBatchOrders: (data: { items: any[]; requester: string; phone: string; priority?: string; advance_payment?: number; customer_id?: number; language?: string }) =>
+  createBatchOrders: (data: { items: any[]; requester: string; phone: string; priority?: string; advance_payment?: number; customer_id?: number; language?: string; sendWhatsApp?: boolean }) =>
     apiClient.post('/orders/batch', data).then(res => res.data),
   updateOrder: (id: number, data: Partial<SpecialOrder>) => apiClient.put(`/orders/${id}`, data).then(res => res.data),
   updateOrderStatus: (id: number, status: string) => apiClient.post(`/orders/${id}/status`, { status }).then(res => res.data),

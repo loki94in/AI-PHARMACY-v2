@@ -451,7 +451,7 @@ const DatabasePage = () => {
       setPackagingTerm(packagingInput);
       setDistributorTerm(distributorInput);
       setSearchPending(false);
-    }, 500);
+    }, 300);
     return () => clearTimeout(timer);
   }, [productNameInput, mrpInput, apiInput, packagingInput, distributorInput, productNameTerm, mrpTerm, apiTerm, packagingTerm, distributorTerm]);
 

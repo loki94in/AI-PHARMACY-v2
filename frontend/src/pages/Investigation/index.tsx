@@ -119,10 +119,10 @@ const InvestigationCenter = () => {
   const [debouncedInvoice, setDebouncedInvoice] = useState('');
   const [debouncedParty, setDebouncedParty] = useState('');
 
-  useEffect(() => { const t = setTimeout(() => setDebouncedMedicine(colFilterMedicine), 400); return () => clearTimeout(t); }, [colFilterMedicine]);
-  useEffect(() => { const t = setTimeout(() => setDebouncedBatch(colFilterBatch), 400); return () => clearTimeout(t); }, [colFilterBatch]);
-  useEffect(() => { const t = setTimeout(() => setDebouncedInvoice(colFilterInvoice), 400); return () => clearTimeout(t); }, [colFilterInvoice]);
-  useEffect(() => { const t = setTimeout(() => setDebouncedParty(colFilterParty), 400); return () => clearTimeout(t); }, [colFilterParty]);
+  useEffect(() => { const t = setTimeout(() => setDebouncedMedicine(colFilterMedicine), 300); return () => clearTimeout(t); }, [colFilterMedicine]);
+  useEffect(() => { const t = setTimeout(() => setDebouncedBatch(colFilterBatch), 300); return () => clearTimeout(t); }, [colFilterBatch]);
+  useEffect(() => { const t = setTimeout(() => setDebouncedInvoice(colFilterInvoice), 300); return () => clearTimeout(t); }, [colFilterInvoice]);
+  useEffect(() => { const t = setTimeout(() => setDebouncedParty(colFilterParty), 300); return () => clearTimeout(t); }, [colFilterParty]);
 
   const dateRangeHelper = usePersistedDateRange({
     storageKey: 'investigation-date-range',

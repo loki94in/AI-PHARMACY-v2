@@ -661,7 +661,7 @@ const Returns: React.FC = () => {
       } catch (error) {
         console.error('Error searching medicines:', error);
       }
-    }, 250);
+    }, 300);
   }, []);
 
   useEffect(() => {

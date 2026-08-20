@@ -104,7 +104,8 @@ router.post('/batch', async (req, res) => {
     phone, 
     priority = 'Normal', 
     status = 'Pending',
-    advance_payment = 0
+    advance_payment = 0,
+    sendWhatsApp = false
   } = req.body;
 
   if (!items || !Array.isArray(items) || items.length === 0) {
@@ -162,19 +163,22 @@ router.post('/batch', async (req, res) => {
         const itemQty = Number(item.qty) || 1;
         const itemAdv = i === 0 && advance_payment ? Number(advance_payment) : Number(item.advance_payment || 0);
 
+        const initialNotified = Boolean(sendWhatsApp || req.body.sendWhatsApp) ? 1 : 0;
+        const initialStatus = item.status || status || 'Pending';
         const result = await db.run(
           `INSERT INTO special_orders (
             product, requester, phone, qty, priority, status, date, notified,
             pharmarack_distributor, pharmarack_rate, pharmarack_mrp, pharmarack_mapped, pharmarack_scheme, advance_payment
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`,
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             medName,
             cleanReqName,
             cleanPhone,
             itemQty,
             item.priority || priority,
-            status,
+            initialStatus,
             todayStr,
+            initialNotified,
             item.distributor || item.pharmarack_distributor || null,
             item.rate !== undefined ? item.rate : (item.pharmarack_rate !== undefined ? item.pharmarack_rate : null),
             item.mrp !== undefined ? item.mrp : (item.pharmarack_mrp !== undefined ? item.pharmarack_mrp : null),
@@ -315,20 +319,22 @@ router.post('/', async (req, res) => {
     const todayStr = new Date().toISOString();
     const medName = reqProduct.trim();
 
-    // Insert order into SQLite
+    const initialNotified = Boolean(req.body.sendWhatsApp) ? 1 : 0;
+    const initialStatus = status || 'Pending';
     const result = await db.run(
       `INSERT INTO special_orders (
         product, requester, phone, qty, priority, status, date, notified,
         pharmarack_distributor, pharmarack_rate, pharmarack_mrp, pharmarack_mapped, pharmarack_scheme, advance_payment
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         medName,
         requester.trim(),
         cleanPhone,
         Number(qty) || 1,
-        priority,
-        status,
+        priority || 'Normal',
+        initialStatus,
         todayStr,
+        initialNotified,
         pharmarack_distributor || null,
         pharmarack_rate !== undefined ? pharmarack_rate : null,
         pharmarack_mrp !== undefined ? pharmarack_mrp : null,
@@ -525,14 +531,29 @@ router.put('/:id', async (req, res) => {
     const newAdvancePayment = advance_payment !== undefined ? advance_payment : existing.advance_payment;
     const newCartAddError = cart_add_error !== undefined ? cart_add_error : existing.cart_add_error;
 
+    let newNotified = existing.notified;
+    if (newStatus === 'Fulfilled') {
+      newNotified = 1;
+    }
+
     await db.run(
       `UPDATE special_orders
        SET status = ?, priority = ?, qty = ?, product = ?, requester = ?, phone = ?,
            pharmarack_distributor = ?, pharmarack_rate = ?, pharmarack_mrp = ?, pharmarack_mapped = ?,
-           advance_payment = ?, cart_add_error = ?
+           advance_payment = ?, cart_add_error = ?, notified = ?
        WHERE id = ?`,
-      [newStatus, newPriority, newQty, newProduct, newRequester, newPhone, newDistributor, newRate, newMrp, newMapped, newAdvancePayment, newCartAddError, id]
+      [newStatus, newPriority, newQty, newProduct, newRequester, newPhone, newDistributor, newRate, newMrp, newMapped, newAdvancePayment, newCartAddError, newNotified, id]
     );
+
+    if (newStatus === 'Fulfilled' || newStatus === 'Cancelled') {
+      await db.run(
+        `UPDATE automation_notifications 
+         SET lifecycle_status = 'sent', status = 'sent_manually' 
+         WHERE (type IN ('special_order_arrived', 'quick_order', 'special_order', 'quick_order_resend', 'quick_order_batch') OR reference_id = ?)
+           AND reference_id = ?`,
+        [String(id), String(id)]
+      ).catch(() => {});
+    }
 
     res.json({ success: true, message: 'Order updated successfully' });
   } catch (err) {
@@ -562,7 +583,18 @@ const handleStatusUpdate = async (req: express.Request, res: express.Response) =
       return res.status(404).json({ error: 'Order not found' });
     }
 
-    await db.run('UPDATE special_orders SET status = ? WHERE id = ?', [status, id]);
+    const newNotified = status === 'Fulfilled' ? 1 : existing.notified;
+    await db.run('UPDATE special_orders SET status = ?, notified = ? WHERE id = ?', [status, newNotified, id]);
+
+    if (status === 'Fulfilled' || status === 'Cancelled') {
+      await db.run(
+        `UPDATE automation_notifications 
+         SET lifecycle_status = 'sent', status = 'sent_manually' 
+         WHERE (type IN ('special_order_arrived', 'quick_order', 'special_order', 'quick_order_resend', 'quick_order_batch') OR reference_id = ?)
+           AND reference_id = ?`,
+        [String(id), String(id)]
+      ).catch(() => {});
+    }
 
     res.json({ success: true, message: `Order status updated to ${status}` });
   } catch (err: any) {
@@ -586,6 +618,13 @@ router.delete('/:id', async (req, res) => {
     if (result.changes === 0) {
       return res.status(404).json({ error: 'Order not found' });
     }
+
+    await db.run(
+      `DELETE FROM automation_notifications 
+       WHERE (type IN ('special_order_arrived', 'quick_order', 'special_order', 'quick_order_resend', 'quick_order_batch') OR reference_id = ?)
+         AND reference_id = ?`,
+      [String(id), String(id)]
+    ).catch(() => {});
     
     res.json({ success: true, message: 'Order deleted successfully' });
   } catch (err) {
@@ -630,7 +669,16 @@ router.post('/:id/fulfill', async (req, res) => {
       return res.status(404).json({ error: 'Order not found' });
     }
 
-    await db.run("UPDATE special_orders SET status = 'Fulfilled' WHERE id = ?", id);
+    await db.run("UPDATE special_orders SET status = 'Fulfilled', notified = 1 WHERE id = ?", id);
+
+    // Clean up all staged notifications and arrival alerts for this special order
+    await db.run(
+      `UPDATE automation_notifications 
+       SET lifecycle_status = 'sent', status = 'sent_manually' 
+       WHERE (type IN ('special_order_arrived', 'quick_order', 'special_order', 'quick_order_resend', 'quick_order_batch') OR reference_id = ?)
+         AND reference_id = ?`,
+      [String(id), String(id)]
+    ).catch(() => {});
 
     if (Boolean(sendWhatsApp) && order.phone) {
       const cleanPhone = order.phone.replace(/\D/g, '');

@@ -188,6 +188,34 @@ const RefillsSection: React.FC = () => {
   const [editIntervalVal, setEditIntervalVal] = useState<number>(30);
   const [updatingFreq, setUpdatingFreq] = useState(false);
 
+  // Resizable panel width state (persisted in localStorage, matching WhatsApp layout)
+  const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
+    const saved = localStorage.getItem('crm_refills_sidebar_width');
+    return saved ? parseInt(saved, 10) : 360;
+  });
+  const [isDragging, setIsDragging] = useState(false);
+
+  // Mouse move handler for resizing sidebar
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isDragging) return;
+      const newWidth = Math.min(Math.max(e.clientX - 260, 240), 550);
+      setSidebarWidth(newWidth);
+      localStorage.setItem('crm_refills_sidebar_width', String(newWidth));
+    };
+
+    const handleMouseUp = () => setIsDragging(false);
+
+    if (isDragging) {
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+    }
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isDragging]);
+
   // Ref to track currently selected patient phone for smooth silent background updates
   const selectedPatientPhoneRef = useRef<string | null>(null);
   useEffect(() => {
@@ -875,15 +903,18 @@ const RefillsSection: React.FC = () => {
         </div>
       </div>
 
-      {/* ── Split-View Container (Master-Detail Layout) ── */}
-      <div className="flex-1 flex flex-col md:flex-row gap-3 overflow-hidden min-h-0">
-        {/* ── LEFT PANEL: Patient Refill List ── */}
-        <div className="w-full md:w-80 lg:w-96 shrink-0 bg-bg border border-border rounded-2xl flex flex-col overflow-hidden shadow-sm">
+      {/* ── Main Unified Resizable Split-View Container (Matching WhatsApp & Credit) ── */}
+      <div className="flex-1 min-h-0 flex bg-bg2 border border-border rounded-2xl overflow-hidden shadow-sm">
+        {/* Left: Patient List Panel (Resizable Width) */}
+        <div
+          style={{ width: `${sidebarWidth}px` }}
+          className="border-r border-border flex flex-col bg-bg3/40 min-h-0 shrink-0 select-none"
+        >
           {/* Header Bar */}
-          <div className="p-3 border-b border-border bg-bg3/40 flex items-center justify-between shrink-0">
+          <div className="p-3 border-b border-border flex items-center justify-between gap-2 shrink-0">
             <h3 className="text-xs font-bold text-text uppercase tracking-wider flex items-center gap-1.5">
               <Repeat2 size={14} className="text-primary" />
-              Patients &amp; Schedules
+              <span>Patients &amp; Schedules</span>
             </h3>
             <span className="text-[10px] bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 rounded-full font-bold">
               {filtered.length}
@@ -918,12 +949,12 @@ const RefillsSection: React.FC = () => {
           </div>
 
           {/* Search Input */}
-          <div className="p-2 border-b border-border bg-bg shrink-0">
-            <div className="relative">
-              <Search size={12} className="absolute left-2.5 top-2.5 text-muted" />
+          <div className="p-2.5 border-b border-border bg-bg shrink-0 flex items-center gap-2">
+            <div className="relative flex-1">
+              <Search size={13} className="absolute left-2.5 top-2.5 text-muted" />
               <input
                 type="text"
-                placeholder="Search patient name, mobile or barcode..."
+                placeholder="Search patient, mobile or barcode..."
                 value={search}
                 onChange={e => {
                   const val = e.target.value;
@@ -932,10 +963,18 @@ const RefillsSection: React.FC = () => {
                 className="w-full pl-8 pr-2.5 py-1.5 bg-bg2 border border-border rounded-xl text-xs text-text focus:outline-none focus:border-primary"
               />
             </div>
+            <button
+              onClick={() => load()}
+              disabled={loading}
+              className="p-1.5 rounded-xl bg-bg2 border border-border text-muted hover:text-text transition-all active:scale-95 disabled:opacity-50"
+              title="Refresh list"
+            >
+              <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
+            </button>
           </div>
 
           {/* Patient Cards List */}
-          <div className="flex-1 overflow-y-auto divide-y divide-border/30">
+          <div className="flex-1 overflow-y-auto divide-y divide-border/40">
             {loading && data.length === 0 ? (
               <div className="p-8 text-center text-xs text-muted flex items-center justify-center gap-2">
                 <RefreshCw size={14} className="animate-spin text-primary" /> Loading refills...
@@ -955,26 +994,26 @@ const RefillsSection: React.FC = () => {
                   <div
                     key={patient.patient_phone}
                     onClick={() => selectPatientAndLoadDetails(patient)}
-                    className={`p-3 cursor-pointer transition-all flex items-center justify-between hover:bg-primary/5 ${
+                    className={`p-3 cursor-pointer transition-all flex items-center justify-between hover:bg-bg/60 ${
                       isSelected ? 'bg-primary/10 border-l-4 border-primary font-semibold' : ''
                     }`}
                   >
                     <div className="flex items-center gap-2.5 min-w-0 pr-2">
                       <div
-                        className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
+                        className={`w-9 h-9 rounded-xl flex items-center justify-center text-xs font-bold shrink-0 border ${
                           isOverdue
-                            ? 'bg-red-500/15 text-red-400'
+                            ? 'bg-red-500/15 text-red-400 border-red-500/30'
                             : isLead
-                            ? 'bg-amber-500/15 text-amber-400'
-                            : 'bg-primary/15 text-primary'
+                            ? 'bg-amber-500/15 text-amber-400 border-amber-500/30'
+                            : 'bg-primary/15 text-primary border-primary/30'
                         }`}
                       >
                         {patient.patient_name?.[0]?.toUpperCase() || '?'}
                       </div>
                       <div className="min-w-0">
-                        <div className="text-xs font-bold text-text truncate flex items-center gap-1">
-                          <span>{patient.patient_name || 'Unnamed Patient'}</span>
-                          <span className="text-[9px] px-1 py-0.2 rounded bg-bg3 text-muted border border-border/60 shrink-0 font-normal">
+                        <div className="text-xs font-bold text-text truncate flex items-center gap-1.5">
+                          <span className="truncate">{patient.patient_name || 'Unnamed Patient'}</span>
+                          <span className="text-[9px] px-1.5 py-0.2 rounded bg-bg3 text-muted border border-border/60 shrink-0 font-normal">
                             {patient.language === 'hi' ? '🇮🇳 HI' : patient.language === 'mr' ? '🇮🇳 MR' : '🇬🇧 EN'}
                           </span>
                         </div>
@@ -996,9 +1035,9 @@ const RefillsSection: React.FC = () => {
                       </div>
                       <div className="text-[9px] text-muted mt-0.5 flex items-center justify-end gap-1">
                         {patient.reminder_status === 'SENT' ? (
-                          <span className="text-emerald-400" title="Reminder sent">✓ Sent</span>
+                          <span className="text-emerald-400 font-medium" title="Reminder sent">✓ Sent</span>
                         ) : patient.reminder_status === 'QUEUED' ? (
-                          <span className="text-amber-400" title="Reminder queued">⏳ Queued</span>
+                          <span className="text-amber-400 font-medium" title="Reminder queued">⏳ Queued</span>
                         ) : (
                           <span>{isOverdue ? 'Action Needed' : 'Scheduled'}</span>
                         )}
@@ -1011,44 +1050,58 @@ const RefillsSection: React.FC = () => {
           </div>
         </div>
 
-        {/* ── RIGHT PANEL: Selected Patient Command Center ── */}
-        <div className="flex-1 bg-bg2 border border-border rounded-2xl flex flex-col overflow-hidden shadow-sm min-h-0">
+        {/* Resizable Divider Handle */}
+        <div
+          onMouseDown={(e) => { e.preventDefault(); setIsDragging(true); }}
+          className="w-1.5 hover:w-2 bg-border/40 hover:bg-primary/60 cursor-col-resize transition-all shrink-0 select-none flex items-center justify-center group"
+          title="Drag to resize patient panel (auto-saved)"
+        >
+          <div className="w-0.5 h-6 bg-muted/40 group-hover:bg-white rounded-full transition-colors" />
+        </div>
+
+        {/* Right: Selected Patient Command Center */}
+        <div className="flex-1 flex flex-col min-h-0 bg-bg min-w-0">
           {selectedPatient ? (
             <>
               {/* Account / Patient Header Bar */}
-              <div className="p-3.5 border-b border-border bg-bg3/30 flex flex-wrap items-center justify-between gap-3 shrink-0">
-                <div>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <h2 className="text-base font-bold text-text">{selectedPatient.patient_name || 'Unnamed Patient'}</h2>
-                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
-                      isSelectedOverdue
-                        ? 'bg-red-500/10 text-red-400 border-red-500/20'
-                        : isSelectedLeadWindow
-                        ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'
-                        : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
-                    }`}>
-                      {isSelectedOverdue ? '🚨 OVERDUE REFILL' : isSelectedLeadWindow ? '🔔 PREP WINDOW ACTIVE' : 'ACTIVE SCHEDULE'}
-                    </span>
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-bg3 text-text border border-border">
-                      {selectedPatient.language === 'hi' ? '🇮🇳 HI' : selectedPatient.language === 'mr' ? '🇮🇳 MR' : '🇬🇧 EN'}
-                    </span>
+              <div className="p-3.5 border-b border-border bg-bg2 flex flex-wrap items-center justify-between gap-3 shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-primary/20 text-primary border border-primary/30 font-bold text-xs flex items-center justify-center flex-shrink-0">
+                    {selectedPatient.patient_name?.[0]?.toUpperCase() || 'P'}
                   </div>
-                  <div className="text-xs text-muted mt-1 flex items-center gap-3 flex-wrap">
-                    <span className="flex items-center gap-1 font-mono text-text">
-                      <Phone size={11} className="text-primary" /> {selectedPatient.patient_phone}
-                    </span>
-                    <span>•</span>
-                    <span className="flex items-center gap-1">
-                      <Calendar size={11} className="text-accent" />
-                      <span>Next Due: <strong>{formatDate(selectedPatient.next_refill_date)}</strong></span>
-                      {selectedDiffDays > 0 ? (
-                        <span className="text-[10px] text-muted">({selectedDiffDays} days remaining)</span>
-                      ) : selectedDiffDays === 0 ? (
-                        <span className="text-[10px] text-amber-400 font-bold">(Due Today)</span>
-                      ) : (
-                        <span className="text-[10px] text-red-400 font-bold">({Math.abs(selectedDiffDays)} days overdue)</span>
-                      )}
-                    </span>
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h2 className="text-sm font-bold text-text">{selectedPatient.patient_name || 'Unnamed Patient'}</h2>
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                        isSelectedOverdue
+                          ? 'bg-red-500/10 text-red-400 border-red-500/20'
+                          : isSelectedLeadWindow
+                          ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                          : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                      }`}>
+                        {isSelectedOverdue ? '🚨 OVERDUE REFILL' : isSelectedLeadWindow ? '🔔 PREP WINDOW ACTIVE' : 'ACTIVE SCHEDULE'}
+                      </span>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-bg3 text-text border border-border">
+                        {selectedPatient.language === 'hi' ? '🇮🇳 HI' : selectedPatient.language === 'mr' ? '🇮🇳 MR' : '🇬🇧 EN'}
+                      </span>
+                    </div>
+                    <div className="text-xs text-muted mt-0.5 flex items-center gap-3 flex-wrap">
+                      <span className="flex items-center gap-1 font-mono text-text">
+                        <Phone size={11} className="text-primary" /> {selectedPatient.patient_phone}
+                      </span>
+                      <span>•</span>
+                      <span className="flex items-center gap-1">
+                        <Calendar size={11} className="text-accent" />
+                        <span>Next Due: <strong>{formatDate(selectedPatient.next_refill_date)}</strong></span>
+                        {selectedDiffDays > 0 ? (
+                          <span className="text-[10px] text-muted">({selectedDiffDays} days remaining)</span>
+                        ) : selectedDiffDays === 0 ? (
+                          <span className="text-[10px] text-amber-400 font-bold">(Due Today)</span>
+                        ) : (
+                          <span className="text-[10px] text-red-400 font-bold">({Math.abs(selectedDiffDays)} days overdue)</span>
+                        )}
+                      </span>
+                    </div>
                   </div>
                 </div>
 
@@ -1530,7 +1583,9 @@ const RefillsSection: React.FC = () => {
             </>
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center p-8 text-muted text-xs gap-3">
-              <Repeat2 size={36} className="text-primary/40" />
+              <div className="w-16 h-16 rounded-2xl bg-bg3/60 border border-border flex items-center justify-center">
+                <Repeat2 size={32} className="text-primary/60" />
+              </div>
               <p className="text-sm font-semibold text-text">Select a patient from the left panel</p>
               <p className="text-xs text-muted max-w-sm text-center">
                 Click on any patient to view active refill prescriptions, live inventory stock status, automated shortage alerts, and fulfillment history.
@@ -3555,6 +3610,7 @@ const SpecialOrdersSection: React.FC = () => {
   const [advancePayment, setAdvancePayment] = useState<number | ''>('');
   const [priority, setPriority] = useState('Normal');
   const [language, setLanguage] = useState('en');
+  const [sendWhatsApp, setSendWhatsApp] = useState(true);
   const [formSubmitting, setFormSubmitting] = useState(false);
 
   // Edit Request Form State
@@ -3868,6 +3924,7 @@ const SpecialOrdersSection: React.FC = () => {
         priority,
         status: 'Pending',
         language,
+        sendWhatsApp: Boolean(sendWhatsApp),
         pharmarack_distributor: selectedDistributor || undefined,
         pharmarack_rate: selectedRate !== '' ? Number(selectedRate) : undefined,
         pharmarack_mrp: selectedMrp !== '' ? Number(selectedMrp) : undefined,
@@ -3905,6 +3962,7 @@ const SpecialOrdersSection: React.FC = () => {
       setAdvancePayment('');
       setPriority('Normal');
       setLanguage('en');
+      setSendWhatsApp(true);
       setSelectedDistributor('');
       setSelectedRate('');
       setSelectedMrp('');
@@ -4567,8 +4625,25 @@ const SpecialOrdersSection: React.FC = () => {
                 </div>
               </div>
 
-              <div className="p-3 rounded-xl bg-primary/10 border border-primary/20 text-muted text-[11px]">
-                📱 <strong>Auto WhatsApp Alert:</strong> Logging this request will automatically send a booking confirmation message to the customer (including Advance Payment details if added).
+              <div className="p-3 rounded-xl bg-primary/10 border border-primary/20 text-text text-[11px] flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <MessageCircle size={15} className={sendWhatsApp ? "text-emerald-400" : "text-muted"} />
+                  <span>
+                    <strong>WhatsApp Booking Alert:</strong> {sendWhatsApp ? 'Will automatically send booking confirmation to customer.' : 'Confirmation message disabled.'}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSendWhatsApp(!sendWhatsApp)}
+                  className={`px-2.5 py-1 rounded-xl text-xs font-bold transition-all flex items-center gap-1 cursor-pointer shrink-0 ${
+                    sendWhatsApp 
+                      ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 shadow-sm' 
+                      : 'bg-bg3 text-muted border border-border'
+                  }`}
+                >
+                  <span className={`w-1.5 h-1.5 rounded-full ${sendWhatsApp ? 'bg-emerald-400 animate-pulse' : 'bg-muted'}`} />
+                  {sendWhatsApp ? 'ON' : 'OFF'}
+                </button>
               </div>
 
               <div className="flex justify-end gap-2 pt-2 border-t border-border">
