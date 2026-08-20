@@ -6,7 +6,7 @@ import type { SpecialOrder } from '../../services/api';
 import {
   RefreshCw, Send, Users, MessageSquare, Phone, Calendar,
   CheckCircle2, AlertCircle, Clock, Search, Repeat2, Bell,
-  MessageCircle, Check, Package, Mail, ExternalLink, LogOut, Zap, Copy, FileText, X, Plus, Trash2, Sliders, ChevronDown, Info, ClipboardList, ShoppingCart, AlertTriangle, Pencil, Edit2, RotateCcw, Loader2, Globe
+  MessageCircle, Check, Package, Mail, ExternalLink, LogOut, Zap, Copy, FileText, X, Plus, Trash2, Sliders, ChevronDown, Info, ClipboardList, ShoppingCart, AlertTriangle, Pencil, Edit2, RotateCcw, Loader2, Globe, Pill, PackagePlus
 } from 'lucide-react';
 import { toastEvent, specialOrdersEvent, liveCartAddEvent, refillEvent, messageSendEvent, whatsappQueueEvent } from '../../services/events';
 import { usePageActive } from '../../lib/keepAlive/PageActiveContext';
@@ -150,10 +150,22 @@ const emptyRow = (): MedicineRow => ({
 const RefillsSection: React.FC = () => {
   const navigate = useNavigate();
   const [data, setData] = useState<RefillPatient[]>(cachedRefillsData);
+  const [selectedPatient, setSelectedPatient] = useState<RefillPatient | null>(null);
   const [loading, setLoading] = useState(cachedRefillsData.length === 0);
   const [search, setSearch] = useState('');
   const [sending, setSending] = useState<string | null>(null);
   const [runningCheck, setRunningCheck] = useState(false);
+  const [filterTab, setFilterTab] = useState<'all' | 'overdue' | 'lead' | 'active' | 'paused' | 'canceled'>('all');
+  const [activeDetailTab, setActiveDetailTab] = useState<'prescriptions' | 'fulfillments' | 'invoices'>('prescriptions');
+
+  // Sub-detail data states
+  const [fulfillments, setFulfillments] = useState<any[]>([]);
+  const [loadingFulfillments, setLoadingFulfillments] = useState(false);
+  const [invoices, setInvoices] = useState<any[]>([]);
+  const [loadingInvoices, setLoadingInvoices] = useState(false);
+  const [viewInvoice, setViewInvoice] = useState<any | null>(null);
+  const [fulfillingId, setFulfillingId] = useState<number | null>(null);
+  const [fulfillingAll, setFulfillingAll] = useState(false);
 
   // ── Add / Edit Refill modal state ──────────────────────────────────────────
   const [showAddModal, setShowAddModal] = useState(false);
@@ -171,14 +183,72 @@ const RefillsSection: React.FC = () => {
   const [medicineRows, setMedicineRows] = useState<MedicineRow[]>([emptyRow()]);
   const [submitting, setSubmitting] = useState(false);
 
-  const handleOpenAddModal = () => {
-    setEditingPatient(null);
-    setAddPatientName('');
-    setAddPatientPhone('');
-    setAddLanguage('en');
-    setAddInterval(30);
+  // Frequency slider modal
+  const [editingRefill, setEditingRefill] = useState<{ id: number; currentInterval: number; name: string } | null>(null);
+  const [editIntervalVal, setEditIntervalVal] = useState<number>(30);
+  const [updatingFreq, setUpdatingFreq] = useState(false);
+
+  // Ref to track currently selected patient phone for smooth silent background updates
+  const selectedPatientPhoneRef = useRef<string | null>(null);
+  useEffect(() => {
+    selectedPatientPhoneRef.current = selectedPatient?.patient_phone || null;
+  }, [selectedPatient]);
+
+  const handleOpenAddModal = (existingPat?: RefillPatient) => {
+    if (existingPat) {
+      setEditingPatient(existingPat);
+      setAddPatientName(existingPat.patient_name);
+      setAddPatientPhone(existingPat.patient_phone);
+      setAddLanguage((existingPat.language as any) || 'en');
+      const interval = existingPat.medicines[0]?.refill_interval_days || 30;
+      setFreqMode('preset');
+      setAddInterval(interval);
+      setMedicineRows(existingPat.medicines.map(m => ({
+        medicineId: m.medicine_id || m.id,
+        medicineName: m.medicine_name,
+        searchTerm: m.medicine_name,
+        suggestions: [],
+        isOpen: false,
+        quantity_needed: m.quantity_needed || 3,
+        inStockQty: m.in_stock_qty || 0
+      })));
+    } else {
+      setEditingPatient(null);
+      setAddPatientName('');
+      setAddPatientPhone('');
+      setAddLanguage('en');
+      setAddInterval(30);
+      setFreqMode('preset');
+      setMedicineRows([emptyRow()]);
+    }
+    setShowAddModal(true);
+  };
+
+  const handleOpenAddMedicineForSelected = () => {
+    if (!selectedPatient) {
+      handleOpenAddModal();
+      return;
+    }
+    setEditingPatient(selectedPatient);
+    setAddPatientName(selectedPatient.patient_name);
+    setAddPatientPhone(selectedPatient.patient_phone);
+    setAddLanguage((selectedPatient.language as any) || 'en');
+    const interval = selectedPatient.medicines[0]?.refill_interval_days || 30;
     setFreqMode('preset');
-    setMedicineRows([emptyRow()]);
+    setAddInterval(interval);
+    // Keep existing rows and append one new empty row for the new medicine
+    setMedicineRows([
+      ...selectedPatient.medicines.map(m => ({
+        medicineId: m.medicine_id || m.id,
+        medicineName: m.medicine_name,
+        searchTerm: m.medicine_name,
+        suggestions: [],
+        isOpen: false,
+        quantity_needed: m.quantity_needed || 3,
+        inStockQty: m.in_stock_qty || 0
+      })),
+      emptyRow()
+    ]);
     setShowAddModal(true);
   };
 
@@ -191,23 +261,80 @@ const RefillsSection: React.FC = () => {
     return val;
   }, [freqMode, addInterval, customValue, customUnit]);
 
+  // Load fulfillment occurrence history for a patient
+  const loadPatientFulfillments = useCallback(async (phone: string, customerId?: number) => {
+    if (!phone && !customerId) {
+      setFulfillments([]);
+      return;
+    }
+    setLoadingFulfillments(true);
+    try {
+      const identifier = phone || String(customerId);
+      const res = await apiClient.get<any[]>(`/refills/patient/${encodeURIComponent(identifier)}/history`);
+      setFulfillments(Array.isArray(res.data) ? res.data : []);
+    } catch {
+      setFulfillments([]);
+    } finally {
+      setLoadingFulfillments(false);
+    }
+  }, []);
+
+  // Load sales history / invoices for a patient
+  const loadPatientInvoices = useCallback(async (phone: string, customerId?: number) => {
+    if (!phone && !customerId) {
+      setInvoices([]);
+      return;
+    }
+    setLoadingInvoices(true);
+    try {
+      let res: any;
+      if (customerId) {
+        res = await apiClient.get<any[]>(`/crm/${customerId}/history`).catch(() => null);
+      }
+      if (!res || !Array.isArray(res.data) || res.data.length === 0) {
+        if (phone) {
+          res = await apiClient.get<any[]>(`/crm/history-by-phone/${encodeURIComponent(phone)}`).catch(() => null);
+        }
+      }
+      setInvoices(Array.isArray(res?.data) ? res.data : []);
+    } catch {
+      setInvoices([]);
+    } finally {
+      setLoadingInvoices(false);
+    }
+  }, []);
+
+  const selectPatientAndLoadDetails = useCallback((pat: RefillPatient) => {
+    setSelectedPatient(pat);
+    loadPatientFulfillments(pat.patient_phone, pat.customer_id);
+    loadPatientInvoices(pat.patient_phone, pat.customer_id);
+  }, [loadPatientFulfillments, loadPatientInvoices]);
+
   const load = useCallback(async (silent = false) => {
     if (!silent && cachedRefillsData.length === 0) setLoading(true);
+    const previousPhone = selectedPatientPhoneRef.current;
     try {
       const r = await withSilentRetry(() => apiClient.get<RefillPatient[]>('/refills/panel'));
       const list = Array.isArray(r.data) ? r.data : [];
       cachedRefillsData = list;
       setData(list);
+
+      if (list.length > 0) {
+        const match = previousPhone ? list.find(p => p.patient_phone === previousPhone) : null;
+        const active = match || list[0];
+        setSelectedPatient(active);
+        loadPatientFulfillments(active.patient_phone, active.customer_id);
+        loadPatientInvoices(active.patient_phone, active.customer_id);
+      } else {
+        setSelectedPatient(null);
+        setFulfillments([]);
+        setInvoices([]);
+      }
     } catch { 
       if (!silent) toastEvent.trigger('Failed to load refills', 'error', '/crm'); 
     }
     finally { setLoading(false); }
-  }, []);
-
-  const [statusTab, setStatusTab] = useState<'all' | 'active' | 'paused' | 'canceled'>('all');
-  const [editingRefill, setEditingRefill] = useState<{ id: number; currentInterval: number; name: string } | null>(null);
-  const [editIntervalVal, setEditIntervalVal] = useState<number>(30);
-  const [updatingFreq, setUpdatingFreq] = useState(false);
+  }, [loadPatientFulfillments, loadPatientInvoices]);
 
   const handleUpdateFrequency = async () => {
     if (!editingRefill) return;
@@ -278,25 +405,48 @@ const RefillsSection: React.FC = () => {
     }
   };
 
-  const handleRenewRefill = (patient: RefillPatient) => {
-    setEditingPatient(null);
-    setShowAddModal(true);
-    setAddPatientName(patient.patient_name);
-    setAddPatientPhone(patient.patient_phone);
-    setAddLanguage((patient.language as any) || 'en');
-    const interval = patient.medicines[0]?.refill_interval_days || 30;
-    setFreqMode('preset');
-    setAddInterval(interval);
-    setMedicineRows(patient.medicines.map(m => ({
-      medicineId: m.medicine_id || m.id,
-      medicineName: m.medicine_name,
-      searchTerm: m.medicine_name,
-      suggestions: [],
-      isOpen: false,
-      quantity_needed: m.quantity_needed || 3,
-      inStockQty: m.in_stock_qty || 0
-    })));
-    toastEvent.trigger(`Pre-filled refill renewal form for ${patient.patient_name}`, 'info', '/crm');
+  const handleFulfillOccurrence = async (refillId: number, medicineName: string) => {
+    setFulfillingId(refillId);
+    try {
+      const res = await apiClient.post(`/refills/${refillId}/fulfill`, {
+        fulfilled_via: 'crm_single_complete'
+      });
+      toastEvent.trigger(res.data?.message || `Completed refill occurrence for "${medicineName}"! Next due date scheduled.`, 'success', '/crm');
+      refillEvent.triggerRefresh();
+      await load(true);
+    } catch (err: any) {
+      toastEvent.trigger(err.response?.data?.error || 'Failed to mark refill fulfilled', 'error', '/crm');
+    } finally {
+      setFulfillingId(null);
+    }
+  };
+
+  const handleFulfillAllForPatient = async (patient: RefillPatient) => {
+    if (!window.confirm(`Mark all active medicines completed for "${patient.patient_name}" and advance schedule to the next cycle?`)) return;
+    setFulfillingAll(true);
+    try {
+      const res = await apiClient.post(`/refills/patient/${encodeURIComponent(patient.patient_phone)}/fulfill-all`, {
+        fulfilled_via: 'crm_batch_complete'
+      });
+      toastEvent.trigger(res.data?.message || `All active refills fulfilled for ${patient.patient_name}!`, 'success', '/crm');
+      refillEvent.triggerRefresh();
+      await load(true);
+    } catch (err: any) {
+      toastEvent.trigger(err.response?.data?.error || 'Failed to fulfill patient refills', 'error', '/crm');
+    } finally {
+      setFulfillingAll(false);
+    }
+  };
+
+  const handleToggleOverride = async (refillId: number) => {
+    try {
+      const res = await apiClient.post(`/refills/${refillId}/toggle-override`);
+      toastEvent.trigger(res.data?.message || 'Stock override toggled', 'success', '/crm');
+      refillEvent.triggerRefresh();
+      await load(true);
+    } catch (err: any) {
+      toastEvent.trigger(err.response?.data?.error || 'Failed to toggle override', 'error', '/crm');
+    }
   };
 
   useEffect(() => {
@@ -320,15 +470,17 @@ const RefillsSection: React.FC = () => {
   }, [load]);
 
   useEffect(() => {
-    if (!showAddModal) return;
+    if (!showAddModal && !editingRefill && !viewInvoice) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         setShowAddModal(false);
+        setEditingRefill(null);
+        setViewInvoice(null);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [showAddModal]);
+  }, [showAddModal, editingRefill, viewInvoice]);
 
   const handleCheck = async () => {
     setRunningCheck(true);
@@ -341,13 +493,14 @@ const RefillsSection: React.FC = () => {
     finally { setRunningCheck(false); }
   };
 
-  // ── Remind Now: always-active, calls new endpoint ─────────────────────────
+  // ── Remind Now: always-active direct manual WhatsApp trigger ──────────────────
   const handleRemindNow = async (phone: string) => {
     setSending(phone);
     try {
       await apiClient.post('/refills/send-reminder-now', { patient_phone: phone });
       toastEvent.trigger(`WhatsApp reminder queued for ${phone}`, 'success', '/crm');
       whatsappQueueEvent.triggerUpdated();
+      await load(true);
     } catch (err: any) {
       toastEvent.trigger(err.response?.data?.error || 'Failed to send reminder', 'error', '/crm');
     } finally { setSending(null); }
@@ -355,9 +508,7 @@ const RefillsSection: React.FC = () => {
 
   // ── Sell Refill Patient → POS ─────────────────────────────────────────────
   const handleSellRefillPatient = (patient: RefillPatient) => {
-    // Only include active medicines that are actually actionable
     const activeMeds = patient.medicines.filter(m => m.is_active !== 0 && m.status !== 'canceled');
-    // Never prefill a medicine with no real stock — matches refillService.ts hasStock check
     const sellableMeds = activeMeds.filter(m => Number(m.in_stock_qty || 0) > 0 || m.stock_verified_override === 1);
     const outOfStockMeds = activeMeds.filter(m => !(Number(m.in_stock_qty || 0) > 0 || m.stock_verified_override === 1));
 
@@ -373,7 +524,6 @@ const RefillsSection: React.FC = () => {
           patientPhone: patient.patient_phone,
           customerId: patient.customer_id || undefined,
           refillPatient: true,
-          // ponytail: pass refillIds so POS can fulfill each after a successful bill save
           refillIds: sellableMeds.map(m => m.id),
           medicines: sellableMeds.map(m => ({
             medicineId: m.medicine_id,
@@ -568,7 +718,6 @@ const RefillsSection: React.FC = () => {
     setSubmitting(true);
     try {
       if (editingPatient) {
-        // Update existing patient refills
         await apiClient.put('/refills/patient-medicines', {
           customer_id: editingPatient.customer_id,
           original_phone: editingPatient.patient_phone,
@@ -612,396 +761,795 @@ const RefillsSection: React.FC = () => {
     } finally { setSubmitting(false); }
   };
 
+  // Filter calculation
   const filtered = data.filter(p => {
-    const matchesSearch = p.patient_name?.toLowerCase().includes(search.toLowerCase()) || p.patient_phone?.includes(search);
+    const q = search.toLowerCase().trim();
+    const matchesSearch = !q || (p.patient_name?.toLowerCase().includes(q)) || (p.patient_phone?.includes(q));
     if (!matchesSearch) return false;
 
-    if (statusTab === 'active') {
+    const today = new Date();
+    const dueDate = new Date(p.next_refill_date);
+    const isOverdue = dueDate < today;
+    const diffDays = Math.ceil((dueDate.getTime() - today.getTime()) / 86400000);
+    const isLeadWindow = !isOverdue && diffDays <= 6 && diffDays >= 0;
+
+    if (filterTab === 'overdue') return isOverdue;
+    if (filterTab === 'lead') return isLeadWindow;
+    if (filterTab === 'active') {
       return p.medicines.some(m => m.is_active !== 0 && m.status !== 'canceled');
     }
-    if (statusTab === 'paused') {
+    if (filterTab === 'paused') {
       return p.medicines.some(m => m.is_active === 0 || m.status === 'paused');
     }
-    if (statusTab === 'canceled') {
+    if (filterTab === 'canceled') {
       return p.medicines.some(m => m.status === 'canceled');
     }
     return true; // 'all'
   });
 
-  const overdue = filtered.filter(p => new Date(p.next_refill_date) < new Date());
-  const upcoming = filtered.filter(p => new Date(p.next_refill_date) >= new Date());
+  // Top metric stats
+  const totalPrescriptions = data.reduce((sum, p) => sum + (p.medicines?.length || 0), 0);
+  const overdueCount = data.filter(p => new Date(p.next_refill_date) < new Date()).length;
+  const leadWindowCount = data.filter(p => {
+    const today = new Date();
+    const dueDate = new Date(p.next_refill_date);
+    const diffDays = Math.ceil((dueDate.getTime() - today.getTime()) / 86400000);
+    return dueDate >= today && diffDays <= 6 && diffDays >= 0;
+  }).length;
+
+  // Selected patient calculations
+  const isSelectedOverdue = selectedPatient ? new Date(selectedPatient.next_refill_date) < new Date() : false;
+  const selectedDiffDays = selectedPatient
+    ? Math.ceil((new Date(selectedPatient.next_refill_date).getTime() - new Date().getTime()) / 86400000)
+    : 0;
+  const isSelectedLeadWindow = selectedPatient && !isSelectedOverdue && selectedDiffDays <= 6 && selectedDiffDays >= 0;
+  const hasSelectedShortage = selectedPatient?.medicines.some(m => Number(m.quantity_needed || 3) > Number(m.in_stock_qty || 0));
+  const isSelected3DayAlert = selectedPatient && !isSelectedOverdue && selectedDiffDays <= 3 && hasSelectedShortage;
 
   return (
-    <div className="flex flex-col h-full gap-4">
-      {/* Toolbar */}
-      <div className="flex items-center gap-3 flex-shrink-0 flex-wrap">
-        <div className="relative flex-1 max-w-xs">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
-          <input
-            value={search}
-            onChange={e => {
-              const val = e.target.value;
-              setSearch(val.includes('|') ? val.split('|')[0].trim() : val);
-            }}
-            placeholder="Search patient, phone or barcode..."
-            className="w-full pl-8 pr-3 py-2 bg-bg border border-border rounded-lg text-sm focus:outline-none focus:border-primary/50"
-          />
+    <div className="w-full h-full flex flex-col gap-3 overflow-hidden pr-1">
+      {/* ── Top Summary Metrics Cards (Matching Customer Credit Layout) ── */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 shrink-0">
+        <div className="p-3.5 bg-bg border border-border rounded-2xl flex items-center justify-between shadow-sm">
+          <div>
+            <p className="text-[11px] text-muted font-medium">Total Prescribed Patients</p>
+            <h3 className="text-lg font-bold text-text mt-0.5">
+              {data.length} <span className="text-xs font-semibold text-muted">({totalPrescriptions} Meds)</span>
+            </h3>
+          </div>
+          <div className="p-2 rounded-xl bg-primary/10 text-primary border border-primary/20">
+            <Repeat2 size={18} />
+          </div>
         </div>
 
-        {/* Refill Status Filter Tabs */}
-        <div className="flex items-center bg-bg border border-border rounded-xl p-0.5 shrink-0">
-          {(['all', 'active', 'paused', 'canceled'] as const).map(tab => (
-            <button
-              key={tab}
-              type="button"
-              onClick={() => setStatusTab(tab)}
-              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all capitalize cursor-pointer ${
-                statusTab === tab
-                  ? 'bg-primary text-white shadow-sm'
-                  : 'text-muted hover:text-text hover:bg-bg3'
-              }`}
-            >
-              {tab === 'all' ? 'All Refills' : tab}
-            </button>
-          ))}
+        <div className="p-3.5 bg-bg border border-border rounded-2xl flex items-center justify-between shadow-sm">
+          <div>
+            <p className="text-[11px] text-muted font-medium">Overdue Prescriptions</p>
+            <h3 className={`text-lg font-bold mt-0.5 ${overdueCount > 0 ? 'text-red-400' : 'text-text'}`}>
+              {overdueCount} Overdue
+            </h3>
+          </div>
+          <div className="p-2 rounded-xl bg-red-500/10 text-red-400 border border-red-500/20">
+            <AlertCircle size={18} />
+          </div>
         </div>
 
-        <button
-          onClick={handleOpenAddModal}
-          className="flex items-center gap-2 px-3 py-2 bg-primary/10 border border-primary/30 text-primary rounded-lg text-sm font-medium hover:bg-primary/20 transition-colors"
-        >
-          <Plus size={14} />
-          Add Refill
-        </button>
-        <button
-          onClick={handleCheck}
-          disabled={runningCheck}
-          className="flex items-center gap-2 px-3 py-2 bg-bg2 border border-border text-muted rounded-lg text-sm font-medium hover:bg-bg3 transition-colors disabled:opacity-50"
-        >
-          <RefreshCw size={14} className={runningCheck ? 'animate-spin' : ''} />
-          {runningCheck ? 'Checking…' : 'Run Check'}
-        </button>
-        <button onClick={() => load()} className="p-2 bg-bg2 border border-border rounded-lg hover:bg-bg3 transition-colors">
-          <RefreshCw size={14} className={loading ? 'animate-spin text-muted' : 'text-muted'} />
-        </button>
-        <div className="ml-auto flex gap-3 text-xs text-muted">
-          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500 inline-block" />{overdue.length} Overdue</span>
-          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-accent inline-block" />{upcoming.length} Upcoming</span>
+        <div className="p-3.5 bg-bg border border-border rounded-2xl flex items-center justify-between shadow-sm">
+          <div>
+            <p className="text-[11px] text-muted font-medium">Due in 5-6 Days (Prep Window)</p>
+            <h3 className="text-lg font-bold text-amber-400 mt-0.5">
+              {leadWindowCount} Upcoming
+            </h3>
+          </div>
+          <div className="p-2 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20">
+            <Bell size={18} />
+          </div>
+        </div>
+
+        <div className="p-3.5 bg-bg border border-border rounded-2xl flex items-center justify-between gap-2 shadow-sm">
+          <button
+            onClick={() => handleOpenAddModal()}
+            className="flex-1 h-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-primary/10 hover:bg-primary/20 border border-primary/30 text-primary text-xs font-bold transition-all active:scale-95 cursor-pointer"
+            title="Register new patient refill schedule"
+          >
+            <Plus size={14} />
+            <span>+ Add Refill</span>
+          </button>
+          <button
+            onClick={handleCheck}
+            disabled={runningCheck}
+            className="h-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-bg3 border border-border text-xs font-bold text-text hover:text-primary transition-all disabled:opacity-50 active:scale-95 cursor-pointer"
+            title="Run 3-day automated stock check"
+          >
+            <RefreshCw size={13} className={runningCheck ? 'animate-spin' : ''} />
+            <span>Run Check</span>
+          </button>
+          <button
+            onClick={() => load()}
+            disabled={loading}
+            className="p-2 rounded-xl bg-bg3 border border-border text-muted hover:text-text transition-all disabled:opacity-50 active:scale-95 cursor-pointer"
+            title="Refresh refills from server"
+          >
+            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+          </button>
         </div>
       </div>
 
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto space-y-3 pr-1">
-        {loading && (
-          <div className="flex items-center justify-center h-40 text-muted text-sm gap-2">
-            <RefreshCw size={16} className="animate-spin" /> Loading refills…
+      {/* ── Split-View Container (Master-Detail Layout) ── */}
+      <div className="flex-1 flex flex-col md:flex-row gap-3 overflow-hidden min-h-0">
+        {/* ── LEFT PANEL: Patient Refill List ── */}
+        <div className="w-full md:w-80 lg:w-96 shrink-0 bg-bg border border-border rounded-2xl flex flex-col overflow-hidden shadow-sm">
+          {/* Header Bar */}
+          <div className="p-3 border-b border-border bg-bg3/40 flex items-center justify-between shrink-0">
+            <h3 className="text-xs font-bold text-text uppercase tracking-wider flex items-center gap-1.5">
+              <Repeat2 size={14} className="text-primary" />
+              Patients &amp; Schedules
+            </h3>
+            <span className="text-[10px] bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 rounded-full font-bold">
+              {filtered.length}
+            </span>
           </div>
-        )}
-        {!loading && filtered.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-40 text-muted gap-2">
-            <CheckCircle2 size={32} className="text-green-500/50" />
-            <p className="text-sm">No refill records found for this filter tab</p>
+
+          {/* Status Filter Pills */}
+          <div className="p-2 border-b border-border bg-bg shrink-0 flex items-center gap-1 overflow-x-auto no-scrollbar">
+            {(
+              [
+                { id: 'all', label: 'All' },
+                { id: 'overdue', label: '🚨 Overdue' },
+                { id: 'lead', label: '🔔 Due Soon' },
+                { id: 'active', label: 'Active' },
+                { id: 'paused', label: 'Paused' },
+                { id: 'canceled', label: 'Canceled' }
+              ] as const
+            ).map(tab => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setFilterTab(tab.id)}
+                className={`px-2.5 py-1 text-[10px] font-bold rounded-lg transition-all shrink-0 cursor-pointer ${
+                  filterTab === tab.id
+                    ? 'bg-primary text-white shadow-xs'
+                    : 'text-muted hover:text-text hover:bg-bg3'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
           </div>
-        )}
-        {[...overdue, ...upcoming].map((patient) => {
-          const today = new Date();
-          const dueDate = new Date(patient.next_refill_date);
-          const isOverdue = dueDate < today;
-          const diffMs = dueDate.getTime() - today.getTime();
-          const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
 
-          // 5-6 Days Lead Window (Notification Buffer before due date)
-          const isLeadWindowActive = !isOverdue && diffDays <= 6 && diffDays >= 0;
-          const hasShortage = patient.medicines.some(m => Number(m.quantity_needed || 3) > Number(m.in_stock_qty || 0));
-          const is3DayStockAlert = !isOverdue && diffDays <= 3 && hasShortage;
+          {/* Search Input */}
+          <div className="p-2 border-b border-border bg-bg shrink-0">
+            <div className="relative">
+              <Search size={12} className="absolute left-2.5 top-2.5 text-muted" />
+              <input
+                type="text"
+                placeholder="Search patient name, mobile or barcode..."
+                value={search}
+                onChange={e => {
+                  const val = e.target.value;
+                  setSearch(val.includes('|') ? val.split('|')[0].trim() : val);
+                }}
+                className="w-full pl-8 pr-2.5 py-1.5 bg-bg2 border border-border rounded-xl text-xs text-text focus:outline-none focus:border-primary"
+              />
+            </div>
+          </div>
 
-          const allReady = patient.medicines.every(m => m.is_ready);
-          return (
-            <div
-              key={`${patient.patient_phone}-${patient.next_refill_date}`}
-              className={`bg-bg border rounded-xl p-4 transition-all ${
-                isOverdue ? 'border-red-500/30' : 
-                is3DayStockAlert ? 'border-amber-500/50' : 
-                isLeadWindowActive ? 'border-primary/40' : 'border-border'
-              }`}
-            >
-              {/* Lead Window Notification Banner */}
-              {isLeadWindowActive && (
-                <div className="mb-3 px-3 py-2 bg-bg border border-amber-500/30 rounded-xl text-xs font-bold text-amber-400 flex items-center justify-between flex-wrap gap-2">
-                  <div className="flex items-center gap-2">
-                    <span className="text-base animate-bounce">🔔</span>
-                    <span>Refill On The Way! 5-6 Day Lead Notification Window Active (Due in {diffDays} day{diffDays !== 1 ? 's' : ''})</span>
-                  </div>
-                  <span className="text-[10px] bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-md font-mono uppercase tracking-wider">Order Prep Window</span>
-                </div>
-              )}
+          {/* Patient Cards List */}
+          <div className="flex-1 overflow-y-auto divide-y divide-border/30">
+            {loading && data.length === 0 ? (
+              <div className="p-8 text-center text-xs text-muted flex items-center justify-center gap-2">
+                <RefreshCw size={14} className="animate-spin text-primary" /> Loading refills...
+              </div>
+            ) : filtered.length === 0 ? (
+              <div className="p-8 text-center text-xs text-muted">No refill patients found for this filter.</div>
+            ) : (
+              filtered.map(patient => {
+                const isSelected = selectedPatient?.patient_phone === patient.patient_phone;
+                const dueDate = new Date(patient.next_refill_date);
+                const isOverdue = dueDate < new Date();
+                const diffDays = Math.ceil((dueDate.getTime() - new Date().getTime()) / 86400000);
+                const isLead = !isOverdue && diffDays <= 6 && diffDays >= 0;
+                const medsCount = patient.medicines?.length || 0;
 
-              {/* 3-Day Automated Inventory Stock Check Alert */}
-              {is3DayStockAlert && (
-                <div className="mb-3 px-3 py-2 bg-bg border border-red-500/30 rounded-xl text-xs font-extrabold text-red-400 flex items-center justify-between flex-wrap gap-2 animate-pulse">
-                  <div className="flex items-center gap-2">
-                    <AlertCircle size={14} className="text-red-400 shrink-0" />
-                    <span>Automated 3-Day Inventory Stock Check: Shortage detected! Need items pushed to Live Cart.</span>
-                  </div>
-                  <span className="text-[10px] bg-red-500/20 text-red-300 px-2 py-0.5 rounded-md font-mono uppercase tracking-wider">3-Day Stock Alert</span>
-                </div>
-              )}
-
-              {/* Patient header */}
-              <div className="flex items-start justify-between mb-3 flex-wrap gap-2">
-                <div className="flex items-center gap-3">
-                  <div className={`w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold ${isOverdue ? 'bg-red-500/15 text-red-400' : 'bg-primary/15 text-primary'}`}>
-                    {patient.patient_name?.[0]?.toUpperCase() || '?'}
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-1.5">
-                      <p className="text-sm font-semibold text-text">{patient.patient_name}</p>
-                      <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-bg3 text-text border border-border">
-                        {patient.language === 'hi' ? '🇮🇳 HI' : patient.language === 'mr' ? '🇮🇳 MR' : '🇬🇧 EN'}
-                      </span>
+                return (
+                  <div
+                    key={patient.patient_phone}
+                    onClick={() => selectPatientAndLoadDetails(patient)}
+                    className={`p-3 cursor-pointer transition-all flex items-center justify-between hover:bg-primary/5 ${
+                      isSelected ? 'bg-primary/10 border-l-4 border-primary font-semibold' : ''
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0 pr-2">
+                      <div
+                        className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
+                          isOverdue
+                            ? 'bg-red-500/15 text-red-400'
+                            : isLead
+                            ? 'bg-amber-500/15 text-amber-400'
+                            : 'bg-primary/15 text-primary'
+                        }`}
+                      >
+                        {patient.patient_name?.[0]?.toUpperCase() || '?'}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-xs font-bold text-text truncate flex items-center gap-1">
+                          <span>{patient.patient_name || 'Unnamed Patient'}</span>
+                          <span className="text-[9px] px-1 py-0.2 rounded bg-bg3 text-muted border border-border/60 shrink-0 font-normal">
+                            {patient.language === 'hi' ? '🇮🇳 HI' : patient.language === 'mr' ? '🇮🇳 MR' : '🇬🇧 EN'}
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-muted flex items-center gap-1.5 mt-0.5 truncate">
+                          <span>📱 {patient.patient_phone}</span>
+                          <span>•</span>
+                          <span>{medsCount} Med{medsCount !== 1 ? 's' : ''}</span>
+                        </div>
+                      </div>
                     </div>
-                    <p className="text-xs text-muted flex items-center gap-1">
-                      <Phone size={10} /> {patient.patient_phone}
-                    </p>
+
+                    <div className="text-right shrink-0">
+                      <div
+                        className={`text-[10px] font-bold ${
+                          isOverdue ? 'text-red-400' : isLead ? 'text-amber-400' : 'text-emerald-400'
+                        }`}
+                      >
+                        {isOverdue ? `Overdue ${Math.abs(diffDays)}d` : isLead ? `Due in ${diffDays}d` : formatDate(patient.next_refill_date)}
+                      </div>
+                      <div className="text-[9px] text-muted mt-0.5 flex items-center justify-end gap-1">
+                        {patient.reminder_status === 'SENT' ? (
+                          <span className="text-emerald-400" title="Reminder sent">✓ Sent</span>
+                        ) : patient.reminder_status === 'QUEUED' ? (
+                          <span className="text-amber-400" title="Reminder queued">⏳ Queued</span>
+                        ) : (
+                          <span>{isOverdue ? 'Action Needed' : 'Scheduled'}</span>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                </div>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <div className={`flex items-center gap-1 text-xs px-2 py-1 rounded-full ${isOverdue ? 'bg-red-500/15 text-red-400' : 'bg-accent/15 text-accent'}`}>
-                    <Calendar size={10} />
-                    {isOverdue ? 'Overdue · ' : 'Due · '}{formatDate(patient.next_refill_date)}
+                );
+              })
+            )}
+          </div>
+        </div>
+
+        {/* ── RIGHT PANEL: Selected Patient Command Center ── */}
+        <div className="flex-1 bg-bg2 border border-border rounded-2xl flex flex-col overflow-hidden shadow-sm min-h-0">
+          {selectedPatient ? (
+            <>
+              {/* Account / Patient Header Bar */}
+              <div className="p-3.5 border-b border-border bg-bg3/30 flex flex-wrap items-center justify-between gap-3 shrink-0">
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h2 className="text-base font-bold text-text">{selectedPatient.patient_name || 'Unnamed Patient'}</h2>
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                      isSelectedOverdue
+                        ? 'bg-red-500/10 text-red-400 border-red-500/20'
+                        : isSelectedLeadWindow
+                        ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                        : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                    }`}>
+                      {isSelectedOverdue ? '🚨 OVERDUE REFILL' : isSelectedLeadWindow ? '🔔 PREP WINDOW ACTIVE' : 'ACTIVE SCHEDULE'}
+                    </span>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-bg3 text-text border border-border">
+                      {selectedPatient.language === 'hi' ? '🇮🇳 HI' : selectedPatient.language === 'mr' ? '🇮🇳 MR' : '🇬🇧 EN'}
+                    </span>
                   </div>
-                  {/* Renew Schedule */}
-                  <button
-                    type="button"
-                    onClick={() => handleRenewRefill(patient)}
-                    title="Renew or duplicate this patient's refill schedule into new entry"
-                    className="flex items-center gap-1 px-3 py-1.5 bg-primary/10 border border-primary/30 text-primary hover:bg-primary/20 rounded-xl text-xs font-bold transition-all cursor-pointer"
-                  >
-                    <Repeat2 size={12} />
-                    <span>Renew Schedule</span>
-                  </button>
-                  {/* Delete Patient Refill */}
-                  <button
-                    type="button"
-                    onClick={() => handleDeletePatientRefill(patient)}
-                    title={`Delete all refill records for ${patient.patient_name}`}
-                    className="flex items-center gap-1 px-3 py-1.5 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 rounded-xl text-xs font-bold transition-all cursor-pointer"
-                  >
-                    <Trash2 size={12} />
-                    <span>Delete</span>
-                  </button>
-                  {/* Reminder Status Tracking / Action Button */}
-                  {patient.reminder_status === 'SENT' ? (
-                    <div
-                      className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 rounded-xl text-xs font-bold shadow-xs"
-                      title={patient.reminder_sent_at ? `Sent on ${patient.reminder_sent_at}` : 'Refill reminder sent'}
-                    >
-                      <Check size={12} className="text-emerald-400" />
-                      <span>Reminder Sent ✓</span>
-                      {patient.reminder_sent_at && (
-                        <span className="text-[10px] opacity-75 font-mono">({formatDate(patient.reminder_sent_at)})</span>
+                  <div className="text-xs text-muted mt-1 flex items-center gap-3 flex-wrap">
+                    <span className="flex items-center gap-1 font-mono text-text">
+                      <Phone size={11} className="text-primary" /> {selectedPatient.patient_phone}
+                    </span>
+                    <span>•</span>
+                    <span className="flex items-center gap-1">
+                      <Calendar size={11} className="text-accent" />
+                      <span>Next Due: <strong>{formatDate(selectedPatient.next_refill_date)}</strong></span>
+                      {selectedDiffDays > 0 ? (
+                        <span className="text-[10px] text-muted">({selectedDiffDays} days remaining)</span>
+                      ) : selectedDiffDays === 0 ? (
+                        <span className="text-[10px] text-amber-400 font-bold">(Due Today)</span>
+                      ) : (
+                        <span className="text-[10px] text-red-400 font-bold">({Math.abs(selectedDiffDays)} days overdue)</span>
                       )}
-                    </div>
-                  ) : patient.reminder_status === 'QUEUED' ? (
-                    <div
-                      className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/15 border border-amber-500/30 text-amber-400 rounded-xl text-xs font-bold shadow-xs"
-                      title="Refill reminder queued in dispatch queue"
-                    >
-                      <Clock size={12} className="text-amber-400" />
-                      <span>Queued ⏳</span>
-                    </div>
-                  ) : patient.reminder_status === 'SENDING' ? (
-                    <div
-                      className="flex items-center gap-1.5 px-3 py-1.5 bg-sky-500/15 border border-sky-500/30 text-sky-400 rounded-xl text-xs font-bold shadow-xs"
-                      title="Sending WhatsApp reminder..."
-                    >
-                      <Loader2 size={12} className="animate-spin text-sky-400" />
-                      <span>Sending 📡</span>
-                    </div>
-                  ) : patient.reminder_status === 'FAILED' ? (
-                    <button
-                      type="button"
-                      onClick={() => handleRemindNow(patient.patient_phone)}
-                      disabled={sending === patient.patient_phone}
-                      title="Reminder failed to send — click to retry"
-                      className="flex items-center gap-1 px-3 py-1.5 bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 text-red-400 rounded-xl text-xs font-bold transition-colors disabled:opacity-50 cursor-pointer shadow-xs"
-                    >
-                      <AlertCircle size={12} className="text-red-400" />
-                      <span>{sending === patient.patient_phone ? 'Retrying…' : 'Retry Reminder'}</span>
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => handleRemindNow(patient.patient_phone)}
-                      disabled={sending === patient.patient_phone}
-                      title="Send WhatsApp refill reminder now"
-                      className="flex items-center gap-1 px-3 py-1.5 bg-green-500/10 border border-green-500/30 text-green-400 hover:bg-green-500/20 rounded-xl text-xs font-medium transition-colors disabled:opacity-50 cursor-pointer shadow-xs"
-                    >
-                      <Send size={11} className={sending === patient.patient_phone ? 'animate-pulse' : ''} />
-                      {sending === patient.patient_phone ? 'Sending…' : 'Remind Now'}
-                    </button>
-                  )}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Right Action Toolbar */}
+                <div className="flex items-center gap-2 flex-wrap">
                   {/* Sell Now → POS */}
                   <button
-                    onClick={() => handleSellRefillPatient(patient)}
+                    onClick={() => handleSellRefillPatient(selectedPatient)}
                     title="Sell now: Pre-loads all prescribed medicines & quantities into POS"
                     className="flex items-center gap-1.5 px-3.5 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-black shadow-md shadow-emerald-500/20 transition-all hover:scale-105 active:scale-95 cursor-pointer"
                   >
                     <ShoppingCart size={13} />
                     <span>⚡ Sell Now</span>
                   </button>
+
+                  {/* WhatsApp Reminder Button */}
+                  <button
+                    onClick={() => handleRemindNow(selectedPatient.patient_phone)}
+                    disabled={sending === selectedPatient.patient_phone}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-primary hover:bg-primary/90 text-white text-xs font-bold transition-all active:scale-95 disabled:opacity-50 cursor-pointer shadow-xs"
+                    title="Send instant manual refill reminder on WhatsApp"
+                  >
+                    <Send size={12} className={sending === selectedPatient.patient_phone ? 'animate-pulse' : ''} />
+                    <span>{sending === selectedPatient.patient_phone ? 'Sending…' : 'Remind Now'}</span>
+                  </button>
+
+                  {/* Add Medicine to this Patient */}
+                  <button
+                    onClick={handleOpenAddMedicineForSelected}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-bg3 border border-border text-text hover:text-primary hover:border-primary/40 rounded-xl text-xs font-bold transition-all active:scale-95 cursor-pointer"
+                    title="Add a new medicine schedule to this patient"
+                  >
+                    <Pill size={13} className="text-primary" />
+                    <span>+ Add Med</span>
+                  </button>
+
+                  {/* Complete / Renew All Schedule Button */}
+                  <button
+                    onClick={() => handleFulfillAllForPatient(selectedPatient)}
+                    disabled={fulfillingAll}
+                    className="flex items-center gap-1 px-3 py-1.5 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20 rounded-xl text-xs font-bold transition-all active:scale-95 cursor-pointer disabled:opacity-50"
+                    title="Mark all active medicines fulfilled and advance recurring schedule to next cycle"
+                  >
+                    <Check size={12} className={fulfillingAll ? 'animate-spin' : ''} />
+                    <span>{fulfillingAll ? 'Advancing…' : 'Fulfill Cycle'}</span>
+                  </button>
+
+                  {/* Delete Patient Schedule */}
+                  <button
+                    onClick={() => handleDeletePatientRefill(selectedPatient)}
+                    className="flex items-center gap-1 px-2.5 py-1.5 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 rounded-xl text-xs font-bold transition-all active:scale-95 cursor-pointer"
+                    title="Permanently remove refill schedule for this patient"
+                  >
+                    <Trash2 size={12} />
+                  </button>
                 </div>
               </div>
 
-              {/* Medicines with Shortage Calculation, Inline Freq Slider, Pause/Resume & Direct Live Cart Button */}
-              <div className="space-y-1.5">
-                {patient.medicines.map(med => {
-                  const reqQty = Number(med.quantity_needed !== undefined && med.quantity_needed !== null ? med.quantity_needed : 3);
-                  const stockQty = Number(med.in_stock_qty || 0);
-                  const shortageQty = Math.max(0, reqQty - stockQty);
-                  const cartOrderQty = shortageQty > 0 ? shortageQty : reqQty;
-                  const isPaused = med.is_active === 0 || med.status === 'paused';
-                  const isCanceled = med.status === 'canceled';
+              {/* Sub-Tab Navigation Bar */}
+              <div className="px-4 pt-2.5 border-b border-border bg-bg3/20 flex items-center gap-4 shrink-0">
+                <button
+                  onClick={() => setActiveDetailTab('prescriptions')}
+                  className={`pb-2.5 text-xs font-bold border-b-2 transition-all flex items-center gap-1.5 cursor-pointer ${
+                    activeDetailTab === 'prescriptions'
+                      ? 'border-primary text-primary'
+                      : 'border-transparent text-muted hover:text-text'
+                  }`}
+                >
+                  <Package size={13} />
+                  <span>Prescriptions &amp; Stock ({selectedPatient.medicines?.length || 0})</span>
+                </button>
 
-                  return (
-                    <div key={med.id} className={`flex items-center justify-between gap-2 px-3 py-2 rounded-xl border flex-wrap transition-all ${
-                      isCanceled ? 'bg-red-500/5 border-red-500/20 opacity-75' :
-                      isPaused ? 'bg-amber-500/5 border-amber-500/20' :
-                      'bg-bg3/50 border-border/40'
-                    }`}>
-                      <div className="flex items-center gap-2 flex-1 min-w-[200px]">
-                        <Package size={13} className={isCanceled ? 'text-red-400' : isPaused ? 'text-amber-400' : 'text-primary'} />
-                        <span className={`text-xs font-semibold text-text truncate ${isCanceled ? 'line-through opacity-70' : ''}`}>{med.medicine_name}</span>
-                        {isPaused && (
-                          <span className="px-1.5 py-0.5 rounded text-[9px] font-extrabold bg-amber-500/20 text-amber-400 border border-amber-500/30">
-                            ⏸️ Paused
-                          </span>
-                        )}
-                        {isCanceled && (
-                          <span className="px-1.5 py-0.5 rounded text-[9px] font-extrabold bg-red-500/20 text-red-400 border border-red-500/30">
-                            ❌ Canceled
-                          </span>
-                        )}
+                <button
+                  onClick={() => {
+                    setActiveDetailTab('fulfillments');
+                    loadPatientFulfillments(selectedPatient.patient_phone, selectedPatient.customer_id);
+                  }}
+                  className={`pb-2.5 text-xs font-bold border-b-2 transition-all flex items-center gap-1.5 cursor-pointer ${
+                    activeDetailTab === 'fulfillments'
+                      ? 'border-primary text-primary'
+                      : 'border-transparent text-muted hover:text-text'
+                  }`}
+                >
+                  <Clock size={13} />
+                  <span>Fulfillment History ({fulfillments.length})</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    setActiveDetailTab('invoices');
+                    loadPatientInvoices(selectedPatient.patient_phone, selectedPatient.customer_id);
+                  }}
+                  className={`pb-2.5 text-xs font-bold border-b-2 transition-all flex items-center gap-1.5 cursor-pointer ${
+                    activeDetailTab === 'invoices'
+                      ? 'border-primary text-primary'
+                      : 'border-transparent text-muted hover:text-text'
+                  }`}
+                >
+                  <FileText size={13} />
+                  <span>Sales &amp; Purchase Bills ({invoices.length})</span>
+                </button>
+              </div>
+
+              {/* Sub-Views Container */}
+              <div className="flex-1 overflow-y-auto p-4 space-y-3 min-h-0">
+                {/* ── VIEW 1: Prescriptions & Stock Analysis ── */}
+                {activeDetailTab === 'prescriptions' && (
+                  <div className="space-y-3">
+                    {/* Lead Window Notification Banner */}
+                    {isSelectedLeadWindow && (
+                      <div className="px-3.5 py-2.5 bg-bg border border-amber-500/30 rounded-xl text-xs font-bold text-amber-400 flex items-center justify-between flex-wrap gap-2 shadow-xs">
+                        <div className="flex items-center gap-2">
+                          <span className="text-base animate-bounce">🔔</span>
+                          <span>Refill On The Way! 5-6 Day Lead Notification Window Active (Due in {selectedDiffDays} day{selectedDiffDays !== 1 ? 's' : ''})</span>
+                        </div>
+                        <span className="text-[10px] bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-md font-mono uppercase tracking-wider">
+                          Order Prep Window
+                        </span>
                       </div>
+                    )}
 
-                      <div className="flex items-center gap-2 flex-wrap">
-                        {/* Edit Frequency Slider Button */}
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setEditingRefill({ id: med.id, currentInterval: med.refill_interval_days || 30, name: med.medicine_name });
-                            setEditIntervalVal(med.refill_interval_days || 30);
-                          }}
-                          className="flex items-center gap-1 px-2 py-1 rounded-lg bg-bg border border-border hover:border-primary/50 text-muted hover:text-text text-[10px] font-semibold transition-all cursor-pointer"
-                          title="Modify Refill Frequency / Due Date with Interactive Slider"
-                        >
-                          <Sliders size={10} className="text-accent" />
-                          <span>{med.refill_interval_days || 30}d Cycle (Edit)</span>
-                        </button>
+                    {/* 3-Day Automated Inventory Stock Check Alert */}
+                    {isSelected3DayAlert && (
+                      <div className="px-3.5 py-2.5 bg-bg border border-red-500/30 rounded-xl text-xs font-extrabold text-red-400 flex items-center justify-between flex-wrap gap-2 animate-pulse shadow-xs">
+                        <div className="flex items-center gap-2">
+                          <AlertCircle size={14} className="text-red-400 shrink-0" />
+                          <span>Automated 3-Day Inventory Stock Check: Shortage detected! Add shortage to Live Cart below.</span>
+                        </div>
+                        <span className="text-[10px] bg-red-500/20 text-red-300 px-2 py-0.5 rounded-md font-mono uppercase tracking-wider">
+                          3-Day Stock Alert
+                        </span>
+                      </div>
+                    )}
 
-                        {/* Pause / Resume Toggle Button */}
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleTogglePauseRefill(med.id, med.is_active !== 0);
-                          }}
-                          className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold border transition-all cursor-pointer ${
-                            med.is_active !== 0
-                              ? 'bg-amber-500/15 hover:bg-amber-500/25 border-amber-500/40 text-amber-400'
-                              : 'bg-emerald-500/15 hover:bg-emerald-500/25 border-emerald-500/40 text-emerald-400'
-                          }`}
-                          title={med.is_active !== 0 ? 'Pause refill notifications and orders for this medicine' : 'Resume refill schedule for this medicine'}
-                        >
-                          {med.is_active !== 0 ? '⏸️ Pause' : '▶️ Resume'}
-                        </button>
+                    {/* Medicines List */}
+                    <div className="space-y-2.5">
+                      {selectedPatient.medicines.map(med => {
+                        const reqQty = Number(med.quantity_needed !== undefined && med.quantity_needed !== null ? med.quantity_needed : 3);
+                        const stockQty = Number(med.in_stock_qty || 0);
+                        const shortageQty = Math.max(0, reqQty - stockQty);
+                        const cartOrderQty = shortageQty > 0 ? shortageQty : reqQty;
+                        const isPaused = med.is_active === 0 || med.status === 'paused';
+                        const isCanceled = med.status === 'canceled';
+                        const isOverridden = med.stock_verified_override === 1;
 
-                        {/* Cancel Button */}
-                        {!isCanceled && (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleCancelRefill(med.id);
-                            }}
-                            className="flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-400 text-[10px] font-bold transition-all cursor-pointer"
-                            title="Cancel and archive this refill schedule"
+                        return (
+                          <div
+                            key={med.id}
+                            className={`p-3.5 rounded-xl border flex flex-col gap-3 transition-all ${
+                              isCanceled
+                                ? 'bg-red-500/5 border-red-500/20 opacity-75'
+                                : isPaused
+                                ? 'bg-amber-500/5 border-amber-500/20'
+                                : 'bg-bg border-border hover:border-border/80 shadow-xs'
+                            }`}
                           >
-                            <X size={10} />
-                            <span>Cancel</span>
-                          </button>
-                        )}
+                            <div className="flex items-start justify-between gap-3 flex-wrap">
+                              <div className="flex items-start gap-2.5 min-w-[220px]">
+                                <div className={`p-2 rounded-xl mt-0.5 shrink-0 ${
+                                  isCanceled ? 'bg-red-500/10 text-red-400' : isPaused ? 'bg-amber-500/10 text-amber-400' : 'bg-primary/10 text-primary'
+                                }`}>
+                                  <Package size={16} />
+                                </div>
+                                <div>
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <h4 className={`text-sm font-bold text-text ${isCanceled ? 'line-through opacity-70' : ''}`}>
+                                      {med.medicine_name}
+                                    </h4>
+                                    {med.packaging && (
+                                      <span className="text-[10px] text-muted font-medium px-1.5 py-0.5 rounded bg-bg3 border border-border">
+                                        {med.packaging}
+                                      </span>
+                                    )}
+                                    {isPaused && (
+                                      <span className="px-1.5 py-0.5 rounded text-[9px] font-extrabold bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                                        ⏸️ Paused
+                                      </span>
+                                    )}
+                                    {isCanceled && (
+                                      <span className="px-1.5 py-0.5 rounded text-[9px] font-extrabold bg-red-500/20 text-red-400 border border-red-500/30">
+                                        ❌ Canceled
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="text-[11px] text-muted flex items-center gap-3 mt-1 flex-wrap">
+                                    {med.mrp ? <span>MRP: <strong>₹{med.mrp}</strong></span> : null}
+                                    {med.batch_no && <span>Batch: <strong className="font-mono">{med.batch_no}</strong></span>}
+                                    {med.expiry_date && <span>Exp: <strong>{med.expiry_date}</strong></span>}
+                                  </div>
+                                </div>
+                              </div>
 
-                        {/* Delete Single Refill Item Button */}
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDeleteRefillItem(med.id, med.medicine_name);
-                          }}
-                          className="flex items-center gap-1 px-2 py-1 rounded-lg bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 text-[10px] font-bold transition-all cursor-pointer"
-                          title={`Permanently delete "${med.medicine_name}" from refill schedule`}
-                        >
-                          <Trash2 size={10} />
-                          <span>Delete</span>
-                        </button>
+                              {/* Stock & Quantity Pills */}
+                              <div className="flex items-center gap-2.5 flex-wrap">
+                                <div className="text-right">
+                                  <div className="text-[10px] text-muted font-medium uppercase tracking-wider">Required</div>
+                                  <div className="text-sm font-extrabold text-text">{reqQty} Units</div>
+                                </div>
+                                <div className="h-6 w-px bg-border/60" />
+                                <div className="text-right">
+                                  <div className="text-[10px] text-muted font-medium uppercase tracking-wider">In Stock</div>
+                                  <div className={`text-sm font-extrabold ${stockQty >= reqQty ? 'text-emerald-400' : stockQty > 0 ? 'text-amber-400' : 'text-red-400'}`}>
+                                    {stockQty} Units
+                                  </div>
+                                </div>
+                                <div>
+                                  {stockQty >= reqQty ? (
+                                    <span className="px-2.5 py-1 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-xs font-bold flex items-center gap-1">
+                                      <Check size={11} /> In Stock
+                                    </span>
+                                  ) : stockQty > 0 ? (
+                                    <span className="px-2.5 py-1 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-400 text-xs font-bold flex items-center gap-1">
+                                      <AlertCircle size={11} /> Shortage: {shortageQty}
+                                    </span>
+                                  ) : (
+                                    <span className="px-2.5 py-1 rounded-xl bg-red-500/15 border border-red-500/30 text-red-400 text-xs font-bold flex items-center gap-1">
+                                      <AlertCircle size={11} /> Out of Stock ({shortageQty})
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
 
-                        <span className="text-[11px] font-medium text-muted">
-                          Req: <strong className="text-text">{reqQty}</strong>
-                        </span>
-                        <span className="text-[11px] font-medium text-muted">
-                          Stock: <strong className={stockQty > 0 ? 'text-emerald-400' : 'text-red-400'}>{stockQty}</strong>
-                        </span>
+                            {/* Bottom Actions Row per Medicine */}
+                            <div className="flex items-center justify-between gap-2 pt-2.5 border-t border-border/40 flex-wrap">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                {/* Frequency Slider Button */}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditingRefill({ id: med.id, currentInterval: med.refill_interval_days || 30, name: med.medicine_name });
+                                    setEditIntervalVal(med.refill_interval_days || 30);
+                                  }}
+                                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-bg2 border border-border hover:border-primary/50 text-muted hover:text-text text-[11px] font-semibold transition-all cursor-pointer"
+                                  title="Modify Refill Frequency / Cycle with Interactive Slider"
+                                >
+                                  <Sliders size={11} className="text-accent" />
+                                  <span>{med.refill_interval_days || 30}d Cycle (Edit)</span>
+                                </button>
 
-                        {shortageQty > 0 ? (
-                          <span className="px-2 py-0.5 rounded-md bg-amber-500/15 border border-amber-500/30 text-amber-400 text-[10px] font-extrabold">
-                            Need Order: {shortageQty}
-                          </span>
-                        ) : (
-                          <span className="px-2 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-[10px] font-bold">
-                            In Stock
-                          </span>
-                        )}
+                                {/* Direct Live Cart Addition */}
+                                <button
+                                  type="button"
+                                  onClick={() => handleAddRefillShortageToCart(med.medicine_name, cartOrderQty)}
+                                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-primary/15 hover:bg-primary/25 border border-primary/40 text-primary text-[11px] font-bold transition-all cursor-pointer shadow-xs"
+                                  title={`Add ${cartOrderQty} unit(s) of "${med.medicine_name}" directly to Pharmarack Live Cart`}
+                                >
+                                  <ShoppingCart size={12} />
+                                  <span>+ Live Cart ({cartOrderQty})</span>
+                                </button>
 
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleAddRefillShortageToCart(med.medicine_name, cartOrderQty);
-                          }}
-                          className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-primary/15 hover:bg-primary/25 border border-primary/40 text-primary text-[10px] font-bold transition-all cursor-pointer shadow-xs"
-                          title={`Add ${cartOrderQty} unit(s) of "${med.medicine_name}" directly to Pharmarack Live Cart`}
-                        >
-                          <ShoppingCart size={11} />
-                          <span>+ Live Cart ({cartOrderQty})</span>
-                        </button>
-                      </div>
+                                {/* Stock Override Toggle */}
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleOverride(med.id)}
+                                  className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-[11px] font-bold border transition-all cursor-pointer ${
+                                    isOverridden
+                                      ? 'bg-purple-500/15 border-purple-500/40 text-purple-400'
+                                      : 'bg-bg2 border-border text-muted hover:text-text'
+                                  }`}
+                                  title="Force enable sell in POS even if inventory shows 0"
+                                >
+                                  <Zap size={11} />
+                                  <span>{isOverridden ? 'Override On' : 'Override Stock'}</span>
+                                </button>
+                              </div>
+
+                              <div className="flex items-center gap-2 flex-wrap">
+                                {/* Complete Single Occurrence Button */}
+                                <button
+                                  type="button"
+                                  onClick={() => handleFulfillOccurrence(med.id, med.medicine_name)}
+                                  disabled={fulfillingId === med.id}
+                                  className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-400 text-[11px] font-bold transition-all cursor-pointer disabled:opacity-50"
+                                  title="Mark this medicine's current occurrence fulfilled and advance next due date"
+                                >
+                                  <Check size={12} className={fulfillingId === med.id ? 'animate-spin' : ''} />
+                                  <span>{fulfillingId === med.id ? 'Fulfilling…' : '✓ Complete'}</span>
+                                </button>
+
+                                {/* Pause / Resume Toggle */}
+                                <button
+                                  type="button"
+                                  onClick={() => handleTogglePauseRefill(med.id, med.is_active !== 0)}
+                                  className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-[11px] font-bold border transition-all cursor-pointer ${
+                                    med.is_active !== 0
+                                      ? 'bg-amber-500/15 hover:bg-amber-500/25 border-amber-500/40 text-amber-400'
+                                      : 'bg-emerald-500/15 hover:bg-emerald-500/25 border-emerald-500/40 text-emerald-400'
+                                  }`}
+                                  title={med.is_active !== 0 ? 'Pause refill notifications for this medicine' : 'Resume refill schedule'}
+                                >
+                                  {med.is_active !== 0 ? '⏸️ Pause' : '▶️ Resume'}
+                                </button>
+
+                                {/* Cancel */}
+                                {!isCanceled && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleCancelRefill(med.id)}
+                                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-400 text-[11px] font-bold transition-all cursor-pointer"
+                                    title="Cancel and archive this refill schedule"
+                                  >
+                                    <X size={11} />
+                                    <span>Cancel</span>
+                                  </button>
+                                )}
+
+                                {/* Delete Single Refill Item */}
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteRefillItem(med.id, med.medicine_name)}
+                                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 text-[11px] font-bold transition-all cursor-pointer"
+                                  title={`Permanently delete "${med.medicine_name}" from refill schedule`}
+                                >
+                                  <Trash2 size={11} />
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
-                  );
-                })}
-              </div>
+                  </div>
+                )}
 
-              {allReady && (
-                <div className="mt-2 flex items-center gap-1 text-xs text-green-400">
-                  <CheckCircle2 size={11} /> All medicines ready for dispensing
-                </div>
-              )}
+                {/* ── VIEW 2: Refill Fulfillment & Occurrence History ── */}
+                {activeDetailTab === 'fulfillments' && (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-xs font-bold text-muted uppercase tracking-wider">
+                        Fulfillment Occurrence History ({fulfillments.length})
+                      </h4>
+                      <button
+                        onClick={() => loadPatientFulfillments(selectedPatient.patient_phone, selectedPatient.customer_id)}
+                        disabled={loadingFulfillments}
+                        className="text-xs text-primary font-semibold flex items-center gap-1 hover:underline disabled:opacity-50"
+                      >
+                        <RefreshCw size={12} className={loadingFulfillments ? 'animate-spin' : ''} />
+                        <span>Refresh Log</span>
+                      </button>
+                    </div>
+
+                    {loadingFulfillments ? (
+                      <div className="p-8 text-center text-xs text-muted flex items-center justify-center gap-2">
+                        <RefreshCw size={14} className="animate-spin text-primary" /> Loading fulfillment records...
+                      </div>
+                    ) : fulfillments.length === 0 ? (
+                      <div className="p-8 text-center text-xs text-muted border border-border rounded-xl bg-bg">
+                        No historical refill fulfillment records found for this patient yet.
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto border border-border rounded-xl bg-bg">
+                        <table className="w-full text-left text-xs">
+                          <thead>
+                            <tr className="bg-bg3/40 border-b border-border text-muted font-bold">
+                              <th className="p-3">Fulfilled Date</th>
+                              <th className="p-3">Prescribed Medicine</th>
+                              <th className="p-3 text-center">Fulfilled Qty</th>
+                              <th className="p-3">Linked Bill / Invoice</th>
+                              <th className="p-3">Method / Notes</th>
+                              <th className="p-3 text-right">Next Due Scheduled</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-border/30">
+                            {fulfillments.map((item: any, idx: number) => (
+                              <tr key={idx} className="hover:bg-bg2/50">
+                                <td className="p-3 font-semibold text-text">
+                                  {formatDate(item.fulfilled_at || item.created_at)}
+                                </td>
+                                <td className="p-3 font-bold text-text">
+                                  {item.medicine_name || 'Prescribed Medicine'}
+                                </td>
+                                <td className="p-3 text-center font-extrabold text-emerald-400">
+                                  {item.quantity_fulfilled || 1} Units
+                                </td>
+                                <td className="p-3">
+                                  {item.linked_invoice_no || item.invoice_no ? (
+                                    <span className="font-mono text-[11px] text-primary font-bold">
+                                      #{item.linked_invoice_no || item.invoice_no}
+                                    </span>
+                                  ) : (
+                                    <span className="text-muted text-[11px]">Manual / CRM</span>
+                                  )}
+                                </td>
+                                <td className="p-3">
+                                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-bg3 text-muted border border-border">
+                                    {item.fulfilled_via === 'pos_sale' ? '⚡ POS Sale' : '✓ CRM Complete'}
+                                  </span>
+                                </td>
+                                <td className="p-3 text-right font-medium text-muted">
+                                  {item.next_due_date ? formatDate(item.next_due_date) : 'Scheduled'}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* ── VIEW 3: Sales & Purchase Bills History ── */}
+                {activeDetailTab === 'invoices' && (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-xs font-bold text-muted uppercase tracking-wider">
+                        Customer Invoices &amp; Bills ({invoices.length})
+                      </h4>
+                      <button
+                        onClick={() => loadPatientInvoices(selectedPatient.patient_phone, selectedPatient.customer_id)}
+                        disabled={loadingInvoices}
+                        className="text-xs text-primary font-semibold flex items-center gap-1 hover:underline disabled:opacity-50"
+                      >
+                        <RefreshCw size={12} className={loadingInvoices ? 'animate-spin' : ''} />
+                        <span>Refresh Invoices</span>
+                      </button>
+                    </div>
+
+                    {loadingInvoices ? (
+                      <div className="p-8 text-center text-xs text-muted flex items-center justify-center gap-2">
+                        <RefreshCw size={14} className="animate-spin text-primary" /> Loading purchase invoices...
+                      </div>
+                    ) : invoices.length === 0 ? (
+                      <div className="p-8 text-center text-xs text-muted border border-border rounded-xl bg-bg">
+                        No purchase invoices recorded for this customer yet.
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto border border-border rounded-xl bg-bg">
+                        <table className="w-full text-left text-xs">
+                          <thead>
+                            <tr className="bg-bg3/40 border-b border-border text-muted font-bold">
+                              <th className="p-3">Invoice No</th>
+                              <th className="p-3">Date</th>
+                              <th className="p-3">Items Purchased</th>
+                              <th className="p-3">Payment Method</th>
+                              <th className="p-3 text-right">Bill Total</th>
+                              <th className="p-3 text-center">Action</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-border/30">
+                            {invoices.map((inv: any) => (
+                              <tr key={inv.id} className="hover:bg-bg2/50">
+                                <td className="p-3 font-mono font-bold text-primary">
+                                  {inv.invoice_no}
+                                </td>
+                                <td className="p-3 text-muted">
+                                  {formatDate(inv.date)}
+                                </td>
+                                <td className="p-3 font-medium text-text max-w-xs truncate">
+                                  {inv.items && inv.items.length > 0
+                                    ? inv.items.map((i: any) => i.medicine_name).join(', ')
+                                    : `${inv.item_count || 1} item(s)`}
+                                </td>
+                                <td className="p-3">
+                                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-bg3 text-muted border border-border">
+                                    {inv.payment_medium || 'CASH'}
+                                  </span>
+                                </td>
+                                <td className="p-3 text-right font-extrabold text-emerald-400">
+                                  ₹{(inv.total_amount || 0).toFixed(2)}
+                                </td>
+                                <td className="p-3 text-center">
+                                  <button
+                                    onClick={() => setViewInvoice(inv)}
+                                    className="px-2.5 py-1 rounded-lg bg-bg2 hover:bg-bg3 border border-border text-primary text-[11px] font-semibold transition-all cursor-pointer"
+                                  >
+                                    View Details
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </>
+          ) : (
+            <div className="flex-1 flex flex-col items-center justify-center p-8 text-muted text-xs gap-3">
+              <Repeat2 size={36} className="text-primary/40" />
+              <p className="text-sm font-semibold text-text">Select a patient from the left panel</p>
+              <p className="text-xs text-muted max-w-sm text-center">
+                Click on any patient to view active refill prescriptions, live inventory stock status, automated shortage alerts, and fulfillment history.
+              </p>
             </div>
-          );
-        })}
+          )}
+        </div>
       </div>
 
-      {/* ── Add / Edit Refill Modal ─────────────────────────────────────────── */}
+      {/* ── Add / Edit Refill Modal ── */}
       {showAddModal && createPortal(
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-modal flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-modal flex items-center justify-center p-4 animate-fade-in">
           <div className="bg-bg2 border border-border rounded-2xl w-full max-w-xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
             {/* Modal Header */}
-            <div className="p-4 border-b border-border flex items-center justify-between flex-shrink-0 bg-bg3/40">
+            <div className="p-4 border-b border-border flex items-center justify-between shrink-0 bg-bg3/40">
               <div>
                 <h3 className="text-sm font-bold text-text flex items-center gap-2">
                   {editingPatient ? <Edit2 size={18} className="text-primary" /> : <Repeat2 size={18} className="text-primary" />}
-                  {editingPatient ? 'Edit Patient Refill' : 'Add New Patient Refill'}
+                  {editingPatient ? 'Edit Patient Refill Schedule' : 'Add New Patient Refill'}
                 </h3>
                 <p className="text-[11px] text-muted mt-0.5">
                   {editingPatient
@@ -1109,13 +1657,13 @@ const RefillsSection: React.FC = () => {
                   </span>
                 </div>
 
-                {/* Quick Presets: 15, 30, 90 Days */}
+                {/* Quick Presets */}
                 <div className="grid grid-cols-4 gap-2">
                   {[
                     { days: 15, label: '15 Days' },
                     { days: 30, label: '30 Days' },
-                    { days: 90, label: '90 Days' },
-                    { days: 60, label: '60 Days' }
+                    { days: 60, label: '60 Days' },
+                    { days: 90, label: '90 Days' }
                   ].map(opt => (
                     <button
                       key={opt.days}
@@ -1179,7 +1727,7 @@ const RefillsSection: React.FC = () => {
                   return (
                     <div className="flex flex-col gap-1 px-3 py-2 bg-accent/10 border border-accent/20 rounded-xl text-xs text-accent">
                       <div className="flex items-center gap-2">
-                        <Calendar size={13} className="flex-shrink-0 text-accent" />
+                        <Calendar size={13} className="shrink-0 text-accent" />
                         <span>Calculated Due Date: <strong>{formattedDue}</strong> ({effDays}-day cycle)</span>
                       </div>
                       <div className="flex items-center gap-2 text-[11px] text-amber-400 font-medium pl-5">
@@ -1195,12 +1743,12 @@ const RefillsSection: React.FC = () => {
                 <div className="flex items-center justify-between">
                   <label className="text-[10px] font-bold text-muted uppercase tracking-wider flex items-center gap-1">
                     <Package size={11} className="text-primary" />
-                    Medicines & Inventory Selection *
+                    Medicines &amp; Inventory Selection *
                   </label>
                   <button
                     type="button"
                     onClick={() => setMedicineRows(prev => [...prev, emptyRow()])}
-                    className="flex items-center gap-1 text-[11px] font-bold text-primary hover:underline"
+                    className="flex items-center gap-1 text-[11px] font-bold text-primary hover:underline cursor-pointer"
                   >
                     <Plus size={12} /> Add Another Medicine
                   </button>
@@ -1268,14 +1816,14 @@ const RefillsSection: React.FC = () => {
                                         <p className="text-[10px] text-muted truncate">{s.manufacturer}</p>
                                       )}
                                     </div>
-                                    <div className="flex items-center gap-2 flex-shrink-0">
+                                    <div className="flex items-center gap-2 shrink-0">
                                       {s.mrp ? (
                                         <span className="text-[11px] font-medium text-text">₹{s.mrp}</span>
                                       ) : null}
                                       <span
                                         className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
                                           inStock
-                                            ? 'bg-green-500/15 text-green-400 border border-green-500/30'
+                                            ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
                                             : 'bg-red-500/15 text-red-400 border border-red-500/30'
                                         }`}
                                       >
@@ -1290,7 +1838,7 @@ const RefillsSection: React.FC = () => {
                         </div>
 
                         {/* Quantity Counter */}
-                        <div className="flex items-center border border-border rounded-xl bg-bg2 overflow-hidden flex-shrink-0">
+                        <div className="flex items-center border border-border rounded-xl bg-bg2 overflow-hidden shrink-0">
                           <button
                             type="button"
                             onClick={() => updateQty(idx, row.quantity_needed - 1)}
@@ -1320,7 +1868,7 @@ const RefillsSection: React.FC = () => {
                           <button
                             type="button"
                             onClick={() => setMedicineRows(prev => prev.filter((_, i) => i !== idx))}
-                            className="p-2.5 text-muted hover:text-red-400 transition-colors rounded-xl hover:bg-bg3"
+                            className="p-2.5 text-muted hover:text-red-400 transition-colors rounded-xl hover:bg-bg3 cursor-pointer"
                             title="Remove medication"
                           >
                             <Trash2 size={15} />
@@ -1338,9 +1886,9 @@ const RefillsSection: React.FC = () => {
                           <div
                             className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${
                               (row.inStockQty || 0) >= row.quantity_needed
-                                ? 'bg-green-500/15 text-green-400'
+                                ? 'bg-emerald-500/15 text-emerald-400'
                                 : (row.inStockQty || 0) > 0
-                                ? 'bg-yellow-500/15 text-yellow-400'
+                                ? 'bg-amber-500/15 text-amber-400'
                                 : 'bg-red-500/15 text-red-400'
                             }`}
                           >
@@ -1367,14 +1915,14 @@ const RefillsSection: React.FC = () => {
                     setShowAddModal(false);
                     setEditingPatient(null);
                   }}
-                  className="px-4 py-2 rounded-xl text-xs font-bold text-muted hover:bg-bg3 transition-colors"
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-muted hover:bg-bg3 transition-colors cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={submitting}
-                  className="px-5 py-2 rounded-xl bg-primary hover:bg-primary/90 text-white text-xs font-bold transition-all shadow-md disabled:opacity-50 flex items-center gap-2"
+                  className="px-5 py-2 rounded-xl bg-primary hover:bg-primary/90 text-white text-xs font-bold transition-all shadow-md disabled:opacity-50 flex items-center gap-2 cursor-pointer"
                 >
                   {submitting ? (
                     <><RefreshCw size={13} className="animate-spin" /> {editingPatient ? 'Updating…' : 'Registering…'}</>
@@ -1389,9 +1937,9 @@ const RefillsSection: React.FC = () => {
         document.body
       )}
 
-      {/* ── Inline Edit Refill Frequency Modal ────────────────────────────────────── */}
+      {/* ── Inline Edit Refill Frequency Modal ── */}
       {editingRefill && createPortal(
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-modal flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-modal flex items-center justify-center p-4 animate-fade-in">
           <div className="bg-bg2 border border-border rounded-2xl w-full max-w-md p-5 shadow-2xl space-y-4">
             <div className="flex items-center justify-between border-b border-border pb-3">
               <h3 className="text-sm font-bold text-text flex items-center gap-2">
@@ -1401,7 +1949,7 @@ const RefillsSection: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setEditingRefill(null)}
-                className="text-muted hover:text-text p-1 rounded-lg hover:bg-bg3"
+                className="text-muted hover:text-text p-1 rounded-lg hover:bg-bg3 cursor-pointer"
               >
                 ✕
               </button>
@@ -1411,8 +1959,8 @@ const RefillsSection: React.FC = () => {
               Adjust refill interval cycle for <strong className="text-text">{editingRefill.name}</strong>:
             </p>
 
-            <div className="grid grid-cols-3 gap-2">
-              {[15, 30, 90].map(days => (
+            <div className="grid grid-cols-4 gap-2">
+              {[15, 30, 60, 90].map(days => (
                 <button
                   key={days}
                   type="button"
@@ -1462,7 +2010,7 @@ const RefillsSection: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setEditingRefill(null)}
-                className="px-4 py-2 rounded-xl text-xs font-semibold text-muted hover:bg-bg3"
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-muted hover:bg-bg3 cursor-pointer"
               >
                 Cancel
               </button>
@@ -1470,10 +2018,117 @@ const RefillsSection: React.FC = () => {
                 type="button"
                 onClick={handleUpdateFrequency}
                 disabled={updatingFreq}
-                className="px-5 py-2 rounded-xl bg-primary hover:bg-primary-hover text-white text-xs font-bold transition-all disabled:opacity-50"
+                className="px-5 py-2 rounded-xl bg-primary hover:bg-primary-hover text-white text-xs font-bold transition-all disabled:opacity-50 cursor-pointer"
               >
                 {updatingFreq ? 'Saving...' : 'Save Refill Frequency'}
               </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* ── Bill / Invoice Preview Modal ── */}
+      {viewInvoice && createPortal(
+        <div className="fixed inset-0 z-modal flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
+          <div className="glass-panel w-full max-w-4xl max-h-[90vh] flex flex-col border-primary/20 bg-bg2 rounded-2xl shadow-2xl overflow-hidden">
+            {/* Modal Header */}
+            <div className="p-4 border-b border-border flex justify-between items-center bg-bg3/50 shrink-0">
+              <div>
+                <h3 className="font-bold text-base flex items-center gap-2 text-text">
+                  <FileText size={18} className="text-primary" />
+                  Bill Preview: {viewInvoice.invoice_no}
+                </h3>
+                <p className="text-xs text-muted mt-0.5">Read-only preview of customer sale invoice</p>
+              </div>
+              <button
+                onClick={() => setViewInvoice(null)}
+                className="p-1.5 rounded-lg hover:bg-bg3 text-muted hover:text-text transition-all cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-5 space-y-4 flex-1 overflow-y-auto">
+              {/* Customer & Invoice Summary */}
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-3 bg-bg3/30 p-3.5 rounded-xl border border-border text-xs">
+                <div>
+                  <div className="text-[10px] font-bold text-muted uppercase tracking-wider mb-0.5">Patient Name</div>
+                  <div className="font-bold text-text">{viewInvoice.customer_name || 'Walk-in'}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] font-bold text-muted uppercase tracking-wider mb-0.5">WhatsApp / Phone</div>
+                  <div className="font-bold text-text">{viewInvoice.customer_phone || '-'}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] font-bold text-muted uppercase tracking-wider mb-0.5">Payment Method</div>
+                  <div className="font-bold text-emerald-400">{viewInvoice.payment_medium || 'CASH'}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] font-bold text-muted uppercase tracking-wider mb-0.5">Sale Date</div>
+                  <div className="font-bold text-text">{formatDate(viewInvoice.date)}</div>
+                </div>
+              </div>
+
+              {/* Purchased Medicines Table */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <h4 className="text-xs font-bold text-muted uppercase tracking-wider">Purchased Medicines</h4>
+                  <span className="text-xs text-muted">{viewInvoice.items?.length || 0} item(s)</span>
+                </div>
+                <div className="overflow-x-auto border border-border rounded-xl bg-bg">
+                  <table className="w-full text-left text-xs">
+                    <thead>
+                      <tr className="bg-bg3/40 border-b border-border text-muted font-bold">
+                        <th className="p-2.5">Medicine Name</th>
+                        <th className="p-2.5">Batch</th>
+                        <th className="p-2.5 text-center">Qty (Strips/Loose)</th>
+                        <th className="p-2.5 text-center">CD %</th>
+                        <th className="p-2.5">MRP</th>
+                        <th className="p-2.5">Unit Price</th>
+                        <th className="p-2.5 text-right">Subtotal</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border/30">
+                      {viewInvoice.items?.map((item: any, idx: number) => {
+                        const packSize = item.pack_size || 1;
+                        const looseQty = item.loose_qty || 0;
+                        const discPer = item.discount_per || 0;
+                        const discountedPrice = item.unit_price * (1 - discPer / 100);
+                        const itemTotal = (discountedPrice * item.quantity) + ((discountedPrice / packSize) * looseQty);
+                        return (
+                          <tr key={idx} className="hover:bg-bg2/50">
+                            <td className="p-2.5 font-semibold text-text">{item.medicine_name || `Item #${item.inventory_id}`}</td>
+                            <td className="p-2.5 font-mono text-[11px] text-muted">{item.batch_number || '-'}</td>
+                            <td className="p-2.5 text-center font-bold">{item.quantity} / {looseQty}</td>
+                            <td className="p-2.5 text-center text-muted">{discPer}%</td>
+                            <td className="p-2.5 text-muted">₹{item.mrp || 0}</td>
+                            <td className="p-2.5 font-medium text-text">₹{discountedPrice.toFixed(2)}</td>
+                            <td className="p-2.5 font-bold text-emerald-400 text-right">₹{Math.round(itemTotal)}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 border-t border-border flex justify-between items-center bg-bg3/50 shrink-0">
+              <button
+                onClick={() => setViewInvoice(null)}
+                className="px-4 py-2 bg-bg3 text-muted rounded-xl text-xs font-semibold hover:text-text cursor-pointer"
+              >
+                Close Preview
+              </button>
+              <div className="text-right">
+                <div className="text-[10px] text-muted">Total Bill Amount</div>
+                <div className="text-lg font-extrabold text-emerald-400">
+                  ₹{(viewInvoice.total_amount || 0).toFixed(2)}
+                </div>
+              </div>
             </div>
           </div>
         </div>,
