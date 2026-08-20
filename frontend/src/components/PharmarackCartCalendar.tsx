@@ -41,7 +41,6 @@ interface PharmarackCartCalendarProps {
   hasUnreadSentHistory?: boolean;
   activeCount?: number;
   reorderCount?: number;
-  shortageCount?: number;
 }
 
 export const PharmarackCartCalendar: React.FC<PharmarackCartCalendarProps> = ({
@@ -50,7 +49,6 @@ export const PharmarackCartCalendar: React.FC<PharmarackCartCalendarProps> = ({
   hasUnreadSentHistory = false,
   activeCount = 0,
   reorderCount = 0,
-  shortageCount = 0,
 }) => {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const todayCardRef = useRef<HTMLButtonElement>(null);
@@ -175,13 +173,13 @@ export const PharmarackCartCalendar: React.FC<PharmarackCartCalendarProps> = ({
             type="button"
             onClick={() => onTabChange('reorder')}
             className={`flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer whitespace-nowrap ${
-              currentTab === 'reorder' || (!currentTab && activeCount === 0)
+              currentTab === 'reorder'
                 ? 'bg-amber-500/20 text-amber-400 font-black shadow-xs border border-amber-500/40'
                 : reorderCount > 0
                   ? 'text-amber-400 hover:bg-amber-500/10'
                   : 'text-muted hover:text-text hover:bg-bg3'
             }`}
-            title="Review medicines requiring reorder with previous purchase history"
+            title="Customer requests, refills due, sales-weighted restock suggestions, and recently ordered medicines"
           >
             <Clock size={13} className={currentTab === 'reorder' || reorderCount > 0 ? 'text-amber-400' : 'text-muted'} />
             <span>Reorder Hub</span>
@@ -197,13 +195,13 @@ export const PharmarackCartCalendar: React.FC<PharmarackCartCalendarProps> = ({
             type="button"
             onClick={() => onTabChange('cart')}
             className={`flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer whitespace-nowrap ${
-              currentTab === 'cart'
+              currentTab === 'cart' || !currentTab
                 ? 'bg-bg2 text-primary font-black shadow-xs border border-border'
                 : 'text-muted hover:text-text hover:bg-bg3'
             }`}
             title="Review grouped distributor carts and create Purchase Orders"
           >
-            <ShoppingCart size={13} className={currentTab === 'cart' ? 'text-primary' : 'text-muted'} />
+            <ShoppingCart size={13} className={currentTab === 'cart' || !currentTab ? 'text-primary' : 'text-muted'} />
             <span>Supplier PO Grouping</span>
             {activeCount > 0 && (
               <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-primary/15 text-primary border border-primary/20 font-mono font-bold">
@@ -212,27 +210,7 @@ export const PharmarackCartCalendar: React.FC<PharmarackCartCalendarProps> = ({
             )}
           </button>
 
-          {/* Tab 3: Restock & Shortages */}
-          <button
-            type="button"
-            onClick={() => onTabChange('shortages')}
-            className={`flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer whitespace-nowrap ${
-              currentTab === 'shortages'
-                ? 'bg-bg2 text-primary font-black shadow-xs border border-border'
-                : 'text-muted hover:text-text hover:bg-bg3'
-            }`}
-            title="Special Patient Shortage Requests, Refills Due, and Sales Restock Suggestions"
-          >
-            <Building2 size={13} className={currentTab === 'shortages' ? 'text-primary' : 'text-muted'} />
-            <span>Demands & Shortages</span>
-            {shortageCount > 0 && (
-              <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-sky-500/15 text-sky-400 border border-sky-500/20 font-mono font-bold">
-                {shortageCount}
-              </span>
-            )}
-          </button>
-
-          {/* Tab 4: Sent Orders History */}
+          {/* Tab 3: Sent Orders History */}
           <button
             type="button"
             onClick={() => onTabChange('sent-history')}
@@ -250,20 +228,6 @@ export const PharmarackCartCalendar: React.FC<PharmarackCartCalendarProps> = ({
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
               </span>
             )}
-          </button>
-
-          {/* Tab 5: Non-Mapped Distributors */}
-          <button
-            type="button"
-            onClick={() => onTabChange('non-mapped')}
-            className={`flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer whitespace-nowrap ${
-              currentTab === 'non-mapped'
-                ? 'bg-bg2 text-primary font-black shadow-xs border border-border'
-                : 'text-muted hover:text-text hover:bg-bg3'
-            }`}
-          >
-            <Building2 size={13} className={currentTab === 'non-mapped' ? 'text-primary' : 'text-muted'} />
-            <span>Distributor Catalogs</span>
           </button>
         </div>
 

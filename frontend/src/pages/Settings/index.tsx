@@ -793,6 +793,7 @@ function IntegrationsCredentialsTab({ rawSettings, refetchSettings, isVisible }:
   const [pharmarackUser, setPharmarackUser] = useState(rawSettings.pharmarack_username || '');
   const [pharmarackPass, setPharmarackPass] = useState(rawSettings.pharmarack_password || '');
   const [pharmarackRefreshing, setPharmarackRefreshing] = useState(false);
+  const [reorderWindowMonths, setReorderWindowMonths] = useState(rawSettings.pharmarack_reorder_window_months || '2');
 
   const [saving, setSaving] = useState(false);
   const queryClient = useQueryClient();
@@ -832,6 +833,7 @@ function IntegrationsCredentialsTab({ rawSettings, refetchSettings, isVisible }:
     setGmailPass(rawSettings.gmail_pass || '');
     setPharmarackUser(rawSettings.pharmarack_username || '');
     setPharmarackPass(rawSettings.pharmarack_password || '');
+    setReorderWindowMonths(rawSettings.pharmarack_reorder_window_months || '2');
     toastEvent.trigger('Integration credentials reset to saved parameters', 'info');
   };
 
@@ -852,7 +854,8 @@ function IntegrationsCredentialsTab({ rawSettings, refetchSettings, isVisible }:
         gmail_pass: gmailPass,
         pharmarack_username: pharmarackUser,
         pharmarack_password: pharmarackPass,
-        pharmarack_mode: 'Live'
+        pharmarack_mode: 'Live',
+        pharmarack_reorder_window_months: reorderWindowMonths
       };
 
       await apiClient.post('/settings/save', payload);
@@ -880,6 +883,17 @@ function IntegrationsCredentialsTab({ rawSettings, refetchSettings, isVisible }:
       toastEvent.trigger('Pharmarack session refresh error: ' + err.message, 'error');
     } finally {
       setPharmarackRefreshing(false);
+    }
+  };
+
+  const handleReorderWindowChange = async (months: string) => {
+    setReorderWindowMonths(months);
+    try {
+      await apiClient.post('/settings', { key: 'pharmarack_reorder_window_months', value: months });
+      toastEvent.trigger(`Reorder lookback window set to ${months} months`, 'success');
+      refetchSettings();
+    } catch (err: any) {
+      toastEvent.trigger('Failed to save reorder window: ' + err.message, 'error');
     }
   };
 
@@ -1132,6 +1146,22 @@ function IntegrationsCredentialsTab({ rawSettings, refetchSettings, isVisible }:
               <span>Refresh B2B Session</span>
             </button>
           </div>
+        </div>
+        <div className="mt-4">
+          <label className="block text-xs font-semibold text-text mb-1">Reorder Suggestions Lookback Window</label>
+          <select
+            value={reorderWindowMonths}
+            onChange={(e) => handleReorderWindowChange(e.target.value)}
+            className="w-full md:w-1/3 px-3 py-2 rounded-xl bg-bg border border-border text-text text-xs focus:border-primary focus:outline-none"
+          >
+            <option value="2">2 months</option>
+            <option value="4">4 months</option>
+            <option value="6">6 months</option>
+            <option value="8">8 months</option>
+          </select>
+          <p className="text-[11px] text-muted mt-1">
+            How far back sales/purchase history is weighed for restock suggestions and the &quot;Ordered Recently&quot; list in the Reorder Hub. Changing this recomputes suggestions in the background.
+          </p>
         </div>
       </div>
 

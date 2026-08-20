@@ -8,7 +8,6 @@ import { findBestCartMatchForOrder } from '../../utils/orderFuzzyMatcher';
 
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { sanitizePhoneInput, isValid10DigitPhone } from '../../utils/phone';
-import NonMappedDistributors from '../NonMappedDistributors';
 import { PharmarackCartCalendar } from '../../components/PharmarackCartCalendar';
 import { usePageActive } from '../../lib/keepAlive/PageActiveContext';
 import { broadcastContactDataChanged } from '../../utils/settingsSync';
@@ -152,7 +151,6 @@ export default function PharmarackCart() {
   const [sendingNotifId, setSendingNotifId] = useState<number | null>(null);
   const [pendingOrders, setPendingOrders] = useState<SpecialOrder[]>(() => cachedPendingOrders);
   const [addingOrderId, setAddingOrderId] = useState<number | null>(null);
-  const [sidebarTab, setSidebarTab] = useState<'all' | 'requests' | 'refills' | 'sales_suggestions' | 'missing_phone' | 'history'>('all');
   const [pendingRefills, setPendingRefills] = useState<Refill[]>(() => cachedPendingRefills);
   const [addingRefillId, setAddingRefillId] = useState<number | null>(null);
   const [showAddedItems, setShowAddedItems] = useState<boolean>(false);
@@ -160,6 +158,8 @@ export default function PharmarackCart() {
 
   const [reorderSuggestions, setReorderSuggestions] = useState<any[]>([]);
   const [suggestionsLoading, setSuggestionsLoading] = useState<boolean>(false);
+  const [reorderRecentItems, setReorderRecentItems] = useState<{ medicineName: string; lastOrderedDate: string; lastQty: number; lastDistributorName: string }[]>([]);
+  const [reorderWindowMonths, setReorderWindowMonths] = useState<number>(2);
 
   const fetchReorderSuggestions = async () => {
     setSuggestionsLoading(true);
@@ -172,6 +172,17 @@ export default function PharmarackCart() {
       console.warn('Failed to load sales reorder suggestions:', err);
     } finally {
       setSuggestionsLoading(false);
+    }
+  };
+
+  const fetchReorderRecentItems = async () => {
+    try {
+      const res = await api.getPharmarackReorderRecent();
+      if (res && res.success && Array.isArray(res.items)) {
+        setReorderRecentItems(res.items);
+      }
+    } catch (err) {
+      console.warn('Failed to load recently reordered items:', err);
     }
   };
 
@@ -209,7 +220,7 @@ export default function PharmarackCart() {
   const [purchaseHistoryModalTarget, setPurchaseHistoryModalTarget] = useState<{ medicineName: string; loading: boolean; history: any[] } | null>(null);
 
   // Shortages Hub Subtab State
-  const [shortagesSubTab, setShortagesSubTab] = useState<'requests' | 'refills' | 'sales_suggestions'>('requests');
+  const [shortagesSubTab, setShortagesSubTab] = useState<'requests' | 'refills' | 'sales_suggestions' | 'ordered_recently'>('requests');
 
   // Latest sent order history map by store ID / store name
   const [latestSentMap, setLatestSentMap] = useState<Record<string, { storeId: number | null; storeName: string; placedAt: number; items: any[] }>>({});
@@ -311,17 +322,19 @@ export default function PharmarackCart() {
   };
 
   const isItemIncludedInDispatch = (item: CartLineItem, dist: Distributor): boolean => {
-    const pastInfo = getPastOrderedInfo(item, dist);
-    const isYesterdayOrPast = pastInfo.isPastOrdered && !pastInfo.isToday;
-    if (!isYesterdayOrPast) {
-      // Fresh new medicines are always included by default!
-      return true;
-    }
+    // User's manual tick/untick always wins, regardless of sent status.
     const key = getItemCheckKey(dist.storeId, item);
     if (typeof userCheckOverridesRef.current[key] === 'boolean') {
       return userCheckOverridesRef.current[key];
     }
-    return false; // Old medicines are unchecked / excluded by default unless user ticks the box
+
+    const pastInfo = getPastOrderedInfo(item, dist);
+    if (pastInfo.isPastOrdered) {
+      // Already sent — whether today or on an earlier day — excluded by default so a later
+      // "Send All" only dispatches genuinely new items instead of resending the old ones too.
+      return false;
+    }
+    return true; // Fresh medicine, never sent — included by default
   };
 
   const handleToggleItemCheck = (storeId: number, itemOrKey: any, isChecked: boolean) => {
@@ -467,10 +480,10 @@ export default function PharmarackCart() {
   };
 
   useEffect(() => {
-    if (sidebarTab === 'history' || currentTab === 'sent-history') {
+    if (currentTab === 'sent-history') {
       loadSentDates();
     }
-  }, [sidebarTab, currentTab]);
+  }, [currentTab]);
 
   const handleCopySentItemsToCart = async (items: any[]) => {
     if (!items || items.length === 0) return;
@@ -497,8 +510,7 @@ export default function PharmarackCart() {
 
       const res = await api.addPharmarackCart(payload);
       if (res && res.success) {
-        cachedDistributors = [];
-        await fetchCart();
+        await fetchCartSilent();
         window.dispatchEvent(new CustomEvent('refresh-pharmarack-cart'));
         toastEvent.trigger(`✅ Re-added ${payload.length} item(s) to Pharmarack cart!`, 'success');
         setSearchParams({ tab: 'cart' });
@@ -698,6 +710,9 @@ export default function PharmarackCart() {
       const res = await apiClient.get('/settings');
       if (res.data) {
         const s = res.data;
+        const windowVal = parseInt(s.pharmarack_reorder_window_months || '2', 10);
+        if ([2, 4, 6, 8].includes(windowVal)) setReorderWindowMonths(windowVal);
+
         setStoreInfo({
           name: s.pharmacy_name || s.shop_name || s.store_name || s.medical_name || s.name || '',
           phone: s.phone || s.shop_phone || s.store_phone || s.whatsapp_number || s.owner_whatsapp_number || '',
@@ -732,11 +747,15 @@ export default function PharmarackCart() {
     fetchSavedDistributors();
     fetchDistributorMappings();
     loadContactData();
+    fetchReorderSuggestions();
+    fetchReorderRecentItems();
 
     const handlePhoneUpdate = () => {
       fetchSavedDistributors();
       fetchDistributorMappings();
       loadContactData();
+      fetchReorderSuggestions();
+      fetchReorderRecentItems();
     };
 
     const handleClearSentHistory = () => {
@@ -2382,6 +2401,11 @@ export default function PharmarackCart() {
   useEffect(() => {
     if (!showSuggestionsTier) return;
     fetchReorderSuggestions();
+    fetchReorderRecentItems();
+    apiClient.get('/settings').then(res => {
+      const val = parseInt(res.data?.pharmarack_reorder_window_months || '2', 10);
+      if ([2, 4, 6, 8].includes(val)) setReorderWindowMonths(val);
+    }).catch(() => {});
   }, [showSuggestionsTier]);
 
   // Card quantity overrides
@@ -2753,8 +2777,7 @@ export default function PharmarackCart() {
   // 'refresh-special-orders'     → re-fetch pending orders so the left sidebar count is up-to-date
   useEffect(() => {
     const handleCartRefresh = () => {
-      cachedDistributors = [];
-      fetchCart();
+      fetchCartSilent();
       fetchLatestSentMap();
     };
     const handleOrdersRefresh = () => {
@@ -2806,15 +2829,10 @@ export default function PharmarackCart() {
         }}
         hasUnreadSentHistory={hasUnreadSentHistory}
         activeCount={distributors.reduce((acc, d) => acc + (d.items || []).filter(i => isItemIncludedInDispatch(i, d) && !isItemAlreadySent(i, d)).length, 0)}
-        reorderCount={previousOrderItemsInfo.length}
-        shortageCount={visiblePendingOrders.length + visiblePendingRefills.length + reorderSuggestions.length}
+        reorderCount={visiblePendingOrders.length + visiblePendingRefills.length + reorderSuggestions.length + reorderRecentItems.length}
       />
 
-      {currentTab === 'non-mapped' ? (
-        <div className="flex-1 flex flex-col overflow-hidden relative min-h-0 bg-glass-bg border border-glass-border rounded-3xl p-6">
-          <NonMappedDistributors />
-        </div>
-      ) : currentTab === 'sent-history' ? (
+      {currentTab === 'sent-history' ? (
         /* ── Split-Pane Sent Orders History Master-Detail View ── */
         <div className="flex-1 flex overflow-hidden bg-glass-bg border border-glass-border rounded-3xl min-h-0">
           
@@ -2980,495 +2998,23 @@ export default function PharmarackCart() {
           </div>
         </div>
       ) : currentTab === 'reorder' ? (
-        /* ── REORDER CART & RESTOCKING WORKSPACE MASTER VIEW ── */
-        <div className="flex-1 flex flex-col overflow-hidden bg-glass-bg border border-glass-border rounded-3xl min-h-0">
-          {/* Top Header */}
-          <div className="p-4 sm:p-5 border-b border-glass-border/40 bg-glass-bg/10 backdrop-blur-md shrink-0 space-y-3">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0 shadow-sm">
-                  <RotateCw size={18} />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h2 className="text-base font-black tracking-wide uppercase text-text leading-none">
-                      REORDER CART
-                    </h2>
-                    <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full border bg-amber-500/15 text-amber-400 border-amber-500/35 font-mono">
-                      Restocking Workspace
-                    </span>
-                  </div>
-                  <p className="text-xs text-muted mt-1 font-medium">
-                    Review medicines that need restocking and create purchase orders.
-                  </p>
-                </div>
-              </div>
-
-              {/* Top Quick Actions */}
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleToggleAllPreviousItems(true)}
-                  disabled={previousOrderItemsInfo.length === 0 || previousOrderItemsInfo.every(x => x.isChecked)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-extrabold transition-all active:scale-95 text-xs disabled:opacity-40 shadow-sm cursor-pointer"
-                  title="Select all previous medicines to include in today's active dispatch"
-                >
-                  <Check size={13} />
-                  <span>Reorder All for Today</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setSearchParams({ tab: 'cart' })}
-                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-primary text-white hover:bg-primary/90 font-extrabold transition-all active:scale-95 text-xs shadow-sm cursor-pointer"
-                >
-                  <ShoppingCart size={13} />
-                  <span>Supplier PO Grouping ➔</span>
-                </button>
-              </div>
-            </div>
-
-            {/* ── Educational Restocking Lifecycle Progression Bar ── */}
-            <div className="p-3 rounded-2xl bg-bg2/60 border border-glass-border/60 shadow-xs">
-              <div className="flex items-center gap-1.5 overflow-x-auto text-[10px] font-bold text-muted custom-scrollbar py-0.5">
-                <span className="px-2.5 py-1 rounded-lg bg-bg border border-glass-border flex items-center gap-1.5 shrink-0 text-text">
-                  <span className="w-2 h-2 rounded-full bg-primary" /> 1. Low Stock Detected
-                </span>
-                <span className="text-muted/60 font-mono">➔</span>
-                <span className="px-2.5 py-1 rounded-lg bg-bg border border-glass-border flex items-center gap-1.5 shrink-0 text-text">
-                  <span className="w-2 h-2 rounded-full bg-amber-400" /> 2. Review Past Supplier & Price
-                </span>
-                <span className="text-muted/60 font-mono">➔</span>
-                <span className="px-2.5 py-1 rounded-lg bg-amber-500/15 border border-amber-500/35 flex items-center gap-1.5 shrink-0 text-amber-400 font-extrabold">
-                  <RotateCw size={11} className="text-amber-400" /> 3. ↻ REORDER SAME
-                </span>
-                <span className="text-muted/60 font-mono">➔</span>
-                <span className="px-2.5 py-1 rounded-lg bg-bg border border-glass-border flex items-center gap-1.5 shrink-0 text-text">
-                  <span className="w-2 h-2 rounded-full bg-sky-400" /> 4. Create Purchase Order
-                </span>
-                <span className="text-muted/60 font-mono">➔</span>
-                <span className="px-2.5 py-1 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 font-black flex items-center gap-1.5 shrink-0">
-                  <CheckCircle2 size={11} /> 5. GRN Updates Inventory
-                </span>
-              </div>
-
-              {/* Critical Rule Callout */}
-              <div className="mt-2 pt-2 border-t border-glass-border/40 flex items-center gap-1.5 text-[10px] text-muted">
-                <AlertCircle size={13} className="text-amber-400 shrink-0" />
-                <span>
-                  <strong>CRITICAL INVENTORY RULE:</strong> Adding items to Reorder Cart or creating a Purchase Order does <strong>NOT</strong> increase inventory. Stock is updated <strong>ONLY</strong> when medicines are physically received in GRN (<code className="font-mono text-primary font-bold">/purchases</code>).
-                </span>
-              </div>
-            </div>
-
-            {/* ── Top Summary KPIs ── */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 shrink-0">
-              <div className="p-3 rounded-2xl bg-bg2/40 border border-glass-border/60 shadow-xs flex items-center gap-3">
-                <div className="w-8 h-8 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 shrink-0">
-                  <RotateCw size={15} />
-                </div>
-                <div>
-                  <span className="text-[10px] text-muted font-bold uppercase tracking-wider block">Medicines to Reorder</span>
-                  <span className="text-sm font-black text-text font-mono leading-none">
-                    {allCandidateCards.length}
-                  </span>
-                </div>
-              </div>
-
-              <div className="p-3 rounded-2xl bg-bg2/40 border border-glass-border/60 shadow-xs flex items-center gap-3">
-                <div className="w-8 h-8 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0">
-                  <CheckCircle2 size={15} />
-                </div>
-                <div>
-                  <span className="text-[10px] text-muted font-bold uppercase tracking-wider block">Previously Purchased</span>
-                  <span className="text-sm font-black text-emerald-400 font-mono leading-none">
-                    {allCandidateCards.filter((c: any) => c.hasPreviousPurchase).length}
-                  </span>
-                </div>
-              </div>
-
-              <div className="p-3 rounded-2xl bg-bg2/40 border border-glass-border/60 shadow-xs flex items-center gap-3">
-                <div className="w-8 h-8 rounded-xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400 shrink-0">
-                  <AlertCircle size={15} />
-                </div>
-                <div>
-                  <span className="text-[10px] text-muted font-bold uppercase tracking-wider block">Low Stock / Below Min</span>
-                  <span className="text-sm font-black text-rose-400 font-mono leading-none">
-                    {allCandidateCards.filter((c: any) => c.reason === 'below_min_stock' || c.reason === 'low_stock').length}
-                  </span>
-                </div>
-              </div>
-
-              <div className="p-3 rounded-2xl bg-bg2/40 border border-glass-border/60 shadow-xs flex items-center gap-3">
-                <div className="w-8 h-8 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center text-sky-400 shrink-0">
-                  <Building2 size={15} />
-                </div>
-                <div>
-                  <span className="text-[10px] text-muted font-bold uppercase tracking-wider block">Suppliers / POs</span>
-                  <span className="text-sm font-black text-sky-400 font-mono leading-none">
-                    {distributors.length} Connected
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Quick Filters Bar & Category Pills */}
-          <div className="px-6 py-3 border-b border-glass-border/30 bg-bg2/40 flex flex-col md:flex-row md:items-center justify-between gap-3 shrink-0">
-            {/* Search Input */}
-            <div className="relative flex-1 max-w-md">
-              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
-              <input
-                type="text"
-                placeholder="Search medicine, manufacturer, or previous supplier..."
-                value={reorderSearchQuery}
-                onChange={(e) => setReorderSearchQuery(e.target.value)}
-                className="w-full bg-bg border border-glass-border rounded-xl pl-9 pr-3 py-1.5 text-xs text-text focus:outline-none focus:border-amber-500 font-medium"
-              />
-            </div>
-
-            {/* Category Filter Pills */}
-            <div className="flex items-center gap-1.5 overflow-x-auto custom-scrollbar py-0.5">
-              <button
-                type="button"
-                onClick={() => setReorderCategoryFilter('all')}
-                className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all cursor-pointer whitespace-nowrap ${
-                  reorderCategoryFilter === 'all'
-                    ? 'bg-primary text-white shadow-xs'
-                    : 'bg-bg border border-glass-border text-muted hover:text-text hover:bg-bg3'
-                }`}
-              >
-                All Restock ({allCandidateCards.length})
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setReorderCategoryFilter('yesterday')}
-                className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all cursor-pointer whitespace-nowrap ${
-                  reorderCategoryFilter === 'yesterday'
-                    ? 'bg-amber-500 text-white shadow-xs font-black'
-                    : 'bg-bg border border-glass-border text-amber-400 hover:bg-amber-500/10'
-                }`}
-              >
-                🕒 Ordered Yesterday ({allCandidateCards.filter((c: any) => c.reason === 'yesterday_order').length})
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setReorderCategoryFilter('purchased_before')}
-                className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all cursor-pointer whitespace-nowrap ${
-                  reorderCategoryFilter === 'purchased_before'
-                    ? 'bg-emerald-500 text-white shadow-xs font-black'
-                    : 'bg-bg border border-glass-border text-emerald-400 hover:bg-emerald-500/10'
-                }`}
-              >
-                ✓ Previously Purchased ({allCandidateCards.filter((c: any) => c.hasPreviousPurchase).length})
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setReorderCategoryFilter('never_purchased')}
-                className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all cursor-pointer whitespace-nowrap ${
-                  reorderCategoryFilter === 'never_purchased'
-                    ? 'bg-amber-500 text-white shadow-xs font-black'
-                    : 'bg-bg border border-glass-border text-amber-400 hover:bg-amber-500/10'
-                }`}
-              >
-                ⚠️ Never Purchased ({allCandidateCards.filter((c: any) => !c.hasPreviousPurchase).length})
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setReorderCategoryFilter('low_stock')}
-                className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all cursor-pointer whitespace-nowrap ${
-                  reorderCategoryFilter === 'low_stock'
-                    ? 'bg-rose-500 text-white shadow-xs font-black'
-                    : 'bg-bg border border-glass-border text-rose-400 hover:bg-rose-500/10'
-                }`}
-              >
-                🔴 Low Stock ({allCandidateCards.filter((c: any) => c.reason === 'below_min_stock' || c.reason === 'low_stock').length})
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setReorderCategoryFilter('special_requests')}
-                className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all cursor-pointer whitespace-nowrap ${
-                  reorderCategoryFilter === 'special_requests'
-                    ? 'bg-purple-500 text-white shadow-xs font-black'
-                    : 'bg-bg border border-glass-border text-purple-400 hover:bg-purple-500/10'
-                }`}
-              >
-                🟣 Special Requests ({allCandidateCards.filter((c: any) => c.reason === 'special_order').length})
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setReorderCategoryFilter('refills')}
-                className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all cursor-pointer whitespace-nowrap ${
-                  reorderCategoryFilter === 'refills'
-                    ? 'bg-sky-500 text-white shadow-xs font-black'
-                    : 'bg-bg border border-glass-border text-sky-400 hover:bg-sky-500/10'
-                }`}
-              >
-                🔵 Refills Due ({allCandidateCards.filter((c: any) => c.reason === 'refill_due').length})
-              </button>
-            </div>
-          </div>
-
-          {/* ── Reorder Cards Grid ── */}
-          <div className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar">
-            {(() => {
-              // Apply text search and category filter
-              const filteredCards = allCandidateCards.filter((card: any) => {
-                // Category Filter
-                if (reorderCategoryFilter === 'yesterday' && card.reason !== 'yesterday_order') return false;
-                if (reorderCategoryFilter === 'purchased_before' && !card.hasPreviousPurchase) return false;
-                if (reorderCategoryFilter === 'never_purchased' && card.hasPreviousPurchase) return false;
-                if (reorderCategoryFilter === 'low_stock' && card.reason !== 'below_min_stock' && card.reason !== 'low_stock') return false;
-                if (reorderCategoryFilter === 'special_requests' && card.reason !== 'special_order') return false;
-                if (reorderCategoryFilter === 'refills' && card.reason !== 'refill_due') return false;
-
-                // Search Query
-                if (reorderSearchQuery.trim()) {
-                  const q = reorderSearchQuery.toLowerCase();
-                  const matchesName = card.medicineName.toLowerCase().includes(q);
-                  const matchesCompany = card.company && card.company.toLowerCase().includes(q);
-                  const matchesSupplier = card.previousPurchase?.supplierName && card.previousPurchase.supplierName.toLowerCase().includes(q);
-                  if (!matchesName && !matchesCompany && !matchesSupplier) return false;
-                }
-
-                return true;
-              });
-
-              if (filteredCards.length === 0) {
-                return (
-                  <div className="flex flex-col items-center justify-center h-full gap-3 text-center py-20">
-                    <RotateCw size={48} className="text-muted/30" />
-                    <div>
-                      <p className="text-sm font-bold text-text">No medicines match current filter</p>
-                      <p className="text-xs text-muted mt-1">All low-stock medicines, patient shortages, and reorder demands are reviewed.</p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => { setReorderCategoryFilter('all'); setReorderSearchQuery(''); }}
-                      className="px-4 py-2 rounded-xl bg-primary text-white text-xs font-bold hover:bg-primary/80 transition-all mt-2 cursor-pointer"
-                    >
-                      Clear Filters
-                    </button>
-                  </div>
-                );
-              }
-
-              return (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {filteredCards.map(card => {
-                    const estRate = card.ptr || card.previousPurchase?.price || 0;
-                    const effectiveOrderQty = card.orderQty || card.suggestedQty || 1;
-                    const estTotal = effectiveOrderQty * estRate;
-
-                    return (
-                      <div
-                        key={card.id}
-                        className="p-4 rounded-2xl border border-glass-border/70 bg-bg2/40 shadow-xs hover:border-glass-border flex flex-col justify-between gap-3.5 transition-all"
-                      >
-                        {/* 1. Card Top: Name, Packaging, Manufacturer, Reason Badge */}
-                        <div className="space-y-2">
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-center gap-1.5 flex-wrap">
-                                <h4 className="font-black text-xs sm:text-sm text-text leading-snug truncate" title={card.medicineName}>
-                                  {card.medicineName}
-                                </h4>
-                                {card.packaging && (
-                                  <span className="text-[9px] font-mono text-muted bg-bg px-1.5 py-0.2 rounded border border-glass-border">
-                                    {card.packaging}
-                                  </span>
-                                )}
-                              </div>
-                              {card.company && (
-                                <div className="text-[11px] text-muted truncate">
-                                  Manufacturer: <strong className="text-text">{card.company}</strong>
-                                </div>
-                              )}
-                              {card.composition && (
-                                <div className="text-[10px] text-primary/80 font-medium truncate">
-                                  Generic: {card.composition}
-                                </div>
-                              )}
-                            </div>
-
-                            {/* Why is this medicine here? (Reason Badge) */}
-                            <span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded-full border shrink-0 flex items-center gap-1 ${
-                              card.reason === 'below_min_stock'
-                                ? 'bg-rose-500/20 text-rose-400 border-rose-500/40'
-                                : card.reason === 'low_stock'
-                                ? 'bg-amber-500/20 text-amber-400 border-amber-500/40'
-                                : card.reason === 'special_order'
-                                ? 'bg-purple-500/20 text-purple-400 border-purple-500/40'
-                                : card.reason === 'refill_due'
-                                ? 'bg-sky-500/20 text-sky-400 border-sky-500/40'
-                                : card.reason === 'previous_order'
-                                ? 'bg-amber-500/15 text-amber-300 border-amber-500/30'
-                                : 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'
-                            }`}>
-                              <span>{card.reasonLabel}</span>
-                            </span>
-                          </div>
-
-                          {/* 2. Stock Snapshot */}
-                          <div className="grid grid-cols-3 gap-2 p-2 rounded-xl bg-bg/50 border border-glass-border/40 text-center">
-                            <div>
-                              <span className="text-[9px] text-muted uppercase font-bold block">Current Stock</span>
-                              <span className={`text-xs font-mono font-black ${card.currentStock <= 2 ? 'text-rose-400' : 'text-text'}`}>
-                                {card.currentStock}
-                              </span>
-                            </div>
-                            <div>
-                              <span className="text-[9px] text-muted uppercase font-bold block">Min Stock</span>
-                              <span className="text-xs font-mono font-bold text-muted">
-                                {card.minStock}
-                              </span>
-                            </div>
-                            <div>
-                              <span className="text-[9px] text-primary uppercase font-bold block">Suggested Order</span>
-                              <span className="text-xs font-mono font-black text-primary">
-                                {card.suggestedQty}
-                              </span>
-                            </div>
-                          </div>
-
-                          {/* 3. Previous Purchase Record Box */}
-                          <div className="p-3 rounded-xl border border-glass-border/50 bg-bg/30">
-                            {card.hasPreviousPurchase && card.previousPurchase ? (
-                              <div className="space-y-1">
-                                <div className="flex items-center justify-between">
-                                  <span className="text-[10px] font-black uppercase text-emerald-400 flex items-center gap-1">
-                                    <Check size={11} /> Previously Purchased
-                                  </span>
-                                  <span className="text-[9px] text-muted font-mono">
-                                    {card.previousPurchase.purchaseDate ? formatDisplayDate(card.previousPurchase.purchaseDate) : 'Past Invoice'}
-                                  </span>
-                                </div>
-                                <div className="text-xs text-text space-y-0.5">
-                                  <div className="flex items-center justify-between">
-                                    <span className="text-muted text-[11px]">Supplier:</span>
-                                    <strong className="text-text font-bold truncate max-w-[180px]">{card.previousPurchase.supplierName}</strong>
-                                  </div>
-                                  <div className="flex items-center justify-between">
-                                    <span className="text-muted text-[11px]">Prev Quantity:</span>
-                                    <strong className="font-mono text-text">{card.previousPurchase.quantity} units</strong>
-                                  </div>
-                                  <div className="flex items-center justify-between">
-                                    <span className="text-muted text-[11px]">Purchase Price:</span>
-                                    <strong className="font-mono text-emerald-400 font-bold">₹{card.previousPurchase.price?.toFixed(2)}</strong>
-                                  </div>
-                                </div>
-                              </div>
-                            ) : (
-                              <div className="space-y-0.5 text-center py-0.5">
-                                <div className="text-[10px] font-bold text-amber-400 flex items-center justify-center gap-1">
-                                  <AlertCircle size={11} /> No previous purchase found
-                                </div>
-                                <p className="text-[9px] text-muted">No prior invoices in database. Select supplier to restock.</p>
-                              </div>
-                            )}
-                          </div>
-
-                          {/* 4. Quantity Adjuster & Estimated Total */}
-                          <div className="flex items-center justify-between gap-3 pt-1 border-t border-glass-border/30">
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-[10px] text-muted font-bold">Order Qty:</span>
-                              <div className="flex items-center gap-1 bg-bg border border-glass-border rounded-xl p-0.5">
-                                <button
-                                  type="button"
-                                  onClick={() => handleUpdateCardQty(card.id, Math.max(1, effectiveOrderQty - 1))}
-                                  className="w-5 h-5 rounded bg-bg2 hover:bg-bg3 text-xs font-bold flex items-center justify-center cursor-pointer"
-                                >
-                                  -
-                                </button>
-                                <span className="w-7 text-center font-mono font-black text-xs text-text">
-                                  {effectiveOrderQty}
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={() => handleUpdateCardQty(card.id, effectiveOrderQty + 1)}
-                                  className="w-5 h-5 rounded bg-bg2 hover:bg-bg3 text-xs font-bold flex items-center justify-center cursor-pointer"
-                                >
-                                  +
-                                </button>
-                              </div>
-                            </div>
-
-                            <div className="text-right">
-                              <span className="text-[8px] text-muted block uppercase font-bold">Est. Total</span>
-                              <span className="text-xs font-mono font-black text-emerald-400">
-                                {estTotal > 0 ? `₹${estTotal.toFixed(2)}` : '—'}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* 5. Primary Action Buttons */}
-                        <div className="pt-2 border-t border-glass-border/40 space-y-2">
-                          {/* ↻ REORDER SAME button */}
-                          <button
-                            type="button"
-                            onClick={() => handleOpenReorderSameModal(card)}
-                            className="w-full py-2 px-3 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-extrabold text-xs flex items-center justify-center gap-1.5 transition-all active:scale-95 shadow-sm cursor-pointer"
-                          >
-                            <RotateCw size={13} />
-                            <span>↻ REORDER SAME</span>
-                          </button>
-
-                          {/* Secondary actions: View History, Switch Supplier */}
-                          <div className="flex items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => handleOpenPurchaseHistoryModal(card.medicineName)}
-                              className="flex-1 py-1.5 px-2 rounded-xl bg-bg border border-glass-border hover:bg-bg3 text-muted hover:text-text font-bold text-[10px] flex items-center justify-center gap-1 transition-all cursor-pointer"
-                              title="View all past purchase invoices for this medicine"
-                            >
-                              <Clock size={11} />
-                              <span>Purchase History</span>
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => handleOpenSwitchModalForCard(card)}
-                              className="flex-1 py-1.5 px-2 rounded-xl bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/30 text-sky-400 font-bold text-[10px] flex items-center justify-center gap-1 transition-all cursor-pointer"
-                              title="Compare prices and switch connected distributor"
-                            >
-                              <ArrowLeftRight size={11} />
-                              <span>Switch Supplier</span>
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              );
-            })()}
-          </div>
-        </div>
-      ) : currentTab === 'shortages' ? (
-        /* ── Shortages & Restock Hub View ── */
+        /* ── Reorder Hub View ── */
         <div className="flex-1 flex flex-col overflow-hidden bg-glass-bg border border-glass-border rounded-3xl min-h-0">
           {/* Header */}
           <div className="h-16 border-b border-glass-border/40 px-6 flex items-center justify-between shrink-0 bg-glass-bg/10 backdrop-blur-md">
             <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-sky-500/15 border border-sky-500/30 flex items-center justify-center text-sky-400">
-                <Building2 size={16} />
+              <div className="w-9 h-9 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400">
+                <Clock size={16} />
               </div>
               <div>
                 <h3 className="text-sm font-bold text-text tracking-wide uppercase leading-none flex items-center gap-2">
-                  Shortages & Restock Hub
-                  <span className="text-[9px] font-extrabold px-2 py-0.5 rounded-full border bg-sky-500/10 text-sky-400 border-sky-500/30 font-mono">
-                    {visiblePendingOrders.length + visiblePendingRefills.length + reorderSuggestions.length} Demands
+                  Reorder Hub
+                  <span className="text-[9px] font-extrabold px-2 py-0.5 rounded-full border bg-amber-500/15 text-amber-400 border-amber-500/30 font-mono">
+                    {visiblePendingOrders.length + visiblePendingRefills.length + reorderSuggestions.length + reorderRecentItems.length} Items
                   </span>
                 </h3>
                 <p className="text-[10px] text-muted tracking-wider mt-1">
-                  Patient shortages, refill reminders, and sales-weighted inventory replenishment.
+                  Customer requests, refill reminders, sales-weighted restock suggestions, and recently ordered medicines.
                 </p>
               </div>
             </div>
@@ -3512,6 +3058,19 @@ export default function PharmarackCart() {
               >
                 <TrendingUp size={12} />
                 <span>Sales Restock ({reorderSuggestions.length})</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShortagesSubTab('ordered_recently')}
+                className={`flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                  shortagesSubTab === 'ordered_recently'
+                    ? 'bg-violet-500/20 text-violet-400 font-black shadow-xs border border-violet-500/30'
+                    : 'text-muted hover:text-text hover:bg-bg3'
+                }`}
+              >
+                <RotateCw size={12} />
+                <span>Ordered Recently ({reorderRecentItems.length})</span>
               </button>
             </div>
           </div>
@@ -3631,9 +3190,9 @@ export default function PharmarackCart() {
                         </div>
 
                         <div className="text-xs text-muted space-y-1">
-                          {sug.company && <div>Company: <strong className="text-text">{sug.company}</strong></div>}
-                          <div>Current Stock: <strong className="text-rose-400 font-mono">{sug.currentStock}</strong> | Monthly Avg: <strong className="text-text font-mono">{sug.monthlyWeightedConsumption}</strong></div>
-                          <div>Suggested Top-up: <strong className="text-emerald-400 font-mono font-bold">{sug.suggestedQty}</strong></div>
+                          <div>📊 Past {reorderWindowMonths} {reorderWindowMonths === 1 ? 'Month' : 'Months'} Sold: <strong className="text-text font-mono">{sug.sixMonthTotalSales}</strong> units</div>
+                          <div>📦 Current Stock: <strong className="text-rose-400 font-mono">{sug.currentStock}</strong> strips</div>
+                          <div>Need: <strong className="text-emerald-400 font-mono font-bold">{sug.suggestedQty}</strong> qty</div>
                         </div>
                       </div>
 
@@ -3646,19 +3205,57 @@ export default function PharmarackCart() {
                           <ShoppingCart size={12} />
                           <span>Add to Cart (x{sug.suggestedQty})</span>
                         </button>
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            await api.snoozeReorderSuggestion(sug.medicineId, 7, '7_days');
+                        <select
+                          onChange={async (e) => {
+                            const val = e.target.value;
+                            if (!val) return;
+                            const [days, type] = val === '7' ? [7, '7_days'] : val === '30' ? [30, '30_days'] : [3650, 'permanent'];
+                            await api.snoozeReorderSuggestion(sug.medicineId, days as number, type as string);
                             fetchReorderSuggestions();
-                            toastEvent.trigger(`Snoozed ${sug.medicineName} for 7 days`, 'info');
+                            toastEvent.trigger(`Snoozed ${sug.medicineName}${type === 'permanent' ? ' permanently' : ` for ${days} days`}`, 'info');
+                            e.target.value = '';
                           }}
-                          className="p-1.5 rounded-xl bg-bg2 hover:bg-bg3 border border-glass-border text-muted hover:text-text text-xs transition-all cursor-pointer"
-                          title="Snooze for 7 days"
+                          defaultValue=""
+                          className="p-1.5 rounded-xl bg-bg2 hover:bg-bg3 border border-glass-border text-muted hover:text-text text-[10px] transition-all cursor-pointer"
+                          title="Ignore this suggestion"
                         >
-                          7d
-                        </button>
+                          <option value="" disabled>Ignore…</option>
+                          <option value="7">7 days</option>
+                          <option value="30">30 days</option>
+                          <option value="permanent">Permanently</option>
+                        </select>
                       </div>
+                    </div>
+                  ))}
+                </div>
+              )
+            )}
+
+            {/* Ordered Recently */}
+            {shortagesSubTab === 'ordered_recently' && (
+              reorderRecentItems.length === 0 ? (
+                <div className="text-center py-16 text-xs text-muted italic">
+                  No medicines ordered in the configured lookback window.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {reorderRecentItems.map((item) => (
+                    <div key={item.medicineName} className="p-4 rounded-2xl border border-glass-border/70 bg-bg2/40 flex flex-col justify-between gap-3 shadow-sm hover:border-glass-border transition-all">
+                      <div className="space-y-2">
+                        <span className="font-extrabold text-xs text-text">{item.medicineName}</span>
+                        <div className="text-xs text-muted space-y-1">
+                          <div>Last ordered: <strong className="text-text">{item.lastOrderedDate}</strong> from <strong className="text-text">{item.lastDistributorName || 'Unknown'}</strong></div>
+                          <div>Last quantity: <strong className="text-violet-400 font-mono">{item.lastQty}</strong></div>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => liveCartAddEvent.triggerOpen(item.medicineName, item.lastQty)}
+                        className="w-full py-1.5 px-3 rounded-xl bg-violet-500 hover:bg-violet-600 text-white text-xs font-bold flex items-center justify-center gap-1.5 transition-all active:scale-95 cursor-pointer shadow-xs"
+                      >
+                        <ShoppingCart size={12} />
+                        <span>Reorder (x{item.lastQty})</span>
+                      </button>
                     </div>
                   ))}
                 </div>
@@ -3690,6 +3287,17 @@ export default function PharmarackCart() {
             </div>
 
             <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => handleToggleAllPreviousItems(true)}
+                disabled={previousOrderItemsInfo.length === 0 || previousOrderItemsInfo.every(x => x.isChecked)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-extrabold transition-all active:scale-95 text-xs disabled:opacity-40 shadow-sm cursor-pointer"
+                title="Select all previous medicines to include in today's active dispatch"
+              >
+                <Check size={13} />
+                <span>Reorder All ({previousOrderItemsInfo.length})</span>
+              </button>
+
               <button
                 onClick={handleManualRefresh}
                 disabled={loading || isRefreshing}
@@ -3742,568 +3350,8 @@ export default function PharmarackCart() {
 
           {/* ── Main Area ── */}
           <div className="flex-1 flex overflow-hidden min-h-0">
-            {/* Left Sidebar: Add Pending Order panel */}
-            {!loading && !error && (
-              <div className="w-80 border-r border-glass-border/40 bg-bg2/25 flex flex-col shrink-0 overflow-hidden">
-                {/* Sidebar Tabs */}
-                <div className="flex border-b border-glass-border/40 bg-bg3/10 shrink-0 select-none overflow-x-auto">
-                  <button
-                    onClick={() => setSidebarTab('all')}
-                    className={`flex-1 py-2.5 text-[10px] font-black uppercase tracking-wider border-b-2 transition-all flex items-center justify-center gap-1 min-w-[50px] ${sidebarTab === 'all'
-                      ? 'border-primary text-primary bg-primary/5'
-                      : 'border-transparent text-muted hover:text-text hover:bg-white/5'
-                      }`}
-                    title="View All Notifications & Items Combined"
-                  >
-                    <Layers size={11} />
-                    All ({visiblePendingOrders.length + visiblePendingRefills.length + reorderSuggestions.length})
-                  </button>
-                  <button
-                    onClick={() => setSidebarTab('requests')}
-                    className={`flex-1 py-2.5 text-[10px] font-black uppercase tracking-wider border-b-2 transition-all flex items-center justify-center gap-1 min-w-[50px] ${sidebarTab === 'requests'
-                      ? 'border-primary text-primary bg-primary/5'
-                      : 'border-transparent text-muted hover:text-text hover:bg-white/5'
-                      }`}
-                  >
-                    <Clock size={11} />
-                    Req ({visiblePendingOrders.length})
-                  </button>
-                  <button
-                    onClick={() => setSidebarTab('refills')}
-                    className={`flex-1 py-2.5 text-[10px] font-black uppercase tracking-wider border-b-2 transition-all flex items-center justify-center gap-1 min-w-[55px] ${sidebarTab === 'refills'
-                      ? 'border-primary text-primary bg-primary/5'
-                      : 'border-transparent text-muted hover:text-text hover:bg-white/5'
-                      }`}
-                  >
-                    <ShoppingCart size={11} />
-                    Refills ({visiblePendingRefills.length})
-                  </button>
-                  <button
-                    onClick={() => setSidebarTab('sales_suggestions')}
-                    className={`flex-1 py-2.5 text-[10px] font-black uppercase tracking-wider border-b-2 transition-all flex items-center justify-center gap-1 min-w-[50px] ${sidebarTab === 'sales_suggestions'
-                      ? 'border-emerald-500 text-emerald-400 bg-emerald-500/5'
-                      : 'border-transparent text-muted hover:text-text hover:bg-white/5'
-                      }`}
-                    title="2-Day Sales & 6-Month Average Reorder Suggestions"
-                  >
-                    <TrendingUp size={11} className="text-emerald-400" />
-                    Sales ({reorderSuggestions.length})
-                  </button>
-                  <button
-                    onClick={() => setSidebarTab('missing_phone' as any)}
-                    className={`flex-1 py-2.5 text-[10px] font-black uppercase tracking-wider border-b-2 transition-all flex items-center justify-center gap-1 min-w-[55px] ${sidebarTab === ('missing_phone' as any)
-                      ? 'border-amber-500 text-amber-400 bg-amber-500/5'
-                      : 'border-transparent text-muted hover:text-text hover:bg-white/5'
-                      }`}
-                  >
-                    <Phone size={11} />
-                    Missing
-                  </button>
-                </div>
 
-                {/* Auto-hide Cart Items Control Banner */}
-                <div className="flex items-center justify-between px-3 py-1.5 bg-bg3/30 border-b border-glass-border/40 text-[10px] text-muted shrink-0">
-                  <span className="font-semibold text-muted">Auto-hiding items in Live Cart</span>
-                  <label className="flex items-center gap-1.5 cursor-pointer select-none font-bold text-text hover:text-primary">
-                    <input
-                      type="checkbox"
-                      checked={showAddedItems}
-                      onChange={e => setShowAddedItems(e.target.checked)}
-                      className="rounded bg-bg border-glass-border text-primary focus:ring-0 w-3 h-3 cursor-pointer"
-                    />
-                    <span>Show Added ({pendingOrders.filter(o => getOrderItemInCart(o)).length + pendingRefills.filter(r => getRefillItemInCart(r)).length})</span>
-                  </label>
-                </div>
-
-                <div className="flex-1 overflow-y-auto p-4 space-y-3">
-                  {(sidebarTab === 'all' || sidebarTab === 'requests') && (() => {
-                    const displayOrders = visiblePendingOrders;
-
-                    if (sidebarTab === 'requests' && displayOrders.length === 0) {
-                      return (
-                        <div className="text-center py-8 text-[11px] text-muted italic select-none">
-                          {pendingOrders.length > 0 && !showAddedItems
-                            ? 'All special requests have been added to the Pharmarack cart!'
-                            : 'No pending special requests found.'}
-                        </div>
-                      );
-                    }
-
-                    if (displayOrders.length === 0 && sidebarTab === 'all') return null;
-
-                    return (
-                      <div className="space-y-2">
-                        {sidebarTab === 'all' && (
-                          <div className="text-[10px] font-black uppercase text-primary tracking-wider px-1 pt-1 pb-1 border-b border-glass-border/30 flex items-center justify-between">
-                            <span className="flex items-center gap-1">
-                              <Clock size={11} />
-                              Special Shortage Requests ({displayOrders.length})
-                            </span>
-                          </div>
-                        )}
-                        {displayOrders.map(order => {
-                          const cartMatch = getOrderCartMatch(order);
-                          const inCart = Boolean(cartMatch?.isHighMatch);
-                          const isPartialMatch = Boolean(cartMatch?.isPartialMatch);
-                          const candidateItem = cartMatch?.candidateItem;
-                          const matchScore = cartMatch?.result?.score || 0;
-                          const matchReasons = cartMatch?.result?.matchReasons || [];
-
-                          const orderDateMs = new Date(order.date).getTime();
-                          const hoursElapsed = !isNaN(orderDateMs) ? (Date.now() - orderDateMs) / (1000 * 60 * 60) : 0;
-                          const isDelayedOver12h = hoursElapsed >= 12 && order.status !== 'Ready' && order.status !== 'Arrived' && order.status !== 'Fulfilled';
-
-                          const handleConfirmOrdered = async () => {
-                            try {
-                              await api.updateOrder(order.id, { status: 'Ordered' });
-                              toastEvent.trigger(`Confirmed & marked "${order.product}" as Ordered!`, 'success');
-                              await fetchPendingOrders();
-                            } catch (err: any) {
-                              toastEvent.trigger('Failed to update status', 'error');
-                            }
-                          };
-
-                          return (
-                            <div
-                              key={order.id}
-                              className={`p-3 rounded-xl border flex flex-col gap-2 transition-all shadow-sm ${
-                                isDelayedOver12h
-                                  ? 'bg-amber-500/10 border-amber-500/50 text-amber-300 shadow-amber-500/10 animate-pulse'
-                                  : inCart
-                                  ? 'bg-emerald-500/10 border-emerald-500/35 text-emerald-400'
-                                  : isPartialMatch
-                                  ? 'bg-amber-500/10 border-amber-500/30 text-amber-300'
-                                  : 'bg-red/10 border-red/20 text-red'
-                              }`}
-                            >
-                              <div className="flex justify-between items-start">
-                                <div 
-                                  className="flex flex-col min-w-0 cursor-pointer group flex-1"
-                                  onClick={() => liveCartAddEvent.triggerOpen(order.product, order.qty, order.id)}
-                                  title="Click to search in Pharmarack and add to cart"
-                                >
-                                  <div className="flex items-center gap-1.5 flex-wrap">
-                                    <span className={`text-[11px] font-bold truncate group-hover:underline ${inCart ? 'line-through opacity-65 text-emerald-400' : 'text-text'}`}>
-                                      {order.product}
-                                    </span>
-                                    {isDelayedOver12h && (
-                                      <span className="text-[8px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/40 shrink-0">
-                                        ⏰ {Math.floor(hoursElapsed)}h Shipment Delay
-                                      </span>
-                                    )}
-                                  </div>
-                                  <span className="text-[9px] text-muted mt-0.5 truncate">
-                                    Customer: {order.requester} (Qty: {order.qty})
-                                  </span>
-                                  {inCart && matchReasons.length > 0 && (
-                                    <span className="text-[8px] text-emerald-400/90 font-medium mt-0.5 truncate" title={matchReasons.join(', ')}>
-                                      Match details: {matchReasons.join(' • ')}
-                                    </span>
-                                  )}
-                                  <span className="text-[8px] text-muted/80 font-mono mt-0.2">
-                                    Logged: {formatDisplayDate(order.date)}
-                                  </span>
-
-                                  {isDelayedOver12h && (
-                                    <span className="text-[9px] font-bold text-amber-400 mt-1 flex items-center gap-1">
-                                      ⚠️ Placed &gt;12h ago — Pending arrival in pharmacy inventory!
-                                    </span>
-                                  )}
-                                  {order.cart_add_error && (
-                                    <span
-                                      className="text-[9px] font-semibold text-red mt-1 flex items-start gap-1"
-                                      title={order.cart_add_error}
-                                    >
-                                      ⚠️ Last attempt failed: {order.cart_add_error}
-                                    </span>
-                                  )}
-                                </div>
-
-                                <div className="flex flex-col items-end gap-1.5 shrink-0">
-                                  {inCart ? (
-                                    <>
-                                      <span className="text-[8px] font-extrabold uppercase bg-emerald-500/25 px-1.5 py-0.5 rounded-md border border-emerald-500/30 text-emerald-400 select-none flex items-center gap-1">
-                                        <span>✨ In Cart</span>
-                                        <span className="opacity-75">({matchScore}%)</span>
-                                      </span>
-                                      {order.status === 'Pending' && (
-                                        <button
-                                          type="button"
-                                          onClick={handleConfirmOrdered}
-                                          className="text-[9px] font-bold bg-white text-emerald-600 border border-emerald-500 hover:bg-emerald-50 px-2 py-0.5 rounded transition-all flex items-center gap-1 shadow-sm cursor-pointer"
-                                          title="Double-check & confirm that this order is placed"
-                                        >
-                                          <Check size={10} />
-                                          <span>Confirm Ordered</span>
-                                        </button>
-                                      )}
-                                    </>
-                                  ) : isPartialMatch && candidateItem ? (
-                                    <>
-                                      <span className="text-[8px] font-extrabold uppercase bg-amber-500/25 px-1.5 py-0.5 rounded-md border border-amber-500/30 text-amber-400 select-none flex items-center gap-1">
-                                        <span>⚡ Possible Match</span>
-                                        <span className="opacity-75">({matchScore}%)</span>
-                                      </span>
-                                      <button
-                                        type="button"
-                                        onClick={() => handleConfirmCandidateMatch(order, candidateItem)}
-                                        className="text-[9px] font-bold bg-white text-amber-600 border border-amber-500 hover:bg-amber-50 px-2 py-0.5 rounded transition-all flex items-center gap-1 shadow-sm cursor-pointer"
-                                        title={`Confirm "${candidateItem.productName || candidateItem.name}" in cart is this request`}
-                                      >
-                                        <Check size={10} />
-                                        <span>Confirm Added</span>
-                                      </button>
-                                    </>
-                                  ) : (
-                                    <button
-                                      onClick={() => liveCartAddEvent.triggerOpen(order.product, order.qty, order.id)}
-                                      className="text-[9px] font-bold bg-primary/20 hover:bg-primary/35 border border-primary/30 px-2 py-1 rounded-md transition-all active:scale-95 text-primary font-sans flex items-center gap-1 cursor-pointer"
-                                      title="Open Medicine Search & Add to Pharmarack Live Cart"
-                                    >
-                                      <Search size={10} />
-                                      <span>Search & Add</span>
-                                    </button>
-                                  )}
-                                </div>
-                              </div>
-
-                              {/* Partial Candidate Match Banner */}
-                              {isPartialMatch && candidateItem && (
-                                <div className="mt-1 pt-1.5 border-t border-amber-500/20 text-[9px] text-amber-300/90 flex flex-col gap-0.5 bg-amber-500/5 p-1.5 rounded-lg">
-                                  <div className="flex justify-between items-center font-semibold">
-                                    <span className="truncate pr-1" title={candidateItem.productName || candidateItem.name}>
-                                      Candidate: {candidateItem.productName || candidateItem.name}
-                                    </span>
-                                    {candidateItem.distributor && (
-                                      <span className="text-[8px] bg-amber-500/20 px-1 py-0.2 rounded font-mono shrink-0">
-                                        {candidateItem.distributor}
-                                      </span>
-                                    )}
-                                  </div>
-                                  {matchReasons.length > 0 && (
-                                    <span className="text-[8px] text-amber-400/80 truncate">
-                                      Match factors: {matchReasons.join(' • ')}
-                                    </span>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    );
-                  })()}
-
-                  {(sidebarTab === 'all' || sidebarTab === 'refills') && (() => {
-                    const displayRefills = visiblePendingRefills;
-
-                    if (sidebarTab === 'refills' && displayRefills.length === 0) {
-                      return (
-                        <div className="text-center py-8 text-[11px] text-muted italic select-none">
-                          {pendingRefills.length > 0 && !showAddedItems
-                            ? 'All refill medicines have been added to the Pharmarack cart!'
-                            : 'No pending out-of-stock refill medicines due.'}
-                        </div>
-                      );
-                    }
-
-                    if (displayRefills.length === 0 && sidebarTab === 'all') return null;
-
-                    return (
-                      <div className="space-y-2">
-                        {sidebarTab === 'all' && (
-                          <div className="text-[10px] font-black uppercase text-amber-400 tracking-wider px-1 pt-2 pb-1 border-b border-glass-border/30 flex items-center justify-between">
-                            <span className="flex items-center gap-1">
-                              <ShoppingCart size={11} />
-                              Chronic Patient Refills ({displayRefills.length})
-                            </span>
-                          </div>
-                        )}
-                        {displayRefills.map(refill => {
-                          const inCart = getRefillItemInCart(refill);
-                          const medName = refill.medicine_name || `Medicine ID: ${refill.medicine_id}`;
-                          const reqQty = Number(refill.quantity_needed || 1);
-                          const stockQty = Number(refill.in_stock_qty || 0);
-                          const shortageQty = Math.max(1, reqQty - stockQty);
-
-                          const today = new Date();
-                          const dueDate = new Date(refill.next_refill_date);
-                          const diffDays = Math.ceil((dueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-                          const isLeadWindow = diffDays <= 6 && diffDays >= 0;
-
-                          return (
-                            <div
-                              key={refill.id}
-                              className={`p-3 rounded-xl border flex flex-col gap-2 transition-all shadow-sm ${inCart
-                                ? 'bg-emerald-500/10 border-emerald-500/35 text-emerald-400'
-                                : 'bg-amber-500/10 border-amber-500/20 text-amber-400'
-                                }`}
-                            >
-                              <div className="flex justify-between items-start gap-2">
-                                <div 
-                                  className="flex flex-col min-w-0 cursor-pointer group flex-1"
-                                  onClick={() => liveCartAddEvent.triggerOpen(medName, shortageQty, undefined, refill.id)}
-                                  title="Click to search in Pharmarack and add to cart"
-                                >
-                                  <span className={`text-[11px] font-bold truncate group-hover:underline ${inCart ? 'line-through opacity-65 text-emerald-400' : 'text-text'}`}>
-                                    {medName}
-                                  </span>
-                                  <span className="text-[9px] text-muted mt-0.5 truncate">
-                                    Patient: {refill.patient_name}
-                                  </span>
-                                  <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-                                    <span className="text-[8px] text-muted font-mono">
-                                      Due: {formatDisplayDate(refill.next_refill_date)}
-                                    </span>
-                                    {isLeadWindow && (
-                                      <span className="text-[8px] font-black text-amber-400 bg-amber-500/20 px-1.5 py-0.2 rounded border border-amber-500/40">
-                                        🔔 Lead Window ({diffDays}d)
-                                      </span>
-                                    )}
-                                    <span className="text-[8px] font-bold text-red-400 bg-red-500/15 px-1.5 py-0.2 rounded">
-                                      Need: {shortageQty} (Stock: {stockQty})
-                                    </span>
-                                  </div>
-                                </div>
-                                {inCart ? (
-                                  <span className="shrink-0 text-[8px] font-extrabold uppercase bg-emerald-500/25 px-1.5 py-0.5 rounded-md border border-emerald-500/20 text-emerald-400 select-none">
-                                    Added
-                                  </span>
-                                ) : (
-                                  <button
-                                    onClick={() => liveCartAddEvent.triggerOpen(medName, shortageQty, undefined, refill.id)}
-                                    className="shrink-0 text-[9px] font-bold bg-white text-amber-600 border border-amber-500 hover:bg-amber-50 px-2 py-1 rounded-md transition-all active:scale-95 font-sans flex items-center gap-1 cursor-pointer shadow-sm"
-                                    title={`Add ${shortageQty} shortage units to Pharmarack Live Cart`}
-                                  >
-                                    <Search size={10} />
-                                    <span>Add ({shortageQty})</span>
-                                  </button>
-                                )}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    );
-                  })()}
-
-                  {(sidebarTab === 'all' || sidebarTab === 'sales_suggestions') && (() => {
-                    if (suggestionsLoading) {
-                      return (
-                        <div className="flex flex-col items-center justify-center py-10 gap-2">
-                          <div className="w-6 h-6 border-2 border-emerald-400/20 border-t-emerald-400 rounded-full animate-spin" />
-                          <span className="text-[10px] text-muted animate-pulse font-bold uppercase tracking-wider">Calculating 6M & 2-Day Sales…</span>
-                        </div>
-                      );
-                    }
-
-                    if (sidebarTab === 'sales_suggestions' && reorderSuggestions.length === 0) {
-                      return (
-                        <div className="text-center py-8 text-[11px] text-muted italic select-none">
-                          No 2-day sales suggestions found.
-                        </div>
-                      );
-                    }
-
-                    if (reorderSuggestions.length === 0 && sidebarTab === 'all') return null;
-
-                    return (
-                      <div className="space-y-2">
-                        {sidebarTab === 'all' && (
-                          <div className="text-[10px] font-black uppercase text-primary tracking-wider px-1 pt-2 pb-1 border-b border-glass-border flex items-center justify-between">
-                            <span className="flex items-center gap-1">
-                              <TrendingUp size={11} />
-                              Smart Restock & Safety Reorders ({reorderSuggestions.length})
-                            </span>
-                          </div>
-                        )}
-                        {reorderSuggestions.map((sug) => (
-                          <div key={sug.medicineId} className="p-3 rounded-xl border border-glass-border bg-glass-bg flex flex-col gap-2 shadow-sm hover:border-primary/40 transition-all">
-                            <div className="flex justify-between items-start">
-                              <div className="flex flex-col min-w-0 pr-1">
-                                <span className="text-xs font-black text-text truncate" title={sug.medicineName}>
-                                  {sug.medicineName}
-                                </span>
-                                <span className="text-[10px] text-muted truncate">
-                                  {sug.company} {sug.packaging ? `• ${sug.packaging}` : ''}
-                                </span>
-                              </div>
-                              <div className="flex items-center gap-1 shrink-0 flex-wrap justify-end">
-                                {sug.isLowStockSafety && (
-                                  <span className="text-[8px] font-black uppercase px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30" title="Low stock (1-2 strips left) with 6M demand history">
-                                    ⚠️ Low Stock ({sug.currentStock} left)
-                                  </span>
-                                )}
-                                {sug.isHotMover && (
-                                  <span className="text-[8px] font-black uppercase px-1.5 py-0.5 rounded bg-primary/20 text-primary border border-primary/30">
-                                    🔥 Hot Mover
-                                  </span>
-                                )}
-                                {!sug.isHotMover && !sug.isLowStockSafety && sug.twoDaySales > 0 && (
-                                  <span className="text-[8px] font-black uppercase px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                                    ⚡ {sug.twoDaySales} Sold (2d)
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-
-                            <div className="grid grid-cols-2 gap-1 text-[9px] text-muted bg-bg2/40 px-2 py-1 rounded border border-glass-border">
-                              <span title="Purchase-Weighted Monthly Consumption (70% Purchases / 30% Sales)">
-                                📦 Purchases 6M: <strong className="text-text">{sug.sixMonthTotalPurchases || 0}</strong>
-                              </span>
-                              <span title="6-Month POS Sales Volume">
-                                🛒 Sales 6M: <strong className="text-text">{sug.sixMonthTotalSales || 0}</strong>
-                              </span>
-                              <span title="Current Inventory Stock">
-                                📊 Stock Level: <strong className={sug.currentStock > 0 ? 'text-emerald-400' : 'text-rose-400'}>{sug.currentStock}</strong>
-                              </span>
-                              <span title="Weighted Monthly Demand Rate">
-                                📈 Est. Monthly: <strong className="text-primary">{sug.monthlyWeightedConsumption || sug.suggestedQty}</strong>/mo
-                              </span>
-                            </div>
-
-                            <div className="flex items-center justify-between pt-1 border-t border-glass-border">
-                              <div className="flex items-center gap-1">
-                                <span className="text-[10px] font-bold text-muted">
-                                  Need: <strong className="text-primary font-mono">{sug.suggestedQty} qty</strong>
-                                </span>
-                              </div>
-                              <div className="flex items-center gap-1.5">
-                                {/* Snooze Options */}
-                                <div className="relative group">
-                                  <button
-                                    onClick={async () => {
-                                      try {
-                                        await api.snoozeReorderSuggestion(sug.medicineId, 7, '7_days');
-                                        toastEvent.trigger(`Ignored ${sug.medicineName} for 7 days.`, 'success');
-                                        fetchReorderSuggestions();
-                                      } catch (_) {
-                                        toastEvent.trigger('Failed to ignore suggestion', 'error');
-                                      }
-                                    }}
-                                    className="text-[9px] font-bold text-muted hover:text-text bg-bg2 hover:bg-bg3 border border-glass-border px-2 py-1 rounded-md transition-all cursor-pointer flex items-center gap-1"
-                                    title="Ignore for 7 days (or hover for more options)"
-                                  >
-                                    <span>Ignore (7d)</span>
-                                  </button>
-                                  <div className="absolute right-0 top-full mt-1 hidden group-hover:flex flex-col bg-bg2 border border-glass-border rounded-lg shadow-xl z-20 py-1 min-w-[120px]">
-                                    <button
-                                      onClick={async () => {
-                                        try {
-                                          await api.snoozeReorderSuggestion(sug.medicineId, 30, '30_days');
-                                          toastEvent.trigger(`Paused ${sug.medicineName} for 30 days.`, 'success');
-                                          fetchReorderSuggestions();
-                                        } catch (_) {
-                                          toastEvent.trigger('Failed to pause suggestion', 'error');
-                                        }
-                                      }}
-                                      className="text-left px-2.5 py-1 text-[10px] text-text hover:bg-glass-bg cursor-pointer font-medium"
-                                    >
-                                      Pause 1 Month (30d)
-                                    </button>
-                                    <button
-                                      onClick={async () => {
-                                        try {
-                                          await api.snoozeReorderSuggestion(sug.medicineId, 180, '6_months');
-                                          toastEvent.trigger(`Paused ${sug.medicineName} for 6 Months (Seasonal).`, 'success');
-                                          fetchReorderSuggestions();
-                                        } catch (_) {
-                                          toastEvent.trigger('Failed to pause suggestion', 'error');
-                                        }
-                                      }}
-                                      className="text-left px-2.5 py-1 text-[10px] text-amber-400 hover:bg-glass-bg cursor-pointer font-medium"
-                                    >
-                                      Pause 6 Months (Seasonal)
-                                    </button>
-                                  </div>
-                                </div>
-
-                                <button
-                                  onClick={() => handleReaddSingleSentItem({ productName: sug.medicineName, qty: sug.suggestedQty, ptr: sug.ptr, mrp: sug.mrp, company: sug.company, packaging: sug.packaging })}
-                                  className="shrink-0 text-[10px] font-bold bg-primary text-text hover:bg-primary/90 px-2.5 py-1 rounded-lg shadow-sm transition-all active:scale-95 flex items-center gap-1 cursor-pointer"
-                                  title={`Add ${sug.suggestedQty} units of ${sug.medicineName} to Pharmarack Cart`}
-                                >
-                                  <Plus size={11} />
-                                  <span>Add ({sug.suggestedQty})</span>
-                                </button>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    );
-                  })()}
-
-                  {(sidebarTab === 'all' || sidebarTab === ('missing_phone' as any)) && (() => {
-                    const missingPhoneDistributors = distributors.filter(dist => !isDistributorMapped(dist));
-
-                    if (sidebarTab === ('missing_phone' as any) && missingPhoneDistributors.length === 0) {
-                      return (
-                        <div className="text-center py-8 text-[11px] text-muted italic select-none">
-                          All cart distributors have valid saved phone numbers!
-                        </div>
-                      );
-                    }
-
-                    if (missingPhoneDistributors.length === 0 && sidebarTab === 'all') return null;
-
-                    return (
-                      <div className="space-y-2">
-                        {sidebarTab === 'all' && (
-                          <div className="text-[10px] font-black uppercase text-amber-400 tracking-wider px-1 pt-2 pb-1 border-b border-glass-border/30 flex items-center justify-between">
-                            <span className="flex items-center gap-1">
-                              <Phone size={11} />
-                              Missing Contact Numbers ({missingPhoneDistributors.length})
-                            </span>
-                          </div>
-                        )}
-                        {missingPhoneDistributors.map(dist => (
-                          <div key={dist.storeId} className="p-3 rounded-xl border border-amber-500/30 bg-amber-500/10 flex flex-col gap-2 shadow-sm">
-                            <div className="flex justify-between items-start">
-                              <div className="flex flex-col min-w-0">
-                                <span className="text-xs font-extrabold text-amber-400 truncate" title={dist.storeName}>
-                                  {dist.storeName}
-                                </span>
-                                <span className="text-[9px] text-muted mt-0.5">
-                                  Phone Number Missing / Invalid
-                                </span>
-                              </div>
-                            </div>
-
-                            <div className="flex gap-1.5 mt-1">
-                              <input
-                                type="text"
-                                placeholder="10-digit mobile..."
-                                value={customDistributorPhones[dist.storeId] || ''}
-                                onChange={(e) => setCustomDistributorPhones(prev => ({ ...prev, [dist.storeId]: e.target.value }))}
-                                className="flex-1 text-xs px-2.5 py-1.5 rounded-lg bg-bg border border-glass-border text-text focus:outline-none focus:border-primary font-mono"
-                              />
-                              <button
-                                onClick={() => {
-                                  const val = customDistributorPhones[dist.storeId];
-                                  if (val) {
-                                    api.addDistributor({ name: dist.storeName, contact: val }).then(() => {
-                                      toastEvent.trigger(`Saved phone for ${dist.storeName}!`, 'success');
-                                    }).catch(() => {
-                                      toastEvent.trigger('Failed to save phone', 'error');
-                                    });
-                                  }
-                                }}
-                                className="px-2.5 py-1.5 rounded-lg bg-white text-emerald-600 border border-emerald-500 hover:bg-emerald-50 text-[10px] font-extrabold transition-all active:scale-95 shrink-0 shadow-sm cursor-pointer"
-                              >
-                                Save
-                              </button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    );
-                  })()}
-                </div>
-              </div>
-            )}
-
-            {/* Right Panel: Main live cart contents */}
+            {/* Main live cart contents */}
             <div className="flex-1 flex flex-col min-h-0 overflow-hidden bg-glass-bg/20">
               {loading ? (
                 <div className="flex flex-col items-center justify-center h-full gap-3 py-12">
@@ -4688,14 +3736,14 @@ export default function PharmarackCart() {
                               return (
                                 <button
                                   onClick={() => handleOpenEditModal(dist)}
-                                  className={`flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md border transition-all active:scale-95 ${activePhone
+                                  className={`flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md border transition-all active:scale-95 cursor-pointer ${activePhone
                                     ? 'bg-bg2 text-text border-border hover:bg-bg3'
-                                    : 'bg-bg2 text-muted border-border hover:bg-bg3'
+                                    : 'bg-amber-500/15 text-amber-400 border-amber-500/30 hover:bg-amber-500/25'
                                     }`}
-                                  title="Search saved distributors & edit WhatsApp phone number"
+                                  title={activePhone ? 'Edit WhatsApp phone number' : 'Missing WhatsApp number — click to add'}
                                 >
                                   <Phone size={10} />
-                                  <span>{activePhone || '+ Add Phone'}</span>
+                                  <span>{activePhone || 'No Phone'}</span>
                                   <Edit2 size={9} className="opacity-70" />
                                 </button>
                               );

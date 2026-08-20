@@ -128,7 +128,7 @@ async function fetchPharmarack(url: string, options: any = {}): Promise<Response
 
   let response = await executeFetch(token);
 
-  if ((response.status === 401 || response.status === 403) && token) {
+  if ((response.status === 401 || response.status === 403 || response.status === 406) && token) {
     console.log(`[Pharmarack Fetch] API ${url} returned ${response.status}. Attempting silent background token refresh...`);
     const freshToken = await tokenRefreshScheduler.executeRefresh();
     if (freshToken) {
@@ -982,8 +982,19 @@ router.post('/cart/add', async (req, res) => {
           }
           const [page] = await browser.pages();
           
-          await page.goto('https://retailers.pharmarack.com/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+          await page.goto('https://retailers.pharmarack.com/', { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
           
+          const currentUrl = page.url();
+          if (currentUrl.includes('/login') || currentUrl.includes('/auth') || currentUrl.includes('/signin')) {
+            console.warn('[Pharmarack Fallback] Session expired (redirected to login). Aborting browser fallback.');
+            lastError = 'Session expired. Please log in via Settings > External Integrations.';
+            try {
+              const db = await dbManager.getConnection();
+              await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('pharmarack_session_token', '')");
+            } catch (_) {}
+            throw new Error('Pharmarack session expired. Redirected to login.');
+          }
+
           const freshSettings = await getPharmarackSettings();
           const activeToken = freshSettings['pharmarack_session_token'] || token;
 
@@ -1099,55 +1110,65 @@ router.post('/cart/add', async (req, res) => {
           }
 
           // Tier 3: UI automation fallback
-          if (!cartSuccess) {
-            console.log('Page context evaluation failed. Trying UI automation...');
-            await page.goto('https://retailers.pharmarack.com/search', { waitUntil: 'networkidle2', timeout: 30000 });
+          if (!cartSuccess && !lastError.includes('Session expired')) {
+            console.log('Page context evaluation failed. Checking login status before UI automation...');
+            await page.goto('https://retailers.pharmarack.com/search', { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
             
-            for (const item of items) {
-              const searchSelector = 'input[placeholder*="search" i], input[placeholder*="medicine" i], input[type="search"]';
-              await page.waitForSelector(searchSelector, { timeout: 10000 });
-              await page.focus(searchSelector);
-              await page.keyboard.down('Control');
-              await page.keyboard.press('KeyA');
-              await page.keyboard.up('Control');
-              await page.keyboard.press('Backspace');
-              await page.type(searchSelector, item.name || item.productName || item.product || '');
-              await page.keyboard.press('Enter');
-              
-              await new Promise(r => setTimeout(r, 3000));
-              
-              // Distributor-specific selector targeting inside page evaluate
-              const clickedDistributor = await page.evaluate(async (targetStoreName) => {
-                const elements = Array.from(document.querySelectorAll('tr, div.product-card, div.row, div.item, .search-result-item'));
-                for (const el of elements) {
-                  const text = el.textContent || '';
-                  const hasAddButton = el.querySelector('button, .add-to-cart, .btn-add');
-                  if (hasAddButton && targetStoreName) {
-                    if (text.toLowerCase().includes(targetStoreName.toLowerCase())) {
-                      const btn = el.querySelector('button, .add-to-cart, .btn-add') as HTMLElement;
-                      if (btn) {
-                        btn.click();
-                        return true;
+            const searchUrl = page.url();
+            if (searchUrl.includes('/login') || searchUrl.includes('/auth') || searchUrl.includes('/signin')) {
+              console.warn('[Pharmarack Fallback] Search page redirected to login. Session expired. Aborting UI fallback.');
+              lastError = 'Session expired. Please log in via Settings > External Integrations.';
+              try {
+                const db = await dbManager.getConnection();
+                await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('pharmarack_session_token', '')");
+              } catch (_) {}
+            } else {
+              for (const item of items) {
+                const searchSelector = 'input[placeholder*="search" i], input[placeholder*="medicine" i], input[type="search"]';
+                await page.waitForSelector(searchSelector, { timeout: 8000 });
+                await page.focus(searchSelector);
+                await page.keyboard.down('Control');
+                await page.keyboard.press('KeyA');
+                await page.keyboard.up('Control');
+                await page.keyboard.press('Backspace');
+                await page.type(searchSelector, item.name || item.productName || item.product || '');
+                await page.keyboard.press('Enter');
+                
+                await new Promise(r => setTimeout(r, 3000));
+                
+                // Distributor-specific selector targeting inside page evaluate
+                const clickedDistributor = await page.evaluate(async (targetStoreName) => {
+                  const elements = Array.from(document.querySelectorAll('tr, div.product-card, div.row, div.item, .search-result-item'));
+                  for (const el of elements) {
+                    const text = el.textContent || '';
+                    const hasAddButton = el.querySelector('button, .add-to-cart, .btn-add');
+                    if (hasAddButton && targetStoreName) {
+                      if (text.toLowerCase().includes(targetStoreName.toLowerCase())) {
+                        const btn = el.querySelector('button, .add-to-cart, .btn-add') as HTMLElement;
+                        if (btn) {
+                          btn.click();
+                          return true;
+                        }
                       }
                     }
                   }
-                }
-                // Fallback: Click first available add button
-                const fallbackBtn = document.querySelector('button[class*="add" i], button[id*="add" i], button[title*="add" i], .add-to-cart, .btn-add') as HTMLElement;
-                if (fallbackBtn) {
-                  fallbackBtn.click();
-                  return true;
-                }
-                return false;
-              }, item.storeName || '');
+                  // Fallback: Click first available add button
+                  const fallbackBtn = document.querySelector('button[class*="add" i], button[id*="add" i], button[title*="add" i], .add-to-cart, .btn-add') as HTMLElement;
+                  if (fallbackBtn) {
+                    fallbackBtn.click();
+                    return true;
+                  }
+                  return false;
+                }, item.storeName || '');
 
-              if (!clickedDistributor) {
-                console.warn(`[Pharmarack Fallback] Could not click add button for ${item.name} / ${item.storeName}`);
+                if (!clickedDistributor) {
+                  console.warn(`[Pharmarack Fallback] Could not click add button for ${item.name} / ${item.storeName}`);
+                }
+                await new Promise(r => setTimeout(r, 2000));
               }
-              await new Promise(r => setTimeout(r, 2000));
+              cartSuccess = true;
+              console.log('Successfully added items to cart using UI automation fallback!');
             }
-            cartSuccess = true;
-            console.log('Successfully added items to cart using UI automation fallback!');
           }
         } catch (pwErr: any) {
           console.error('Headless browser fallback failed:', pwErr.message);
@@ -2278,6 +2299,49 @@ router.get('/sent-orders/latest-map', async (req, res) => {
   } catch (err: any) {
     console.error('Error fetching Pharmarack latest sent map:', err);
     res.status(500).json({ error: 'Failed to fetch latest sent map: ' + err.message });
+  }
+});
+
+/**
+ * GET /api/pharmarack/reorder-recent
+ * Query param: ?months=2|4|6|8 (defaults to configured reorder window setting)
+ * Returns one entry per distinct medicine name sent to any distributor within the window.
+ */
+router.get('/reorder-recent', async (req, res) => {
+  try {
+    const db = await dbManager.getConnection();
+    const { getReorderWindowMonths } = await import('../services/medicineSalesMetricsService.js');
+    const queryMonths = parseInt((req.query.months as string) || '', 10);
+    const months = [2, 4, 6, 8].includes(queryMonths) ? queryMonths : await getReorderWindowMonths(db);
+    const windowDays = months * 30;
+
+    const rows = await db.all(
+      `SELECT * FROM pharmarack_placed_orders
+       WHERE order_date >= DATE('now', ?)
+       ORDER BY placed_at DESC`,
+      [`-${windowDays} days`]
+    );
+
+    const byMedicine = new Map<string, { medicineName: string; lastOrderedDate: string; lastQty: number; lastDistributorName: string }>();
+    for (const row of rows) {
+      let items: any[] = [];
+      try { items = JSON.parse(row.items_json || '[]'); } catch (_) { continue; }
+      for (const item of items) {
+        const name = (item.productName || item.name || '').trim();
+        if (!name || byMedicine.has(name)) continue;
+        byMedicine.set(name, {
+          medicineName: name,
+          lastOrderedDate: row.order_date,
+          lastQty: Number(item.qty || item.quantity || 1),
+          lastDistributorName: row.store_name || ''
+        });
+      }
+    }
+
+    res.json({ success: true, items: Array.from(byMedicine.values()) });
+  } catch (err: any) {
+    console.error('Error fetching recently reordered medicines:', err);
+    res.status(500).json({ error: 'Failed to fetch recently reordered medicines: ' + err.message });
   }
 });
 

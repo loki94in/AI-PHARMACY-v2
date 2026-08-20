@@ -3219,14 +3219,12 @@ export const Layout = ({
 
     window.addEventListener('focus', handleDataRefresh);
     document.addEventListener('visibilitychange', handleDataRefresh);
-    window.addEventListener('refresh-special-orders', handleDataRefresh);
     window.addEventListener('app-purchases-updated', handleDataRefresh);
 
     return () => {
       unsubRefill();
       window.removeEventListener('focus', handleDataRefresh);
       document.removeEventListener('visibilitychange', handleDataRefresh);
-      window.removeEventListener('refresh-special-orders', handleDataRefresh);
       window.removeEventListener('app-purchases-updated', handleDataRefresh);
     };
   }, [compactCacheLoaded, fetchStagedNotifications, refetchSpecialOrders, refetchRefills]);

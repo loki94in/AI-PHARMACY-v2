@@ -264,6 +264,38 @@ async function auditExpiry(db: Db): Promise<CategoryResult> {
       }));
     }
   }
+
+  if (await tableExists(db, 'inventory_master')) {
+    let badCandidateCount = 0;
+    if (await tableExists(db, 'expiry_return_reviews')) {
+      const ghostReviews = await db.get(`
+        SELECT COUNT(*) as c
+        FROM expiry_return_reviews er
+        JOIN inventory_master im ON er.inventory_id = im.id
+        WHERE er.status = 'pending' AND (im.quantity <= 0 OR COALESCE(im.is_active, 1) = 0)
+      `);
+      badCandidateCount += (ghostReviews?.c || 0);
+    }
+
+    const zeroStockActive = await db.get(`
+      SELECT COUNT(*) as c
+      FROM inventory_master
+      WHERE (quantity <= 0 AND COALESCE(loose_quantity, 0) <= 0) AND is_active = 1
+    `);
+    badCandidateCount += (zeroStockActive?.c || 0);
+
+    if (badCandidateCount > 0) {
+      findings.push(finding({
+        id: 'EXP-NEAR-EXPIRY-STOCK-SCOPE', category: 'Expiry', severity: 'HIGH',
+        summary: `Near-expiry reporting contains stock that is no longer an eligible current inventory return candidate (${badCandidateCount} invalid record(s) found with zero stock or inactive status).`,
+        where: 'src/routes/returns.ts — GET /returns/near-expiry / inventory_master / return_items',
+        codeFixAvailable: false, userActionRequired: true,
+        exactAction: 'Update the Near-Expiry query so that only active inventory with positive remaining quantity and no already-completed expiry return is returned.',
+        evidenceCount: badCandidateCount,
+      }));
+    }
+  }
+
   return { category: 'Expiry', status: findings.length ? 'ISSUE' : 'CLEAN', findings };
 }
 

@@ -6,7 +6,7 @@ import type { SpecialOrder } from '../../services/api';
 import {
   RefreshCw, Send, Users, MessageSquare, Phone, Calendar,
   CheckCircle2, AlertCircle, Clock, Search, Repeat2, Bell,
-  MessageCircle, Check, Package, Mail, ExternalLink, LogOut, Zap, Copy, FileText, X, Plus, Trash2, Sliders, ChevronDown, Info, ClipboardList, ShoppingCart, AlertTriangle, Pencil, Edit2, RotateCcw, Loader2
+  MessageCircle, Check, Package, Mail, ExternalLink, LogOut, Zap, Copy, FileText, X, Plus, Trash2, Sliders, ChevronDown, Info, ClipboardList, ShoppingCart, AlertTriangle, Pencil, Edit2, RotateCcw, Loader2, Globe
 } from 'lucide-react';
 import { toastEvent, specialOrdersEvent, liveCartAddEvent, refillEvent, messageSendEvent, whatsappQueueEvent } from '../../services/events';
 import { usePageActive } from '../../lib/keepAlive/PageActiveContext';
@@ -38,6 +38,7 @@ interface RefillPatient {
   customer_id?: number;
   patient_name: string;
   patient_phone: string;
+  language?: string;
   next_refill_date: string;
   reminder_status?: string;
   reminder_sent_at?: string | null;
@@ -155,6 +156,7 @@ const RefillsSection: React.FC = () => {
   const [editingPatient, setEditingPatient] = useState<RefillPatient | null>(null);
   const [addPatientName, setAddPatientName] = useState('');
   const [addPatientPhone, setAddPatientPhone] = useState('');
+  const [addLanguage, setAddLanguage] = useState<'en' | 'hi' | 'mr'>('en');
   
   // Frequency state: preset vs custom
   const [freqMode, setFreqMode] = useState<'preset' | 'custom'>('preset');
@@ -169,6 +171,7 @@ const RefillsSection: React.FC = () => {
     setEditingPatient(null);
     setAddPatientName('');
     setAddPatientPhone('');
+    setAddLanguage('en');
     setAddInterval(30);
     setFreqMode('preset');
     setMedicineRows([emptyRow()]);
@@ -179,6 +182,7 @@ const RefillsSection: React.FC = () => {
     setEditingPatient(patient);
     setAddPatientName(patient.patient_name || '');
     setAddPatientPhone(patient.patient_phone || '');
+    setAddLanguage((patient.language as any) || 'en');
     const interval = patient.medicines[0]?.refill_interval_days || 30;
     setFreqMode('preset');
     setAddInterval(interval);
@@ -265,11 +269,42 @@ const RefillsSection: React.FC = () => {
     }
   };
 
+  const handleDeletePatientRefill = async (patient: RefillPatient) => {
+    if (!window.confirm(`Are you sure you want to permanently delete the refill schedule for "${patient.patient_name}"?`)) return;
+    try {
+      const ids = (patient.medicines || []).map(m => m.id).filter(Boolean);
+      const res = await apiClient.post('/refills/delete-patient', {
+        ids,
+        patient_phone: patient.patient_phone,
+        customer_id: patient.customer_id,
+        patient_name: patient.patient_name
+      });
+      toastEvent.trigger(res.data?.message || `Refill schedule deleted for ${patient.patient_name}`, 'success', '/crm');
+      refillEvent.triggerRefresh();
+      await load(true);
+    } catch (err: any) {
+      toastEvent.trigger(err.response?.data?.error || 'Failed to delete refill schedule', 'error', '/crm');
+    }
+  };
+
+  const handleDeleteRefillItem = async (refillId: number, medicineName: string) => {
+    if (!window.confirm(`Are you sure you want to permanently delete "${medicineName}" from this refill schedule?`)) return;
+    try {
+      const res = await apiClient.delete(`/refills/${refillId}`);
+      toastEvent.trigger(res.data?.message || `Deleted "${medicineName}" from refill schedule`, 'success', '/crm');
+      refillEvent.triggerRefresh();
+      await load(true);
+    } catch (err: any) {
+      toastEvent.trigger(err.response?.data?.error || 'Failed to delete refill item', 'error', '/crm');
+    }
+  };
+
   const handleRenewRefill = (patient: RefillPatient) => {
     setEditingPatient(null);
     setShowAddModal(true);
     setAddPatientName(patient.patient_name);
     setAddPatientPhone(patient.patient_phone);
+    setAddLanguage((patient.language as any) || 'en');
     const interval = patient.medicines[0]?.refill_interval_days || 30;
     setFreqMode('preset');
     setAddInterval(interval);
@@ -536,9 +571,11 @@ const RefillsSection: React.FC = () => {
       if (editingPatient) {
         // Update existing patient refills
         await apiClient.put('/refills/patient-medicines', {
+          customer_id: editingPatient.customer_id,
           original_phone: editingPatient.patient_phone,
           patient_name: addPatientName.trim(),
           patient_phone: addPatientPhone.trim(),
+          language: addLanguage,
           refill_interval_days: intervalDays,
           medicines: validRows.map(row => ({
             medicine_id: row.medicineId,
@@ -554,6 +591,7 @@ const RefillsSection: React.FC = () => {
               patient_name: addPatientName.trim(),
               patient_phone: addPatientPhone.trim(),
               medicine_id: row.medicineId,
+              language: addLanguage,
               refill_interval_days: intervalDays,
               quantity_needed: row.quantity_needed || 3
             })
@@ -569,7 +607,7 @@ const RefillsSection: React.FC = () => {
       setFreqMode('preset');
       setMedicineRows([emptyRow()]);
       refillEvent.triggerRefresh();
-      await load();
+      await load(true);
     } catch (err: any) {
       toastEvent.trigger(err.response?.data?.error || (editingPatient ? 'Failed to update refill' : 'Failed to add refill'), 'error', '/crm');
     } finally { setSubmitting(false); }
@@ -717,7 +755,12 @@ const RefillsSection: React.FC = () => {
                     {patient.patient_name?.[0]?.toUpperCase() || '?'}
                   </div>
                   <div>
-                    <p className="text-sm font-semibold text-text">{patient.patient_name}</p>
+                    <div className="flex items-center gap-1.5">
+                      <p className="text-sm font-semibold text-text">{patient.patient_name}</p>
+                      <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-bg3 text-text border border-border">
+                        {patient.language === 'hi' ? '🇮🇳 HI' : patient.language === 'mr' ? '🇮🇳 MR' : '🇬🇧 EN'}
+                      </span>
+                    </div>
                     <p className="text-xs text-muted flex items-center gap-1">
                       <Phone size={10} /> {patient.patient_phone}
                     </p>
@@ -747,6 +790,16 @@ const RefillsSection: React.FC = () => {
                   >
                     <Repeat2 size={12} />
                     <span>Renew Schedule</span>
+                  </button>
+                  {/* Delete Patient Refill */}
+                  <button
+                    type="button"
+                    onClick={() => handleDeletePatientRefill(patient)}
+                    title={`Delete all refill records for ${patient.patient_name}`}
+                    className="flex items-center gap-1 px-3 py-1.5 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                  >
+                    <Trash2 size={12} />
+                    <span>Delete</span>
                   </button>
                   {/* Reminder Status Tracking / Action Button */}
                   {patient.reminder_status === 'SENT' ? (
@@ -883,13 +936,27 @@ const RefillsSection: React.FC = () => {
                               e.stopPropagation();
                               handleCancelRefill(med.id);
                             }}
-                            className="flex items-center gap-1 px-2 py-1 rounded-lg bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 text-[10px] font-bold transition-all cursor-pointer"
+                            className="flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-400 text-[10px] font-bold transition-all cursor-pointer"
                             title="Cancel and archive this refill schedule"
                           >
                             <X size={10} />
                             <span>Cancel</span>
                           </button>
                         )}
+
+                        {/* Delete Single Refill Item Button */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteRefillItem(med.id, med.medicine_name);
+                          }}
+                          className="flex items-center gap-1 px-2 py-1 rounded-lg bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 text-[10px] font-bold transition-all cursor-pointer"
+                          title={`Permanently delete "${med.medicine_name}" from refill schedule`}
+                        >
+                          <Trash2 size={10} />
+                          <span>Delete</span>
+                        </button>
 
                         <span className="text-[11px] font-medium text-muted">
                           Req: <strong className="text-text">{reqQty}</strong>
@@ -992,6 +1059,52 @@ const RefillsSection: React.FC = () => {
                       allowEmpty={false}
                     />
                   </div>
+                </div>
+              </div>
+
+              {/* WhatsApp Language Preference */}
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-bold text-muted uppercase tracking-wider flex items-center gap-1">
+                  <Globe size={11} className="text-primary" />
+                  WhatsApp Language
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setAddLanguage('en')}
+                    className={`py-2 px-3 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                      addLanguage === 'en'
+                        ? 'bg-primary/15 border-primary text-primary shadow-sm'
+                        : 'bg-bg border-border text-muted hover:text-text hover:bg-bg3'
+                    }`}
+                  >
+                    <span>🇬🇧</span>
+                    <span>English</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAddLanguage('hi')}
+                    className={`py-2 px-3 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                      addLanguage === 'hi'
+                        ? 'bg-primary/15 border-primary text-primary shadow-sm'
+                        : 'bg-bg border-border text-muted hover:text-text hover:bg-bg3'
+                    }`}
+                  >
+                    <span>🇮🇳</span>
+                    <span>हिंदी (Hindi)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAddLanguage('mr')}
+                    className={`py-2 px-3 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                      addLanguage === 'mr'
+                        ? 'bg-primary/15 border-primary text-primary shadow-sm'
+                        : 'bg-bg border-border text-muted hover:text-text hover:bg-bg3'
+                    }`}
+                  >
+                    <span>🇮🇳</span>
+                    <span>मराठी (Marathi)</span>
+                  </button>
                 </div>
               </div>
 
@@ -2991,6 +3104,18 @@ const SpecialOrdersSection: React.FC = () => {
       if (res && res.success) {
         toastEvent.trigger(`Added "${order.product}" to Pharmarack cart!`, 'success', '/crm');
         await api.updateOrder(order.id, { status: 'Ordered' });
+
+        // Send booking confirmation WhatsApp message to the customer
+        if (order.phone) {
+          try {
+            await api.resendSpecialOrderBooking(order.id);
+            toastEvent.trigger(`Booking WhatsApp sent to ${order.requester || 'Customer'}!`, 'success', '/crm');
+            whatsappQueueEvent.triggerUpdated();
+          } catch (waErr: any) {
+            console.warn('Failed to send booking WhatsApp on add to cart:', waErr);
+          }
+        }
+
         await loadOrders();
         window.dispatchEvent(new CustomEvent('refresh-pharmarack-cart'));
       } else {

@@ -986,4 +986,9 @@ export const api = {
 
   // Price & Purchase History APIs
   getBatchLastPurchase: (medicines: { name: string }[], distributor_id?: number) => apiClient.post<any[]>('/purchases/batch-last-purchase', { medicines, distributor_id }).then(res => res.data),
+
+  // Pharmarack Reorder Recent API
+  getPharmarackReorderRecent: (months?: number) =>
+    apiClient.get<{ success: boolean; items: { medicineName: string; lastOrderedDate: string; lastQty: number; lastDistributorName: string }[] }>('/pharmarack/reorder-recent', { params: months ? { months } : {} }).then(res => res.data),
 };
+

@@ -111,19 +111,22 @@ export async function checkAllRefills(db: Database): Promise<void> {
 
           outOfStockRefills.push(refill);
 
-          // Silent API post to add to Pharmarack cart
+          // Silent API post to add to Pharmarack cart if session is active
           try {
-            const port = process.env.PORT || 3000;
-            fetch(`http://localhost:${port}/api/pharmarack/cart/add`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                items: [{
-                  name: refill.medicine_name,
-                  qty: Number(refill.quantity_needed || refill.quantity || 3)
-                }]
-              })
-            }).catch(e => console.error('Failed to auto-add to Pharmarack cart:', e));
+            const tokenRow = await db.get("SELECT value FROM app_settings WHERE key = 'pharmarack_session_token'");
+            if (tokenRow?.value) {
+              const port = process.env.PORT || 3000;
+              fetch(`http://localhost:${port}/api/pharmarack/cart/add`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  items: [{
+                    name: refill.medicine_name,
+                    qty: Number(refill.quantity_needed || refill.quantity || 3)
+                  }]
+                })
+              }).catch(e => console.error('Failed to auto-add to Pharmarack cart:', e));
+            }
           } catch (e) {
             console.error('Fetch post error:', e);
           }

@@ -16,6 +16,7 @@ const DB_PATH = process.env.DB_PATH || path.resolve(__dirname, '..', '..', 'data
 const UPLOADS_DIR = path.resolve(getAppDataDir(), 'uploads');
 
 import { triggerSchedulerService } from '../services/triggerSchedulerService.js';
+import { reconcileAllMedicineSalesMetrics } from '../services/medicineSalesMetricsService.js';
 
 const router = express.Router();
 
@@ -59,6 +60,13 @@ router.post('/', async (req, res) => {
     const saveValue = key === 'pharmarack_mode' ? 'Live' : (value ?? '');
     await db.run('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)', [key, saveValue]);
 
+    if (key === 'pharmarack_reorder_window_months') {
+      const windowMonths = [2, 4, 6, 8].includes(parseInt(saveValue, 10)) ? parseInt(saveValue, 10) : 2;
+      reconcileAllMedicineSalesMetrics(db, windowMonths).catch((err) => {
+        console.error('[Settings] Reorder window reconcile failed:', err);
+      });
+    }
+
     // Synchronize store name alias keys
     const nameKeys = ['shop_name', 'pharmacy_name', 'store_name', 'medical_name'];
     if (nameKeys.includes(key) && saveValue) {
@@ -90,6 +98,13 @@ router.post('/save-single', async (req, res) => {
     const db = await dbManager.getConnection();
     const saveValue = key === 'pharmarack_mode' ? 'Live' : (value ?? '');
     await db.run('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)', [key, saveValue]);
+
+    if (key === 'pharmarack_reorder_window_months') {
+      const windowMonths = [2, 4, 6, 8].includes(parseInt(saveValue, 10)) ? parseInt(saveValue, 10) : 2;
+      reconcileAllMedicineSalesMetrics(db, windowMonths).catch((err) => {
+        console.error('[Settings] Reorder window reconcile failed (save-single):', err);
+      });
+    }
 
     const nameKeys = ['shop_name', 'pharmacy_name', 'store_name', 'medical_name'];
     if (nameKeys.includes(key) && saveValue) {
@@ -319,6 +334,18 @@ router.post('/save', async (req, res) => {
           const db = await dbManager.getConnection();
           const { emailService } = await import('../services/emailService.js');
           emailService.pruneOldEmails(db).catch(err => console.error('Pruning after settings update failed:', err));
+        } catch (err) { }
+      }
+
+      if (payload['pharmarack_reorder_window_months'] !== undefined) {
+        try {
+          const db = await dbManager.getConnection();
+          const windowMonths = [2, 4, 6, 8].includes(parseInt(payload['pharmarack_reorder_window_months'], 10))
+            ? parseInt(payload['pharmarack_reorder_window_months'], 10)
+            : 2;
+          reconcileAllMedicineSalesMetrics(db, windowMonths).catch((err) => {
+            console.error('[Settings] Reorder window reconcile failed (save batch):', err);
+          });
         } catch (err) { }
       }
 

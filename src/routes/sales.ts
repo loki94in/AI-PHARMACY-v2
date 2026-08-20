@@ -14,6 +14,7 @@ import fs from 'fs';
 import PDFDocument from 'pdfkit';
 import { generateInvoiceBarcodeData } from '../services/barcodeService.js';
 import { getAppDataDir } from '../config/index.js';
+import { applySaleDelta, getReorderWindowMonths, computeReorderSuggestion } from '../services/medicineSalesMetricsService.js';
 
 const router = express.Router();
 
@@ -441,6 +442,7 @@ router.post('/', async (req, res) => {
         quantity: -soldQty, loose_quantity: -soldLoose,
         transaction_type: 'sale', transaction_id: invoiceId
       });
+      await applySaleDelta(db, currentStock.medicine_id, soldQty);
 
       // Handle refill logic if enabled
       if (refillEnabled && inventory_id) {
@@ -2605,131 +2607,78 @@ router.get('/reorder-suggestions', async (_req, res) => {
     `);
     const snoozedSet = new Set<number>(snoozedRows.map((r: any) => Number(r.medicine_id)));
 
-    // Query 2-Day sales per medicine
-    const twoDaySalesMap: Record<number, any> = {};
-    try {
-      const twoDaySales = await db.all(`
-        SELECT 
-          m.id as medicine_id,
-          m.name as medicine_name,
-          m.manufacturer as company,
-          m.packaging,
-          m.mrp,
-          SUM(si.quantity) as two_day_qty
-        FROM sale_items si
-        JOIN sales_invoices inv ON si.invoice_id = inv.id
-        JOIN inventory_master im ON si.inventory_id = im.id
-        JOIN medicines m ON im.medicine_id = m.id
-        WHERE inv.date >= DATETIME('now', '-2 days')
-        GROUP BY m.id
-      `);
-      for (const row of twoDaySales) {
-        twoDaySalesMap[row.medicine_id] = row;
-      }
-    } catch (_) {}
+    const windowMonths = await getReorderWindowMonths(db);
 
-    // Query 6-Month (180 days) sales per medicine
-    const sixMonthSalesMap: Record<number, number> = {};
-    try {
-      const sixMonthRows = await db.all(`
-        SELECT 
-          im.medicine_id,
-          SUM(si.quantity) as total_qty
-        FROM sale_items si
-        JOIN sales_invoices inv ON si.invoice_id = inv.id
-        JOIN inventory_master im ON si.inventory_id = im.id
-        WHERE inv.date >= DATETIME('now', '-180 days')
-        GROUP BY im.medicine_id
-      `);
-      for (const row of sixMonthRows) {
-        sixMonthSalesMap[row.medicine_id] = Number(row.total_qty || 0);
-      }
-    } catch (_) {}
-
-    // Query 6-Month purchases per medicine
-    const sixMonthPurchasesMap: Record<number, number> = {};
-    try {
-      const purchaseRows = await db.all(`
-        SELECT 
-          pi.medicine_id,
-          SUM(pi.quantity) as total_qty
-        FROM purchase_items pi
-        JOIN purchases p ON pi.purchase_id = p.id
-        WHERE p.date >= DATETIME('now', '-180 days')
-        GROUP BY pi.medicine_id
-      `);
-      for (const row of purchaseRows) {
-        sixMonthPurchasesMap[row.medicine_id] = Number(row.total_qty || 0);
-      }
-    } catch (_) {}
-
-    // Query Current Stock & Medicine details for candidates
-    const candidateMeds = await db.all(`
-      SELECT 
-        m.id as medicine_id,
-        m.name as medicine_name,
-        m.manufacturer as company,
-        m.packaging,
-        COALESCE(MAX(im.cost_price), 0) as ptr,
-        m.mrp,
-        COALESCE(SUM(im.quantity), 0) as current_stock
-      FROM medicines m
-      LEFT JOIN inventory_master im ON im.medicine_id = m.id
-      GROUP BY m.id
+    const candidates = await db.all(`
+      SELECT m.id as medicine_id, m.name as medicine_name, m.manufacturer as company,
+             m.packaging, m.mrp, msm.sales_2d_qty, msm.sales_window_qty, msm.purchases_window_qty
+      FROM medicine_sales_metrics msm
+      JOIN medicines m ON m.id = msm.medicine_id
+      WHERE msm.sales_2d_qty > 0 OR msm.sales_window_qty > 0 OR msm.purchases_window_qty > 0
+      ORDER BY msm.sales_window_qty DESC
+      LIMIT 500
     `);
 
-    const items: any[] = [];
-
-    for (const row of candidateMeds) {
-      const medId = Number(row.medicine_id);
-      if (snoozedSet.has(medId)) continue; // Skip snoozed items
-
-      const sold2Days = Number(twoDaySalesMap[medId]?.two_day_qty || 0);
-      const sold6Months = Number(sixMonthSalesMap[medId] || 0);
-      const purchased6Months = Number(sixMonthPurchasesMap[medId] || 0);
-      const stock = Math.max(0, Number(row.current_stock || 0));
-
-      // Purchase-weighted True Monthly Consumption (70% Purchase + 30% Sales)
-      const monthlyWeightedConsumption = Math.round((0.70 * purchased6Months + 0.30 * sold6Months) / 6);
-      const dailyAvgSales = Math.round((sold6Months / 180) * 100) / 100;
-      const dailyAvgPurchases = Math.round((purchased6Months / 180) * 100) / 100;
-
-      const isHotMover = monthlyWeightedConsumption >= 10 || sold2Days >= 5;
-      const isLowStockSafety = stock <= 2 && (purchased6Months >= 6 || sold6Months >= 6);
-
-      // Include if: 2-day sales > 0 OR Low stock safety OR Hot mover below stock threshold
-      if (sold2Days > 0 || isLowStockSafety || (monthlyWeightedConsumption > 0 && stock <= monthlyWeightedConsumption)) {
-        let suggestedQty = 1;
-        if (monthlyWeightedConsumption > 0) {
-          suggestedQty = Math.max(1, Math.ceil(monthlyWeightedConsumption - stock));
-        } else if (sold2Days > 0) {
-          suggestedQty = Math.max(1, sold2Days * 2);
-        } else if (isLowStockSafety) {
-          suggestedQty = Math.max(1, 10 - stock); // Standard strip/box top-up
-        }
-
-        items.push({
-          medicineId: medId,
-          medicineName: row.medicine_name,
-          company: row.company || '',
-          packaging: row.packaging || '',
-          ptr: Number(row.ptr || 0),
-          mrp: Number(row.mrp || 0),
-          twoDaySales: sold2Days,
-          sixMonthTotalSales: sold6Months,
-          sixMonthAvgDailySales: dailyAvgSales,
-          sixMonthTotalPurchases: purchased6Months,
-          sixMonthAvgDailyPurchases: dailyAvgPurchases,
-          monthlyWeightedConsumption,
-          currentStock: stock,
-          suggestedQty,
-          isHotMover,
-          isLowStockSafety
-        });
-      }
+    const candidateIds = candidates.map((c: any) => c.medicine_id);
+    const stockByMed: Record<number, number> = {};
+    if (candidateIds.length > 0) {
+      const placeholders = candidateIds.map(() => '?').join(',');
+      const stockRows = await db.all(
+        `SELECT medicine_id, COALESCE(SUM(quantity), 0) as current_stock
+         FROM inventory_master
+         WHERE medicine_id IN (${placeholders})
+         GROUP BY medicine_id`,
+        candidateIds
+      );
+      for (const row of stockRows) stockByMed[row.medicine_id] = Number(row.current_stock || 0);
     }
 
-    // Sort: Low Stock Safety & Hot Movers first, then higher suggestedQty
+    const ptrRows = candidateIds.length > 0
+      ? await db.all(
+          `SELECT medicine_id, COALESCE(MAX(cost_price), 0) as ptr
+           FROM inventory_master WHERE medicine_id IN (${candidateIds.map(() => '?').join(',')})
+           GROUP BY medicine_id`,
+          candidateIds
+        )
+      : [];
+    const ptrByMed: Record<number, number> = Object.fromEntries(ptrRows.map((r: any) => [r.medicine_id, Number(r.ptr || 0)]));
+
+    const items: any[] = [];
+    for (const row of candidates) {
+      const medId = Number(row.medicine_id);
+      if (snoozedSet.has(medId)) continue;
+
+      const currentStock = Math.max(0, stockByMed[medId] || 0);
+      const result = computeReorderSuggestion(
+        {
+          sales2dQty: Number(row.sales_2d_qty || 0),
+          salesWindowQty: Number(row.sales_window_qty || 0),
+          purchasesWindowQty: Number(row.purchases_window_qty || 0),
+          currentStock
+        },
+        windowMonths
+      );
+
+      if (!result.included) continue;
+
+      items.push({
+        medicineId: medId,
+        medicineName: row.medicine_name,
+        company: row.company || '',
+        packaging: row.packaging || '',
+        ptr: ptrByMed[medId] || 0,
+        mrp: Number(row.mrp || 0),
+        twoDaySales: Number(row.sales_2d_qty || 0),
+        sixMonthTotalSales: Number(row.sales_window_qty || 0),
+        sixMonthTotalPurchases: Number(row.purchases_window_qty || 0),
+        monthlyWeightedConsumption: result.monthlyWeightedConsumption,
+        currentStock,
+        suggestedQty: result.suggestedQty,
+        isHotMover: result.isHotMover,
+        isLowStockSafety: result.isLowStockSafety
+      });
+    }
+
     items.sort((a, b) => {
       if (a.isLowStockSafety !== b.isLowStockSafety) return a.isLowStockSafety ? -1 : 1;
       if (a.isHotMover !== b.isHotMover) return a.isHotMover ? -1 : 1;

@@ -70,7 +70,7 @@ export function computeReorderSuggestion(
   const included = sales2dQty > 0 || isLowStockSafety || (monthlyWeightedConsumption > 0 && currentStock <= monthlyWeightedConsumption);
 
   let suggestedQty = 1;
-  if (monthlyWeightedConsumption > 0) {
+  if (monthlyWeightedConsumption > currentStock) {
     suggestedQty = Math.max(1, Math.ceil(monthlyWeightedConsumption - currentStock));
   } else if (sales2dQty > 0) {
     suggestedQty = Math.max(1, sales2dQty * 2);
@@ -171,35 +171,30 @@ export async function reconcileAllMedicineSalesMetrics(db: any, windowMonths: nu
   }
 }
 
-// Register the nightly reconcile at module load — imageArchiveService's initJobs()
-// pattern was found to never actually be called anywhere in this codebase, so this
-// registers directly instead of depending on an external init call that might not happen.
-const isTest = process.env.NODE_ENV === 'test' || !!process.env.JEST_WORKER_ID;
-if (!isTest) {
-  cron.schedule('0 3 * * *', async () => {
-    try {
-      const db = await dbManager.getConnection();
+// Register the nightly reconcile at module load
+cron.schedule('0 3 * * *', async () => {
+  try {
+    const db = await dbManager.getConnection();
+    const windowMonths = await getReorderWindowMonths(db);
+    await reconcileAllMedicineSalesMetrics(db, windowMonths);
+    console.log('[MedicineSalesMetrics] Nightly reconcile complete.');
+  } catch (err) {
+    console.error('[MedicineSalesMetrics] Nightly reconcile failed:', err);
+  }
+});
+
+// Startup backfill: populate immediately on first run instead of waiting for 3am.
+(async () => {
+  try {
+    const db = await dbManager.getConnection();
+    await ensureMedicineSalesMetricsSchema(db);
+    const row = await db.get('SELECT COUNT(*) as c FROM medicine_sales_metrics');
+    if (!row || Number(row.c) === 0) {
       const windowMonths = await getReorderWindowMonths(db);
       await reconcileAllMedicineSalesMetrics(db, windowMonths);
-      console.log('[MedicineSalesMetrics] Nightly reconcile complete.');
-    } catch (err) {
-      console.error('[MedicineSalesMetrics] Nightly reconcile failed:', err);
+      console.log('[MedicineSalesMetrics] Initial backfill complete.');
     }
-  });
-
-  // Startup backfill: populate immediately on first run instead of waiting for 3am.
-  (async () => {
-    try {
-      const db = await dbManager.getConnection();
-      await ensureMedicineSalesMetricsSchema(db);
-      const row = await db.get('SELECT COUNT(*) as c FROM medicine_sales_metrics');
-      if (!row || Number(row.c) === 0) {
-        const windowMonths = await getReorderWindowMonths(db);
-        await reconcileAllMedicineSalesMetrics(db, windowMonths);
-        console.log('[MedicineSalesMetrics] Initial backfill complete.');
-      }
-    } catch (err) {
-      console.error('[MedicineSalesMetrics] Initial backfill failed:', err);
-    }
-  })();
-}
+  } catch (err) {
+    console.error('[MedicineSalesMetrics] Initial backfill failed:', err);
+  }
+})();

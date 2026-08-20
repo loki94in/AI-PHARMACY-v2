@@ -14,6 +14,75 @@ const DB_PATH = process.env.DB_PATH || path.resolve(__dirname, '..', '..', 'data
 
 const router = express.Router();
 
+let refillsTableInitialized = false;
+
+export async function initRefillsTable(db: any) {
+  if (refillsTableInitialized) return;
+  try {
+    await db.exec(`
+      CREATE TABLE IF NOT EXISTS patient_refills (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        customer_id INTEGER,
+        patient_name TEXT NOT NULL,
+        patient_phone TEXT NOT NULL,
+        medicine_id INTEGER NOT NULL,
+        refill_interval_days INTEGER DEFAULT 30,
+        last_refill_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+        next_refill_date DATETIME,
+        status TEXT DEFAULT 'pending',
+        hold_for_stock INTEGER DEFAULT 0,
+        is_active INTEGER DEFAULT 1,
+        is_ready INTEGER DEFAULT 0,
+        acknowledged INTEGER DEFAULT 0,
+        ordering_triggered INTEGER DEFAULT 0,
+        quick_bill_id INTEGER DEFAULT NULL,
+        stock_verified_override INTEGER DEFAULT 0,
+        quantity_needed INTEGER DEFAULT 3,
+        reminder_status TEXT DEFAULT 'NOT_SENT',
+        reminder_sent_at DATETIME DEFAULT NULL,
+        reminder_job_id INTEGER DEFAULT NULL,
+        reminder_occurrence_date DATETIME DEFAULT NULL,
+        FOREIGN KEY(medicine_id) REFERENCES medicines(id),
+        FOREIGN KEY(customer_id) REFERENCES customers(id)
+      )
+    `);
+
+    const cols: Array<[string, string]> = [
+      ['hold_for_stock', 'INTEGER DEFAULT 0'],
+      ['is_active', 'INTEGER DEFAULT 1'],
+      ['is_ready', 'INTEGER DEFAULT 0'],
+      ['acknowledged', 'INTEGER DEFAULT 0'],
+      ['ordering_triggered', 'INTEGER DEFAULT 0'],
+      ['quick_bill_id', 'INTEGER DEFAULT NULL'],
+      ['stock_verified_override', 'INTEGER DEFAULT 0'],
+      ['customer_id', 'INTEGER DEFAULT NULL'],
+      ['quantity_needed', 'INTEGER DEFAULT 3'],
+      ['language', "TEXT DEFAULT 'en'"],
+      ['reminder_status', "TEXT DEFAULT 'NOT_SENT'"],
+      ['reminder_sent_at', 'DATETIME DEFAULT NULL'],
+      ['reminder_job_id', 'INTEGER DEFAULT NULL'],
+      ['reminder_occurrence_date', 'DATETIME DEFAULT NULL']
+    ];
+
+    const tableInfo = await db.all('PRAGMA table_info(patient_refills)');
+    const existing = new Set(tableInfo.map((c: any) => c.name.toLowerCase()));
+    for (const [colName, colDef] of cols) {
+      if (!existing.has(colName.toLowerCase())) {
+        await db.run(`ALTER TABLE patient_refills ADD COLUMN ${colName} ${colDef}`).catch(() => {});
+      }
+    }
+    refillsTableInitialized = true;
+  } catch (_e) {}
+}
+
+router.use(async (_req, _res, next) => {
+  try {
+    const db = await dbManager.getConnection();
+    await initRefillsTable(db);
+  } catch (_) {}
+  next();
+});
+
 // Helper to parse dynamic or text-based interval descriptions into numbers
 function parseIntervalDays(val: any): number {
   if (typeof val === 'string') {
@@ -28,9 +97,41 @@ function parseIntervalDays(val: any): number {
   return 30;
 }
 
+// Multilingual refill reminder message builder
+export function buildRefillReminderMessage(
+  patientName: string,
+  items: Array<{ medicine_name?: string; quantity_needed?: number }>,
+  pharmacyName: string,
+  lang: string = 'en',
+  dueDateStr?: string
+): string {
+  const pName = (patientName || 'Customer').trim();
+  const cleanLang = (lang || 'en').toLowerCase();
+
+  if (cleanLang === 'hi') {
+    const medList = items
+      .map(m => `• ${m.medicine_name || 'दवाई'} (मात्रा: ${m.quantity_needed || 1})`)
+      .join('\n');
+    const dueSuffix = dueDateStr ? `\n\nतारीख: ${dueDateStr}` : '';
+    return `🔔 *दवाई रिफिल रिमाइंडर — ${pharmacyName}*\n\nनमस्ते ${pName},\nआपकी नियमित दवाई का रिफिल समय आ गया है:\n\n${medList}${dueSuffix}\n\n*कृपया डिलीवरी या पिकअप की पुष्टि के लिए उत्तर दें।*`;
+  } else if (cleanLang === 'mr') {
+    const medList = items
+      .map(m => `• ${m.medicine_name || 'औषध'} (प्रमाण: ${m.quantity_needed || 1})`)
+      .join('\n');
+    const dueSuffix = dueDateStr ? `\n\nदिनांक: ${dueDateStr}` : '';
+    return `🔔 *औषध रिफिल स्मरणपत्र — ${pharmacyName}*\n\nनमस्कार ${pName},\nआपल्या नियमित औषधांची रिफिल करण्याची वेळ झाली आहे:\n\n${medList}${dueSuffix}\n\n*कृपया डिलिव्हरी किंवा पिकअप निश्चित करण्यासाठी उत्तर द्या.*`;
+  } else {
+    const medList = items
+      .map(m => `• ${m.medicine_name || 'Medicine'} (Qty: ${m.quantity_needed || 1})`)
+      .join('\n');
+    const dueSuffix = dueDateStr ? `\n\nDue Date: ${dueDateStr}` : '';
+    return `🔔 *MEDICINE REFILL REMINDER — ${pharmacyName}*\n\nDear ${pName},\nYour regular prescription is due for refill:\n\n${medList}${dueSuffix}\n\n*Please reply to confirm delivery or pickup.*`;
+  }
+}
+
 // Register a manual patient refill request
 router.post('/', async (req, res) => {
-  const { patient_name, patient_phone, medicine_id, refill_interval_days = 30 } = req.body;
+  const { patient_name, patient_phone, medicine_id, refill_interval_days = 30, language = 'en' } = req.body;
   if (!patient_name || !patient_phone || !medicine_id) {
     return res.status(400).json({ error: 'patient_name, patient_phone, and medicine_id are required' });
   }
@@ -48,6 +149,7 @@ router.post('/', async (req, res) => {
     // Resolve or auto-create customer profile in customers table
     const cleanPhone = (patient_phone || '').trim();
     const cleanName = (patient_name || 'Customer').trim();
+    const cleanLang = (language || 'en').trim();
     let customerId = req.body.customer_id || null;
     if (!customerId && (cleanPhone || cleanName)) {
       let cust = await db.get('SELECT id FROM customers WHERE phone = ? LIMIT 1', [cleanPhone]);
@@ -56,18 +158,21 @@ router.post('/', async (req, res) => {
       }
       if (cust) {
         customerId = cust.id;
+        await db.run('UPDATE customers SET language = ? WHERE id = ?', [cleanLang, customerId]);
       } else if (cleanPhone || cleanName) {
-        const custRes = await db.run('INSERT INTO customers (name, phone) VALUES (?, ?)', [cleanName, cleanPhone]);
+        const custRes = await db.run('INSERT INTO customers (name, phone, language) VALUES (?, ?, ?)', [cleanName, cleanPhone, cleanLang]);
         customerId = custRes.lastID;
       }
+    } else if (customerId) {
+      await db.run('UPDATE customers SET language = ? WHERE id = ?', [cleanLang, customerId]);
     }
 
     const quantityNeeded = parseInt(req.body.quantity_needed || req.body.quantity, 10) || 3;
 
     await db.run(
-      `INSERT INTO patient_refills (customer_id, patient_name, patient_phone, medicine_id, refill_interval_days, next_refill_date, status, quantity_needed)
-       VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)`,
-      [customerId, patient_name, patient_phone, medicine_id, intervalDays, nextRefillStr, quantityNeeded]
+      `INSERT INTO patient_refills (customer_id, patient_name, patient_phone, medicine_id, refill_interval_days, next_refill_date, status, quantity_needed, language)
+       VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
+      [customerId, patient_name, patient_phone, medicine_id, intervalDays, nextRefillStr, quantityNeeded, cleanLang]
     );
 
     // Run a check immediately in case the medicine is already in stock!
@@ -82,7 +187,7 @@ router.post('/', async (req, res) => {
 
 // Update an existing patient's refill prescription & medicines
 router.put('/patient-medicines', async (req, res) => {
-  const { original_phone, patient_name, patient_phone, refill_interval_days = 30, medicines } = req.body;
+  const { original_phone, patient_name, patient_phone, refill_interval_days = 30, medicines, language = 'en', next_refill_date } = req.body;
   if (!patient_name || !patient_phone || !Array.isArray(medicines) || medicines.length === 0) {
     return res.status(400).json({ error: 'patient_name, patient_phone, and valid medicines array are required' });
   }
@@ -95,39 +200,54 @@ router.put('/patient-medicines', async (req, res) => {
     const cleanPhone = (patient_phone || '').trim();
     const origPhone = (original_phone || cleanPhone).trim();
     const cleanName = (patient_name || 'Customer').trim();
+    const cleanLang = (language || 'en').trim();
 
-    // Resolve or auto-create customer profile in customers table
+    // Resolve or auto-create/update customer profile in customers table
     let customerId = req.body.customer_id || null;
-    if (!customerId && (cleanPhone || cleanName)) {
+    if (!customerId && (cleanPhone || cleanName || origPhone)) {
       let cust = await db.get('SELECT id FROM customers WHERE phone = ? LIMIT 1', [cleanPhone]);
+      if (!cust && origPhone && origPhone !== cleanPhone) {
+        cust = await db.get('SELECT id FROM customers WHERE phone = ? LIMIT 1', [origPhone]);
+      }
       if (!cust && cleanName && cleanName.toLowerCase() !== 'customer') {
         cust = await db.get('SELECT id FROM customers WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) LIMIT 1', [cleanName]);
       }
       if (cust) {
         customerId = cust.id;
+        await db.run('UPDATE customers SET name = ?, phone = ?, language = ? WHERE id = ?', [cleanName, cleanPhone, cleanLang, customerId]);
       } else if (cleanPhone || cleanName) {
-        const custRes = await db.run('INSERT INTO customers (name, phone) VALUES (?, ?)', [cleanName, cleanPhone]);
+        const custRes = await db.run('INSERT INTO customers (name, phone, language) VALUES (?, ?, ?)', [cleanName, cleanPhone, cleanLang]);
         customerId = custRes.lastID;
       }
+    } else if (customerId) {
+      await db.run('UPDATE customers SET name = ?, phone = ?, language = ? WHERE id = ?', [cleanName, cleanPhone, cleanLang, customerId]);
     }
 
     // Check if there was an existing next_refill_date for this patient
     const existingRefill = await db.get(
-      'SELECT next_refill_date, last_refill_date FROM patient_refills WHERE patient_phone = ? OR patient_phone = ? ORDER BY next_refill_date ASC LIMIT 1',
-      [origPhone, cleanPhone]
+      'SELECT next_refill_date, last_refill_date, refill_interval_days FROM patient_refills WHERE patient_phone = ? OR patient_phone = ? OR (customer_id IS NOT NULL AND customer_id = ?) ORDER BY next_refill_date ASC LIMIT 1',
+      [origPhone, cleanPhone, customerId]
     );
 
     let nextRefillStr: string;
-    if (existingRefill && existingRefill.next_refill_date && new Date(existingRefill.next_refill_date) > new Date()) {
+    if (next_refill_date) {
+      nextRefillStr = next_refill_date;
+    } else if (existingRefill && existingRefill.refill_interval_days === intervalDays && existingRefill.next_refill_date && new Date(existingRefill.next_refill_date) > new Date()) {
+      // Keep existing next_refill_date ONLY if the interval days did NOT change and it's in the future
       nextRefillStr = existingRefill.next_refill_date;
     } else {
+      // Recalculate next refill date based on the new interval
       const nextRefillDate = new Date();
       nextRefillDate.setDate(nextRefillDate.getDate() + intervalDays);
       nextRefillStr = nextRefillDate.toISOString().slice(0, 19).replace('T', ' ');
     }
 
     // Delete previous refill records for this patient
-    await db.run('DELETE FROM patient_refills WHERE patient_phone = ? OR patient_phone = ?', [origPhone, cleanPhone]);
+    if (customerId) {
+      await db.run('DELETE FROM patient_refills WHERE patient_phone = ? OR patient_phone = ? OR customer_id = ?', [origPhone, cleanPhone, customerId]);
+    } else {
+      await db.run('DELETE FROM patient_refills WHERE patient_phone = ? OR patient_phone = ?', [origPhone, cleanPhone]);
+    }
 
     // Insert updated medicines
     for (const med of medicines) {
@@ -135,16 +255,16 @@ router.put('/patient-medicines', async (req, res) => {
       if (!medId) continue;
       const qtyNeeded = parseInt(med.quantity_needed || med.quantity, 10) || 3;
       await db.run(
-        `INSERT INTO patient_refills (customer_id, patient_name, patient_phone, medicine_id, refill_interval_days, next_refill_date, status, quantity_needed, is_active)
-         VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, 1)`,
-        [customerId, cleanName, cleanPhone, medId, intervalDays, nextRefillStr, qtyNeeded]
+        `INSERT INTO patient_refills (customer_id, patient_name, patient_phone, medicine_id, refill_interval_days, next_refill_date, status, quantity_needed, is_active, language)
+         VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, 1, ?)`,
+        [customerId, cleanName, cleanPhone, medId, intervalDays, nextRefillStr, qtyNeeded, cleanLang]
       );
     }
 
     // Re-check inventory stock and trigger necessary alerts/schedules
     await checkAllRefills(db);
 
-    res.json({ success: true, message: 'Patient refill schedule updated successfully', interval_days: intervalDays });
+    res.json({ success: true, message: 'Patient refill schedule updated successfully', interval_days: intervalDays, next_refill_date: nextRefillStr });
   } catch (err: any) {
     console.error('Failed to update patient refills:', err);
     res.status(500).json({ error: 'Internal server error: ' + err.message });
@@ -200,7 +320,15 @@ router.put('/:id', async (req, res) => {
     const updatedPhone = patient_phone !== undefined ? patient_phone : refill.patient_phone;
     const updatedMedicineId = medicine_id !== undefined ? medicine_id : refill.medicine_id;
     const updatedInterval = refill_interval_days !== undefined ? parseIntervalDays(refill_interval_days) : refill.refill_interval_days;
-    const updatedNextDate = next_refill_date !== undefined ? next_refill_date : refill.next_refill_date;
+    let updatedNextDate = next_refill_date !== undefined ? next_refill_date : refill.next_refill_date;
+    
+    // If interval changed and next_refill_date wasn't explicitly provided, recalculate next_refill_date
+    if (refill_interval_days !== undefined && next_refill_date === undefined) {
+      const nextDate = new Date();
+      nextDate.setDate(nextDate.getDate() + updatedInterval);
+      updatedNextDate = nextDate.toISOString().slice(0, 19).replace('T', ' ');
+    }
+
     const updatedStatus = (status !== undefined && (status === 'pending' || status === 'notified')) ? status : refill.status;
     const updatedHold = hold_for_stock !== undefined ? parseInt(hold_for_stock, 10) : refill.hold_for_stock;
     const updatedIsActive = is_active !== undefined ? (is_active ? 1 : 0) : (refill.is_active !== undefined ? refill.is_active : 1);
@@ -219,7 +347,7 @@ router.put('/:id', async (req, res) => {
       await checkAllRefills(db);
     }
 
-    res.json({ success: true, message: 'Refill updated successfully', interval_days: updatedInterval });
+    res.json({ success: true, message: 'Refill updated successfully', interval_days: updatedInterval, next_refill_date: updatedNextDate });
   } catch (err) {
     console.error('Failed to update refill:', err);
     res.status(500).json({ error: 'Internal server error' });
@@ -293,9 +421,15 @@ router.get('/panel', async (req, res) => {
 
     // Optional upcoming_days query parameter (if omitted, returns all patient refills for CRM management)
     const upcomingDays = req.query.upcoming_days ? parseInt(req.query.upcoming_days as string, 10) : null;
-    let query = `SELECT pr.*, m.name as medicine_name, COALESCE(inv.in_stock_qty, 0) as in_stock_qty 
+    let query = `SELECT pr.*, m.name as medicine_name, COALESCE(pr.language, c.language, 'en') as language, COALESCE(inv.in_stock_qty, 0) as in_stock_qty 
        FROM patient_refills pr
        JOIN medicines m ON pr.medicine_id = m.id
+       LEFT JOIN (
+         SELECT id, phone, language, name 
+         FROM customers 
+         WHERE phone IS NOT NULL AND phone != '' 
+         GROUP BY phone
+       ) c ON (pr.customer_id IS NOT NULL AND pr.customer_id = c.id) OR (pr.customer_id IS NULL AND pr.patient_phone = c.phone)
        LEFT JOIN (
          SELECT medicine_id, (SUM(quantity) + COALESCE(SUM(loose_quantity), 0)) as in_stock_qty 
          FROM inventory_master 
@@ -315,8 +449,10 @@ router.get('/panel', async (req, res) => {
       const phone = row.patient_phone;
       if (!patientGroups[phone]) {
         patientGroups[phone] = {
+          customer_id: row.customer_id,
           patient_name: row.patient_name,
           patient_phone: row.patient_phone,
+          language: row.language || 'en',
           next_refill_date: row.next_refill_date,
           reminder_status: 'NOT_SENT',
           reminder_sent_at: null,
@@ -328,25 +464,29 @@ router.get('/panel', async (req, res) => {
         patientGroups[phone].next_refill_date = row.next_refill_date;
       }
       const medReminderStatus = row.reminder_status || (row.status === 'notified' ? 'SENT' : 'NOT_SENT');
-      patientGroups[phone].medicines.push({
-        id: row.id,
-        medicine_id: row.medicine_id,
-        medicine_name: row.medicine_name,
-        quantity_needed: (row.quantity_needed !== undefined && row.quantity_needed !== null) ? row.quantity_needed : 3, // default refill quantity: 3
-        refill_interval_days: row.refill_interval_days || 30,
-        in_stock_qty: row.in_stock_qty || 0,
-        stock_verified_override: row.stock_verified_override || 0,
-        acknowledged: row.acknowledged || 0,
-        hold_for_stock: row.hold_for_stock || 0,
-        is_ready: row.is_ready || 0,
-        is_active: row.is_active !== undefined ? row.is_active : 1,
-        status: row.is_active === 0 ? 'paused' : (row.status || 'pending'),
-        quick_bill_id: row.quick_bill_id,
-        reminder_status: medReminderStatus,
-        reminder_sent_at: row.reminder_sent_at || null,
-        reminder_job_id: row.reminder_job_id || null,
-        reminder_occurrence_date: row.reminder_occurrence_date || null
-      });
+      
+      // Deduplicate medicine rows within group to prevent duplicate cards
+      if (!patientGroups[phone].medicines.some((m: any) => m.id === row.id)) {
+        patientGroups[phone].medicines.push({
+          id: row.id,
+          medicine_id: row.medicine_id,
+          medicine_name: row.medicine_name,
+          quantity_needed: (row.quantity_needed !== undefined && row.quantity_needed !== null) ? row.quantity_needed : 3, // default refill quantity: 3
+          refill_interval_days: row.refill_interval_days || 30,
+          in_stock_qty: row.in_stock_qty || 0,
+          stock_verified_override: row.stock_verified_override || 0,
+          acknowledged: row.acknowledged || 0,
+          hold_for_stock: row.hold_for_stock || 0,
+          is_ready: row.is_ready || 0,
+          is_active: row.is_active !== undefined ? row.is_active : 1,
+          status: row.is_active === 0 ? 'paused' : (row.status || 'pending'),
+          quick_bill_id: row.quick_bill_id,
+          reminder_status: medReminderStatus,
+          reminder_sent_at: row.reminder_sent_at || null,
+          reminder_job_id: row.reminder_job_id || null,
+          reminder_occurrence_date: row.reminder_occurrence_date || null
+        });
+      }
     }
 
     // Aggregate group-level reminder status and latest sent timestamp
@@ -443,10 +583,137 @@ router.post('/:id/cancel', async (req, res) => {
   }
 });
 
+// Permanently delete an entire patient refill schedule
+const deletePatientRefillsHandler = async (req: any, res: any) => {
+  const phone = (req.params.phone || req.body.patient_phone || req.query.phone || req.query.patient_phone || '').trim();
+  const customerId = req.body.customer_id ? parseInt(req.body.customer_id, 10) : (req.query.customer_id ? parseInt(req.query.customer_id as string, 10) : null);
+  const ids: number[] = Array.isArray(req.body.ids) ? req.body.ids.map((i: any) => parseInt(i, 10)).filter((n: number) => !isNaN(n) && n > 0) : [];
+  const patientName = (req.body.patient_name || req.query.patient_name || '').trim();
+
+  if (ids.length === 0 && !phone && !customerId && !patientName) {
+    return res.status(400).json({ error: 'Patient identifiers or refill IDs are required' });
+  }
+
+  let db;
+  try {
+    db = await dbManager.getConnection();
+
+    // Collect all matching refill records first
+    let query = 'SELECT id FROM patient_refills WHERE 0 = 1';
+    const params: any[] = [];
+
+    if (ids.length > 0) {
+      const placeholders = ids.map(() => '?').join(',');
+      query += ` OR id IN (${placeholders})`;
+      params.push(...ids);
+    }
+
+    if (customerId) {
+      query += ' OR customer_id = ?';
+      params.push(customerId);
+    }
+
+    if (phone) {
+      const digits = phone.replace(/\D/g, '').slice(-10);
+      if (digits) {
+        query += ' OR patient_phone = ? OR patient_phone LIKE ?';
+        params.push(phone, `%${digits}%`);
+      } else {
+        query += ' OR patient_phone = ?';
+        params.push(phone);
+      }
+    }
+
+    if (patientName && patientName.toLowerCase() !== 'customer') {
+      query += ' OR LOWER(TRIM(patient_name)) = LOWER(TRIM(?))';
+      params.push(patientName);
+    }
+
+    const matchingRefills = await db.all(query, params);
+    const refillIds = Array.from(new Set(matchingRefills.map((r: any) => String(r.id))));
+
+    if (refillIds.length > 0) {
+      const placeholders = refillIds.map(() => '?').join(',');
+      // 1. Remove staged notifications
+      await db.run(
+        `DELETE FROM automation_notifications WHERE type = 'refill_collection' AND reference_id IN (${placeholders})`,
+        refillIds
+      );
+      // 2. Delete patient refills
+      const result = await db.run(
+        `DELETE FROM patient_refills WHERE id IN (${placeholders})`,
+        refillIds
+      );
+
+      await checkAllRefills(db);
+
+      return res.json({
+        success: true,
+        deletedCount: result.changes || refillIds.length,
+        message: 'Patient refill schedule deleted successfully'
+      });
+    } else {
+      // Direct deletion fallback if query had no pre-match
+      let deleted = 0;
+      if (phone) {
+        const delRes = await db.run('DELETE FROM patient_refills WHERE patient_phone = ? OR patient_phone LIKE ?', [phone, `%${phone.replace(/\D/g, '').slice(-10)}%`]);
+        deleted = delRes.changes || 0;
+      }
+      await checkAllRefills(db);
+      return res.json({
+        success: true,
+        deletedCount: deleted,
+        message: 'Patient refill schedule deleted successfully'
+      });
+    }
+  } catch (err: any) {
+    console.error('Failed to delete patient refill schedule:', err);
+    res.status(500).json({ error: 'Internal server error: ' + err.message });
+  }
+};
+
+router.post('/delete-patient', deletePatientRefillsHandler);
+router.delete('/patient/:phone', deletePatientRefillsHandler);
+router.delete('/patient', deletePatientRefillsHandler);
+
+// Permanently delete a single refill item by id
+router.delete('/:id', async (req, res) => {
+  const { id } = req.params;
+  const numId = parseInt(id, 10);
+  if (!numId || isNaN(numId)) {
+    return res.status(400).json({ error: 'Valid refill ID required' });
+  }
+
+  let db;
+  try {
+    db = await dbManager.getConnection();
+    const refill = await db.get('SELECT * FROM patient_refills WHERE id = ?', [numId]);
+    if (!refill) {
+      return res.status(404).json({ error: 'Refill not found' });
+    }
+
+    // Clean up staged notification for this refill
+    await db.run(
+      `DELETE FROM automation_notifications 
+       WHERE type = 'refill_collection' AND (reference_id = ? OR reference_id LIKE ? OR reference_id LIKE ?)`,
+      [String(numId), `${numId},%`, `%,${numId}%`]
+    );
+
+    await db.run('DELETE FROM patient_refills WHERE id = ?', [numId]);
+
+    await checkAllRefills(db);
+
+    res.json({ success: true, message: 'Refill item deleted successfully' });
+  } catch (err: any) {
+    console.error('Failed to delete refill item:', err);
+    res.status(500).json({ error: 'Internal server error: ' + err.message });
+  }
+});
+
 // Update refill frequency / interval days & recalculate next due date
 router.put('/:id/frequency', async (req, res) => {
   const { id } = req.params;
-  const { refill_interval_days } = req.body;
+  const { refill_interval_days, update_all = true } = req.body;
   const interval = parseInt(refill_interval_days, 10);
   if (!interval || interval <= 0) {
     return res.status(400).json({ error: 'Valid refill interval days required' });
@@ -464,10 +731,17 @@ router.put('/:id/frequency', async (req, res) => {
     nextDate.setDate(nextDate.getDate() + interval);
     const nextDateStr = nextDate.toISOString().slice(0, 19).replace('T', ' ');
 
-    await db.run(
-      'UPDATE patient_refills SET refill_interval_days = ?, next_refill_date = ? WHERE id = ?',
-      [interval, nextDateStr, id]
-    );
+    if (update_all && refill.patient_phone) {
+      await db.run(
+        'UPDATE patient_refills SET refill_interval_days = ?, next_refill_date = ? WHERE patient_phone = ? AND is_active = 1',
+        [interval, nextDateStr, refill.patient_phone]
+      );
+    } else {
+      await db.run(
+        'UPDATE patient_refills SET refill_interval_days = ?, next_refill_date = ? WHERE id = ?',
+        [interval, nextDateStr, id]
+      );
+    }
 
     await checkAllRefills(db);
 
@@ -695,10 +969,16 @@ router.post('/:id/send', async (req, res) => {
       });
     }
     const patientName = refill.patient_name || 'Customer';
-    const medName = refill.medicine_name || 'Prescribed Medicine';
-    const qtyNeeded = refill.quantity_needed || 1;
+    const cleanDigits = cleanPhone.replace(/^91/, '');
+    const custRow = await db.get('SELECT language FROM customers WHERE phone = ? OR phone = ? OR id = ? LIMIT 1', [cleanPhone, cleanDigits, refill.customer_id]);
+    const lang = req.body?.language || refill.language || custRow?.language || 'en';
 
-    const msg = `🔔 *MEDICINE REFILL REMINDER — ${medicalName}*\n\nDear ${patientName},\nYour regular prescription is due for refill:\n\n• ${medName} (Qty: ${qtyNeeded})\n\n*Please reply to confirm delivery or pickup.*`;
+    const msg = buildRefillReminderMessage(
+      patientName,
+      [{ medicine_name: refill.medicine_name || 'Prescribed Medicine', quantity_needed: refill.quantity_needed || 1 }],
+      medicalName,
+      lang
+    );
 
     const queueId = await whatsappQueueWorker.enqueue(
       cleanPhone,
@@ -755,7 +1035,6 @@ router.post('/send-grouped', async (req, res) => {
     }
     const patientName = patient_name || 'Customer';
 
-    let medListStr = '';
     const rawIds: number[] = Array.isArray(refill_ids) ? refill_ids : [];
     if (Array.isArray(medicines) && medicines.length > 0) {
       medicines.forEach((m: any) => {
@@ -808,9 +1087,16 @@ router.post('/send-grouped', async (req, res) => {
     }
 
     const idsToUpdate = unsentRows.map(r => r.id);
-    medListStr = unsentRows.map((r: any) => `• ${r.medicine_name || 'Medicine'} (Qty: ${r.quantity_needed || 1})`).join('\n');
+    const cleanDigits = cleanPhone.replace(/^91/, '');
+    const custRow = await db.get('SELECT language FROM customers WHERE phone = ? OR phone = ? LIMIT 1', [cleanPhone, cleanDigits]);
+    const lang = req.body?.language || rows[0]?.language || custRow?.language || 'en';
 
-    const msg = `🔔 *MEDICINE REFILL REMINDER — ${medicalName}*\n\nDear ${patientName},\nYour regular prescription is due for refill:\n\n${medListStr}\n\n*Please reply to confirm delivery or pickup.*`;
+    const msg = buildRefillReminderMessage(
+      patientName,
+      unsentRows.map((r: any) => ({ medicine_name: r.medicine_name, quantity_needed: r.quantity_needed })),
+      medicalName,
+      lang
+    );
 
     const queueId = await whatsappQueueWorker.enqueue(
       cleanPhone,
@@ -909,9 +1195,17 @@ router.post('/send-tomorrow-reminder', async (req, res) => {
     }
 
     const patientName = unsent[0].patient_name || 'Customer';
-    const medicineNames = unsent.map(r => r.medicine_name).join(', ');
+    const cleanDigits = cleanPhone.replace(/^91/, '');
+    const custRow = await db.get('SELECT language FROM customers WHERE phone = ? OR phone = ? LIMIT 1', [cleanPhone, cleanDigits]);
+    const lang = req.body?.language || tomorrowRefills[0]?.language || custRow?.language || 'en';
 
-    const msg = `Hello ${patientName}, this is a friendly reminder that your refill for ${medicineNames} is due tomorrow. We have checked our stock and prepared it for you. Please collect it from ${medicalName} at your convenience.`;
+    const msg = buildRefillReminderMessage(
+      patientName,
+      unsent.map(r => ({ medicine_name: r.medicine_name, quantity_needed: r.quantity_needed })),
+      medicalName,
+      lang,
+      tomorrowDateStr
+    );
 
     const queueId = await whatsappQueueWorker.enqueue(
       cleanPhone,
@@ -996,12 +1290,21 @@ router.post('/send-reminder-now', async (req, res) => {
     }
 
     const patientName = unsentRows[0].patient_name || 'Customer';
-    const medicineNames = unsentRows.map((r: any) => r.medicine_name).join(', ');
+    const cleanDigits = cleanPhone.replace(/^91/, '');
+    const custRow = await db.get('SELECT language FROM customers WHERE phone = ? OR phone = ? LIMIT 1', [cleanPhone, cleanDigits]);
+    const lang = req.body?.language || rows[0]?.language || custRow?.language || 'en';
+
     const refillDate = unsentRows[0].next_refill_date
       ? new Date(unsentRows[0].next_refill_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
-      : 'soon';
+      : undefined;
 
-    const msg = `Hello ${patientName}, a friendly reminder that your prescription refill for ${medicineNames} is due on ${refillDate}. Please visit us at ${medicalName} to collect your medicines. Thank you! 🙏`;
+    const msg = buildRefillReminderMessage(
+      patientName,
+      unsentRows.map((r: any) => ({ medicine_name: r.medicine_name, quantity_needed: r.quantity_needed })),
+      medicalName,
+      lang,
+      refillDate
+    );
 
     const queueId = await whatsappQueueWorker.enqueue(
       cleanPhone,

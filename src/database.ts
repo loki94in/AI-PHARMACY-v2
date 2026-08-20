@@ -2,7 +2,7 @@ import { dbManager } from './database/connection.js';
 
 // Bump this number whenever you add new CREATE TABLE, ALTER TABLE, or INSERT OR IGNORE statements below.
 // On normal boots where this version matches the stored version, all DDL is skipped entirely (~3-5s saved).
-const CURRENT_SCHEMA_VERSION = 37;
+const CURRENT_SCHEMA_VERSION = 39;
 
 // FTS5 creates exactly these four shadow tables for an external-content index.
 // While the `medicines_fts` declaration exists in sqlite_master these names are
@@ -535,7 +535,20 @@ export async function ensureSchema(dbPath: string) {
       refill_interval_days INTEGER DEFAULT 30,
       last_refill_date DATETIME DEFAULT CURRENT_TIMESTAMP,
       next_refill_date DATETIME,
-      status TEXT CHECK(status IN ('pending', 'notified')) DEFAULT 'pending',
+      status TEXT DEFAULT 'pending',
+      hold_for_stock INTEGER DEFAULT 0,
+      is_active INTEGER DEFAULT 1,
+      is_ready INTEGER DEFAULT 0,
+      acknowledged INTEGER DEFAULT 0,
+      ordering_triggered INTEGER DEFAULT 0,
+      quick_bill_id INTEGER DEFAULT NULL,
+      stock_verified_override INTEGER DEFAULT 0,
+      quantity_needed INTEGER DEFAULT 3,
+      language TEXT DEFAULT 'en',
+      reminder_status TEXT DEFAULT 'NOT_SENT',
+      reminder_sent_at DATETIME DEFAULT NULL,
+      reminder_job_id INTEGER DEFAULT NULL,
+      reminder_occurrence_date DATETIME DEFAULT NULL,
       FOREIGN KEY(medicine_id) REFERENCES medicines(id),
       FOREIGN KEY(customer_id) REFERENCES customers(id)
     );
@@ -977,6 +990,7 @@ export async function ensureSchema(dbPath: string) {
     ['patient_refills', 'stock_verified_override', 'ALTER TABLE patient_refills ADD COLUMN stock_verified_override INTEGER DEFAULT 0'],
     ['patient_refills', 'customer_id', 'ALTER TABLE patient_refills ADD COLUMN customer_id INTEGER DEFAULT NULL'],
     ['patient_refills', 'quantity_needed', 'ALTER TABLE patient_refills ADD COLUMN quantity_needed INTEGER DEFAULT 3'],
+    ['patient_refills', 'language', "ALTER TABLE patient_refills ADD COLUMN language TEXT DEFAULT 'en'"],
     ['patient_refills', 'reminder_status', "ALTER TABLE patient_refills ADD COLUMN reminder_status TEXT DEFAULT 'NOT_SENT'"],
     ['patient_refills', 'reminder_sent_at', 'ALTER TABLE patient_refills ADD COLUMN reminder_sent_at DATETIME DEFAULT NULL'],
     ['patient_refills', 'reminder_job_id', 'ALTER TABLE patient_refills ADD COLUMN reminder_job_id INTEGER DEFAULT NULL'],
@@ -1252,7 +1266,8 @@ export async function ensureSchema(dbPath: string) {
       date DATETIME DEFAULT CURRENT_TIMESTAMP,
       total_amount REAL,
       items_json TEXT,
-      status TEXT CHECK(status IN ('pending', 'approved', 'rejected')) DEFAULT 'pending'
+      status TEXT CHECK(status IN ('pending', 'approved', 'rejected')) DEFAULT 'pending',
+      source_type TEXT DEFAULT NULL
     );
 
     CREATE TABLE IF NOT EXISTS medicine_aliases (

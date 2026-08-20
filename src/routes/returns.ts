@@ -122,27 +122,32 @@ router.get('/near-expiry', async (req, res) => {
     const months = parseInt(monthsStr, 10);
     
     db = await dbManager.getConnection();
-    // Fetch all stock > 0 and try to join with purchase history to find the distributor
+    // Authoritative current stock source: inventory_master where is_active=1 and quantity > 0
     const rows = await db.all(`
-      SELECT im.id as inventory_id, im.batch_no, im.expiry_date, im.quantity, im.cost_price, im.mrp,
+      SELECT im.id as inventory_id, im.medicine_id, im.batch_no, im.expiry_date, im.quantity, im.cost_price, im.mrp,
              m.name as medicine_name, d.name as distributor_name, d.id as distributor_id
       FROM inventory_master im
       JOIN medicines m ON im.medicine_id = m.id
-      LEFT JOIN purchase_items pi ON pi.medicine_id = m.id AND pi.batch_no = im.batch_no
+      LEFT JOIN purchase_items pi ON pi.id = (
+        SELECT pi3.id 
+        FROM purchase_items pi3 
+        WHERE pi3.medicine_id = im.medicine_id AND pi3.batch_no = im.batch_no 
+        ORDER BY pi3.id DESC 
+        LIMIT 1
+      )
       LEFT JOIN purchases p ON pi.purchase_id = p.id
       LEFT JOIN distributors d ON p.distributor_id = d.id
-      WHERE im.quantity > 0
-      GROUP BY im.id
+      WHERE COALESCE(im.is_active, 1) = 1 AND im.quantity > 0
+      ORDER BY im.expiry_date ASC
     `);
-    
     
     const now = new Date();
     const thresholdDate = new Date();
-    thresholdDate.setMonth(now.getMonth() + months);
+    thresholdDate.setMonth(now.getMonth() + (isNaN(months) ? 6 : months));
 
     const nearExpiryItems = rows.filter(row => {
-      if (!row.expiry_date) return false;
-      let expDate;
+      if (!row.expiry_date || !row.quantity || row.quantity <= 0) return false;
+      let expDate: Date;
       // Handle MM/YY or MM/YYYY
       if (row.expiry_date.includes('/')) {
         const parts = row.expiry_date.split('/');
@@ -153,6 +158,7 @@ router.get('/near-expiry', async (req, res) => {
       } else {
         expDate = new Date(row.expiry_date);
       }
+      if (isNaN(expDate.getTime())) return false;
       return expDate <= thresholdDate;
     });
 

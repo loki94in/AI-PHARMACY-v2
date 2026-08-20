@@ -407,9 +407,21 @@ export class TokenRefreshScheduler {
           console.log('[TokenRefreshScheduler] Headless navigation error/timeout:', err.message);
         });
 
-      // Poll for captured token or timeout (10s max)
+      const currentUrl = page.url();
+      if (currentUrl.includes('/login') || currentUrl.includes('/auth') || currentUrl.includes('/signin')) {
+        console.warn('[TokenRefreshScheduler] Session expired: Headless browser redirected to login page. Clearing token.');
+        this.lastError = 'Session expired. Please log in via Settings > External Integrations.';
+        try {
+          const db = await dbManager.getConnection();
+          await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('pharmarack_session_token', '')");
+        } catch (_) {}
+        return null;
+      }
+
+      // Poll for captured token or timeout (8s max)
       const startTime = Date.now();
-      while (!holder.token && Date.now() - startTime < 10000) {
+      while (!holder.token && Date.now() - startTime < 8000) {
+        if (page.url().includes('/login')) break;
         await new Promise(resolve => setTimeout(resolve, 200));
       }
 

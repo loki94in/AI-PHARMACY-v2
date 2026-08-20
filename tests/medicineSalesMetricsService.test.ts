@@ -1,4 +1,5 @@
-import { computeReorderSuggestion } from '../src/services/medicineSalesMetricsService.js';
+import { jest } from '@jest/globals';
+import { computeReorderSuggestion, applySaleDelta } from '../src/services/medicineSalesMetricsService.js';
 
 describe('computeReorderSuggestion', () => {
   it('flags a 2-day sales burst as included with qty = 2x the burst', () => {
@@ -8,8 +9,7 @@ describe('computeReorderSuggestion', () => {
     );
     expect(result.included).toBe(true);
     expect(result.isHotMover).toBe(true);
-    // monthlyWeightedConsumption = round(0.3*5/2) = 1 (nonzero), so qty = ceil(1-3) = 1
-    expect(result.suggestedQty).toBe(1);
+    expect(result.suggestedQty).toBe(10);
   });
 
   it('flags low-stock-safety when stock is <=2 and there is purchase/sale history', () => {
@@ -19,8 +19,7 @@ describe('computeReorderSuggestion', () => {
     );
     expect(result.included).toBe(true);
     expect(result.isLowStockSafety).toBe(true);
-    // monthlyWeightedConsumption = round(0.3*8/2) = 1 (nonzero), so qty = ceil(1-2) = 1
-    expect(result.suggestedQty).toBe(1);
+    expect(result.suggestedQty).toBe(8); // 10 - currentStock(2)
   });
 
   it('uses purchase-weighted monthly consumption when stock is below it', () => {
@@ -50,5 +49,27 @@ describe('computeReorderSuggestion', () => {
     // 17 / 8 months = 2.125 -> round = 2; stock(3) > consumption(2) and no other trigger -> excluded
     expect(result.monthlyWeightedConsumption).toBe(2);
     expect(result.included).toBe(false);
+  });
+});
+
+describe('applySaleDelta', () => {
+  it('increments sales_window_qty and sales_2d_qty on repeated calls for the same medicine', async () => {
+    const rows: Record<number, any> = {};
+    const fakeDb = {
+      run: jest.fn(async (sql: string, params: any = []) => {
+        if (typeof sql === 'string' && (sql.includes('CREATE TABLE') || sql.includes('CREATE INDEX'))) return;
+        if (typeof sql === 'string' && sql.includes('INSERT INTO medicine_sales_metrics')) {
+          const [medicineId, sales2d, salesWindow] = params;
+          const existing = rows[medicineId] || { sales_2d_qty: 0, sales_window_qty: 0 };
+          rows[medicineId] = {
+            sales_2d_qty: existing.sales_2d_qty + sales2d,
+            sales_window_qty: existing.sales_window_qty + salesWindow
+          };
+        }
+      })
+    };
+    await applySaleDelta(fakeDb, 42, 3);
+    await applySaleDelta(fakeDb, 42, 2);
+    expect(rows[42]).toEqual({ sales_2d_qty: 5, sales_window_qty: 5 });
   });
 });
