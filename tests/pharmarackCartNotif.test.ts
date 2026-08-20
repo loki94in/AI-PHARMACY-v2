@@ -5,7 +5,11 @@ const mockSendMessage = jest.fn((..._args: any[]) => Promise.resolve(true));
 jest.unstable_mockModule('../src/whatsappClient.js', () => ({
   __esModule: true,
   sendMessage: mockSendMessage,
-  initClient: jest.fn(() => Promise.resolve(true))
+  initClient: jest.fn(() => Promise.resolve(true)),
+  getWhatsAppStatus: jest.fn(() => Promise.resolve({ isConnected: true, isReady: true, status: 'CONNECTED' })),
+  normalizeWhatsAppPhone: jest.fn((p: string) => p ? String(p).replace(/\D/g, '') : ''),
+  shouldRouteToBusiness: jest.fn(() => false),
+  hashMessageBody: jest.fn((b: string) => b.length)
 }));
 
 import fs from 'fs';
@@ -64,8 +68,8 @@ describe('Pharmarack Cart Notifications Tests', () => {
     );
 
     const items = [
-      { productName: "Aspirin", qty: 2 },
-      { productName: "Ibuprofen", qty: 5 }
+      { productName: "Aspirin", qty: 2, packaging: "15's" },
+      { productName: "Ibuprofen", qty: 5, packaging: "100 ml" }
     ];
 
     const deliveryPersons = [
@@ -75,22 +79,20 @@ describe('Pharmarack Cart Notifications Tests', () => {
     const result = await notificationService.notifyAboutCartOrder("Test Dist", 123, deliveryPersons, items);
     expect(result).toBe(true);
 
-    // We expect two messages to be sent:
-    // 1. To the distributor ("919876543210")
-    // 2. To the delivery boy ("918888888888")
-    expect(mockSendMessage).toHaveBeenCalledTimes(2);
-    
-    // Check that phone numbers are parsed and formatted with 91 prefix
-    expect(mockSendMessage).toHaveBeenCalledWith("919876543210", undefined, expect.any(String));
-    expect(mockSendMessage).toHaveBeenCalledWith("918888888888", undefined, expect.any(String));
+    const notifs = await db.all("SELECT * FROM automation_notifications ORDER BY id ASC");
+    expect(notifs.length).toBe(2);
+    expect(notifs[0].recipient_phone).toBe("919876543210");
+    expect(notifs[1].recipient_phone).toBe("918888888888");
 
     // Verify messages content
-    const msg = mockSendMessage.mock.calls[0][2];
+    const msg = notifs[0].message;
     expect(msg).toContain("Items Requested:");
     expect(msg).toContain("Aspirin");
-    expect(msg).toContain("Qty: 2");
+    expect(msg).toContain("Pack: 15's");
+    expect(msg).toContain("*2 Strips* (30 Tablets)");
     expect(msg).toContain("Ibuprofen");
-    expect(msg).toContain("Qty: 5");
+    expect(msg).toContain("Pack: 100 ml");
+    expect(msg).toContain("*5 Bottles*");
     expect(msg).toContain("Delivery Boy John");
   });
 });

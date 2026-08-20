@@ -2669,6 +2669,8 @@ router.get('/reorder-suggestions', async (_req, res) => {
         ptr: ptrByMed[medId] || 0,
         mrp: Number(row.mrp || 0),
         twoDaySales: Number(row.sales_2d_qty || 0),
+        twoMonthSales: Number(row.sales_window_qty || 0),
+        twoMonthPurchases: Number(row.purchases_window_qty || 0),
         sixMonthTotalSales: Number(row.sales_window_qty || 0),
         sixMonthTotalPurchases: Number(row.purchases_window_qty || 0),
         monthlyWeightedConsumption: result.monthlyWeightedConsumption,

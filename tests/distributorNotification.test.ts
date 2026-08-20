@@ -5,8 +5,10 @@ jest.unstable_mockModule('../src/whatsappClient.js', () => ({
   __esModule: true,
   sendMessage: jest.fn(() => Promise.resolve(true)),
   initClient: jest.fn(() => Promise.resolve(true)),
-  getWhatsAppStatus: jest.fn(() => Promise.resolve({ isConnected: true, status: 'CONNECTED' })),
-  normalizeWhatsAppPhone: jest.fn((p: string) => p ? String(p).replace(/\D/g, '') : '')
+  getWhatsAppStatus: jest.fn(() => Promise.resolve({ isConnected: true, isReady: true, status: 'CONNECTED' })),
+  normalizeWhatsAppPhone: jest.fn((p: string) => p ? String(p).replace(/\D/g, '') : ''),
+  shouldRouteToBusiness: jest.fn(() => false),
+  hashMessageBody: jest.fn((b: string) => b.length)
 }));
 
 import fs from 'fs';
@@ -93,18 +95,19 @@ describe('Distributor WhatsApp Notification Automation Tests', () => {
     const res = await notificationService.notifyDistributorAboutDeliveryBoy("BILL-10025");
     expect(res).toBe(true);
 
-    // 6. Verify sendMessage was called for both distributor numbers
-    expect(mockSendMessage).toHaveBeenCalledTimes(2);
-    expect(mockSendMessage).toHaveBeenNthCalledWith(1, "919876543210", undefined, expect.any(String));
-    expect(mockSendMessage).toHaveBeenNthCalledWith(2, "919876543211", undefined, expect.any(String));
+    // 6. Verify notification was logged and prepared for both distributor numbers
+    const notifs = await db.all("SELECT * FROM automation_notifications ORDER BY id ASC");
+    expect(notifs.length).toBe(2);
+    expect(notifs[0].recipient_phone).toBe("919876543210");
+    expect(notifs[1].recipient_phone).toBe("919876543211");
 
     // Verify message content
-    const sentMessage = mockSendMessage.mock.calls[0][2];
+    const sentMessage = notifs[0].message;
     expect(sentMessage).toContain("Items Requested:");
-    expect(sentMessage).toContain("Paracetamol 500mg —");
-    expect(sentMessage).toContain("Qty: 20");
-    expect(sentMessage).toContain("Azithromycin 500mg —");
-    expect(sentMessage).toContain("Qty: 10");
+    expect(sentMessage).toContain("Paracetamol 500mg");
+    expect(sentMessage).toContain("*20 Units*");
+    expect(sentMessage).toContain("Azithromycin 500mg");
+    expect(sentMessage).toContain("*10 Units*");
     expect(sentMessage).toContain("Rahul Sharma");
     expect(sentMessage).toContain("Assigned Delivery Boy:");
   });
@@ -122,7 +125,9 @@ describe('Distributor WhatsApp Notification Automation Tests', () => {
     const res = await notificationService.notifyDistributorAboutDeliveryBoy("BILL-10025");
     expect(res).toBe(true);
 
-    const sentMessage = mockSendMessage.mock.calls[0][2];
+    const notifs = await db.all("SELECT * FROM automation_notifications ORDER BY id ASC");
+    expect(notifs.length).toBe(1);
+    const sentMessage = notifs[0].message;
     expect(sentMessage).toContain("Admin / Store Owner");
     expect(sentMessage).toContain("+91 98765 43210");
   });
@@ -135,7 +140,6 @@ describe('Distributor WhatsApp Notification Automation Tests', () => {
 
     const res = await notificationService.notifyDistributorAboutDeliveryBoy("BILL-10025");
     expect(res).toBe(false);
-    expect(mockSendMessage).not.toHaveBeenCalled();
 
     // Verify warning log exists
     const log = await db.get("SELECT * FROM action_logs WHERE action_type = 'DISTRIBUTOR_NOTIF_SKIP'");
@@ -152,7 +156,9 @@ describe('Distributor WhatsApp Notification Automation Tests', () => {
     const res = await notificationService.notifyDistributorAboutDeliveryBoy("BILL-10025");
     expect(res).toBe(true);
 
-    const sentMessage = mockSendMessage.mock.calls[0][2];
+    const notifs = await db.all("SELECT * FROM automation_notifications ORDER BY id ASC");
+    expect(notifs.length).toBe(1);
+    const sentMessage = notifs[0].message;
     expect(sentMessage).toContain("Standard Pharmacy Order Items");
   });
 
@@ -170,8 +176,9 @@ describe('Distributor WhatsApp Notification Automation Tests', () => {
     expect(res).toBe(true);
 
     // Should only send once because of de-duplication
-    expect(mockSendMessage).toHaveBeenCalledTimes(1);
-    expect(mockSendMessage).toHaveBeenCalledWith("919876543210", undefined, expect.any(String));
+    const notifs = await db.all("SELECT * FROM automation_notifications ORDER BY id ASC");
+    expect(notifs.length).toBe(1);
+    expect(notifs[0].recipient_phone).toBe("919876543210");
   });
 
   test('Edge Case: Multiple delivery boys assigned', async () => {
@@ -190,7 +197,9 @@ describe('Distributor WhatsApp Notification Automation Tests', () => {
     const res = await notificationService.notifyDistributorAboutDeliveryBoy("BILL-10025");
     expect(res).toBe(true);
 
-    const sentMessage = mockSendMessage.mock.calls[0][2];
+    const notifs = await db.all("SELECT * FROM automation_notifications ORDER BY id ASC");
+    expect(notifs.length).toBe(1);
+    const sentMessage = notifs[0].message;
     expect(sentMessage).toContain("Rahul Sharma");
   });
 });

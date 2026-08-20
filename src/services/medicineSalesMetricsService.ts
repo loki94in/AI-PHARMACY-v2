@@ -46,6 +46,37 @@ export async function applySaleDelta(db: any, medicineId: number, soldQty: numbe
   );
 }
 
+/**
+ * Same-day freshness hook: call once per purchased line item upon saving or verifying
+ * a purchase invoice. Atomically increments purchases_window_qty and records last purchase details.
+ */
+export async function applyPurchaseDelta(
+  db: any,
+  medicineId: number,
+  purchasedQty: number,
+  ptr?: number | null,
+  distributorId?: number | null,
+  distributorName?: string | null
+): Promise<void> {
+  if (!medicineId) return;
+  await ensureMedicineSalesMetricsSchema(db);
+  await db.run(
+    `INSERT INTO medicine_sales_metrics (
+       medicine_id, purchases_window_qty, last_purchase_date,
+       last_purchase_ptr, last_distributor_id, last_distributor_name, updated_at
+     )
+     VALUES (?, ?, DATETIME('now'), ?, ?, ?, DATETIME('now'))
+     ON CONFLICT(medicine_id) DO UPDATE SET
+       purchases_window_qty = purchases_window_qty + excluded.purchases_window_qty,
+       last_purchase_date = excluded.last_purchase_date,
+       last_purchase_ptr = CASE WHEN excluded.last_purchase_ptr > 0 THEN excluded.last_purchase_ptr ELSE medicine_sales_metrics.last_purchase_ptr END,
+       last_distributor_id = COALESCE(excluded.last_distributor_id, medicine_sales_metrics.last_distributor_id),
+       last_distributor_name = COALESCE(excluded.last_distributor_name, medicine_sales_metrics.last_distributor_name),
+       updated_at = excluded.updated_at`,
+    [medicineId, purchasedQty || 0, ptr || 0, distributorId || null, distributorName || null]
+  );
+}
+
 export async function getReorderWindowMonths(dbInstance?: any): Promise<number> {
   try {
     const db = dbInstance || (await dbManager.getConnection());

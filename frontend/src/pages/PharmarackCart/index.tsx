@@ -11,6 +11,7 @@ import { sanitizePhoneInput, isValid10DigitPhone } from '../../utils/phone';
 import { PharmarackCartCalendar } from '../../components/PharmarackCartCalendar';
 import { usePageActive } from '../../lib/keepAlive/PageActiveContext';
 import { broadcastContactDataChanged } from '../../utils/settingsSync';
+import { formatPackagingAndUnit } from '../../utils/packagingMatcher';
 
 interface CartLineItem {
   productId: number | null;
@@ -1433,9 +1434,10 @@ export default function PharmarackCart() {
     msg += `📋 *ORDER ITEMS (${itemsToSend.length}):*\n`;
 
     itemsToSend.forEach((item, idx) => {
-      const packStr = item.packaging ? ` [${item.packaging}]` : '';
+      const packInfo = formatPackagingAndUnit(item.packaging, item.qty);
+      const packBadge = packInfo.packLabel ? ` • 📦 *${packInfo.packLabel}*` : '';
       const priceStr = item.ptr > 0 ? ` @ ₹${item.ptr}` : '';
-      msg += `${idx + 1}. *${item.productName}*${packStr}\n   📦 Quantity: *${item.qty}*${priceStr}\n`;
+      msg += `${idx + 1}. *${item.productName}*${packBadge}\n   🔢 Order Qty: *${packInfo.unitQtyStr}*${packInfo.totalUnitsNote}${priceStr}\n`;
     });
 
     msg += `\n🚚 *Assigned Delivery Person:*\n`;
@@ -3182,48 +3184,61 @@ export default function PharmarackCart() {
                   {reorderSuggestions.map((sug) => (
                     <div key={sug.medicineId} className="p-4 rounded-2xl border border-glass-border/70 bg-bg2/40 flex flex-col justify-between gap-3 shadow-sm hover:border-glass-border transition-all">
                       <div className="space-y-2">
-                        <div className="flex items-center justify-between">
-                          <span className="font-extrabold text-xs text-text">{sug.medicineName}</span>
-                          <span className="text-[9px] font-bold uppercase px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span className="font-extrabold text-xs text-text truncate">{sug.medicineName}</span>
+                            {sug.packaging && (
+                              <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-bg3 text-muted border border-glass-border/40 font-mono shrink-0">
+                                {sug.packaging}
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-[9px] font-bold uppercase px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shrink-0">
                             {sug.isHotMover ? '🔥 Hot Mover' : '⚠️ Low Stock'}
                           </span>
                         </div>
 
                         <div className="text-xs text-muted space-y-1">
-                          <div>📊 Past {reorderWindowMonths} {reorderWindowMonths === 1 ? 'Month' : 'Months'} Sold: <strong className="text-text font-mono">{sug.sixMonthTotalSales}</strong> units</div>
+                          <div>📊 Past {reorderWindowMonths} {reorderWindowMonths === 1 ? 'Month' : 'Months'} Sold: <strong className="text-text font-mono">{sug.twoMonthSales ?? sug.sixMonthTotalSales ?? 0}</strong> units</div>
                           <div>📦 Current Stock: <strong className="text-rose-400 font-mono">{sug.currentStock}</strong> strips</div>
-                          <div>Need: <strong className="text-emerald-400 font-mono font-bold">{sug.suggestedQty}</strong> qty</div>
                         </div>
                       </div>
 
                       <div className="pt-2 border-t border-glass-border/30 flex items-center justify-between gap-2">
-                        <button
-                          type="button"
-                          onClick={() => liveCartAddEvent.triggerOpen(sug.medicineName, sug.suggestedQty)}
-                          className="flex-1 py-1.5 px-3 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold flex items-center justify-center gap-1.5 transition-all active:scale-95 cursor-pointer shadow-xs"
-                        >
-                          <ShoppingCart size={12} />
-                          <span>Add to Cart (x{sug.suggestedQty})</span>
-                        </button>
-                        <select
-                          onChange={async (e) => {
-                            const val = e.target.value;
-                            if (!val) return;
-                            const [days, type] = val === '7' ? [7, '7_days'] : val === '30' ? [30, '30_days'] : [3650, 'permanent'];
-                            await api.snoozeReorderSuggestion(sug.medicineId, days as number, type as string);
-                            fetchReorderSuggestions();
-                            toastEvent.trigger(`Snoozed ${sug.medicineName}${type === 'permanent' ? ' permanently' : ` for ${days} days`}`, 'info');
-                            e.target.value = '';
-                          }}
-                          defaultValue=""
-                          className="p-1.5 rounded-xl bg-bg2 hover:bg-bg3 border border-glass-border text-muted hover:text-text text-[10px] transition-all cursor-pointer"
-                          title="Ignore this suggestion"
-                        >
-                          <option value="" disabled>Ignore…</option>
-                          <option value="7">7 days</option>
-                          <option value="30">30 days</option>
-                          <option value="permanent">Permanently</option>
-                        </select>
+                        <div className="text-xs font-bold text-muted">
+                          Need: <strong className="text-emerald-400 font-mono text-xs">{sug.suggestedQty}</strong> qty
+                        </div>
+
+                        <div className="flex items-center gap-1.5">
+                          <select
+                            onChange={async (e) => {
+                              const val = e.target.value;
+                              if (!val) return;
+                              const [days, type] = val === '7' ? [7, '7_days'] : val === '30' ? [30, '30_days'] : [3650, 'permanent'];
+                              await api.snoozeReorderSuggestion(sug.medicineId, days as number, type as string);
+                              fetchReorderSuggestions();
+                              toastEvent.trigger(`Snoozed ${sug.medicineName}${type === 'permanent' ? ' permanently' : ` for ${days} days`}`, 'info');
+                              e.target.value = '';
+                            }}
+                            defaultValue=""
+                            className="py-1 px-2 rounded-xl bg-bg2 hover:bg-bg3 border border-glass-border text-muted hover:text-text text-[10px] font-medium transition-all cursor-pointer"
+                            title="Ignore this suggestion"
+                          >
+                            <option value="" disabled>Ignore…</option>
+                            <option value="7">7 days</option>
+                            <option value="30">30 days</option>
+                            <option value="permanent">Permanently</option>
+                          </select>
+
+                          <button
+                            type="button"
+                            onClick={() => liveCartAddEvent.triggerOpen(sug.medicineName, sug.suggestedQty)}
+                            className="py-1 px-3 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold flex items-center justify-center gap-1 transition-all active:scale-95 cursor-pointer shadow-xs whitespace-nowrap"
+                          >
+                            <Plus size={13} />
+                            <span>+ Add ({sug.suggestedQty})</span>
+                          </button>
+                        </div>
                       </div>
                     </div>
                   ))}

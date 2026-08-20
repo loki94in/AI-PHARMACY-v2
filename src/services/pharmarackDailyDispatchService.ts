@@ -11,6 +11,7 @@ import { dbManager } from '../database/connection.js';
 import { whatsappQueueWorker } from './whatsappQueueWorker.js';
 import { formatDisplayPhone } from './notificationService.js';
 import { resolveDistributorContact } from '../utils/distributorSyncHelper.js';
+import { formatPackagingAndUnit } from '../utils/whatsappTemplateBuilder.js';
 
 const CYCLE_DAYS = 45;
 const BAND_START_HOUR = 11;
@@ -169,8 +170,9 @@ async function buildSeparateDispatchMessages(db: any, orders: any[], isLate = fa
       const item = items[i];
       const name = item.productName || item.name || 'Unknown';
       const qty = item.qty || item.Quantity || item.quantity || 1;
-      const pack = item.packaging ? ` (${item.packaging})` : '';
-      msg += `${i + 1}. *${name}*${pack} — Qty: *${qty}*\n`;
+      const packInfo = formatPackagingAndUnit(item.packaging || item.packing, qty);
+      const packStr = packInfo.packLabel ? ` • 📦 *${packInfo.packLabel}*` : '';
+      msg += `${i + 1}. *${name}*${packStr}\n   🔢 Order Qty: *${packInfo.unitQtyStr}*${packInfo.totalUnitsNote}\n`;
     }
     msg += `\n📊 *Total Items:* ${items.length}\n`;
     msg += `📄 *Preferred Email Invoice Format:* ${distFormat}`;

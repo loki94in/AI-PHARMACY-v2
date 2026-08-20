@@ -147,3 +147,63 @@ export function getMatchScore(
 
   return score;
 }
+
+export interface FormattedItemUnit {
+  packLabel: string;
+  unitQtyStr: string;
+  totalUnitsNote: string;
+}
+
+/**
+ * Formats medicine packaging and quantity into human-readable pack labels and unit descriptors
+ * (e.g., '10 Strips (150 Tablets)', '5 Bottles', '2 Vials') for order messages and invoices.
+ */
+export function formatPackagingAndUnit(
+  packaging?: string | null,
+  qty: number | string = 1
+): FormattedItemUnit {
+  const numericQty = Math.max(1, Number(qty) || 1);
+  const rawPack = (packaging || '').trim();
+
+  if (!rawPack) {
+    return {
+      packLabel: '',
+      unitQtyStr: `${numericQty} ${numericQty === 1 ? 'Unit' : 'Units'}`,
+      totalUnitsNote: ''
+    };
+  }
+
+  const parsed = parsePackaging(rawPack);
+  const lower = rawPack.toLowerCase();
+
+  let unitType = numericQty === 1 ? 'Pack' : 'Packs';
+  let totalUnitsNote = '';
+
+  if (parsed.volumeMl !== null || /ml|syrup|susp|drop|lotion|liquid|bottle/i.test(lower)) {
+    unitType = numericQty === 1 ? 'Bottle' : 'Bottles';
+  } else if (parsed.weightGm !== null || /tube|gel|oint|cream/i.test(lower)) {
+    unitType = numericQty === 1 ? 'Tube' : 'Tubes';
+  } else if (/inj|vial|amp/i.test(lower)) {
+    unitType = numericQty === 1 ? 'Vial' : 'Vials';
+  } else if (/sachet|pouch/i.test(lower)) {
+    unitType = numericQty === 1 ? 'Sachet' : 'Sachets';
+  } else if (/box|carton/i.test(lower)) {
+    unitType = numericQty === 1 ? 'Box' : 'Boxes';
+    if (parsed.unitsCount && parsed.unitsCount > 1) {
+      const isCap = /cap/i.test(lower);
+      totalUnitsNote = ` (${numericQty * parsed.unitsCount} ${isCap ? 'Capsules' : 'Tablets'})`;
+    }
+  } else if (parsed.unitsCount !== null || /strip|tab|cap/i.test(lower)) {
+    unitType = numericQty === 1 ? 'Strip' : 'Strips';
+    if (parsed.unitsCount && parsed.unitsCount > 1) {
+      const isCap = /cap/i.test(lower);
+      totalUnitsNote = ` (${numericQty * parsed.unitsCount} ${isCap ? 'Capsules' : 'Tablets'})`;
+    }
+  }
+
+  return {
+    packLabel: `Pack: ${rawPack}`,
+    unitQtyStr: `${numericQty} ${unitType}`,
+    totalUnitsNote
+  };
+}

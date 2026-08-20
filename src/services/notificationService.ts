@@ -7,6 +7,7 @@ import { config } from '../config/index.js';
 import { dbManager } from '../database/connection.js';
 import { recordPlacedOrder } from './pharmarackDailyDispatchService.js';
 import { resolveDistributorContact } from '../utils/distributorSyncHelper.js';
+import { formatPackagingAndUnit } from '../utils/whatsappTemplateBuilder.js';
 
 export interface NotificationData {
   type: 'whatsapp' | 'whatsapp_business' | 'telegram' | 'email';
@@ -324,7 +325,7 @@ export class NotificationService {
 
       // 3. Fetch medicines and quantities for this purchase
       const purchaseItems = await db.all(
-        `SELECT pi.quantity, m.name as medicine_name
+        `SELECT pi.quantity, m.name as medicine_name, m.packaging
          FROM purchase_items pi
          JOIN medicines m ON pi.medicine_id = m.id
          WHERE pi.purchase_id = ?`,
@@ -338,7 +339,13 @@ export class NotificationService {
       let itemsText = '';
       if (purchaseItems && purchaseItems.length > 0) {
         itemsText = purchaseItems
-          .map((item: any) => `  • ${item.medicine_name} — \n    Qty: ${item.quantity}`)
+          .map((item: any, idx: number) => {
+            const name = item.medicine_name || 'Medicine Item';
+            const qty = item.quantity || 1;
+            const packInfo = formatPackagingAndUnit(item.packaging, qty);
+            const packStr = packInfo.packLabel ? ` • 📦 *${packInfo.packLabel}*` : '';
+            return `  ${idx + 1}. *${name}*${packStr}\n     🔢 Order Qty: *${packInfo.unitQtyStr}*${packInfo.totalUnitsNote}`;
+          })
           .join('\n');
       } else {
         itemsText = '  • Standard Pharmacy Order Items';
@@ -519,7 +526,13 @@ export class NotificationService {
       let itemsText = '';
       if (items && items.length > 0) {
         itemsText = items
-          .map((item: any) => `  • ${item.productName || item.name || 'Medicine Item'}\n    Qty: ${item.qty || item.Quantity || 1}`)
+          .map((item: any, idx: number) => {
+            const name = item.productName || item.name || 'Medicine Item';
+            const qty = item.qty || item.Quantity || 1;
+            const packInfo = formatPackagingAndUnit(item.packaging || item.packing, qty);
+            const packStr = packInfo.packLabel ? ` • 📦 *${packInfo.packLabel}*` : '';
+            return `  ${idx + 1}. *${name}*${packStr}\n     🔢 Order Qty: *${packInfo.unitQtyStr}*${packInfo.totalUnitsNote}`;
+          })
           .join('\n');
       } else {
         itemsText = '  • Standard Pharmacy Order Items';
@@ -749,8 +762,9 @@ export class NotificationService {
         (order.items || []).forEach((item, idx) => {
           const name = item.productName || item.name || 'Unknown Product';
           const qty = item.qty || item.Quantity || item.quantity || 1;
-          const pack = item.packaging || item.packing ? ` (${item.packaging || item.packing})` : '';
-          msg += `${idx + 1}. *${name}*${pack} — Qty: *${qty}*\n`;
+          const packInfo = formatPackagingAndUnit(item.packaging || item.packing, qty);
+          const packStr = packInfo.packLabel ? ` • 📦 *${packInfo.packLabel}*` : '';
+          msg += `${idx + 1}. *${name}*${packStr}\n   🔢 Order Qty: *${packInfo.unitQtyStr}*${packInfo.totalUnitsNote}\n`;
         });
 
         msg += `\n📊 *Total Items:* ${order.items?.length || 0}`;

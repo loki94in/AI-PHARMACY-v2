@@ -24,6 +24,7 @@ import { OrderFulfillmentService } from '../services/orderFulfillmentService.js'
 import { getSummaryCache, rebuildPurchaseSummaryCache, triggerBackgroundSummaryRebuild } from '../services/summaryCacheService.js';
 import { isValidDistributorName } from '../utils/nameNormalizer.js';
 import { extractDateFromText } from '../utils/dateExtractor.js';
+import { applyPurchaseDelta } from '../services/medicineSalesMetricsService.js';
 
 
 
@@ -1101,6 +1102,7 @@ router.post('/manual', async (req, res) => {
         quantity: totalQty, loose_quantity: 0,
         transaction_type: 'purchase', transaction_id: purchaseId
       });
+      await applyPurchaseDelta(db, medId, totalQty, rawRate, distId || null, distName || null);
 
       // Keep medicines.mrp, rate, and GST in sync for future purchases
       if (rawMrp && rawMrp > 0) {
@@ -1548,6 +1550,8 @@ async function handleUpdatePurchaseFull(req: express.Request, res: express.Respo
         `, [medId, totalQty, rawBatch, rawExpiry || null, rawRate, rawMrp || 0]);
         await refreshInventoryActiveByBatch(db, medId, rawBatch);
       }
+
+      await applyPurchaseDelta(db, medId, totalQty, rawRate, distRow.id, distRow.name || null);
 
       if (rawMrp && rawMrp > 0) {
         await db.run('UPDATE medicines SET mrp = ?, rate = ? WHERE id = ?', [rawMrp, rawRate, medId]);

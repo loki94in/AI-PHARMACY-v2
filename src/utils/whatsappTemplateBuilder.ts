@@ -78,12 +78,97 @@ export async function resolveActiveDeliveryBoy(
   };
 }
 
+export interface FormattedItemUnit {
+  packLabel: string;
+  unitQtyStr: string;
+  totalUnitsNote: string;
+}
+
+/**
+ * Formats medicine packaging and quantity into human-readable pack labels and unit descriptors
+ * (e.g., '10 Strips (150 Tablets)', '5 Bottles', '2 Vials') for order messages and invoices.
+ */
+export function formatPackagingAndUnit(
+  packaging?: string | null,
+  qty: number | string = 1
+): FormattedItemUnit {
+  const numericQty = Math.max(1, Number(qty) || 1);
+  const rawPack = (packaging || '').trim();
+
+  if (!rawPack) {
+    return {
+      packLabel: '',
+      unitQtyStr: `${numericQty} ${numericQty === 1 ? 'Unit' : 'Units'}`,
+      totalUnitsNote: ''
+    };
+  }
+
+  const lower = rawPack.toLowerCase();
+  let unitsCount: number | null = null;
+  let hasVolume = false;
+  let hasWeight = false;
+
+  if (/\b\d+(?:\.\d+)?\s*(?:ml|milliliter|millilitre|l|ltr|liter|litre)\b/i.test(lower)) {
+    hasVolume = true;
+  }
+  if (/\b\d+(?:\.\d+)?\s*(?:gm|gram|grams|g|kg|kilogram)\b/i.test(lower)) {
+    hasWeight = true;
+  }
+
+  const multiTabMatch = lower.match(/\b(\d+)\s*x\s*(\d+)\b/);
+  if (multiTabMatch) {
+    unitsCount = parseInt(multiTabMatch[1], 10) * parseInt(multiTabMatch[2], 10);
+  } else {
+    const tabMatch = lower.match(/\b(\d+)\s*(?:tab|tabs|tablet|tablets|cap|caps|capsule|capsules|'s|s\b)/);
+    if (tabMatch) {
+      unitsCount = parseInt(tabMatch[1], 10);
+    } else {
+      const parenMatch = lower.match(/\((\d+)\s*(?:tabs?|caps?|units?)?\)/);
+      if (parenMatch) {
+        unitsCount = parseInt(parenMatch[1], 10);
+      }
+    }
+  }
+
+  let unitType = numericQty === 1 ? 'Pack' : 'Packs';
+  let totalUnitsNote = '';
+
+  if (hasVolume || /ml|syrup|susp|drop|lotion|liquid|bottle/i.test(lower)) {
+    unitType = numericQty === 1 ? 'Bottle' : 'Bottles';
+  } else if (hasWeight || /tube|gel|oint|cream/i.test(lower)) {
+    unitType = numericQty === 1 ? 'Tube' : 'Tubes';
+  } else if (/inj|vial|amp/i.test(lower)) {
+    unitType = numericQty === 1 ? 'Vial' : 'Vials';
+  } else if (/sachet|pouch/i.test(lower)) {
+    unitType = numericQty === 1 ? 'Sachet' : 'Sachets';
+  } else if (/box|carton/i.test(lower)) {
+    unitType = numericQty === 1 ? 'Box' : 'Boxes';
+    if (unitsCount && unitsCount > 1) {
+      const isCap = /cap/i.test(lower);
+      totalUnitsNote = ` (${numericQty * unitsCount} ${isCap ? 'Capsules' : 'Tablets'})`;
+    }
+  } else if (unitsCount !== null || /strip|tab|cap/i.test(lower)) {
+    unitType = numericQty === 1 ? 'Strip' : 'Strips';
+    if (unitsCount && unitsCount > 1) {
+      const isCap = /cap/i.test(lower);
+      totalUnitsNote = ` (${numericQty * unitsCount} ${isCap ? 'Capsules' : 'Tablets'})`;
+    }
+  }
+
+  return {
+    packLabel: `Pack: ${rawPack}`,
+    unitQtyStr: `${numericQty} ${unitType}`,
+    totalUnitsNote
+  };
+}
+
 /**
  * Builds standardized WhatsApp Order Notification template with resolved delivery boy.
  */
 export async function buildWhatsAppOrderNotification(params: {
   productName: string;
   qty: number | string;
+  packaging?: string;
   distributorName?: string;
   assignedBoy?: string | number | null;
   dbInstance?: any;
@@ -92,9 +177,12 @@ export async function buildWhatsAppOrderNotification(params: {
   const storeName = await getStoreMedicalName(db);
   const deliveryBoy = await resolveActiveDeliveryBoy(db, params.assignedBoy);
 
+  const packInfo = formatPackagingAndUnit(params.packaging, params.qty);
+  const packStr = packInfo.packLabel ? ` • 📦 *${packInfo.packLabel}*` : '';
+
   let msg = `📦 *ORDER NOTIFICATION* - ${storeName}\n\n`;
-  msg += `• *Product*: ${params.productName}\n`;
-  msg += `• *Quantity*: ${params.qty}\n`;
+  msg += `• *Product*: ${params.productName}${packStr}\n`;
+  msg += `• *Order Qty*: ${packInfo.unitQtyStr}${packInfo.totalUnitsNote}\n`;
   if (params.distributorName) {
     msg += `• *Distributor*: ${params.distributorName}\n`;
   }

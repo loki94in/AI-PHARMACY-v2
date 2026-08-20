@@ -219,6 +219,12 @@ router.get('/search', async (req, res) => {
   const isMapped = req.query.isMapped === 'true';
   const hasStoreFilter = storeId !== null && !isNaN(storeId);
 
+  // 1. Fast in-memory cache lookup (<1ms response for repeat queries & pending item transfers)
+  const cached = searchCache.get(qRaw, storeId, isMapped);
+  if (cached && Array.isArray(cached) && cached.length > 0) {
+    return res.json(cached);
+  }
+
   try {
     const settings = await getPharmarackSettings();
     const token = settings['pharmarack_session_token'] || '';
@@ -227,6 +233,7 @@ router.get('/search', async (req, res) => {
       // If token is missing, attempt offline catalog search before returning NEED_LOGIN
       const offline = await searchOfflineCatalogFallback(qRaw, storeId, isMapped);
       if (offline.length > 0) {
+        searchCache.set(qRaw, storeId, isMapped, offline);
         return res.json(offline);
       }
       return res.status(401).json({ error: 'Need to login', code: 'NEED_LOGIN' });
@@ -289,11 +296,15 @@ router.get('/search', async (req, res) => {
         };
       });
 
+      searchCache.set(qRaw, storeId, isMapped, results);
       return res.json(results);
     }
 
     // Fallback: If live OpenSearch returns 0 items, search local catalog cache
     const offline = await searchOfflineCatalogFallback(qRaw, storeId, isMapped);
+    if (offline.length > 0) {
+      searchCache.set(qRaw, storeId, isMapped, offline);
+    }
     return res.json(offline);
 
   } catch (err: any) {
@@ -303,6 +314,7 @@ router.get('/search', async (req, res) => {
     try {
       const offline = await searchOfflineCatalogFallback(qRaw, storeId, isMapped);
       if (offline.length > 0) {
+        searchCache.set(qRaw, storeId, isMapped, offline);
         return res.json(offline);
       }
     } catch (_) {}
