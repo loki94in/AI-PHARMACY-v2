@@ -24,7 +24,6 @@ const router = express.Router();
 router.get('/', async (_req, res) => {
   try {
     const db = await dbManager.getConnection();
-    await db.run('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT)');
     const rows = await db.all('SELECT * FROM app_settings');
     const settingsObj: Record<string, string> = {};
     rows.forEach(r => {
@@ -133,7 +132,6 @@ router.post('/save', async (req, res) => {
   if (!payload || typeof payload !== 'object') return res.status(400).json({ error: 'payload required' });
   try {
     await dbManager.transaction(async (db) => {
-      await db.run('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT)');
       const protectedKeys = [
         'pharmarack_session_token',
         'pharmarack_username',
@@ -256,23 +254,6 @@ router.post('/save', async (req, res) => {
       // This replaces the frontend's separate api.saveContact(...) HTTP call.
       const ownerPhoneRaw = payload['owner_whatsapp_number'] || payload['phone'];
       if (ownerPhoneRaw !== undefined && String(ownerPhoneRaw).trim() !== '') {
-        await db.run(`
-          CREATE TABLE IF NOT EXISTS contacts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            type TEXT DEFAULT 'general',
-            phone TEXT,
-            email TEXT,
-            address TEXT,
-            gstin TEXT,
-            notes TEXT,
-            alias_names TEXT,
-            is_active INTEGER DEFAULT 1,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-          )
-        `);
-
         const ownerName = String(
           payload['pharmacy_name'] || payload['shop_name'] || payload['store_name'] || payload['medical_name'] || 'Pharmacy Owner'
         ).trim() || 'Pharmacy Owner';
@@ -697,14 +678,6 @@ router.post('/google/disconnect', async (_req, res) => {
 router.get('/registered-devices', async (_req, res) => {
   try {
     const db = await dbManager.getConnection();
-    await db.run(`
-      CREATE TABLE IF NOT EXISTS push_tokens (
-        token TEXT PRIMARY KEY,
-        device_name TEXT,
-        os TEXT,
-        last_seen DATETIME DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
     const rows = await db.all(`
       SELECT 
         push_tokens.token, 
@@ -751,18 +724,6 @@ router.put('/registered-devices/rename', async (req, res) => {
 router.get('/storage-locations', async (_req, res) => {
   try {
     const db = await dbManager.getConnection();
-    await db.run(`
-      CREATE TABLE IF NOT EXISTS storage_locations (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL UNIQUE,
-        code TEXT UNIQUE,
-        type TEXT DEFAULT 'rack',
-        description TEXT,
-        is_default INTEGER DEFAULT 0,
-        is_active INTEGER DEFAULT 1,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
     const locations = await db.all('SELECT * FROM storage_locations ORDER BY is_default DESC, name ASC');
     res.json(locations || []);
   } catch (error) {

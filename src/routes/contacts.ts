@@ -4,23 +4,10 @@ import { syncDistributorPhoneAcrossTables } from '../utils/distributorSyncHelper
 
 const router = express.Router();
 
-async function ensureContactsTable(db: any) {
-  await db.exec(`
-    CREATE TABLE IF NOT EXISTS contacts (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL,
-      type TEXT DEFAULT 'general',
-      phone TEXT,
-      email TEXT,
-      address TEXT,
-      gstin TEXT,
-      notes TEXT,
-      alias_names TEXT,
-      is_active INTEGER DEFAULT 1,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
+let contactsTableInitialized = false;
+async function ensureContactsTable(_db: any) {
+  if (contactsTableInitialized) return;
+  contactsTableInitialized = true;
 }
 
 // GET /api/contacts

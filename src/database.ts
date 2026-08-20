@@ -2,7 +2,7 @@ import { dbManager } from './database/connection.js';
 
 // Bump this number whenever you add new CREATE TABLE, ALTER TABLE, or INSERT OR IGNORE statements below.
 // On normal boots where this version matches the stored version, all DDL is skipped entirely (~3-5s saved).
-const CURRENT_SCHEMA_VERSION = 39;
+const CURRENT_SCHEMA_VERSION = 41;
 
 // FTS5 creates exactly these four shadow tables for an external-content index.
 // While the `medicines_fts` declaration exists in sqlite_master these names are
@@ -193,10 +193,20 @@ export async function ensureSchema(dbPath: string) {
         await db.run('INSERT OR IGNORE INTO schema_migrations (version) VALUES (?)', [CURRENT_SCHEMA_VERSION]);
       }
       console.log(`[Boot] Schema v${CURRENT_SCHEMA_VERSION} already applied, skipping DDL (fast boot).`);
-      // Still verify the FTS index: a broken one blocks every write to `medicines`,
-      // and that damage can happen long after the schema version was recorded.
+      // Still verify the FTS index and performance composite indexes:
       await db.run('CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers (phone)');
       await db.run('CREATE INDEX IF NOT EXISTS idx_customers_name ON customers (name)');
+      await db.run('CREATE INDEX IF NOT EXISTS idx_sales_invoices_cust_pay ON sales_invoices(customer_id, payment_status, payment_medium)');
+      await db.run('CREATE INDEX IF NOT EXISTS idx_sales_date_status ON sales_invoices(date DESC, payment_status)');
+      await db.run('CREATE INDEX IF NOT EXISTS idx_purchases_date_dist ON purchases(date DESC, distributor_id)');
+      await db.run('CREATE INDEX IF NOT EXISTS idx_customers_credit ON customers(credit_balance, credit_enabled)');
+      await db.run('CREATE INDEX IF NOT EXISTS idx_medicines_name_mfg ON medicines(name, manufacturer)');
+      await db.run('CREATE INDEX IF NOT EXISTS idx_special_orders_status_date ON special_orders(status, date DESC)');
+      await db.run('CREATE INDEX IF NOT EXISTS idx_inventory_master_stock ON inventory_master(quantity, loose_quantity)');
+      await db.run('CREATE INDEX IF NOT EXISTS idx_auto_notif_type_status ON automation_notifications(type, status, created_at DESC)');
+      await db.run('CREATE INDEX IF NOT EXISTS idx_auto_notif_created ON automation_notifications(created_at DESC)');
+      await db.run('CREATE INDEX IF NOT EXISTS idx_action_logs_created_type ON action_logs(created_at DESC, action_type)');
+      await db.run('CREATE INDEX IF NOT EXISTS idx_delivery_boys_active ON delivery_boys(is_active)');
       await ensureMedicinesFts(db);
       return;
     }
@@ -255,6 +265,7 @@ export async function ensureSchema(dbPath: string) {
       const cols: Array<{ name: string }> = await db.all("PRAGMA table_info(special_orders)");
       const colNames = cols.map(c => c.name).join(', ');
       await db.exec(`
+        DROP TABLE IF EXISTS special_orders_new;
         CREATE TABLE special_orders_new (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           customer_id INTEGER DEFAULT NULL,
@@ -280,7 +291,9 @@ export async function ensureSchema(dbPath: string) {
           source TEXT,
           source_refill_id INTEGER DEFAULT NULL,
           converted_to_refill_id INTEGER DEFAULT NULL,
-          cart_add_error TEXT DEFAULT NULL
+          cart_add_error TEXT DEFAULT NULL,
+          lifecycle_status TEXT DEFAULT 'CREATED',
+          last_checked_at DATETIME
         );
       `);
       if (colNames) {
@@ -590,6 +603,14 @@ export async function ensureSchema(dbPath: string) {
     CREATE INDEX IF NOT EXISTS idx_patient_refills_status_date ON patient_refills (status, next_refill_date);
     CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers (phone);
     CREATE INDEX IF NOT EXISTS idx_customers_name ON customers (name);
+    CREATE INDEX IF NOT EXISTS idx_sales_invoices_customer_status ON sales_invoices (customer_id, payment_status, payment_medium);
+    CREATE INDEX IF NOT EXISTS idx_sales_invoices_date_status ON sales_invoices (date DESC, payment_status);
+    CREATE INDEX IF NOT EXISTS idx_purchases_date_dist ON purchases (date DESC, distributor_id);
+    CREATE INDEX IF NOT EXISTS idx_medicines_name_mfg ON medicines (name, manufacturer);
+    CREATE INDEX IF NOT EXISTS idx_action_logs_created_type ON action_logs (created_at DESC, action_type);
+    CREATE INDEX IF NOT EXISTS idx_automation_notifications_type_status ON automation_notifications (type, status);
+    CREATE INDEX IF NOT EXISTS idx_delivery_boys_active ON delivery_boys (is_active);
+    CREATE INDEX IF NOT EXISTS idx_special_orders_status_date ON special_orders (status, date DESC);
     CREATE TABLE IF NOT EXISTS distributor_dispatch_reminders (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       distributor_id INTEGER,
@@ -1337,6 +1358,106 @@ export async function ensureSchema(dbPath: string) {
       cache_value TEXT NOT NULL,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
+
+    CREATE TABLE IF NOT EXISTS delivery_boys (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      whatsapp_number TEXT,
+      telegram_chat_id TEXT,
+      is_active INTEGER DEFAULT 1
+    );
+    CREATE INDEX IF NOT EXISTS idx_delivery_boys_active ON delivery_boys(is_active);
+
+    CREATE TABLE IF NOT EXISTS contacts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      type TEXT DEFAULT 'general',
+      phone TEXT,
+      email TEXT,
+      address TEXT,
+      gstin TEXT,
+      notes TEXT,
+      alias_names TEXT,
+      is_active INTEGER DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS pharmarack_distributors (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      store_name TEXT UNIQUE,
+      distributor_code TEXT,
+      phone TEXT,
+      location TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS pharmarack_distributor_mappings (
+      store_name TEXT PRIMARY KEY,
+      distributor_id INTEGER,
+      phone TEXT,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS expiry_return_reviews (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      inventory_id INTEGER NOT NULL,
+      medicine_id INTEGER NOT NULL,
+      batch_no TEXT NOT NULL,
+      expiry_date TEXT,
+      quantity REAL NOT NULL,
+      distributor_id INTEGER,
+      distributor_name TEXT,
+      cost_price REAL DEFAULT 0,
+      mrp REAL DEFAULT 0,
+      proposed_return_amount REAL DEFAULT 0,
+      status TEXT DEFAULT 'pending',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      reviewed_at DATETIME,
+      reviewed_by TEXT,
+      return_id INTEGER,
+      notes TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_expiry_return_reviews_status ON expiry_return_reviews(status);
+
+    CREATE TABLE IF NOT EXISTS inventory_reorder_snooze (
+      medicine_id INTEGER PRIMARY KEY,
+      snooze_until TEXT NOT NULL,
+      snooze_type TEXT NOT NULL DEFAULT '7_days',
+      reason TEXT,
+      created_at TEXT NOT NULL DEFAULT (DATETIME('now')),
+      updated_at TEXT NOT NULL DEFAULT (DATETIME('now')),
+      FOREIGN KEY (medicine_id) REFERENCES medicines(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS refill_fulfillments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      refill_id INTEGER NOT NULL,
+      customer_id INTEGER,
+      patient_name TEXT NOT NULL,
+      patient_phone TEXT NOT NULL,
+      medicine_id INTEGER NOT NULL,
+      medicine_name TEXT,
+      quantity_fulfilled INTEGER DEFAULT 1,
+      fulfilled_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      invoice_id INTEGER,
+      invoice_no TEXT,
+      payment_status TEXT DEFAULT 'PAID'
+    );
+    CREATE INDEX IF NOT EXISTS idx_refill_fulfillments_refill_id ON refill_fulfillments(refill_id);
+    CREATE INDEX IF NOT EXISTS idx_refill_fulfillments_customer_id ON refill_fulfillments(customer_id);
+
+    -- Composite Performance Indexes for High-Traffic Query Endpoints
+    CREATE INDEX IF NOT EXISTS idx_sales_invoices_cust_pay ON sales_invoices(customer_id, payment_status, payment_medium);
+    CREATE INDEX IF NOT EXISTS idx_sales_date_status ON sales_invoices(date DESC, payment_status);
+    CREATE INDEX IF NOT EXISTS idx_purchases_date_dist ON purchases(date DESC, distributor_id);
+    CREATE INDEX IF NOT EXISTS idx_customers_credit ON customers(credit_balance, credit_enabled);
+    CREATE INDEX IF NOT EXISTS idx_automation_notifications_type_status ON automation_notifications(type, status, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_special_orders_status_date ON special_orders(status, date DESC);
+    CREATE INDEX IF NOT EXISTS idx_medicines_enrichment ON medicines(enrichment_status);
+    CREATE INDEX IF NOT EXISTS idx_action_logs_created_type ON action_logs(created_at DESC, action_type);
+    CREATE INDEX IF NOT EXISTS idx_medicines_name_mfg ON medicines(name, manufacturer);
+    CREATE INDEX IF NOT EXISTS idx_inventory_master_stock ON inventory_master(quantity, loose_quantity);
 
     CREATE TRIGGER IF NOT EXISTS auto_generate_item_code
     AFTER INSERT ON medicines

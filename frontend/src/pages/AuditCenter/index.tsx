@@ -122,6 +122,9 @@ function StatCard({ label, value, color, sub }: { label: string; value: number |
   );
 }
 
+let cachedAuditReport: AuditReport | null = null;
+let cachedAuditHistory: AuditHistoryRow[] = [];
+
 // ── Main Page ─────────────────────────────────────────────────────────────────
 export default function AuditCenter() {
   const [viewingHistoryId, setViewingHistoryId] = useState<number | null>(null);
@@ -129,11 +132,30 @@ export default function AuditCenter() {
 
   const latestQuery = useApiQuery<AuditReport | null>(
     ['audit-latest'],
-    () => apiClient.get('/audit/latest').then(r => r.data)
+    async () => {
+      const res = await apiClient.get('/audit/latest');
+      if (res.data) cachedAuditReport = res.data;
+      return res.data;
+    },
+    {
+      initialData: cachedAuditReport || undefined,
+      staleTime: 60000,
+      refetchOnWindowFocus: false,
+    }
   );
   const historyQuery = useApiQuery<AuditHistoryRow[]>(
     ['audit-history'],
-    () => apiClient.get('/audit/history').then(r => r.data || [])
+    async () => {
+      const res = await apiClient.get('/audit/history');
+      const list = res.data || [];
+      cachedAuditHistory = list;
+      return list;
+    },
+    {
+      initialData: cachedAuditHistory.length > 0 ? cachedAuditHistory : undefined,
+      staleTime: 60000,
+      refetchOnWindowFocus: false,
+    }
   );
   const historicalQuery = useApiQuery<AuditReport>(
     ['audit-detail', viewingHistoryId],

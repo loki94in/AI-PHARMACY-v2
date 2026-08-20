@@ -2199,9 +2199,11 @@ const RefillsSection: React.FC = () => {
 // DISTRIBUTOR MESSAGES SECTION
 // ═══════════════════════════════════════════════════════════════════════════════
 
+let cachedDistributorLogs: AutomationLog[] = [];
+
 const DistributorMessagesSection: React.FC = () => {
-  const [logs, setLogs] = useState<AutomationLog[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [logs, setLogs] = useState<AutomationLog[]>(cachedDistributorLogs);
+  const [loading, setLoading] = useState(cachedDistributorLogs.length === 0);
   const [typeFilter, setTypeFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
   const [search, setSearch] = useState('');
@@ -2221,7 +2223,9 @@ const DistributorMessagesSection: React.FC = () => {
   };
 
   const load = useCallback(async () => {
-    setLoading(true);
+    if (cachedDistributorLogs.length === 0) {
+      setLoading(true);
+    }
     try {
       const r = await withSilentRetry(() => apiClient.get('/automation/notifications', {
         params: {
@@ -2231,7 +2235,9 @@ const DistributorMessagesSection: React.FC = () => {
           limit: 200
         }
       }));
-      setLogs(Array.isArray(r.data) ? r.data : []);
+      const list = Array.isArray(r.data) ? r.data : [];
+      cachedDistributorLogs = list;
+      setLogs(list);
     } catch { toastEvent.trigger('Failed to load messages', 'error', '/crm'); }
     finally { setLoading(false); }
   }, [typeFilter, statusFilter, debouncedSearch]);
@@ -2448,8 +2454,11 @@ interface WaMessageTemplate {
   body: string;
 }
 
+let cachedWaChats: WaChatItem[] = [];
+let cachedWaTemplates: WaMessageTemplate[] = [];
+
 const WhatsAppSection: React.FC = () => {
-  const [chats, setChats] = useState<WaChatItem[]>([]);
+  const [chats, setChats] = useState<WaChatItem[]>(cachedWaChats);
   const [loadingChats, setLoadingChats] = useState(false);
   const [search, setSearch] = useState('');
   const [activeChat, setActiveChat] = useState<WaChatItem | null>(null);
@@ -2464,7 +2473,7 @@ const WhatsAppSection: React.FC = () => {
   const [initializing, setInitializing] = useState(false);
   const [qrUrl, setQrUrl] = useState<string | null>(null);
   const [qrMessage, setQrMessage] = useState<string>('');
-  const [templates, setTemplates] = useState<WaMessageTemplate[]>([]);
+  const [templates, setTemplates] = useState<WaMessageTemplate[]>(cachedWaTemplates);
   const [showTemplatePopover, setShowTemplatePopover] = useState(false);
   const [showManageModal, setShowManageModal] = useState(false);
   const [showNewChatModal, setShowNewChatModal] = useState(false);
@@ -2559,7 +2568,9 @@ const WhatsAppSection: React.FC = () => {
     setLoadingChats(true);
     try {
       const res = await withSilentRetry(() => apiClient.get<WaChatItem[]>('/messaging/chats'));
-      setChats(Array.isArray(res.data) ? res.data : []);
+      const list = Array.isArray(res.data) ? res.data : [];
+      cachedWaChats = list;
+      setChats(list);
     } catch {
       toastEvent.trigger('Failed to load WhatsApp chats', 'error', '/crm');
     } finally {
@@ -2571,7 +2582,9 @@ const WhatsAppSection: React.FC = () => {
   const loadTemplates = useCallback(async () => {
     try {
       const res = await apiClient.get<WaMessageTemplate[]>('/messaging/templates');
-      setTemplates(Array.isArray(res.data) ? res.data : []);
+      const list = Array.isArray(res.data) ? res.data : [];
+      cachedWaTemplates = list;
+      setTemplates(list);
     } catch (err) {
       console.error('Failed to load message templates:', err);
     }
@@ -3581,10 +3594,12 @@ interface SpecialOrderItem {
   language?: string;
 }
 
+let cachedSpecialOrders: SpecialOrderItem[] = [];
+
 const SpecialOrdersSection: React.FC = () => {
   const navigate = useNavigate();
-  const [orders, setOrders] = useState<SpecialOrderItem[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [orders, setOrders] = useState<SpecialOrderItem[]>(cachedSpecialOrders);
+  const [loading, setLoading] = useState(cachedSpecialOrders.length === 0);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
@@ -3707,10 +3722,14 @@ const SpecialOrdersSection: React.FC = () => {
   };
 
   const loadOrders = useCallback(async () => {
-    setLoading(true);
+    if (cachedSpecialOrders.length === 0) {
+      setLoading(true);
+    }
     try {
       const data = await withSilentRetry(() => api.getOrders());
-      setOrders(Array.isArray(data) ? data : []);
+      const list = Array.isArray(data) ? data : [];
+      cachedSpecialOrders = list;
+      setOrders(list);
     } catch {
       toastEvent.trigger('Failed to load special requests', 'error', '/crm');
     } finally {
@@ -4838,16 +4857,6 @@ const SpecialOrdersSection: React.FC = () => {
 // CUSTOMER CREDIT SECTION
 // ═══════════════════════════════════════════════════════════════════════════════
 
-
-
-
-
-
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// CUSTOMER CREDIT SECTION
-// ═══════════════════════════════════════════════════════════════════════════════
-
 interface CreditCustomerItem {
   id: number;
   name: string;
@@ -4860,13 +4869,22 @@ interface CreditCustomerItem {
   last_sale_date?: string;
 }
 
+let cachedCreditCustomers: CreditCustomerItem[] = [];
+let cachedSelectedCustomerId: number | null = null;
+
 const CustomerCreditSection: React.FC = () => {
   const navigate = useNavigate();
-  const [customers, setCustomers] = useState<CreditCustomerItem[]>([]);
-  const [selectedCustomer, setSelectedCustomer] = useState<CreditCustomerItem | null>(null);
+  const [customers, setCustomers] = useState<CreditCustomerItem[]>(cachedCreditCustomers);
+  const [selectedCustomer, setSelectedCustomer] = useState<CreditCustomerItem | null>(() => {
+    if (cachedCreditCustomers.length > 0) {
+      const match = cachedCreditCustomers.find(c => c.id === cachedSelectedCustomerId);
+      return match || cachedCreditCustomers[0];
+    }
+    return null;
+  });
   const [customerInvoices, setCustomerInvoices] = useState<any[]>([]);
   const [loadingInvoices, setLoadingInvoices] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(cachedCreditCustomers.length === 0);
   const [search, setSearch] = useState('');
   const [editingId, setEditingId] = useState<number | null>(null);
   const [newDueDate, setNewDueDate] = useState('');
@@ -4889,8 +4907,6 @@ const CustomerCreditSection: React.FC = () => {
   }, []);
 
   // Handle ESC key to close viewInvoice modal.
-  // Handler reads the latest value via ref so the effect can attach the
-  // listener once ([]) instead of re-attaching on every open/close.
   const viewInvoiceRef = useRef(viewInvoice);
   useEffect(() => {
     viewInvoiceRef.current = viewInvoice;
@@ -4906,22 +4922,20 @@ const CustomerCreditSection: React.FC = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  // Tracks the currently selected customer id via ref (not state) so it can be
-  // read synchronously before the list fetch resolves, without adding
-  // `selectedCustomer` to loadCreditCustomers' deps (which would re-trigger the
-  // mount effect below on every customer click).
   const selectedCustomerIdRef = useRef<number | null>(null);
   useEffect(() => {
     selectedCustomerIdRef.current = selectedCustomer?.id ?? null;
+    if (selectedCustomer?.id) {
+      cachedSelectedCustomerId = selectedCustomer.id;
+    }
   }, [selectedCustomer]);
 
   const loadCreditCustomers = useCallback(async () => {
-    setLoading(true);
-    const previousId = selectedCustomerIdRef.current;
+    if (cachedCreditCustomers.length === 0) {
+      setLoading(true);
+    }
+    const previousId = selectedCustomerIdRef.current || cachedSelectedCustomerId;
     try {
-      // Fetch the customer list and the previously-selected customer's invoice
-      // history concurrently instead of waiting for the list before starting
-      // the history fetch — they're independent once the id is already known.
       const [res, invoicesRes] = await Promise.all([
         apiClient.get<CreditCustomerItem[]>('/crm/credit-customers'),
         previousId
@@ -4929,10 +4943,12 @@ const CustomerCreditSection: React.FC = () => {
           : Promise.resolve(null)
       ]);
       const data = Array.isArray(res.data) ? res.data : [];
+      cachedCreditCustomers = data;
       setCustomers(data);
       if (data.length > 0) {
         const match = data.find(c => c.id === previousId);
         const active = match || data[0];
+        cachedSelectedCustomerId = active.id;
         setSelectedCustomer(active);
         if (active.id === previousId && invoicesRes) {
           setCustomerInvoices(Array.isArray(invoicesRes.data) ? invoicesRes.data : []);

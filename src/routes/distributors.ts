@@ -26,18 +26,8 @@ router.get('/', getDistributorsHandler);
 router.get('/pharmarack-list', async (_req, res) => {
   try {
     const db = await dbManager.getConnection();
-    await db.run(`
-      CREATE TABLE IF NOT EXISTS pharmarack_distributors (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        store_name TEXT UNIQUE,
-        distributor_code TEXT,
-        phone TEXT,
-        location TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
     const rows = await db.all('SELECT * FROM pharmarack_distributors ORDER BY store_name ASC LIMIT 1000');
-    res.json({ success: true, distributors: rows });
+    res.json({ success: true, distributors: rows || [] });
   } catch (error: any) {
     res.status(500).json({ error: 'Failed to fetch Pharmarack distributors: ' + error.message });
   }

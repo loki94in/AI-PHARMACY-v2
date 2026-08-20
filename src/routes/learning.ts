@@ -211,19 +211,67 @@ router.get('/mapping', async (req, res) => {
   }
 });
 
+// GET /api/learning/corrections - list all custom OCR correction rules
+router.get('/corrections', async (_req, res) => {
+  try {
+    const db = await dbManager.getConnection();
+    const rows = await db.all('SELECT rowid as id, ocr, correct, count FROM ocr_corrections ORDER BY count DESC, ocr ASC LIMIT 1000');
+    res.json(rows);
+  } catch (error: any) {
+    console.error('Failed to fetch OCR corrections:', error);
+    res.status(500).json({ error: 'Failed to fetch OCR corrections' });
+  }
+});
+
+// POST /api/learning/corrections - add or update an OCR correction rule
+router.post('/corrections', async (req, res) => {
+  const rawText = (req.body.raw_text || req.body.ocr || '').trim();
+  const correctedName = (req.body.corrected_name || req.body.correct || '').trim();
+  if (!rawText || !correctedName) {
+    return res.status(400).json({ error: 'Both raw_text and corrected_name are required' });
+  }
+  try {
+    const db = await dbManager.getConnection();
+    await db.run(
+      `INSERT INTO ocr_corrections (ocr, correct, count)
+       VALUES (?, ?, 1)
+       ON CONFLICT(ocr) DO UPDATE SET
+         correct = excluded.correct,
+         count = count + 1`,
+      [rawText.toLowerCase(), correctedName]
+    );
+    await rebuildLearningStatsCache();
+    res.status(201).json({ success: true, message: 'OCR correction rule saved' });
+  } catch (error: any) {
+    console.error('Failed to save OCR correction:', error);
+    res.status(500).json({ error: 'Failed to save OCR correction' });
+  }
+});
+
+// DELETE /api/learning/corrections/:id - delete an OCR correction rule
+router.delete('/corrections/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const db = await dbManager.getConnection();
+    const numId = parseInt(id, 10);
+    if (!isNaN(numId)) {
+      await db.run('DELETE FROM ocr_corrections WHERE rowid = ? OR ocr = ?', [numId, id]);
+    } else {
+      await db.run('DELETE FROM ocr_corrections WHERE ocr = ?', [id]);
+    }
+    await rebuildLearningStatsCache();
+    res.json({ success: true, message: 'OCR correction rule deleted' });
+  } catch (error: any) {
+    console.error('Failed to delete OCR correction:', error);
+    res.status(500).json({ error: 'Failed to delete OCR correction' });
+  }
+});
+
 // GET /api/learning/profiles - fetch all learning profiles
 router.get('/profiles', async (req, res) => {
   let db;
   try {
     db = await dbManager.getConnection();
-    await db.run(`
-      CREATE TABLE IF NOT EXISTS pharmarack_distributor_mappings (
-        store_name TEXT PRIMARY KEY,
-        distributor_id INTEGER,
-        phone TEXT,
-        updated_at DATETIME
-      )
-    `);
 
     const profiles = await db.all(`
       SELECT d.id as distributor_id, d.name as distributor_name, d.email as distributor_email,
@@ -507,7 +555,7 @@ router.get('/dashboard-stats', async (req, res) => {
       db.get('SELECT COUNT(*) as count FROM medicines').catch(() => ({ count: 0 }))
     ]);
 
-    const recentOcr = await db.all('SELECT raw_ocr_text as ocr, correct_medicine_name as correct, success_count as count, updated_at FROM ocr_corrections ORDER BY updated_at DESC LIMIT 10').catch(() => []);
+    const recentOcr = await db.all('SELECT ocr, correct, count FROM ocr_corrections ORDER BY count DESC LIMIT 10').catch(() => []);
     const recentAliases = await db.all('SELECT alias_name, medicine_id, created_at FROM medicine_aliases ORDER BY id DESC LIMIT 10').catch(() => []);
 
     res.json({

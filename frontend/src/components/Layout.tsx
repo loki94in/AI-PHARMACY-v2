@@ -1015,6 +1015,8 @@ const Topbar = ({
     whatsapp: { connected: boolean; initializing: boolean; isSyncing: boolean; pendingQueueCount: number };
     gaters?: { automation: boolean; whatsapp: boolean; telegram: boolean; email: boolean };
   } | null>(null);
+  const servicesStatusRef = useRef(servicesStatus);
+  servicesStatusRef.current = servicesStatus;
 
   const [waQueueDetail, setWaQueueDetail] = useState<{
     isProcessing: boolean;
@@ -1022,6 +1024,8 @@ const Topbar = ({
     activeTargetName?: string | null;
     counts: { pending: number; sending: number; sent: number; failed_offline: number; failed_perm: number };
   } | null>(null);
+
+  const [isQueueActive, setIsQueueActive] = useState<boolean>(false);
 
   const notifiedFailedQueueIdsRef = useRef<Set<number>>(new Set());
 
@@ -1040,6 +1044,7 @@ const Topbar = ({
       const { api } = await import('../services/api.js');
       const res = await api.getServicesStatus();
       if (res && res.success && res.services) {
+        servicesStatusRef.current = res.services;
         setServicesStatus(res.services);
       }
     } catch (err) {
@@ -1049,7 +1054,8 @@ const Topbar = ({
 
   const fetchWhatsAppQueueStatus = useCallback(async () => {
     try {
-      if (servicesStatus && (!servicesStatus.whatsapp?.connected || servicesStatus.whatsapp?.isSyncing === false && !servicesStatus.whatsapp?.connected)) {
+      const curServices = servicesStatusRef.current;
+      if (curServices && (!curServices.whatsapp?.connected || curServices.whatsapp?.isSyncing === false && !curServices.whatsapp?.connected)) {
         return;
       }
       const { api } = await import('../services/api.js');
@@ -1063,8 +1069,8 @@ const Topbar = ({
         });
         const pending = qData.counts?.pending || 0;
         const sending = qData.counts?.sending || 0;
-        const sent = qData.counts?.sent || 0;
-        const isQueueActive = pending > 0 || sending > 0 || qData.isProcessing;
+        const active = pending > 0 || sending > 0 || !!qData.isProcessing;
+        setIsQueueActive(active);
 
         if (Array.isArray(qData.recentItems)) {
           qData.recentItems.forEach((item: any) => {
@@ -1079,23 +1085,37 @@ const Topbar = ({
     } catch (err) {
       console.warn('[Layout] Failed to fetch whatsapp queue status:', err);
     }
-  }, [servicesStatus]);
+  }, []);
 
+  // Services status: Poll once on mount, then every 30 seconds & on focus/auth events
   useEffect(() => {
     if (!compactCacheLoaded) return;
-    // Services status: Poll every 30 seconds
     fetchServicesStatus();
     const sInterval = setInterval(fetchServicesStatus, 30000);
-
-    // WhatsApp queue status: Live 3-second polling when active, 15-second polling otherwise
-    fetchWhatsAppQueueStatus();
-    const isQueueActive = waQueueDetail?.isProcessing || (waQueueDetail?.counts?.pending || 0) > 0 || (waQueueDetail?.counts?.sending || 0) > 0;
-    const qInterval = setInterval(fetchWhatsAppQueueStatus, isQueueActive ? 3000 : 15000);
 
     const handleRefreshStatus = () => {
       fetchServicesStatus();
       fetchWhatsAppQueueStatus();
     };
+
+    window.addEventListener('focus', handleRefreshStatus);
+    window.addEventListener('refresh-pharmarack-cart', handleRefreshStatus);
+    window.addEventListener('pharmarack-auth-changed', handleRefreshStatus);
+
+    return () => {
+      clearInterval(sInterval);
+      window.removeEventListener('focus', handleRefreshStatus);
+      window.removeEventListener('refresh-pharmarack-cart', handleRefreshStatus);
+      window.removeEventListener('pharmarack-auth-changed', handleRefreshStatus);
+    };
+  }, [fetchServicesStatus, fetchWhatsAppQueueStatus, compactCacheLoaded]);
+
+  // WhatsApp queue status: Poll every 15 seconds (or 3 seconds if active), and on queue events
+  useEffect(() => {
+    if (!compactCacheLoaded) return;
+    fetchWhatsAppQueueStatus();
+    const intervalMs = isQueueActive ? 3000 : 15000;
+    const qInterval = setInterval(fetchWhatsAppQueueStatus, intervalMs);
 
     const unsubOpen = whatsappQueueEvent.subscribeOpen(() => {
       onOpenWaQueue?.();
@@ -1106,20 +1126,12 @@ const Topbar = ({
       fetchWhatsAppQueueStatus();
     });
 
-    window.addEventListener('focus', handleRefreshStatus);
-    window.addEventListener('refresh-pharmarack-cart', handleRefreshStatus);
-    window.addEventListener('pharmarack-auth-changed', handleRefreshStatus);
-
     return () => {
-      clearInterval(sInterval);
       clearInterval(qInterval);
       unsubOpen();
       unsubUpdated();
-      window.removeEventListener('focus', handleRefreshStatus);
-      window.removeEventListener('refresh-pharmarack-cart', handleRefreshStatus);
-      window.removeEventListener('pharmarack-auth-changed', handleRefreshStatus);
     };
-  }, [fetchServicesStatus, fetchWhatsAppQueueStatus, compactCacheLoaded, waQueueDetail?.isProcessing, waQueueDetail?.counts?.pending, waQueueDetail?.counts?.sending, onOpenWaQueue]);
+  }, [compactCacheLoaded, isQueueActive, fetchWhatsAppQueueStatus, onOpenWaQueue]);
 
   // Active Manual/Automated Message Send 10-second Progress state
   const [activeMsgProgress, setActiveMsgProgress] = useState<{

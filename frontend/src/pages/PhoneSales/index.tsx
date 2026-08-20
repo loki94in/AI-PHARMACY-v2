@@ -44,9 +44,31 @@ interface StagedSale {
   status: 'pending' | 'approved' | 'rejected';
 }
 
+interface Device {
+  token: string;
+  device_name: string;
+  os: string;
+  is_online: number;
+  last_seen: string;
+  offline_seconds: number;
+}
+
+interface ConnectionLog {
+  id: number;
+  token: string;
+  device_name: string;
+  os: string;
+  status: 'connected' | 'disconnected';
+  timestamp: string;
+}
+
+let cachedPhoneSales: StagedSale[] = [];
+let cachedDevices: Device[] = [];
+let cachedLogs: ConnectionLog[] = [];
+
 export default function PhoneSales() {
-  const [sales, setSales] = useState<StagedSale[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [sales, setSales] = useState<StagedSale[]>(cachedPhoneSales);
+  const [loading, setLoading] = useState(cachedPhoneSales.length === 0);
   const [error, setError] = useState<string | null>(null);
   
   // Selection & Editing
@@ -58,27 +80,8 @@ export default function PhoneSales() {
   const [saving, setSaving] = useState(false);
   const [rejecting, setRejecting] = useState(false);
 
-  // Device & Logs state for history and charts dashboard
-  interface Device {
-    token: string;
-    device_name: string;
-    os: string;
-    is_online: number;
-    last_seen: string;
-    offline_seconds: number;
-  }
-
-  interface ConnectionLog {
-    id: number;
-    token: string;
-    device_name: string;
-    os: string;
-    status: 'connected' | 'disconnected';
-    timestamp: string;
-  }
-
-  const [devices, setDevices] = useState<Device[]>([]);
-  const [logs, setLogs] = useState<ConnectionLog[]>([]);
+  const [devices, setDevices] = useState<Device[]>(cachedDevices);
+  const [logs, setLogs] = useState<ConnectionLog[]>(cachedLogs);
   const [logsLoading, setLogsLoading] = useState(false);
 
   // Search & Filters
@@ -86,12 +89,16 @@ export default function PhoneSales() {
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
 
   const fetchStagedSales = useCallback(async () => {
-    setLoading(true);
+    if (cachedPhoneSales.length === 0) {
+      setLoading(true);
+    }
     setError(null);
     try {
       // Fetch all historical staged sales
       const data = await api.getStagedSales(true);
-      setSales(Array.isArray(data) ? data : []);
+      const list = Array.isArray(data) ? data : [];
+      cachedPhoneSales = list;
+      setSales(list);
     } catch (err: any) {
       console.error('Failed to fetch staged sales:', err);
       setError(err.message || 'Failed to load staged sales transactions.');
@@ -101,14 +108,19 @@ export default function PhoneSales() {
   }, []);
 
   const fetchDeviceData = useCallback(async () => {
-    setLogsLoading(true);
     try {
       const [devRes, logRes] = await Promise.all([
         apiClient.get('/notifications/devices'),
         apiClient.get('/notifications/devices/logs')
       ]);
-      if (devRes.data?.devices) setDevices(devRes.data.devices);
-      if (logRes.data?.logs) setLogs(logRes.data.logs);
+      if (devRes.data?.devices) {
+        cachedDevices = devRes.data.devices;
+        setDevices(devRes.data.devices);
+      }
+      if (logRes.data?.logs) {
+        cachedLogs = logRes.data.logs;
+        setLogs(logRes.data.logs);
+      }
     } catch (err) {
       console.error('Failed to fetch device data on phone sales page:', err);
     } finally {

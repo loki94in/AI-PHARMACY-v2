@@ -77,8 +77,11 @@ router.get('/medicines', async (req, res) => {
     }
 
     if (mrpFilter) {
-      whereClauses.push('CAST(COALESCE(medicines.mrp, 0) AS TEXT) LIKE ?');
-      params.push(`%${normalizeNumericSearch(mrpFilter)}%`);
+      const norm = normalizeNumericSearch(mrpFilter);
+      if (norm) {
+        whereClauses.push('CAST(COALESCE(medicines.mrp, 0) AS TEXT) LIKE ?');
+        params.push(`%${norm}%`);
+      }
     }
 
     if (packagingFilter) {

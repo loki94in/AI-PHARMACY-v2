@@ -107,7 +107,7 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
 
   useEffect(() => {
     fetchStatus();
-    const interval = setInterval(fetchStatus, 300);
+    const interval = setInterval(fetchStatus, 2000);
     const unsub = whatsappQueueEvent.subscribeUpdated(() => fetchStatus());
     return () => {
       clearInterval(interval);

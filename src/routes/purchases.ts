@@ -2143,7 +2143,7 @@ router.get('/reconciliation', async (req, res) => {
       if (a.alias_name && a.real_name) aliasMap.set(a.alias_name, a.real_name);
     }
 
-    const ocrRows = await db.all(`SELECT LOWER(raw_text) as raw_text, LOWER(corrected_text) as corrected_text FROM ocr_corrections`).catch(() => []);
+    const ocrRows = await db.all(`SELECT LOWER(ocr) as raw_text, LOWER(correct) as corrected_text FROM ocr_corrections`).catch(() => []);
     for (const o of ocrRows) {
       if (o.raw_text && o.corrected_text) aliasMap.set(o.raw_text, o.corrected_text);
     }
@@ -3189,12 +3189,10 @@ router.post('/staged/:id/approve', async (req, res) => {
       if (rawText && rawText.trim() !== '' && rawText.trim().toLowerCase() !== item.name.trim().toLowerCase()) {
         try {
           await db.run('INSERT OR IGNORE INTO medicine_aliases (alias_name, medicine_id) VALUES (?, ?)', [rawText.trim(), medId]);
-          if (finalDistName) {
-            await db.run(
-              `INSERT OR IGNORE INTO ocr_corrections (distributor_name, raw_text, corrected_name, confidence) VALUES (?, ?, ?, ?)`,
-              [finalDistName, rawText.trim(), item.name.trim(), 1.0]
-            );
-          }
+          await db.run(
+            `INSERT OR REPLACE INTO ocr_corrections (ocr, correct, count) VALUES (?, ?, 1)`,
+            [rawText.trim().toLowerCase(), item.name.trim()]
+          );
         } catch (_) {}
       }
 

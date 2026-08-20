@@ -12,70 +12,11 @@ const DB_PATH = process.env.DB_PATH || path.resolve(__dirname, '..', '..', 'data
 
 const router = express.Router();
 
+let ordersTableInitialized = false;
+
 async function initOrdersTable(db: any) {
-  await db.exec(`
-    CREATE TABLE IF NOT EXISTS special_orders (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      customer_id INTEGER DEFAULT NULL,
-      product TEXT,
-      requester TEXT,
-      phone TEXT,
-      qty INTEGER,
-      priority TEXT,
-      status TEXT DEFAULT 'Pending',
-      date DATETIME DEFAULT CURRENT_TIMESTAMP,
-      notified INTEGER DEFAULT 0,
-      pharmarack_distributor TEXT,
-      pharmarack_rate REAL,
-      pharmarack_mrp REAL,
-      pharmarack_mapped INTEGER DEFAULT 0,
-      pharmarack_scheme TEXT,
-      advance_payment REAL DEFAULT 0.0,
-      source TEXT,
-      source_refill_id INTEGER DEFAULT NULL,
-      cart_add_error TEXT DEFAULT NULL
-    )
-  `);
-  // Try adding columns if they do not exist
-  try {
-    await db.exec('ALTER TABLE special_orders ADD COLUMN customer_id INTEGER DEFAULT NULL');
-  } catch (_) {}
-  try {
-    await db.exec('ALTER TABLE special_orders ADD COLUMN phone TEXT');
-  } catch (_) {}
-  try {
-    await db.exec('ALTER TABLE special_orders ADD COLUMN date DATETIME DEFAULT CURRENT_TIMESTAMP');
-  } catch (_) {}
-  try {
-    await db.exec('ALTER TABLE special_orders ADD COLUMN notified INTEGER DEFAULT 0');
-  } catch (_) {}
-  try {
-    await db.exec('ALTER TABLE special_orders ADD COLUMN source_refill_id INTEGER DEFAULT NULL');
-  } catch (_) {}
-  try {
-    await db.exec('ALTER TABLE special_orders ADD COLUMN source TEXT');
-  } catch (_) {}
-  try {
-    await db.exec('ALTER TABLE special_orders ADD COLUMN pharmarack_distributor TEXT');
-  } catch (_) {}
-  try {
-    await db.exec('ALTER TABLE special_orders ADD COLUMN pharmarack_rate REAL');
-  } catch (_) {}
-  try {
-    await db.exec('ALTER TABLE special_orders ADD COLUMN pharmarack_mrp REAL');
-  } catch (_) {}
-  try {
-    await db.exec('ALTER TABLE special_orders ADD COLUMN pharmarack_mapped INTEGER DEFAULT 0');
-  } catch (_) {}
-  try {
-    await db.exec('ALTER TABLE special_orders ADD COLUMN pharmarack_scheme TEXT');
-  } catch (_) {}
-  try {
-    await db.exec('ALTER TABLE special_orders ADD COLUMN advance_payment REAL DEFAULT 0.0');
-  } catch (_) {}
-  try {
-    await db.exec('ALTER TABLE special_orders ADD COLUMN cart_add_error TEXT DEFAULT NULL');
-  } catch (_) {}
+  if (ordersTableInitialized) return;
+  ordersTableInitialized = true;
 }
 
 // List special requests / orders

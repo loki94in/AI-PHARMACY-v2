@@ -453,19 +453,31 @@ router.get('/doctors/:id/combinations/:medicineId', async (req, res) => {
   }
 });
 
-// Customer Credit Ledger - List all credit customers with dues & dates
+// Customer Credit Ledger - List all credit customers with dues & dates (High-Performance Single-Pass Indexed Query)
 router.get('/credit-customers', async (req, res) => {
   try {
     const db = await dbManager.getConnection();
+
     const rows = await db.all(
-      `SELECT c.id, c.name, c.phone, c.address, c.language, 
-              COALESCE(c.credit_balance, (SELECT SUM(total_amount) FROM sales_invoices si WHERE si.customer_id = c.id AND (si.payment_medium = 'CREDIT' OR si.payment_status = 'UNPAID' OR si.payment_status = 'PENDING') AND si.payment_status != 'PAID'), 0) as credit_balance,
-              c.credit_due_date, c.credit_enabled,
-              (SELECT COUNT(*) FROM sales_invoices si WHERE si.customer_id = c.id AND (si.payment_medium = 'CREDIT' OR si.payment_status = 'UNPAID' OR si.payment_status = 'PENDING') AND si.payment_status != 'PAID') as unpaid_bills_count,
-              (SELECT MAX(date) FROM sales_invoices si WHERE si.customer_id = c.id) as last_sale_date
+      `WITH unpaid_invoices AS (
+         SELECT customer_id, 
+                SUM(total_amount) as invoice_due, 
+                COUNT(id) as unpaid_count, 
+                MAX(date) as last_unpaid_date
+         FROM sales_invoices
+         WHERE (payment_medium = 'CREDIT' OR payment_status IN ('UNPAID', 'PENDING')) AND payment_status != 'PAID'
+         GROUP BY customer_id
+       )
+       SELECT c.id, c.name, c.phone, c.address, c.language, c.credit_due_date, c.credit_enabled,
+              CASE 
+                WHEN c.credit_balance IS NOT NULL AND c.credit_balance > 0 THEN c.credit_balance
+                ELSE COALESCE(ui.invoice_due, 0)
+              END as credit_balance,
+              COALESCE(ui.unpaid_count, 0) as unpaid_bills_count,
+              ui.last_unpaid_date as last_sale_date
        FROM customers c
-       WHERE c.credit_balance > 0
-          OR (SELECT COUNT(*) FROM sales_invoices si WHERE si.customer_id = c.id AND (si.payment_medium = 'CREDIT' OR si.payment_status = 'UNPAID' OR si.payment_status = 'PENDING') AND si.payment_status != 'PAID') > 0
+       LEFT JOIN unpaid_invoices ui ON ui.customer_id = c.id
+       WHERE c.credit_balance > 0 OR ui.unpaid_count > 0 OR c.credit_enabled = 1
        ORDER BY credit_balance DESC`
     );
     res.json(rows);

@@ -6,11 +6,22 @@ import { api } from '../../services/api';
 import type { DashboardStats } from '../../services/api';
 import { useApiQuery } from '../../hooks/useApiQuery';
 
+let cachedDashboardStats: DashboardStats | null = null;
+
 const Dashboard = () => {
   const queryClient = useQueryClient();
-  const { data: stats, isLoading: loading, error } = useApiQuery<DashboardStats>(
+  const { data: stats = cachedDashboardStats, isLoading: loading, error } = useApiQuery<DashboardStats>(
     'dashboard',
-    () => api.getDashboard()
+    async () => {
+      const res = await api.getDashboard();
+      if (res) cachedDashboardStats = res;
+      return res;
+    },
+    {
+      initialData: cachedDashboardStats || undefined,
+      staleTime: 30000,
+      refetchOnWindowFocus: false,
+    }
   );
 
   const dateStr = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });

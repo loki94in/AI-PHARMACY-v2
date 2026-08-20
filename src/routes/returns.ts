@@ -734,28 +734,6 @@ router.get('/expiry-reviews', async (req, res) => {
     const { status, search, date_from, date_to } = req.query;
     db = await dbManager.getConnection();
 
-    await db.run(`
-      CREATE TABLE IF NOT EXISTS expiry_return_reviews (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        inventory_id INTEGER NOT NULL,
-        medicine_id INTEGER NOT NULL,
-        batch_no TEXT NOT NULL,
-        expiry_date TEXT,
-        quantity REAL NOT NULL,
-        distributor_id INTEGER,
-        distributor_name TEXT,
-        cost_price REAL DEFAULT 0,
-        mrp REAL DEFAULT 0,
-        proposed_return_amount REAL DEFAULT 0,
-        status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'approved', 'rejected')),
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        reviewed_at DATETIME,
-        reviewed_by TEXT,
-        return_id INTEGER,
-        notes TEXT
-      )
-    `);
-
     let query = `
       SELECT er.*, m.name as medicine_name, COALESCE(m.pack_size, 10) as pack_size,
              im.quantity as current_stock_qty,

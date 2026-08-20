@@ -56,19 +56,22 @@ interface ReviewStats {
   totalCount: number;
 }
 
+let cachedReviews: ExpiryReviewItem[] = [];
+let cachedStats: ReviewStats = {
+  pendingCount: 0,
+  approvedCount: 0,
+  rejectedCount: 0,
+  pendingAmount: 0,
+  approvedAmount: 0,
+  totalCount: 0,
+};
+
 export const ExpiryReturnReview: React.FC<{ onPendingCountChange?: (count: number) => void }> = ({ onPendingCountChange }) => {
   const queryClient = useQueryClient();
-  const [reviews, setReviews] = useState<ExpiryReviewItem[]>([]);
-  const [stats, setStats] = useState<ReviewStats>({
-    pendingCount: 0,
-    approvedCount: 0,
-    rejectedCount: 0,
-    pendingAmount: 0,
-    approvedAmount: 0,
-    totalCount: 0,
-  });
+  const [reviews, setReviews] = useState<ExpiryReviewItem[]>(cachedReviews);
+  const [stats, setStats] = useState<ReviewStats>(cachedStats);
 
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(cachedReviews.length === 0);
   const [scanning, setScanning] = useState(false);
   const [statusFilter, setStatusFilter] = useState<'pending' | 'approved' | 'rejected' | 'all'>('pending');
   const [searchQuery, setSearchQuery] = useState('');
@@ -105,17 +108,21 @@ export const ExpiryReturnReview: React.FC<{ onPendingCountChange?: (count: numbe
       });
 
       if (res && res.success) {
-        setReviews(res.reviews || []);
-        setStats(res.stats || {
+        const list = res.reviews || [];
+        const st = res.stats || {
           pendingCount: 0,
           approvedCount: 0,
           rejectedCount: 0,
           pendingAmount: 0,
           approvedAmount: 0,
           totalCount: 0,
-        });
+        };
+        cachedReviews = list;
+        cachedStats = st;
+        setReviews(list);
+        setStats(st);
         if (onPendingCountChange) {
-          onPendingCountChange(res.stats?.pendingCount || 0);
+          onPendingCountChange(st.pendingCount || 0);
         }
       }
     } catch (err) {

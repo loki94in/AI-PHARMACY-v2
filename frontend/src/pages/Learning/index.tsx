@@ -80,6 +80,7 @@ interface OcrCorrection {
 
 let cachedDoctorsList: any[] = [];
 let cachedProfiles: LearningProfileSummary[] = [];
+let cachedOcrCorrections: OcrCorrection[] = [];
 const cachedProfileDetailsMap: Record<number, any> = {};
 
 const VALID_LEARNING_TABS = ['clinical', 'doctors', 'distributors'];
@@ -330,10 +331,15 @@ const Learning: React.FC = () => {
     { enabled: isPageVisible, staleTime: 60000 }
   );
 
-  // Custom OCR Corrections list
-  const { data: corrections = [], refetch: refetchCorrections } = useApiQuery<OcrCorrection[]>(
+  // Custom OCR Corrections list with module caching
+  const { data: corrections = cachedOcrCorrections, refetch: refetchCorrections } = useApiQuery<OcrCorrection[]>(
     'ocr-corrections',
-    () => apiClient.get('/learning/corrections').then(res => res.data || []),
+    async () => {
+      const res = await apiClient.get('/learning/corrections');
+      const data = res.data || [];
+      cachedOcrCorrections = data;
+      return data;
+    },
     { enabled: isPageVisible, staleTime: 60000 }
   );
 
@@ -360,7 +366,7 @@ const Learning: React.FC = () => {
       return data;
     },
     {
-      enabled: isPageVisible && showSecondaryData,
+      enabled: isPageVisible,
       staleTime: 120000,
       refetchOnWindowFocus: false
     }

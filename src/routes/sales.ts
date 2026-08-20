@@ -598,12 +598,11 @@ router.post('/', async (req, res) => {
           if (rawOcr && typeof rawOcr === 'string' && rawOcr.trim() && medName) {
             const cleanOcr = rawOcr.toLowerCase().trim();
             await db.run(
-              `INSERT INTO ocr_corrections (raw_ocr_text, correct_medicine_name, success_count)
+              `INSERT INTO ocr_corrections (ocr, correct, count)
                VALUES (?, ?, 1)
-               ON CONFLICT(raw_ocr_text) DO UPDATE SET
-                 correct_medicine_name = excluded.correct_medicine_name,
-                 success_count = success_count + 1,
-                 updated_at = CURRENT_TIMESTAMP`,
+               ON CONFLICT(ocr) DO UPDATE SET
+                 correct = excluded.correct,
+                 count = count + 1`,
               [cleanOcr, medName.trim()]
             ).catch(() => {});
           }
@@ -2663,19 +2662,6 @@ router.get('/reorder-suggestions', async (_req, res) => {
   try {
     const db = await dbManager.getConnection();
     
-    // Ensure snooze table exists
-    await db.run(`
-      CREATE TABLE IF NOT EXISTS inventory_reorder_snooze (
-        medicine_id INTEGER PRIMARY KEY,
-        snooze_until TEXT NOT NULL,
-        snooze_type TEXT NOT NULL DEFAULT '7_days',
-        reason TEXT,
-        created_at TEXT NOT NULL DEFAULT (DATETIME('now')),
-        updated_at TEXT NOT NULL DEFAULT (DATETIME('now')),
-        FOREIGN KEY (medicine_id) REFERENCES medicines(id)
-      )
-    `);
-
     // Fetch active snoozed medicine IDs
     const snoozedRows = await db.all(`
       SELECT medicine_id FROM inventory_reorder_snooze
@@ -2784,18 +2770,6 @@ router.post('/reorder-suggestions/snooze', async (req, res) => {
     else if (snoozeType === 'permanent') daysToSnooze = 3650;
 
     const db = await dbManager.getConnection();
-    await db.run(`
-      CREATE TABLE IF NOT EXISTS inventory_reorder_snooze (
-        medicine_id INTEGER PRIMARY KEY,
-        snooze_until TEXT NOT NULL,
-        snooze_type TEXT NOT NULL DEFAULT '7_days',
-        reason TEXT,
-        created_at TEXT NOT NULL DEFAULT (DATETIME('now')),
-        updated_at TEXT NOT NULL DEFAULT (DATETIME('now')),
-        FOREIGN KEY (medicine_id) REFERENCES medicines(id)
-      )
-    `);
-
     await db.run(
       `INSERT OR REPLACE INTO inventory_reorder_snooze 
        (medicine_id, snooze_until, snooze_type, reason, created_at, updated_at) 
@@ -2832,18 +2806,6 @@ router.post('/reorder-suggestions/unsnooze', async (req, res) => {
 router.get('/reorder-suggestions/snoozed', async (_req, res) => {
   try {
     const db = await dbManager.getConnection();
-
-    await db.run(`
-      CREATE TABLE IF NOT EXISTS inventory_reorder_snooze (
-        medicine_id INTEGER PRIMARY KEY,
-        snooze_until TEXT NOT NULL,
-        snooze_type TEXT NOT NULL DEFAULT '7_days',
-        reason TEXT,
-        created_at TEXT NOT NULL DEFAULT (DATETIME('now')),
-        updated_at TEXT NOT NULL DEFAULT (DATETIME('now')),
-        FOREIGN KEY (medicine_id) REFERENCES medicines(id)
-      )
-    `);
 
     const rows = await db.all(`
       SELECT 

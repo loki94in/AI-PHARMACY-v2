@@ -19,21 +19,18 @@ interface ComplianceLog {
   missing_license?: number;
 }
 
-const CompliancePage: React.FC = () => {
-  const [stats, setStats] = useState<{
-    todayH1Sales: number;
-    monthlyH1Sales: number;
-    pendingDoctorAssignments: number;
-    totalComplianceLogs: number;
-  }>({
-    todayH1Sales: 0,
-    monthlyH1Sales: 0,
-    pendingDoctorAssignments: 0,
-    totalComplianceLogs: 0
-  });
+let cachedComplianceStats = {
+  todayH1Sales: 0,
+  monthlyH1Sales: 0,
+  pendingDoctorAssignments: 0,
+  totalComplianceLogs: 0
+};
+let cachedComplianceLogs: ComplianceLog[] = [];
 
-  const [logs, setLogs] = useState<ComplianceLog[]>([]);
-  const [loading, setLoading] = useState(true);
+const CompliancePage: React.FC = () => {
+  const [stats, setStats] = useState(cachedComplianceStats);
+  const [logs, setLogs] = useState<ComplianceLog[]>(cachedComplianceLogs);
+  const [loading, setLoading] = useState(cachedComplianceLogs.length === 0);
   const [search, setSearch] = useState('');
   const [doctorFilter, setDoctorFilter] = useState('');
   const [scheduleFilter, setScheduleFilter] = useState('ALL');
@@ -50,12 +47,14 @@ const CompliancePage: React.FC = () => {
     try {
       const res = await api.getComplianceDashboard();
       if (res && res.success) {
-        setStats({
+        const newStats = {
           todayH1Sales: res.todayH1Sales || 0,
           monthlyH1Sales: res.monthlyH1Sales || 0,
           pendingDoctorAssignments: res.pendingDoctorAssignments || 0,
           totalComplianceLogs: res.totalComplianceLogs || 0
-        });
+        };
+        cachedComplianceStats = newStats;
+        setStats(newStats);
       }
     } catch (err) {
       console.error('Failed to load compliance stats:', err);
@@ -63,7 +62,9 @@ const CompliancePage: React.FC = () => {
   };
 
   const fetchLogs = async () => {
-    setLoading(true);
+    if (cachedComplianceLogs.length === 0) {
+      setLoading(true);
+    }
     try {
       const data = await api.getH1Register({
         startDate: startDate || undefined,
@@ -72,7 +73,9 @@ const CompliancePage: React.FC = () => {
         doctor: doctorFilter || undefined,
         scheduleType: scheduleFilter !== 'ALL' ? scheduleFilter : undefined
       });
-      setLogs(data || []);
+      const list = data || [];
+      cachedComplianceLogs = list;
+      setLogs(list);
     } catch (err) {
       console.error('Failed to load H1 register:', err);
     } finally {

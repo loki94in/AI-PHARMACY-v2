@@ -112,16 +112,10 @@ router.delete('/orders/:id', async (req, res) => {
 
 // ─── DELIVERY BOYS ────────────────────────────────────────────────────────────
 
-const ensureDeliveryBoysTable = async (db: any) => {
-  await db.run(`
-    CREATE TABLE IF NOT EXISTS delivery_boys (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL,
-      whatsapp_number TEXT,
-      telegram_chat_id TEXT,
-      is_active INTEGER DEFAULT 1
-    )
-  `);
+let deliveryBoysTableInitialized = false;
+const ensureDeliveryBoysTable = async (_db: any) => {
+  if (deliveryBoysTableInitialized) return;
+  deliveryBoysTableInitialized = true;
 };
 
 // GET /api/dispatch/delivery-boys
