@@ -290,11 +290,12 @@ router.get('/messages', async (req, res) => {
 router.get('/distributor-reminders/today', async (_req, res) => {
   try {
     const db = await dbManager.getConnection();
-    const [startSetting, endSetting, afternoonEnabledSetting, afternoonTimeSetting] = await Promise.all([
+    const [startSetting, endSetting, afternoonEnabledSetting, afternoonTimeSetting, dispatchEnabledSetting] = await Promise.all([
       db.get("SELECT value FROM app_settings WHERE key = 'trigger_dispatch_reminder_time_start'"),
       db.get("SELECT value FROM app_settings WHERE key = 'trigger_dispatch_reminder_time_end'"),
       db.get("SELECT value FROM app_settings WHERE key = 'trigger_afternoon_dispatch_reminder_enabled'"),
-      db.get("SELECT value FROM app_settings WHERE key = 'trigger_afternoon_dispatch_reminder_time'")
+      db.get("SELECT value FROM app_settings WHERE key = 'trigger_afternoon_dispatch_reminder_time'"),
+      db.get("SELECT value FROM app_settings WHERE key = 'trigger_dispatch_reminder_enabled'")
     ]);
 
     const reminders = await syncTodayActiveDistributors();
@@ -302,7 +303,8 @@ router.get('/distributor-reminders/today', async (_req, res) => {
       success: true,
       window_start: startSetting?.value || '12:30',
       window_end: endSetting?.value || '13:00',
-      afternoon_enabled: afternoonEnabledSetting?.value !== 'false',
+      auto_dispatch_enabled: dispatchEnabledSetting?.value === 'true',
+      afternoon_enabled: afternoonEnabledSetting?.value === 'true',
       afternoon_time: afternoonTimeSetting?.value || '14:00',
       is_recent_fallback: false,
       recent_date: null,

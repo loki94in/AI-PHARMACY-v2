@@ -61,6 +61,10 @@ interface RefillPatient {
     mrp?: number;
     sell_price?: number;
     unit_price?: number;
+    packaging?: string;
+    pack_size?: number;
+    batch_quantity?: number;
+    batch_loose_quantity?: number;
     stock_verified_override?: number;
     reminder_status?: string;
     reminder_sent_at?: string | null;
@@ -408,7 +412,12 @@ const RefillsSection: React.FC = () => {
             expiry_date: m.expiry_date,
             mrp: m.mrp,
             sell_price: m.sell_price,
-            unit_price: m.unit_price || m.sell_price || m.mrp || 0
+            unit_price: m.unit_price || m.sell_price || m.mrp || 0,
+            packaging: m.packaging,
+            pack_size: m.pack_size,
+            in_stock_qty: m.in_stock_qty || 0,
+            stock_qty: m.batch_quantity || m.in_stock_qty || 0,
+            loose_quantity: m.batch_loose_quantity || 0
           }))
         }
       }
@@ -452,37 +461,52 @@ const RefillsSection: React.FC = () => {
     try {
       let suggestions: MedicineSuggestion[] = [];
       const clean = term.trim();
+      const compactCache = await api.getCompactInventory().catch(() => []);
+      const stockMap = new Map<number, number>();
+      for (const item of compactCache) {
+        const mId = item.medicine_id || item.id;
+        const cur = stockMap.get(mId) || 0;
+        stockMap.set(mId, cur + (item.stock_qty || item.quantity || 0) + (item.loose_quantity || 0));
+      }
+
       if (!clean) {
-        const res = await apiClient.get<any[]>('/medicines/compact');
-        const list = Array.isArray(res.data) ? res.data : [];
-        suggestions = list.slice(0, 15).map(m => ({
-          id: m.id || m.medicine_id,
-          name: m.name || m.medicine_name,
+        const res = await apiClient.get<any>('/medicines', { params: { limit: 15, sort: 'name_asc' } });
+        const list = Array.isArray(res.data?.medicines) ? res.data.medicines : (Array.isArray(res.data) ? res.data : []);
+        suggestions = list.map((m: any) => ({
+          id: m.id,
+          name: m.name,
           manufacturer: m.manufacturer,
-          mrp: m.mrp,
-          in_stock_qty: m.quantity !== undefined ? m.quantity : (m.in_stock_qty || 0)
+          mrp: m.mrp || m.sell_price || m.last_purchase_mrp,
+          in_stock_qty: stockMap.get(m.id) || 0
         }));
       } else {
-        const res = await apiClient.get<any[]>(`/sales/search-medicine?q=${encodeURIComponent(clean)}`);
-        const list = Array.isArray(res.data) ? res.data : [];
+        const res = await apiClient.get<any>('/medicines', { params: { search: clean, limit: 15 } });
+        const list = Array.isArray(res.data?.medicines) ? res.data.medicines : (Array.isArray(res.data) ? res.data : []);
         if (list.length > 0) {
-          suggestions = list.slice(0, 15).map(m => ({
-            id: m.medicine_id || m.id,
-            name: m.medicine_name || m.name,
+          suggestions = list.map((m: any) => ({
+            id: m.id,
+            name: m.name,
             manufacturer: m.manufacturer,
-            mrp: m.mrp,
-            in_stock_qty: m.quantity !== undefined ? m.quantity : (m.in_stock_qty || 0)
+            mrp: m.mrp || m.sell_price || m.last_purchase_mrp,
+            in_stock_qty: stockMap.get(m.id) || 0
           }));
         } else {
-          const fallback = await apiClient.get<any[]>(`/medicines/search-fast?q=${encodeURIComponent(clean)}&limit=10`);
-          const fbList = Array.isArray(fallback.data) ? fallback.data : [];
-          suggestions = fbList.map(m => ({
-            id: m.id || m.medicine_id,
-            name: m.name || m.medicine_name,
-            manufacturer: m.manufacturer,
-            mrp: m.mrp,
-            in_stock_qty: m.quantity !== undefined ? m.quantity : (m.in_stock_qty || 0)
-          }));
+          const lower = clean.toLowerCase();
+          const matched = compactCache.filter((c: any) => (c.name || c.medicine_name || '').toLowerCase().includes(lower));
+          const seen = new Map<number, MedicineSuggestion>();
+          for (const m of matched) {
+            const medId = m.medicine_id || m.id;
+            if (!seen.has(medId)) {
+              seen.set(medId, {
+                id: medId,
+                name: m.name || m.medicine_name,
+                manufacturer: m.manufacturer,
+                mrp: m.mrp,
+                in_stock_qty: stockMap.get(medId) || 0
+              });
+            }
+          }
+          suggestions = Array.from(seen.values()).slice(0, 15);
         }
       }
 

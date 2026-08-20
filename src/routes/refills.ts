@@ -421,7 +421,13 @@ router.get('/panel', async (req, res) => {
 
     // Optional upcoming_days query parameter (if omitted, returns all patient refills for CRM management)
     const upcomingDays = req.query.upcoming_days ? parseInt(req.query.upcoming_days as string, 10) : null;
-    let query = `SELECT pr.*, m.name as medicine_name, COALESCE(pr.language, c.language, 'en') as language, COALESCE(inv.in_stock_qty, 0) as in_stock_qty 
+    let query = `SELECT pr.*, m.name as medicine_name, m.packaging, m.pack_size, m.sell_price, 
+               COALESCE(pr.language, c.language, 'en') as language, 
+               COALESCE(inv.in_stock_qty, 0) as in_stock_qty,
+               best_inv.inventory_id, best_inv.batch_no, best_inv.expiry_date,
+               COALESCE(best_inv.mrp, m.mrp, 0) as mrp,
+               COALESCE(best_inv.unit_price, m.sell_price, m.mrp, 0) as unit_price,
+               best_inv.batch_quantity, best_inv.batch_loose_quantity
        FROM patient_refills pr
        JOIN medicines m ON pr.medicine_id = m.id
        LEFT JOIN (
@@ -433,8 +439,19 @@ router.get('/panel', async (req, res) => {
        LEFT JOIN (
          SELECT medicine_id, (SUM(quantity) + COALESCE(SUM(loose_quantity), 0)) as in_stock_qty 
          FROM inventory_master 
+         WHERE (COALESCE(is_active, 1) = 1 AND (quantity > 0 OR COALESCE(loose_quantity, 0) > 0))
          GROUP BY medicine_id
-       ) inv ON inv.medicine_id = pr.medicine_id`;
+       ) inv ON inv.medicine_id = pr.medicine_id
+       LEFT JOIN (
+         SELECT im.medicine_id, im.id as inventory_id, im.batch_no, im.expiry_date, im.mrp, im.unit_price,
+                im.quantity as batch_quantity, im.loose_quantity as batch_loose_quantity,
+                ROW_NUMBER() OVER (
+                  PARTITION BY im.medicine_id 
+                  ORDER BY (CASE WHEN im.expiry_date IS NOT NULL AND im.expiry_date != '' THEN im.expiry_date ELSE '9999-12-31' END) ASC, im.id ASC
+                ) as rn
+         FROM inventory_master im
+         WHERE (COALESCE(im.is_active, 1) = 1 AND (im.quantity > 0 OR COALESCE(im.loose_quantity, 0) > 0))
+       ) best_inv ON best_inv.medicine_id = pr.medicine_id AND best_inv.rn = 1`;
     const params: any[] = [];
     if (upcomingDays && !isNaN(upcomingDays) && upcomingDays > 0) {
       query += ` WHERE pr.next_refill_date <= date('now', '+' || ? || ' days')`;
@@ -484,7 +501,17 @@ router.get('/panel', async (req, res) => {
           reminder_status: medReminderStatus,
           reminder_sent_at: row.reminder_sent_at || null,
           reminder_job_id: row.reminder_job_id || null,
-          reminder_occurrence_date: row.reminder_occurrence_date || null
+          reminder_occurrence_date: row.reminder_occurrence_date || null,
+          inventory_id: row.inventory_id || null,
+          batch_no: row.batch_no || null,
+          expiry_date: row.expiry_date || null,
+          mrp: row.mrp || 0,
+          sell_price: row.sell_price || null,
+          unit_price: row.unit_price || 0,
+          packaging: row.packaging || null,
+          pack_size: row.pack_size || 1,
+          batch_quantity: row.batch_quantity || 0,
+          batch_loose_quantity: row.batch_loose_quantity || 0
         });
       }
     }

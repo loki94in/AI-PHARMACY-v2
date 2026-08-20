@@ -77,10 +77,10 @@ class TriggerSchedulerService {
       trigger_expiry_lookahead_days: '90',
 
       // 3. Distributor Dispatch Reminder Window
-      trigger_dispatch_reminder_enabled: 'true',
+      trigger_dispatch_reminder_enabled: 'false',
       trigger_dispatch_reminder_time_start: '12:30',
       trigger_dispatch_reminder_time_end: '13:00',
-      trigger_afternoon_dispatch_reminder_enabled: 'true',
+      trigger_afternoon_dispatch_reminder_enabled: 'false',
       trigger_afternoon_dispatch_reminder_time: '14:00',
 
       // 4. Nightly Database Backup

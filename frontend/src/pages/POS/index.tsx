@@ -278,7 +278,7 @@ const mapEditSaleItemsToCart = (itemsList: any[]): any[] => {
     };
   });
 
-  // Append trailing empty row for fast subsequent entries
+// Append trailing empty row for fast subsequent entries
   mapped.push({
     id: 'empty_row_' + Date.now(),
     name: '',
@@ -292,6 +292,205 @@ const mapEditSaleItemsToCart = (itemsList: any[]): any[] => {
     isEmptyRow: true
   });
   return mapped;
+};
+
+// Universal FEFO Batch Allocator: Distributes requested quantity across unexpired batches
+export function allocateMedicineBatches(params: {
+  medicineId: number;
+  medicineName: string;
+  requestedQty: number;
+  requestedLooseQty: number;
+  packSize?: number;
+  fallbackItem?: any;
+  compactInventory: any[];
+  editingInvoiceId?: number | null;
+}): any[] {
+  const { medicineId, medicineName, compactInventory, editingInvoiceId, requestedQty, requestedLooseQty } = params;
+  const pSize = Math.max(1, params.packSize || params.fallbackItem?.packSize || params.fallbackItem?.pack_size || 1);
+  const totalRequestedTablets = (requestedQty * pSize) + (requestedLooseQty || 0);
+
+  // 1. Find all active unexpired batches for this medicine
+  const activeBatches = (compactInventory || [])
+    .filter(item => {
+      const idMatch = medicineId > 0 && (item.medicine_id === medicineId || item.id === medicineId);
+      const nameMatch = Boolean(medicineName && (item.name || item.medicine_name) && (item.name || item.medicine_name).toLowerCase().trim() === medicineName.toLowerCase().trim());
+      const hasStock = ((item.stock_qty !== undefined ? item.stock_qty : item.quantity) || 0) > 0 || (item.loose_quantity || 0) > 0;
+      return (idMatch || nameMatch) && hasStock;
+    })
+    .map(item => {
+      const expiryStr = item.expiry_date || '';
+      let isExpired = false;
+      if (expiryStr) {
+        let expDate: Date;
+        if (expiryStr.includes('/')) {
+          const parts = expiryStr.split('/');
+          let year = parseInt(parts[1], 10);
+          const month = parseInt(parts[0], 10) - 1;
+          if (year < 100) year += 2000;
+          expDate = new Date(year, month + 1, 0);
+        } else {
+          expDate = new Date(expiryStr);
+        }
+        if (expDate < new Date()) isExpired = true;
+      }
+      return { 
+        ...item, 
+        stock_qty: item.stock_qty !== undefined ? item.stock_qty : (item.quantity || 0),
+        loose_quantity: item.loose_quantity || 0,
+        isExpired 
+      };
+    })
+    .filter(item => !item.isExpired);
+
+  // 2. If no active batches in inventory cache, fall back to fallback item or single row
+  if (activeBatches.length === 0) {
+    if (editingInvoiceId || params.fallbackItem) {
+      const refItem = params.fallbackItem || {};
+      return [{
+        ...refItem,
+        id: refItem.inventory_id || refItem.id || `item_${medicineId}_${Date.now()}`,
+        inventory_id: refItem.inventory_id || (typeof refItem.id === 'number' && refItem.id < 1000000000 ? refItem.id : undefined),
+        medicine_id: medicineId || refItem.medicine_id,
+        name: medicineName || refItem.name,
+        medicine_name: medicineName || refItem.name,
+        batch: refItem.batch || refItem.batch_no || '',
+        batch_no: refItem.batch_no || refItem.batch || '',
+        expiry: refItem.expiry || refItem.expiry_date || '',
+        expiry_date: refItem.expiry_date || refItem.expiry || '',
+        qty: requestedQty,
+        quantity: requestedQty,
+        looseQty: requestedLooseQty,
+        mrp: Number(refItem.mrp || 0),
+        sell_price: refItem.sell_price || null,
+        unitPrice: Number(refItem.unitPrice || refItem.unit_price || refItem.sell_price || refItem.mrp || 0),
+        discount: Number(refItem.discount || 0),
+        packSize: pSize,
+        availableStock: Number(refItem.availableStock || refItem.stock_qty || 0),
+        availableLooseStock: Number(refItem.availableLooseStock || refItem.loose_quantity || 0),
+        alternative_batches: [],
+        isEmptyRow: false
+      }];
+    }
+    return [];
+  }
+
+  // 3. Sort active batches by FEFO (First Expiry, First Out):
+  // Full strips first, then loose-only. Earliest expiry first.
+  activeBatches.sort((a, b) => {
+    const aHasStrips = (a.stock_qty || 0) > 0 ? 0 : 1;
+    const bHasStrips = (b.stock_qty || 0) > 0 ? 0 : 1;
+    if (aHasStrips !== bHasStrips) return aHasStrips - bHasStrips;
+    
+    const parseExpToTimestamp = (str: string) => {
+      if (!str) return 9999999999999;
+      if (str.includes('/')) {
+        const parts = str.split('/');
+        let year = parseInt(parts[1], 10);
+        const month = parseInt(parts[0], 10) - 1;
+        if (year < 100) year += 2000;
+        return new Date(year, month + 1, 0).getTime();
+      }
+      return new Date(str).getTime() || 9999999999999;
+    };
+    const aTime = parseExpToTimestamp(a.expiry_date || '');
+    const bTime = parseExpToTimestamp(b.expiry_date || '');
+    if (aTime !== bTime) return aTime - bTime;
+    return (a.inventory_id || a.id || 0) - (b.inventory_id || b.id || 0);
+  });
+
+  // 4. Distribute the requested quantity across batches
+  let remainingTablets = totalRequestedTablets;
+  const allocations: any[] = [];
+  let totalAvailableTablets = 0;
+
+  for (const batch of activeBatches) {
+    const batchStockTablets = (batch.stock_qty || 0) * pSize + (batch.loose_quantity || 0);
+    totalAvailableTablets += batchStockTablets;
+    
+    if (remainingTablets > 0 && batchStockTablets > 0) {
+      const takenTablets = Math.min(remainingTablets, batchStockTablets);
+      const qty = Math.floor(takenTablets / pSize);
+      const looseQty = takenTablets % pSize;
+
+      if (qty > 0 || looseQty > 0) {
+        const sellPrice = batch.sell_price !== undefined && batch.sell_price !== null
+          ? batch.sell_price
+          : (params.fallbackItem?.sell_price || null);
+        const mrp = Number(batch.mrp || params.fallbackItem?.mrp || 0);
+        let discount = params.fallbackItem?.discount;
+        if ((discount === undefined || discount === 0) && sellPrice && Number(sellPrice) > 0 && mrp > 0 && Number(sellPrice) < mrp) {
+          discount = parseFloat((((mrp - Number(sellPrice)) / mrp) * 100).toFixed(2));
+        }
+        const unitPrice = Number(params.fallbackItem?.unitPrice || batch.unit_price || sellPrice || mrp || 0);
+
+        allocations.push({
+          ...(params.fallbackItem || {}),
+          id: batch.inventory_id || batch.id,
+          inventory_id: batch.inventory_id || batch.id,
+          medicine_id: batch.medicine_id || medicineId,
+          name: batch.name || medicineName,
+          medicine_name: batch.name || medicineName,
+          batch: batch.batch_no,
+          batch_no: batch.batch_no,
+          expiry: batch.expiry_date || '',
+          expiry_date: batch.expiry_date || '',
+          mrp: mrp,
+          sell_price: sellPrice,
+          qty: qty,
+          quantity: qty,
+          looseQty: looseQty,
+          unitPrice: unitPrice,
+          discount: discount || 0,
+          packSize: pSize,
+          costPrice: batch.cost_price != null ? batch.cost_price : (params.fallbackItem?.costPrice || null),
+          availableStock: batch.stock_qty,
+          availableLooseStock: batch.loose_quantity,
+          alternative_batches: activeBatches.filter(b => (b.inventory_id || b.id) !== (batch.inventory_id || batch.id)),
+          isEmptyRow: false
+        });
+        remainingTablets -= takenTablets;
+      }
+    }
+  }
+
+  // If requested exceeds available stock, cap to maximum
+  if (!editingInvoiceId && totalRequestedTablets > totalAvailableTablets && totalAvailableTablets > 0) {
+    toastEvent.trigger(`Only ${totalAvailableTablets} units available in stock for "${medicineName}". Capped to available stock.`, "info");
+  }
+
+  // If nothing allocated (e.g. 0 requested or 0 stock), return the first batch with 0 qty
+  if (allocations.length === 0 && activeBatches.length > 0) {
+    const firstB = activeBatches[0];
+    const sellPrice = firstB.sell_price !== undefined && firstB.sell_price !== null ? firstB.sell_price : (params.fallbackItem?.sell_price || null);
+    const mrp = Number(firstB.mrp || params.fallbackItem?.mrp || 0);
+    allocations.push({
+      ...(params.fallbackItem || {}),
+      id: firstB.inventory_id || firstB.id,
+      inventory_id: firstB.inventory_id || firstB.id,
+      medicine_id: firstB.medicine_id || medicineId,
+      name: firstB.name || medicineName,
+      medicine_name: firstB.name || medicineName,
+      batch: firstB.batch_no,
+      batch_no: firstB.batch_no,
+      expiry: firstB.expiry_date || '',
+      expiry_date: firstB.expiry_date || '',
+      mrp: mrp,
+      sell_price: sellPrice,
+      qty: 0,
+      quantity: 0,
+      looseQty: 0,
+      unitPrice: Number(params.fallbackItem?.unitPrice || firstB.unit_price || sellPrice || mrp || 0),
+      discount: params.fallbackItem?.discount || 0,
+      packSize: pSize,
+      costPrice: firstB.cost_price != null ? firstB.cost_price : (params.fallbackItem?.costPrice || null),
+      availableStock: firstB.stock_qty,
+      availableLooseStock: firstB.loose_quantity,
+      alternative_batches: activeBatches.filter(b => (b.inventory_id || b.id) !== (firstB.inventory_id || firstB.id)),
+      isEmptyRow: false
+    });
+  }
+
+  return allocations;
 };
 
 const POS = () => {
@@ -374,31 +573,78 @@ const POS = () => {
 
       const fetchAndAddMedicine = async () => {
         try {
-          const results = await api.searchMedicine(refillMedicineName);
-          if (results && results.length > 0) {
-            const matched = results[0];
-            const sellPrice = Number(matched.sell_price || 0);
-            const mrp = Number(matched.mrp || 0);
-            const autoDisc = (sellPrice > 0 && mrp > 0 && sellPrice < mrp)
-              ? parseFloat((((mrp - sellPrice) / mrp) * 100).toFixed(2))
-              : 0;
-            const cartItem = {
-              id: matched.id,
-              name: matched.name,
-              batch: matched.batch_no || matched.batch_number || '',
-              expiry: matched.expiry_date || '',
-              mrp: matched.mrp || 0,
-              sell_price: matched.sell_price || null,
-              qty: Number(refillQty),
-              quantity: Number(refillQty),
-              unitPrice: matched.unit_price || matched.sell_price || matched.mrp || 0,
+          let compactInv = getCompactInventoryCache();
+          if (!compactInv || compactInv.length === 0) {
+            try {
+              const res = await api.getCompactInventory();
+              compactInv = res || getCompactInventoryCache();
+            } catch {}
+          }
+          const targetId = Number(refillMedicineId);
+          const targetQty = Number(refillQty) || 1;
+          const allocated = allocateMedicineBatches({
+            medicineId: targetId,
+            medicineName: refillMedicineName,
+            requestedQty: targetQty,
+            requestedLooseQty: 0,
+            compactInventory: compactInv
+          });
+
+          if (allocated.length > 0) {
+            const emptyTrailingRow = {
+              id: 'empty_row_' + Date.now(),
+              name: '',
+              batch: '',
+              expiry: '',
+              mrp: 0,
+              qty: 0,
               looseQty: 0,
-              discount: autoDisc,
-              packSize: parsePackSizeFromPackaging(matched.packaging) || matched.pack_size || 1
+              discount: 0,
+              packSize: 1,
+              isEmptyRow: true
             };
-            setCart([cartItem]);
+            setCart([...allocated, emptyTrailingRow]);
           } else {
-            toastEvent.trigger(`Refill medicine "${refillMedicineName}" is not available in inventory. Please record a purchase first.`, "error");
+            const results = await api.searchMedicine(refillMedicineName);
+            if (results && results.length > 0) {
+              const matched = results[0];
+              const sellPrice = Number(matched.sell_price || 0);
+              const mrp = Number(matched.mrp || 0);
+              const autoDisc = (sellPrice > 0 && mrp > 0 && sellPrice < mrp)
+                ? parseFloat((((mrp - sellPrice) / mrp) * 100).toFixed(2))
+                : 0;
+              const cartItem = {
+                id: matched.inventory_id || matched.id,
+                inventory_id: matched.inventory_id || matched.id,
+                medicine_id: targetId || matched.medicine_id || matched.id,
+                name: matched.name,
+                batch: matched.batch_no || matched.batch_number || '',
+                expiry: matched.expiry_date || '',
+                mrp: matched.mrp || 0,
+                sell_price: matched.sell_price || null,
+                qty: Number(refillQty),
+                quantity: Number(refillQty),
+                unitPrice: matched.unit_price || matched.sell_price || matched.mrp || 0,
+                looseQty: 0,
+                discount: autoDisc,
+                packSize: parsePackSizeFromPackaging(matched.packaging) || matched.pack_size || 1
+              };
+              const emptyTrailingRow = {
+                id: 'empty_row_' + Date.now(),
+                name: '',
+                batch: '',
+                expiry: '',
+                mrp: 0,
+                qty: 0,
+                looseQty: 0,
+                discount: 0,
+                packSize: 1,
+                isEmptyRow: true
+              };
+              setCart([cartItem, emptyTrailingRow]);
+            } else {
+              toastEvent.trigger(`Refill medicine "${refillMedicineName}" is not available in inventory. Please record a purchase first.`, "error");
+            }
           }
         } catch (err) {
           console.error('Failed to resolve refill medicine in POS:', err);
@@ -472,151 +718,142 @@ const POS = () => {
             : [];
 
           if (rawMedsList.length > 0) {
-            const resolvedCartItems: any[] = await Promise.all(rawMedsList.map(async (med: any) => {
+            // Ensure compact inventory cache is ready
+            let compactInv = getCompactInventoryCache();
+            if (!compactInv || compactInv.length === 0) {
+              try {
+                const res = await api.getCompactInventory();
+                compactInv = res || getCompactInventoryCache();
+              } catch {}
+            }
+
+            const expandedRows: any[] = [];
+
+            for (const med of rawMedsList) {
               const targetId = Number(med.medicineId || med.medicine_id || med.id || 0);
               const targetName = (med.medicineName || med.medicine_name || med.name || '').trim();
               const targetQty = Number(med.quantity_needed || med.quantity || med.qty) || 1;
               const targetLooseQty = Number(med.looseQty || med.loose_qty || med.loose_quantity) || 0;
+              const pSize = parsePackSizeFromPackaging(med.packaging) || med.pack_size || med.packSize || 1;
 
-              // 1. If batch & inventory data is already provided in the item payload, use directly
-              if (med.inventory_id && med.batch_no) {
-                const sellPrice = Number(med.sell_price || 0);
-                const mrp = Number(med.mrp || 0);
-                const autoDisc = (sellPrice > 0 && mrp > 0 && sellPrice < mrp)
-                  ? parseFloat((((mrp - sellPrice) / mrp) * 100).toFixed(2))
-                  : (Number(med.discount || 0));
-                return {
-                  id: med.inventory_id,
-                  name: targetName,
-                  batch: med.batch_no,
-                  expiry: med.expiry_date || '',
-                  mrp: mrp,
-                  sell_price: med.sell_price || null,
-                  qty: targetQty,
-                  quantity: targetQty,
-                  unitPrice: Number(med.unit_price || med.unitPrice || sellPrice || mrp || 0),
-                  looseQty: targetLooseQty,
-                  discount: autoDisc,
-                  packSize: parsePackSizeFromPackaging(med.packaging) || med.pack_size || 1,
-                  isEmptyRow: false
-                };
+              const fallbackItem = {
+                medicine_id: targetId,
+                medicine_name: targetName,
+                name: targetName,
+                packaging: med.packaging,
+                pack_size: pSize,
+                packSize: pSize,
+                sell_price: med.sell_price,
+                mrp: med.mrp,
+                unit_price: med.unit_price || med.unitPrice,
+                unitPrice: med.unit_price || med.unitPrice,
+                discount: med.discount || 0,
+                batch_no: med.batch_no,
+                batch: med.batch_no,
+                expiry_date: med.expiry_date,
+                expiry: med.expiry_date,
+                inventory_id: med.inventory_id
+              };
+
+              let allocated = allocateMedicineBatches({
+                medicineId: targetId,
+                medicineName: targetName,
+                requestedQty: targetQty,
+                requestedLooseQty: targetLooseQty,
+                packSize: pSize,
+                fallbackItem,
+                compactInventory: compactInv,
+                editingInvoiceId: null
+              });
+
+              // If not found in cache and targetId > 0, query refill info from backend
+              if (allocated.length === 0 && targetId > 0) {
+                try {
+                  const refillInfo = await api.getMedicineRefillInfo(targetId);
+                  if (refillInfo && refillInfo.medicine) {
+                    const m = refillInfo.medicine;
+                    const bestInv = refillInfo.best_inventory;
+                    const lastSale = refillInfo.last_sale;
+
+                    if (!name && lastSale?.customer_name) setPatientName(lastSale.customer_name);
+                    if (!phone && lastSale?.customer_phone) setPatientPhone(lastSale.customer_phone);
+                    if (!doctor && lastSale?.doctor_name) setDoctor(lastSale.doctor_name);
+
+                    if (bestInv) {
+                      allocated = [{
+                        id: bestInv.inventory_id || m.id,
+                        inventory_id: bestInv.inventory_id,
+                        medicine_id: m.id,
+                        name: m.name,
+                        medicine_name: m.name,
+                        batch: bestInv.batch_no || '',
+                        batch_no: bestInv.batch_no || '',
+                        expiry: bestInv.expiry_date || '',
+                        expiry_date: bestInv.expiry_date || '',
+                        mrp: Number(bestInv.mrp || m.mrp || 0),
+                        sell_price: m.sell_price || null,
+                        qty: targetQty,
+                        quantity: targetQty,
+                        unitPrice: Number(bestInv.unit_price || m.sell_price || m.mrp || 0),
+                        looseQty: targetLooseQty,
+                        discount: Number(med.discount || lastSale?.discount || 0),
+                        packSize: parsePackSizeFromPackaging(m.packaging) || m.pack_size || 1,
+                        availableStock: Number(bestInv.quantity || 0),
+                        availableLooseStock: Number(bestInv.loose_quantity || 0),
+                        isEmptyRow: false
+                      }];
+                    }
+                  }
+                } catch (e) {
+                  console.warn('Medicine refill info resolution error:', e);
+                }
               }
 
-              // 2. Query medicine refill info / inventory lookup
-              try {
-                if (targetId > 0) {
-                  const refillInfo = await api.getMedicineRefillInfo(targetId);
-                  // Medicine not in database at all
-                  if (!refillInfo || !refillInfo.medicine) {
-                    toastEvent.trigger(
-                      `Medicine ID ${targetId} not found in database.`,
-                      'info', '/pos'
-                    );
-                    return null;
-                  }
-
-                  const m = refillInfo.medicine;
-
-                  // Guard: if medicine exists in DB but has no in-stock batch, show clear message
-                  if (!refillInfo.best_inventory) {
-                    toastEvent.trigger(
-                      `"${m.name}" is not available in inventory. Please record a purchase first before selling.`,
-                      'info', '/pos'
-                    );
-                    return null;
-                  }
-
-                  const bestInv = refillInfo.best_inventory;
-                  const lastSale = refillInfo.last_sale;
-
-                  // If patient info wasn't provided at top level, populate from last sale
-                  if (!name && lastSale?.customer_name) setPatientName(lastSale.customer_name);
-                  if (!phone && lastSale?.customer_phone) setPatientPhone(lastSale.customer_phone);
-                  if (!doctor && lastSale?.doctor_name) setDoctor(lastSale.doctor_name);
-                  if (lastSale?.customer_id && !selectedCustomerIdRef.current) {
-                    setSelectedCustomerId(lastSale.customer_id);
-                    selectedCustomerIdRef.current = lastSale.customer_id;
-                  }
-
-                  const sellPrice = Number(m.sell_price || 0);
-                  const mrp = Number(bestInv.mrp || m.mrp || 0);
-                  const autoDisc = (sellPrice > 0 && mrp > 0 && sellPrice < mrp)
-                    ? parseFloat((((mrp - sellPrice) / mrp) * 100).toFixed(2))
-                    : (lastSale?.discount || 0);
-
-                  const finalQty = med.quantity_needed || med.quantity || med.qty || lastSale?.quantity || 1;
-                  const finalLooseQty = targetLooseQty || lastSale?.loose_qty || 0;
-
-                  return {
-                    id: bestInv.inventory_id || m.id,
-                    name: m.name,
-                    batch: bestInv.batch_no || '',
-                    expiry: bestInv.expiry_date || '',
-                    mrp: mrp,
-                    sell_price: m.sell_price || null,
-                    qty: Number(finalQty),
-                    quantity: Number(finalQty),
-                    unitPrice: Number(bestInv.unit_price || m.sell_price || m.mrp || 0),
-                    looseQty: Number(finalLooseQty),
-                    discount: autoDisc,
-                    packSize: parsePackSizeFromPackaging(m.packaging) || m.pack_size || 1,
-                    isEmptyRow: false
-                  };
-                }
-
-                // Fallback to name search in inventory
-                if (targetName) {
+              // Fallback to name search in inventory
+              if (allocated.length === 0 && targetName) {
+                try {
                   const matched = await api.searchMedicine(targetName);
                   if (matched && matched.length > 0) {
                     const m = matched[0];
-                    const sellPrice = Number(m.sell_price || 0);
-                    const mrp = Number(m.mrp || 0);
-                    const autoDisc = (sellPrice > 0 && mrp > 0 && sellPrice < mrp)
-                      ? parseFloat((((mrp - sellPrice) / mrp) * 100).toFixed(2))
-                      : 0;
-                    return {
-                      id: m.id,
-                      name: m.name,
+                    allocated = [{
+                      id: m.inventory_id || m.id,
+                      inventory_id: m.inventory_id || m.id,
+                      medicine_id: m.medicine_id || m.id,
+                      name: m.name || m.medicine_name,
+                      medicine_name: m.medicine_name || m.name,
                       batch: m.batch_no || m.batch_number || '',
+                      batch_no: m.batch_no || m.batch_number || '',
                       expiry: m.expiry_date || '',
-                      mrp: m.mrp || 0,
+                      expiry_date: m.expiry_date || '',
+                      mrp: Number(m.mrp || 0),
                       sell_price: m.sell_price || null,
                       qty: targetQty,
                       quantity: targetQty,
-                      unitPrice: m.unit_price || m.sell_price || m.mrp || 0,
+                      unitPrice: Number(m.unit_price || m.sell_price || m.mrp || 0),
                       looseQty: targetLooseQty,
-                      discount: autoDisc,
+                      discount: Number(med.discount || 0),
                       packSize: parsePackSizeFromPackaging(m.packaging) || m.pack_size || 1,
+                      availableStock: Number(m.quantity || 0),
+                      availableLooseStock: Number(m.loose_quantity || 0),
                       isEmptyRow: false
-                    };
+                    }];
                   }
+                } catch (e) {
+                  console.warn('Medicine search error:', e);
                 }
-              } catch (e) {
-                console.warn('Medicine prefill resolution warning:', e);
               }
 
-              // If no medicine found in system, show clear message — do not fabricate data
-              if (targetName) {
+              if (allocated.length > 0) {
+                expandedRows.push(...allocated);
+              } else if (targetName) {
                 toastEvent.trigger(
                   `"${targetName}" could not be found in the medicine database. It may need to be added or purchased first.`,
                   'info', '/pos'
                 );
               }
-              return null;
-            }));
+            }
 
-            if (resolvedCartItems.length > 0) {
-              const deduped: any[] = [];
-              const seenMeds = new Set<string>();
-              // ponytail: filter nulls (unavailable medicines) before building cart
-              for (const ci of resolvedCartItems.filter(ci => ci !== null && !ci.isEmptyRow && (ci.name || '').trim())) {
-                const key = (ci.name || '').toLowerCase().trim();
-                if (!seenMeds.has(key)) {
-                  seenMeds.add(key);
-                  deduped.push(ci);
-                }
-              }
-
+            if (expandedRows.length > 0) {
               const emptyTrailingRow = {
                 id: 'empty_row_' + Date.now(),
                 name: '',
@@ -629,10 +866,10 @@ const POS = () => {
                 packSize: 1,
                 isEmptyRow: true
               };
-              const finalCart = [...deduped, emptyTrailingRow];
+              const finalCart = [...expandedRows, emptyTrailingRow];
               cartGenerationRef.current += 1;
               setCart(finalCart);
-              toastEvent.trigger(`Loaded ${deduped.length} prefilled medicine(s) into POS`, 'success', '/pos');
+              toastEvent.trigger(`Loaded ${expandedRows.length} item line(s) into POS`, 'success', '/pos');
             }
           }
         } catch (err) {
@@ -1360,93 +1597,121 @@ const POS = () => {
         ? matchedRefill.medicines
         : [matchedRefill];
 
+      let compactInv = getCompactInventoryCache();
+      if (!compactInv || compactInv.length === 0) {
+        try {
+          const res = await api.getCompactInventory();
+          compactInv = res || getCompactInventoryCache();
+        } catch {}
+      }
+
       const newItems: any[] = [];
       for (const med of medsToAdd) {
         const medName = med.medicine_name || med.name || '';
+        const targetId = Number(med.medicineId || med.medicine_id || med.id || 0);
         const targetQty = Number(med.quantity || med.quantity_needed || med.qty || 1);
         const targetLooseQty = Number(med.loose_qty || med.looseQty || 0);
+        const pSize = parsePackSizeFromPackaging(med.packaging) || med.pack_size || med.packSize || 1;
 
-        let cartItem: any = null;
-        if (med.inventory_id && med.batch_no) {
-          const sellPrice = Number(med.sell_price || 0);
-          const mrp = Number(med.mrp || 0);
-          const autoDisc = (sellPrice > 0 && mrp > 0 && sellPrice < mrp)
-            ? parseFloat((((mrp - sellPrice) / mrp) * 100).toFixed(2))
-            : (Number(med.discount || 0));
-          cartItem = {
-            id: med.inventory_id,
-            name: medName,
-            batch: med.batch_no || '',
-            expiry: med.expiry_date || '',
-            mrp: mrp,
-            sell_price: med.sell_price || null,
-            qty: targetQty,
-            quantity: targetQty,
-            unitPrice: med.unit_price || med.current_unit_price || med.sell_price || mrp || 0,
-            looseQty: targetLooseQty,
-            discount: autoDisc,
-            packSize: parsePackSizeFromPackaging(med.packaging) || med.pack_size || 1,
-            isEmptyRow: false
-          };
-        } else {
+        const fallbackItem = {
+          medicine_id: targetId,
+          medicine_name: medName,
+          name: medName,
+          packaging: med.packaging,
+          pack_size: pSize,
+          packSize: pSize,
+          sell_price: med.sell_price,
+          mrp: med.mrp,
+          unit_price: med.unit_price || med.unitPrice,
+          unitPrice: med.unit_price || med.unitPrice,
+          discount: med.discount || 0,
+          batch_no: med.batch_no,
+          batch: med.batch_no,
+          expiry_date: med.expiry_date,
+          expiry: med.expiry_date,
+          inventory_id: med.inventory_id
+        };
+
+        let allocated = allocateMedicineBatches({
+          medicineId: targetId,
+          medicineName: medName,
+          requestedQty: targetQty,
+          requestedLooseQty: targetLooseQty,
+          packSize: pSize,
+          fallbackItem,
+          compactInventory: compactInv,
+          editingInvoiceId
+        });
+
+        if (allocated.length === 0 && targetId > 0) {
+          try {
+            const refillInfo = await api.getMedicineRefillInfo(targetId);
+            if (refillInfo && refillInfo.best_inventory) {
+              const bestInv = refillInfo.best_inventory;
+              allocated = [{
+                id: bestInv.inventory_id,
+                inventory_id: bestInv.inventory_id,
+                medicine_id: targetId,
+                name: medName,
+                medicine_name: medName,
+                batch: bestInv.batch_no || '',
+                batch_no: bestInv.batch_no || '',
+                expiry: bestInv.expiry_date || '',
+                expiry_date: bestInv.expiry_date || '',
+                mrp: Number(bestInv.mrp || 0),
+                sell_price: med.sell_price || null,
+                qty: targetQty,
+                quantity: targetQty,
+                unitPrice: Number(bestInv.unit_price || med.sell_price || med.mrp || 0),
+                looseQty: targetLooseQty,
+                discount: Number(med.discount || 0),
+                packSize: pSize,
+                availableStock: Number(bestInv.quantity || 0),
+                availableLooseStock: Number(bestInv.loose_quantity || 0),
+                isEmptyRow: false
+              }];
+            }
+          } catch {}
+        }
+
+        if (allocated.length === 0 && medName) {
           try {
             const results = await api.searchMedicine(medName);
             if (results && results.length > 0) {
               const matched = results[0];
-              const sellPrice = Number(matched.sell_price || 0);
-              const mrp = Number(matched.mrp || 0);
-              const autoDisc = (sellPrice > 0 && mrp > 0 && sellPrice < mrp)
-                ? parseFloat((((mrp - sellPrice) / mrp) * 100).toFixed(2))
-                : 0;
-              cartItem = {
+              allocated = [{
                 id: matched.id,
+                inventory_id: matched.inventory_id || matched.id,
+                medicine_id: matched.medicine_id || matched.id,
                 name: matched.name || medName,
+                medicine_name: matched.medicine_name || medName,
                 batch: matched.batch_no || matched.batch_number || '',
+                batch_no: matched.batch_no || matched.batch_number || '',
                 expiry: matched.expiry_date || '',
-                mrp: matched.mrp || 0,
+                expiry_date: matched.expiry_date || '',
+                mrp: Number(matched.mrp || 0),
                 sell_price: matched.sell_price || null,
                 qty: targetQty,
                 quantity: targetQty,
-                unitPrice: matched.unit_price || matched.sell_price || matched.mrp || 0,
+                unitPrice: Number(matched.unit_price || matched.sell_price || matched.mrp || 0),
                 looseQty: targetLooseQty,
-                discount: autoDisc,
-                packSize: parsePackSizeFromPackaging(matched.packaging) || matched.pack_size || 1,
+                discount: Number(med.discount || 0),
+                packSize: pSize,
                 isEmptyRow: false
-              };
+              }];
             }
-          } catch (searchErr) {
-            console.warn('Refill item search error:', searchErr);
-          }
+          } catch {}
         }
 
-        if (!cartItem) {
-          cartItem = {
-            id: 'refill_' + Date.now() + '_' + Math.random(),
-            name: medName,
-            batch: '',
-            expiry: '',
-            mrp: Number(med.mrp || 0),
-            sell_price: med.sell_price || null,
-            qty: targetQty,
-            quantity: targetQty,
-            unitPrice: Number(med.unit_price || med.mrp || 0),
-            looseQty: targetLooseQty,
-            discount: Number(med.discount || 0),
-            packSize: Number(med.pack_size || 1),
-            isEmptyRow: false
-          };
+        if (allocated.length > 0) {
+          newItems.push(...allocated);
         }
-
-        newItems.push(cartItem);
       }
 
       if (newItems.length > 0) {
         setCart(prev => {
           const clean = prev.filter(item => !item.isEmptyRow);
-          // Avoid duplicate lines for medicines already in cart
-          const existingMedNames = new Set(clean.map(c => (c.name || '').toLowerCase().trim()));
-          const itemsToAdd = newItems.filter(ni => !existingMedNames.has((ni.name || '').toLowerCase().trim()));
-          const combined = [...clean, ...itemsToAdd];
+          const combined = [...clean, ...newItems];
           combined.push({
             id: 'empty_row_' + Date.now(),
             name: '',
@@ -1472,7 +1737,7 @@ const POS = () => {
           setActiveRefillId(matchedRefill.id);
         }
 
-        toastEvent.trigger(`Added ${newItems.length} refill item(s) to POS cart`, 'success', '/pos');
+        toastEvent.trigger(`Added ${newItems.length} refill item line(s) to POS cart`, 'success', '/pos');
       }
       refillsPanelCacheRef.current = null;
     } catch (err) {
@@ -1690,8 +1955,17 @@ const POS = () => {
   const [editMedicineId, setEditMedicineId] = useState<number | null>(null);
 
   const rebalanceCartMedicine = (prevCart: any[], medicineId: number, targetItemId: number, updatedFields: { qty?: number; looseQty?: number }) => {
+    const targetItem = prevCart.find(i => i.id === targetItemId);
+    const targetMedId = medicineId || targetItem?.medicine_id;
+    const targetMedName = (targetItem?.name || targetItem?.medicine_name || '').toLowerCase().trim();
+
     // 1. Find all cart items of this medicine
-    const medicineItems = prevCart.filter(item => !item.isEmptyRow && item.medicine_id === medicineId);
+    const medicineItems = prevCart.filter(item => {
+      if (item.isEmptyRow) return false;
+      const idMatch = targetMedId && item.medicine_id === targetMedId;
+      const nameMatch = Boolean(targetMedName && (item.name || item.medicine_name || '').toLowerCase().trim() === targetMedName);
+      return idMatch || nameMatch;
+    });
     if (medicineItems.length === 0) return prevCart;
 
     // 2. Determine the new total requested quantity for this medicine.
@@ -1708,160 +1982,38 @@ const POS = () => {
       totalRequestedTablets += (itemQty * packSize) + itemLoose;
     }
 
-    // 3. Fetch all active batches for this medicine from the local inventory cache
+    const requestedQty = Math.floor(totalRequestedTablets / packSize);
+    const requestedLooseQty = totalRequestedTablets % packSize;
+
     const compactInventory = getCompactInventoryCache();
-    const activeBatches = compactInventory
-      .filter(item => item.medicine_id === medicineId && (item.stock_qty > 0 || item.loose_quantity > 0))
-      .map(item => {
-        const expiryStr = item.expiry_date || '';
-        let isExpired = false;
-        if (expiryStr) {
-          let expDate: Date;
-          if (expiryStr.includes('/')) {
-            const parts = expiryStr.split('/');
-            let year = parseInt(parts[1], 10);
-            const month = parseInt(parts[0], 10) - 1;
-            if (year < 100) year += 2000;
-            expDate = new Date(year, month + 1, 0);
-          } else {
-            expDate = new Date(expiryStr);
-          }
-          if (expDate < new Date()) isExpired = true;
-        }
-        return { ...item, isExpired };
-      })
-      .filter(item => !item.isExpired);
-
-    if (activeBatches.length === 0) {
-      if (editingInvoiceId || medicineItems.some(i => i.batch || i.name)) {
-        const refItem = medicineItems[0];
-        const refQty = refItem.qty ?? refItem.quantity ?? 0;
-        const refLoose = refItem.looseQty ?? refItem.loose_qty ?? 0;
-        activeBatches.push({
-          inventory_id: refItem.inventory_id || refItem.id,
-          medicine_id: medicineId,
-          batch_no: refItem.batch || '',
-          expiry_date: refItem.expiry || '',
-          stock_qty: Math.max(refQty, refItem.stock_qty ?? 0),
-          loose_quantity: Math.max(refLoose, refItem.loose_quantity ?? 0),
-          mrp: refItem.mrp || 0,
-          cost_price: refItem.costPrice || 0,
-          unit_price: refItem.unitPrice || refItem.sell_price || refItem.mrp || 0,
-          pack_size: refItem.packSize || 1,
-          isExpired: false
-        });
-      } else {
-        toastEvent.trigger("This medicine is completely out of stock or expired", "error");
-        return prevCart.map(item => {
-          if (item.id === targetItemId) {
-            return { ...item, qty: 0, looseQty: 0 };
-          }
-          return item;
-        }).filter(item => item.id === targetItemId || item.medicine_id !== medicineId);
-      }
-    }
-
-    // Sort batches by FEFO (First Expiry, First Out):
-    // Active batches that have full strips first, then loose-only. Earliest expiry first.
-    activeBatches.sort((a, b) => {
-      const aHasStrips = (a.stock_qty || 0) > 0 ? 0 : 1;
-      const bHasStrips = (b.stock_qty || 0) > 0 ? 0 : 1;
-      if (aHasStrips !== bHasStrips) return aHasStrips - bHasStrips;
-      
-      const aExp = a.expiry_date || '9999-12-31';
-      const bExp = b.expiry_date || '9999-12-31';
-      return aExp.localeCompare(bExp);
+    const newMedRows = allocateMedicineBatches({
+      medicineId: targetMedId || 0,
+      medicineName: medicineItems[0].name || medicineItems[0].medicine_name || '',
+      requestedQty,
+      requestedLooseQty,
+      packSize,
+      fallbackItem: medicineItems[0],
+      compactInventory,
+      editingInvoiceId
     });
 
-    // 4. Distribute the total requested quantity across batches
-    let remainingTablets = totalRequestedTablets;
-    const allocations: { batch: any; qty: number; looseQty: number }[] = [];
-    let totalAvailableTablets = 0;
-
-    for (const batch of activeBatches) {
-      const batchStockTablets = (batch.stock_qty || 0) * packSize + (batch.loose_quantity || 0);
-      totalAvailableTablets += batchStockTablets;
-      
-      if (remainingTablets > 0 && batchStockTablets > 0) {
-        const takenTablets = Math.min(remainingTablets, batchStockTablets);
-        const qty = Math.floor(takenTablets / packSize);
-        const looseQty = takenTablets % packSize;
-
-        allocations.push({
-          batch,
-          qty,
-          looseQty
-        });
-        remainingTablets -= takenTablets;
-      }
-    }
-
-    // 5. If requested exceeds available stock, alert the user and cap the allocations
-    if (!editingInvoiceId && totalRequestedTablets > totalAvailableTablets) {
-      toastEvent.trigger(`Only ${totalAvailableTablets} units available in stock. Capped to maximum.`, "info");
-      
-      remainingTablets = totalAvailableTablets;
-      allocations.length = 0;
-      for (const batch of activeBatches) {
-        const batchStockTablets = (batch.stock_qty || 0) * packSize + (batch.loose_quantity || 0);
-        if (remainingTablets > 0 && batchStockTablets > 0) {
-          const takenTablets = Math.min(remainingTablets, batchStockTablets);
-          const qty = Math.floor(takenTablets / packSize);
-          const looseQty = takenTablets % packSize;
-          allocations.push({ batch, qty, looseQty });
-          remainingTablets -= takenTablets;
+    if (newMedRows.length === 0) {
+      toastEvent.trigger("This medicine is completely out of stock or expired", "error");
+      return prevCart.map(item => {
+        if (item.id === targetItemId) {
+          return { ...item, qty: 0, looseQty: 0 };
         }
-      }
+        return item;
+      }).filter(item => item.id === targetItemId || (targetMedId ? item.medicine_id !== targetMedId : (item.name || item.medicine_name || '').toLowerCase().trim() !== targetMedName));
     }
 
-    if (allocations.length === 0) {
-      allocations.push({
-        batch: activeBatches[0],
-        qty: 0,
-        looseQty: 0
-      });
-    }
-
-    // 6. Build the new cart rows for this medicine
-    const firstMedItem = medicineItems[0];
-    const newMedRows = allocations.map((alloc) => {
-      const rowSellPrice = alloc.batch.sell_price !== undefined && alloc.batch.sell_price !== null
-        ? alloc.batch.sell_price
-        : (firstMedItem.sell_price || null);
-      const rowMrp = alloc.batch.mrp || firstMedItem.mrp || 0;
-      let rowDiscount = firstMedItem.discount;
-      if ((rowDiscount === undefined || rowDiscount === 0) && rowSellPrice && Number(rowSellPrice) > 0 && rowMrp > 0 && Number(rowSellPrice) < rowMrp) {
-        rowDiscount = parseFloat((((rowMrp - Number(rowSellPrice)) / rowMrp) * 100).toFixed(2));
-      }
-
-      const rowUnitPrice = (firstMedItem.unitPrice !== undefined && firstMedItem.unitPrice !== null && firstMedItem.unitPrice > 0)
-        ? firstMedItem.unitPrice
-        : (alloc.batch.unit_price || rowMrp);
-
-      return {
-        ...firstMedItem,
-        id: alloc.batch.inventory_id,
-        batch: alloc.batch.batch_no,
-        expiry: alloc.batch.expiry_date,
-        qty: alloc.qty,
-        quantity: alloc.qty,
-        looseQty: alloc.looseQty,
-        mrp: rowMrp,
-        sell_price: rowSellPrice,
-        discount: rowDiscount || 0,
-        costPrice: alloc.batch.cost_price != null ? alloc.batch.cost_price : null,
-        unitPrice: rowUnitPrice,
-        availableStock: alloc.batch.stock_qty,
-        availableLooseStock: alloc.batch.loose_quantity,
-        alternative_batches: activeBatches.filter(b => b.inventory_id !== alloc.batch.inventory_id)
-      };
-    });
-
-    // 7. Replace all old rows of this medicine in the cart with the new rows
+    // Replace all old rows of this medicine in the cart with the new allocated rows
     const newCart: any[] = [];
     let inserted = false;
     for (const item of prevCart) {
-      if (item.medicine_id === medicineId) {
+      const isThisMed = (targetMedId && item.medicine_id === targetMedId) ||
+        Boolean(targetMedName && (item.name || item.medicine_name || '').toLowerCase().trim() === targetMedName);
+      if (isThisMed && !item.isEmptyRow) {
         if (!inserted) {
           newCart.push(...newMedRows);
           inserted = true;
@@ -1928,9 +2080,9 @@ const POS = () => {
       
       if (existingIndex !== -1) {
         const existingItem = cleanPrev[existingIndex];
-        const newQty = existingItem.qty + incQty;
+        const newQty = (existingItem.qty || 0) + incQty;
         const newLoose = (existingItem.looseQty || 0) + incLooseQty;
-        return rebalanceCartMedicine(cleanPrev, existingItem.medicine_id, existingItem.id, { qty: newQty, looseQty: newLoose });
+        return rebalanceCartMedicine(cleanPrev, existingItem.medicine_id || existingItem.id, existingItem.id, { qty: newQty, looseQty: newLoose });
       }
       
       const hasRealBatch = !!(med.batch_no || med.batch) && !!(med.inventory_id || (typeof med.id === 'number' && med.id < 1000000000));
@@ -1970,15 +2122,22 @@ const POS = () => {
         alternative_batches: med.alternative_batches || []
       };
       
-      const nextCart = [...cleanPrev, newItem];
-      // Capture generation at schedule time; skip if the cart was replaced wholesale
-      // (e.g. edit-bill load) between scheduling and execution.
-      const scheduledGeneration = cartGenerationRef.current;
-      queueMicrotask(() => {
-        if (cartGenerationRef.current !== scheduledGeneration) return;
-        updateCart(currCart => rebalanceCartMedicine(currCart, newItem.medicine_id, newItem.id, { qty: incQty, looseQty: incLooseQty }));
+      const compactInventory = getCompactInventoryCache();
+      const allocated = allocateMedicineBatches({
+        medicineId: med.medicine_id || (typeof med.id === 'number' && med.id < 1000000000 ? med.id : 0),
+        medicineName: med.name || med.medicine_name || '',
+        requestedQty: incQty,
+        requestedLooseQty: incLooseQty,
+        packSize: med.packSize || med.pack_size || 1,
+        fallbackItem: newItem,
+        compactInventory,
+        editingInvoiceId
       });
-      return nextCart;
+
+      if (allocated.length > 0) {
+        return [...cleanPrev, ...allocated];
+      }
+      return [...cleanPrev, newItem];
     });
 
     // Fetch doctor combination recommendations
@@ -2071,55 +2230,47 @@ const POS = () => {
   };
 
   const fetchDetailsAndAddToCart = async (item: any) => {
-    const basePayload = {
-      id: item.inventory_id,
+    const autoDisc = (item.sell_price && item.mrp && Number(item.sell_price) > 0 && Number(item.mrp) > 0 && Number(item.sell_price) < Number(item.mrp))
+      ? parseFloat((((Number(item.mrp) - Number(item.sell_price)) / Number(item.mrp)) * 100).toFixed(2))
+      : (item.discount || 0);
+
+    addToCart({
+      id: item.inventory_id || item.id,
+      inventory_id: item.inventory_id || item.id,
       medicine_id: item.medicine_id,
-      name: item.medicine_name,
-      batch: item.batch_no,
-      expiry: item.expiry_date,
+      name: item.medicine_name || item.name,
+      batch: item.batch_no || '',
+      expiry: item.expiry_date || '',
       mrp: item.mrp,
-      sell_price: item.sell_price,
-      costPrice: item.cost_price,
-      salts: item.salts || item.hsn_code || '',
+      sell_price: item.sell_price || null,
+      unitPrice: item.unit_price || item.sell_price || item.mrp || 0,
+      costPrice: item.cost_price != null ? item.cost_price : null,
+      salts: item.salts || item.api_reference || item.hsn_code || '',
+      discount: autoDisc,
       packSize: parsePackSizeFromPackaging(item.packaging) || item.pack_size || 1,
-      quantity: item.quantity,
-      batch_quantity: item.batch_quantity,
-      loose_quantity: item.loose_quantity,
-      alternatives: item.alternatives || [],
-    };
-
-    addToCart(basePayload);
-    setSearchTerm('');
-    setSearchResults([]);
-
-    setTimeout(() => {
-      const activeRows = cart.filter(r => !r.isEmptyRow);
-      const targetIdx = activeRows.length; // index of new item
-      const qtyInput = document.getElementById(`row-qty-input-${targetIdx}`) || document.getElementById(`row-qty-input-${Math.max(0, activeRows.length - 1)}`);
-      if (qtyInput) {
-        (qtyInput as HTMLInputElement).focus();
-        (qtyInput as HTMLInputElement).select?.();
-      }
-    }, 80);
+      availableStock: item.quantity !== undefined ? item.quantity : (item.stock_qty !== undefined ? item.stock_qty : 0),
+      availableLooseStock: item.loose_quantity !== undefined ? item.loose_quantity : 0,
+      scanImage: item.scanImage,
+      rawOcrText: item.rawOcrText
+    });
 
     try {
       const details = await api.getMedicineQuickDetails(item.medicine_id);
-      updateCart(prevCart => {
-        const cleanPrev = prevCart.filter(row => !row.isEmptyRow);
-        const targetId = item.inventory_id;
-        const idx = cleanPrev.findIndex(row =>
-          row.medicine_id === item.medicine_id &&
-          (row.id === targetId || row.batch === item.batch_no)
-        );
-        if (idx === -1) return prevCart;
-        const updated = [...cleanPrev];
-        const fetchedSellPrice = details.sell_price !== undefined ? details.sell_price : updated[idx].sell_price;
-        const mrpVal = updated[idx].mrp || details.mrp || 0;
-        const numSellPrice = Number(fetchedSellPrice || 0);
-        const numMrp = Number(mrpVal || 0);
-        let autoDiscount = updated[idx].discount;
-        if (numSellPrice > 0 && numMrp > 0 && numSellPrice < numMrp) {
-          autoDiscount = parseFloat((((numMrp - numSellPrice) / numMrp) * 100).toFixed(2));
+      if (!details) return;
+
+      const fetchedSellPrice = details.sell_price !== undefined ? details.sell_price : (item.sell_price || null);
+      const fetchedMrp = Number(details.mrp || item.mrp || 0);
+      let autoDiscount = item.discount || 0;
+      if (fetchedSellPrice && Number(fetchedSellPrice) > 0 && fetchedMrp > 0 && Number(fetchedSellPrice) < fetchedMrp) {
+        autoDiscount = parseFloat((((fetchedMrp - Number(fetchedSellPrice)) / fetchedMrp) * 100).toFixed(2));
+      }
+
+      updateCart(prev => {
+        const idx = prev.findIndex(r => r.medicine_id === item.medicine_id || r.id === (item.inventory_id || item.id));
+        if (idx === -1) return prev;
+        const updated = [...prev];
+        if (updated[idx].salts && updated[idx].alternatives && updated[idx].alternatives.length > 0) {
+          return prev;
         }
         updated[idx] = {
           ...updated[idx],
@@ -2168,53 +2319,45 @@ const POS = () => {
       }).catch(err => console.error('Failed to post correction learning:', err));
     }
 
-    const existingIndex = cart.findIndex((item, idx) => 
-      idx !== index && 
-      !item.isEmptyRow && 
-      ((item.medicine_id !== undefined && med.medicine_id !== undefined && item.medicine_id === med.medicine_id) ||
-       (item.name.toLowerCase().trim() === med.medicine_name.toLowerCase().trim()))
-    );
+    const defaultQty = originalItem?.isEmptyRow ? 1 : ((originalItem?.qty ?? 0) || 1);
+    const compactInventory = getCompactInventoryCache();
+    const allocated = allocateMedicineBatches({
+      medicineId: med.medicine_id || (typeof med.id === 'number' && med.id < 1000000000 ? med.id : 0),
+      medicineName: med.medicine_name || med.name || '',
+      requestedQty: defaultQty,
+      requestedLooseQty: 0,
+      packSize: med.pack_size || 1,
+      compactInventory,
+      editingInvoiceId
+    });
 
-    if (existingIndex !== -1) {
-      updateCart(prev => {
-        const next = prev.map((item, idx) => {
-          if (idx === existingIndex) {
-            return {
-              ...item,
-              qty: item.qty + 1
-            };
-          }
-          return item;
-        });
-        if (originalItem && originalItem.isEmptyRow) {
-          return next;
-        } else {
-          return next.filter((_, idx) => idx !== index);
-        }
-      });
-    } else {
-      updateCart(prev => prev.map((item, idx) => {
-        if (idx !== index) return item;
-        const defaultQty = item.isEmptyRow ? 1 : (item.qty ?? 0);
-        return {
-          ...item,
-          id: med.inventory_id,
-          medicine_id: med.medicine_id,
-          name: med.medicine_name,
-          batch: med.batch_no,
-          expiry: med.expiry_date,
-          mrp: med.mrp,
-          costPrice: med.cost_price,
-          salts: med.salts || med.hsn_code || '',
-          packSize: med.pack_size || 1,
-          qty: defaultQty,
-          quantity: defaultQty,
-          availableStock: med.batch_quantity !== undefined ? med.batch_quantity : (med.quantity !== undefined ? med.quantity : 0),
-          availableLooseStock: med.loose_quantity !== undefined ? med.loose_quantity : 0,
-          isEmptyRow: false
-        };
-      }));
-    }
+    updateCart(prev => {
+      const clean = prev.filter((_, idx) => idx !== index);
+      const isOrigEmpty = originalItem?.isEmptyRow;
+      const rowsToAdd = allocated.length > 0 ? allocated : [{
+        id: med.inventory_id || med.id,
+        medicine_id: med.medicine_id || med.id,
+        name: med.medicine_name || med.name,
+        batch: med.batch_no || '',
+        expiry: med.expiry_date || '',
+        mrp: med.mrp || 0,
+        costPrice: med.cost_price || 0,
+        salts: med.salts || med.hsn_code || '',
+        packSize: med.pack_size || 1,
+        qty: defaultQty,
+        quantity: defaultQty,
+        availableStock: med.batch_quantity !== undefined ? med.batch_quantity : (med.quantity !== undefined ? med.quantity : 0),
+        availableLooseStock: med.loose_quantity !== undefined ? med.loose_quantity : 0,
+        isEmptyRow: false
+      }];
+
+      if (isOrigEmpty) {
+        return [...clean, ...rowsToAdd];
+      }
+      const next = [...prev];
+      next.splice(index, 1, ...rowsToAdd);
+      return next;
+    });
 
     setActiveRowSearchIndex(null);
     setRowSearchTerm('');
@@ -4186,15 +4329,31 @@ const POS = () => {
                               remainingStock = Math.floor(remainingUnits / packSize);
                               remainingLoose = remainingUnits % packSize;
                             }
+                            const isFullStockInCart = typeof remainingStock === 'number' && remainingStock <= 0 && remainingLoose <= 0 && (medicineBatches.length > 0 || (item.availableStock || 0) > 0);
+                            const isTrueOutOfStock = typeof remainingStock === 'number' && remainingStock <= 0 && remainingLoose <= 0 && medicineBatches.length === 0 && (item.availableStock || 0) === 0;
+
                             return (
-                              <div className={`text-xs select-none font-bold font-mono px-2 py-0.5 rounded-md border inline-flex items-center gap-1 ${
-                                (typeof remainingStock === 'number' && remainingStock <= 0 && remainingLoose <= 0)
-                                  ? 'bg-red/5 border-red/20 text-red animate-pulse'
-                                  : (typeof remainingStock === 'number' && remainingStock <= 10)
-                                  ? 'bg-amber-500/5 border-amber-500/20 text-amber-500'
-                                  : 'bg-green/5 border-green/20 text-green'
-                              }`}>
-                                {remainingStock} / {remainingLoose}
+                              <div 
+                                title={
+                                  isTrueOutOfStock
+                                    ? 'Out of stock in pharmacy'
+                                    : isFullStockInCart
+                                    ? '100% of pharmacy stock allocated to this bill (0 remaining on shelf)'
+                                    : `Remaining stock on shelf after this sale: ${remainingStock} strip(s), ${remainingLoose} loose`
+                                }
+                                className={`text-xs select-none font-bold font-mono px-2 py-0.5 rounded-md border inline-flex items-center gap-1 ${
+                                  isTrueOutOfStock
+                                    ? 'bg-red/5 border-red/20 text-red animate-pulse'
+                                    : isFullStockInCart
+                                    ? 'bg-amber-500/10 border-amber-500/30 text-amber-500'
+                                    : (typeof remainingStock === 'number' && remainingStock <= 10)
+                                    ? 'bg-amber-500/5 border-amber-500/20 text-amber-500'
+                                    : 'bg-green/5 border-green/20 text-green'
+                                }`}>
+                                <span>{remainingStock} / {remainingLoose}</span>
+                                {isFullStockInCart && (
+                                  <span className="text-[10px] uppercase font-bold text-amber-400 ml-0.5" title="100% of pharmacy stock allocated to this bill">(All In Cart)</span>
+                                )}
                               </div>
                             );
                           })()}

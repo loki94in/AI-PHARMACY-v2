@@ -1581,10 +1581,10 @@ function TriggerSchedulesTab({ rawSettings, refetchSettings }: { rawSettings: Re
     triggerExpiryLookaheadDays: rawSettings.trigger_expiry_lookahead_days || '90',
 
     // 3. Distributor Dispatch Reminder
-    triggerDispatchReminderEnabled: rawSettings.trigger_dispatch_reminder_enabled !== 'false',
+    triggerDispatchReminderEnabled: rawSettings.trigger_dispatch_reminder_enabled === 'true',
     triggerDispatchReminderTimeStart: rawSettings.trigger_dispatch_reminder_time_start || '12:30',
     triggerDispatchReminderTimeEnd: rawSettings.trigger_dispatch_reminder_time_end || '13:00',
-    triggerAfternoonDispatchReminderEnabled: rawSettings.trigger_afternoon_dispatch_reminder_enabled !== 'false',
+    triggerAfternoonDispatchReminderEnabled: rawSettings.trigger_afternoon_dispatch_reminder_enabled === 'true',
     triggerAfternoonDispatchReminderTime: rawSettings.trigger_afternoon_dispatch_reminder_time || '14:00',
 
     // 4. Nightly Database Backup

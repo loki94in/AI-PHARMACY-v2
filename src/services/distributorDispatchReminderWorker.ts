@@ -151,7 +151,7 @@ export async function syncTodayActiveDistributors(): Promise<any[]> {
         const initialStatus = dist.hasEmailToday ? 'Dispatched' : 'Pending';
         await db.run(
           `INSERT INTO distributor_dispatch_reminders (distributor_id, distributor_name, distributor_phone, date, status, auto_remind, order_source, email_received_at)
-           VALUES (?, ?, ?, ?, ?, 1, ?, ?)`,
+           VALUES (?, ?, ?, ?, ?, 0, ?, ?)`,
           [
             activeId, dist.name, activePhone || '', todayStr, initialStatus,
             dist.hasEmailToday ? 'email' : 'pharmarack',
@@ -463,6 +463,21 @@ export async function checkAndSendAutoReminders() {
   isWorkerRunning = true;
 
   try {
+    const db = await dbManager.getConnection();
+    const [globalAuto, triggerSetting] = await Promise.all([
+      db.get("SELECT value FROM app_settings WHERE key = 'automation_enabled'"),
+      db.get("SELECT value FROM app_settings WHERE key = 'trigger_dispatch_reminder_enabled'")
+    ]);
+
+    const isGlobalEnabled = !globalAuto || globalAuto.value === 'true';
+    const isTriggerEnabled = triggerSetting?.value === 'true';
+
+    // Must be explicitly enabled by owner
+    if (!isGlobalEnabled || !isTriggerEnabled) {
+      isWorkerRunning = false;
+      return;
+    }
+
     const now = new Date();
     const hours = now.getHours();
     const minutes = now.getMinutes();
@@ -478,7 +493,6 @@ export async function checkAndSendAutoReminders() {
     const todayStr = getTodayDateString();
     await syncTodayActiveDistributors();
 
-    const db = await dbManager.getConnection();
     const pendingReminders = await db.all(
       `SELECT id, distributor_name FROM distributor_dispatch_reminders
        WHERE date = ? AND status = 'Pending' AND auto_remind = 1
@@ -512,9 +526,14 @@ export async function checkAndSendAfternoonDeliveryBoyReminder() {
     const db = await dbManager.getConnection();
     const todayStr = getTodayDateString();
 
-    // 1. Check settings
-    const enabledSetting = await db.get("SELECT value FROM app_settings WHERE key = 'trigger_afternoon_dispatch_reminder_enabled'");
-    if (enabledSetting?.value === 'false') return;
+    // 1. Check settings - must be explicitly enabled by owner
+    const [globalAuto, enabledSetting] = await Promise.all([
+      db.get("SELECT value FROM app_settings WHERE key = 'automation_enabled'"),
+      db.get("SELECT value FROM app_settings WHERE key = 'trigger_afternoon_dispatch_reminder_enabled'")
+    ]);
+
+    const isGlobalEnabled = !globalAuto || globalAuto.value === 'true';
+    if (!isGlobalEnabled || enabledSetting?.value !== 'true') return;
 
     const timeSetting = await db.get("SELECT value FROM app_settings WHERE key = 'trigger_afternoon_dispatch_reminder_time'");
     const targetTime = timeSetting?.value || '14:00';
