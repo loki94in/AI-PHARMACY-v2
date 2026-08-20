@@ -224,6 +224,7 @@ describe('Task 13 — Refill WhatsApp Pharmacy Name Enforcement', () => {
 
     await db.run('INSERT INTO medicines (id, name, mrp) VALUES (10, "Cough Syrup", 120)');
     await db.run('INSERT INTO inventory_master (id, medicine_id, quantity, batch_no, expiry_date, mrp) VALUES (101, 10, 10, "CS-101", "12/28", 120)');
+    await db.run('INSERT INTO patient_refills (id, patient_name, patient_phone, medicine_id, is_active, is_ready, hold_for_stock, status) VALUES (50, "Suresh Raina", "919876500000", 10, 1, 1, 0, "pending")');
 
     const refillObj = {
       id: 50,

@@ -2429,6 +2429,13 @@ const POS = () => {
         if (item.id !== id) return item;
         let updatedItem = { ...item, [field]: value };
 
+        if (field === 'discount') {
+          const numDisc = Math.min(100, Math.max(0, Number(value) || 0));
+          updatedItem.discount = numDisc;
+          updatedItem.discount_per = numDisc;
+          updatedItem.discountPer = numDisc;
+        }
+
         if (field === 'packSize') {
           const pSize = Math.max(1, Number(value));
           updatedItem.packSize = pSize;
@@ -4254,9 +4261,19 @@ const POS = () => {
                                     onKeyDown={e => {
                                       if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
                                         handlePosRowInputKeyDown(e, cart.indexOf(item), 'looseQty');
-                                      } else if (e.key === 'Enter' || (e.key === 'Tab' && !e.shiftKey)) {
+                                      } else if (e.key === 'Enter') {
                                         e.preventDefault();
                                         focusMedicineSearch();
+                                      } else if (e.key === 'Tab' && !e.shiftKey) {
+                                        e.preventDefault();
+                                        const curIdx = cart.indexOf(item);
+                                        const discIn = document.getElementById(`row-disc-input-${curIdx}`) as HTMLInputElement | null;
+                                        if (discIn) {
+                                          discIn.focus();
+                                          discIn.select?.();
+                                        } else {
+                                          focusMedicineSearch();
+                                        }
                                       } else if (e.key === 'Tab' && e.shiftKey) {
                                         e.preventDefault();
                                         const curIdx = cart.indexOf(item);
@@ -4361,48 +4378,66 @@ const POS = () => {
 
                         {/* Discount */}
                         <td className="py-1 px-2.5 text-center">
-                          <input 
-                            id={`row-disc-input-${cart.indexOf(item)}`}
-                            data-pos-row-index={cart.indexOf(item)}
-                            data-pos-field="discount"
-                            type="number" 
-                            className={`w-14 text-center bg-bg/40 border border-border/40 hover:border-border/80 focus:border-primary/50 focus:ring-1 focus:ring-primary/20 text-xs font-mono font-bold text-sky py-0.5 px-1 h-7 rounded-lg ${item.isEmptyRow ? 'opacity-40 cursor-not-allowed' : ''}`}
-                            value={item.isEmptyRow ? '' : (item.discount === 0 || item.discount === undefined || item.discount === null ? '' : item.discount)}
-                            onChange={e => updateCartItem(item.id, 'discount', e.target.value === '' ? 0 : Math.min(100, Math.max(0, Number(e.target.value))))}
-                            min="0"
-                            max="100"
-                            disabled={item.isEmptyRow}
-                            onKeyDown={e => {
-                              if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-                                handlePosRowInputKeyDown(e, cart.indexOf(item), 'discount');
-                              } else if (e.key === 'Enter') {
-                                e.preventDefault();
-                                focusMedicineSearch();
-                              } else if (e.key === 'Tab') {
-                                const curIdx = cart.indexOf(item);
-                                if (e.shiftKey) {
-                                  e.preventDefault();
-                                  const looseIn = document.getElementById(`row-loose-input-${curIdx}`) as HTMLInputElement | null;
-                                  if (looseIn && !looseIn.disabled) {
-                                    looseIn.focus();
-                                    looseIn.select?.();
-                                  } else {
-                                    const qtyIn = document.getElementById(`row-qty-input-${curIdx}`) as HTMLInputElement | null;
-                                    if (qtyIn) { qtyIn.focus(); qtyIn.select?.(); }
-                                  }
-                                } else {
-                                  e.preventDefault();
-                                  const rateIn = document.getElementById(`row-rate-input-${curIdx}`) as HTMLInputElement | null;
-                                  if (rateIn) {
-                                    rateIn.focus();
-                                    rateIn.select?.();
-                                  } else {
+                          <div className="flex items-center justify-center">
+                            <div className={`relative flex items-center bg-bg/50 border rounded-lg px-1.5 py-0.5 h-7 transition-all ${
+                              item.isEmptyRow 
+                                ? 'opacity-40 border-border/30 cursor-not-allowed' 
+                                : (item.discount && Number(item.discount) > 0)
+                                ? 'border-sky-500/50 bg-sky-500/10 focus-within:border-sky-500 focus-within:ring-1 focus-within:ring-sky-500/30'
+                                : 'border-border/40 hover:border-border/80 focus-within:border-primary/50 focus-within:ring-1 focus-within:ring-primary/20'
+                            }`}>
+                              <input 
+                                id={`row-disc-input-${cart.indexOf(item)}`}
+                                data-pos-row-index={cart.indexOf(item)}
+                                data-pos-field="discount"
+                                type="number" 
+                                step="0.5"
+                                className={`w-12 text-center bg-transparent border-0 focus:ring-0 p-0 text-xs font-mono font-bold focus:outline-none ${
+                                  (item.discount && Number(item.discount) > 0) ? 'text-sky-400' : 'text-text'
+                                } ${item.isEmptyRow ? 'cursor-not-allowed' : ''}`}
+                                value={item.isEmptyRow ? '' : (item.discount === 0 || item.discount === undefined || item.discount === null ? '' : item.discount)}
+                                placeholder="0%"
+                                onChange={e => updateCartItem(item.id, 'discount', e.target.value === '' ? 0 : Math.min(100, Math.max(0, Number(e.target.value))))}
+                                min="0"
+                                max="100"
+                                disabled={item.isEmptyRow}
+                                title="Item Discount Percentage (%) — modify manually"
+                                onKeyDown={e => {
+                                  if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                                    handlePosRowInputKeyDown(e, cart.indexOf(item), 'discount');
+                                  } else if (e.key === 'Enter') {
+                                    e.preventDefault();
                                     focusMedicineSearch();
+                                  } else if (e.key === 'Tab') {
+                                    const curIdx = cart.indexOf(item);
+                                    if (e.shiftKey) {
+                                      e.preventDefault();
+                                      const looseIn = document.getElementById(`row-loose-input-${curIdx}`) as HTMLInputElement | null;
+                                      if (looseIn && !looseIn.disabled) {
+                                        looseIn.focus();
+                                        looseIn.select?.();
+                                      } else {
+                                        const qtyIn = document.getElementById(`row-qty-input-${curIdx}`) as HTMLInputElement | null;
+                                        if (qtyIn) { qtyIn.focus(); qtyIn.select?.(); }
+                                      }
+                                    } else {
+                                      e.preventDefault();
+                                      const rateIn = document.getElementById(`row-rate-input-${curIdx}`) as HTMLInputElement | null;
+                                      if (rateIn) {
+                                        rateIn.focus();
+                                        rateIn.select?.();
+                                      } else {
+                                        focusMedicineSearch();
+                                      }
+                                    }
                                   }
-                                }
-                              }
-                            }}
-                          />
+                                }}
+                              />
+                              {!item.isEmptyRow && (
+                                <span className="text-[10px] text-muted font-bold ml-0.5 select-none">%</span>
+                              )}
+                            </div>
+                          </div>
                         </td>
 
                         {/* Rate / Sale Price */}

@@ -444,35 +444,111 @@ router.post('/', async (req, res) => {
       });
       await applySaleDelta(db, currentStock.medicine_id, soldQty);
 
-      // Handle refill logic if enabled
+      // Pre-compute phone queries for customer matching
+      const cleanPhone = (patient_phone || '').replace(/\D/g, '');
+      const phoneQuery = cleanPhone.length >= 10 ? `%${cleanPhone.slice(-10)}%` : 'NON_EXISTENT';
+
+      // Handle refill logic if enabled (Idempotent: update if existing, insert if new)
       if (refillEnabled && inventory_id) {
         const invRecord = currentStock;
         if (invRecord && invRecord.medicine_id) {
           const nextDate = new Date();
-          nextDate.setDate(nextDate.getDate() + Number(refillDays));
-          
-          await db.run(
-            'INSERT INTO patient_refills (customer_id, patient_name, patient_phone, medicine_id, refill_interval_days, next_refill_date, status) VALUES (?, ?, ?, ?, ?, ?, ?)',
-            [customerId, patient_name || 'Walk-in Customer', patient_phone || '', invRecord.medicine_id, refillDays, nextDate.toISOString(), 'pending']
+          const rDays = Number(refillDays || 30);
+          nextDate.setDate(nextDate.getDate() + rDays);
+          const nextDateStr = nextDate.toISOString().slice(0, 19).replace('T', ' ');
+
+          const existingSchedule = await db.get(
+            `SELECT id FROM patient_refills 
+             WHERE medicine_id = ? AND ((customer_id IS NOT NULL AND customer_id = ?) OR (patient_phone IS NOT NULL AND length(patient_phone) >= 10 AND replace(patient_phone, ' ', '') LIKE ?))
+             LIMIT 1`,
+            [invRecord.medicine_id, customerId || -1, phoneQuery]
           );
+
+          if (existingSchedule) {
+            await db.run(
+              `UPDATE patient_refills 
+               SET customer_id = COALESCE(?, customer_id), patient_name = COALESCE(?, patient_name), 
+                   patient_phone = COALESCE(?, patient_phone), refill_interval_days = ?, next_refill_date = ?, is_active = 1
+               WHERE id = ?`,
+              [customerId, patient_name, patient_phone, rDays, nextDateStr, existingSchedule.id]
+            );
+          } else {
+            await db.run(
+              `INSERT INTO patient_refills (customer_id, patient_name, patient_phone, medicine_id, refill_interval_days, next_refill_date, status, is_active)
+               VALUES (?, ?, ?, ?, ?, ?, 'pending', 1)`,
+              [customerId, patient_name || 'Walk-in Customer', patient_phone || '', invRecord.medicine_id, rDays, nextDateStr]
+            );
+          }
         }
       }
     }
 
-    // Resolve refill cycle if this sale completes a pending refill or matches customer phone number
+    // Resolve refill cycle if this sale completes a pending refill or matches sold medicines for this customer
     const cleanPhone = (patient_phone || '').replace(/\D/g, '');
     const phoneQuery = cleanPhone.length >= 10 ? `%${cleanPhone.slice(-10)}%` : 'NON_EXISTENT';
-    const matchingRefills = await db.all(
-      `SELECT * FROM patient_refills WHERE (id = ?) OR (patient_phone IS NOT NULL AND length(patient_phone) >= 10 AND replace(patient_phone, ' ', '') LIKE ?)`,
-      [refillId || -1, phoneQuery]
-    );
+    const soldMedicineIds = Array.from(new Set(Array.from(stockMap.values()).map((s: any) => s.medicine_id).filter(Boolean)));
+
+    const explicitRefillIds: number[] = [];
+    if (req.body.refillId) explicitRefillIds.push(Number(req.body.refillId));
+    if (Array.isArray(req.body.refillIds)) explicitRefillIds.push(...req.body.refillIds.map(Number));
+    if (Array.isArray(req.body.refill_ids)) explicitRefillIds.push(...req.body.refill_ids.map(Number));
+
+    let matchingRefills: any[] = [];
+    if (explicitRefillIds.length > 0) {
+      const placeholders = explicitRefillIds.map(() => '?').join(',');
+      matchingRefills = await db.all(
+        `SELECT pr.*, m.name as medicine_name FROM patient_refills pr
+         LEFT JOIN medicines m ON pr.medicine_id = m.id
+         WHERE pr.id IN (${placeholders}) AND pr.is_active = 1`,
+        explicitRefillIds
+      );
+    } else if (cleanPhone.length >= 10 || customerId) {
+      matchingRefills = await db.all(
+        `SELECT pr.*, m.name as medicine_name FROM patient_refills pr
+         LEFT JOIN medicines m ON pr.medicine_id = m.id
+         WHERE (pr.customer_id = ? OR (pr.patient_phone IS NOT NULL AND length(pr.patient_phone) >= 10 AND replace(pr.patient_phone, ' ', '') LIKE ?))
+           AND pr.is_active = 1`,
+        [customerId || -1, phoneQuery]
+      );
+    }
 
     if (Array.isArray(matchingRefills) && matchingRefills.length > 0) {
       for (const refill of matchingRefills) {
-        const nextDate = new Date();
-        nextDate.setDate(nextDate.getDate() + Number(refill.refill_interval_days || 30));
-        const nextDateStr = nextDate.toISOString().slice(0, 19).replace('T', ' ');
+        // Match either by explicit refill ID, or if the sold items contain this refill's medicine
+        const isMedicineSold = soldMedicineIds.includes(refill.medicine_id) || explicitRefillIds.includes(refill.id);
+        if (!isMedicineSold && explicitRefillIds.length === 0) {
+          continue; // Don't fulfill unrelated medicines in a partial purchase
+        }
 
+        const interval = Number(refill.refill_interval_days || 30);
+        const nextDate = new Date();
+        nextDate.setDate(nextDate.getDate() + interval);
+        const nextDateStr = nextDate.toISOString().slice(0, 19).replace('T', ' ');
+        const cycleDueDate = refill.next_refill_date || new Date().toISOString().slice(0, 10);
+        const fulfilledQty = Number(refill.quantity_needed || 1);
+
+        // 1. Record persistent fulfillment occurrence linked to invoice
+        await db.run(
+          `INSERT INTO refill_fulfillments (
+            refill_id, customer_id, patient_name, patient_phone, medicine_id, medicine_name, 
+            quantity_fulfilled, fulfilled_at, invoice_id, invoice_no, cycle_due_date, next_due_date, fulfilled_via
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?, ?, 'pos_sale')`,
+          [
+            refill.id,
+            refill.customer_id || customerId,
+            refill.patient_name || patient_name || 'Customer',
+            refill.patient_phone || patient_phone || '',
+            refill.medicine_id,
+            refill.medicine_name || 'Prescribed Medicine',
+            fulfilledQty,
+            invoiceId,
+            invoice_no,
+            cycleDueDate,
+            nextDateStr
+          ]
+        );
+
+        // 2. Advance the same persistent schedule in-place
         await db.run(
           `UPDATE patient_refills 
            SET last_refill_date = datetime('now'), 
@@ -500,10 +576,10 @@ router.post('/', async (req, res) => {
         // Mark staged message as sent
         await db.run(
           `UPDATE automation_notifications 
-           SET lifecycle_status = 'sent' 
-           WHERE type = 'refill_collection' AND reference_id = ? AND lifecycle_status = 'staged'`,
-          [String(refill.id)]
-        );
+           SET lifecycle_status = 'sent', status = 'sent_manually' 
+           WHERE type = 'refill_collection' AND (reference_id = ? OR reference_id LIKE ? OR reference_id LIKE ?) AND status = 'staged'`,
+          [String(refill.id), `${refill.id},%`, `%,${refill.id}%`]
+        ).catch(() => {});
       }
     }
     // Commit transaction

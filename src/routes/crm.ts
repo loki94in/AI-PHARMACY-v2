@@ -197,6 +197,67 @@ router.get('/:id/history', async (req, res) => {
   }
 });
 
+// Get customer sales invoice history by phone number (supports patient lookup without pre-existing customer ID)
+router.get('/history-by-phone/:phone', async (req, res) => {
+  const phone = req.params.phone;
+  try {
+    const db = await dbManager.getConnection();
+    const cleanPhone = (phone || '').trim();
+    const digitsOnly = cleanPhone.replace(/\D/g, '').slice(-10);
+
+    let matchingCustomerIds: number[] = [];
+    if (digitsOnly.length === 10) {
+      const customers = await db.all(
+        `SELECT id FROM customers 
+         WHERE phone = ? OR REPLACE(REPLACE(REPLACE(phone, ' ', ''), '-', ''), '+', '') LIKE ?`,
+        [cleanPhone, `%${digitsOnly}`]
+      );
+      matchingCustomerIds = customers.map((c: any) => c.id);
+    }
+
+    let query = `
+      SELECT si.*, c.name as customer_name, c.phone as customer_phone, d.name as doctor_name
+      FROM sales_invoices si
+      LEFT JOIN customers c ON si.customer_id = c.id
+      LEFT JOIN doctors d ON d.id = si.doctor_id
+      WHERE 0 = 1
+    `;
+    const params: any[] = [];
+
+    if (matchingCustomerIds.length > 0) {
+      const placeholders = matchingCustomerIds.map(() => '?').join(',');
+      query += ` OR si.customer_id IN (${placeholders})`;
+      params.push(...matchingCustomerIds);
+    }
+
+    if (digitsOnly.length === 10) {
+      query += ` OR (si.patient_phone IS NOT NULL AND length(si.patient_phone) >= 10 AND REPLACE(REPLACE(REPLACE(si.patient_phone, ' ', ''), '-', ''), '+', '') LIKE ?)`;
+      params.push(`%${digitsOnly}`);
+    }
+
+    query += ` ORDER BY si.date DESC LIMIT 100`;
+
+    const invoices = await db.all(query, params);
+
+    for (const inv of invoices) {
+      const items = await db.all(
+        `SELECT sli.*, COALESCE(m.name, 'Medicine') as medicine_name, im.batch_no as batch_number, im.expiry_date, im.mrp, COALESCE(m.pack_size, 10) as pack_size
+         FROM sale_items sli
+         LEFT JOIN inventory_master im ON im.id = sli.inventory_id
+         LEFT JOIN medicines m ON m.id = im.medicine_id
+         WHERE sli.invoice_id = ?`,
+        [inv.id]
+      );
+      inv.items = items;
+    }
+
+    res.json(invoices);
+  } catch (error: any) {
+    console.error('Failed to fetch history by phone:', error);
+    res.status(500).json({ error: 'Failed to fetch history: ' + error.message });
+  }
+});
+
 // Get doctors list
 router.get('/doctors', async (req, res) => {
   try {

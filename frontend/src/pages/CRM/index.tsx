@@ -182,31 +182,6 @@ const RefillsSection: React.FC = () => {
     setShowAddModal(true);
   };
 
-  const handleEditPatientRefill = (patient: RefillPatient) => {
-    setEditingPatient(patient);
-    setAddPatientName(patient.patient_name || '');
-    setAddPatientPhone(patient.patient_phone || '');
-    setAddLanguage((patient.language as any) || 'en');
-    const interval = patient.medicines[0]?.refill_interval_days || 30;
-    setFreqMode('preset');
-    setAddInterval(interval);
-    if (patient.medicines && patient.medicines.length > 0) {
-      setMedicineRows(patient.medicines.map(m => ({
-        medicineId: m.medicine_id || m.id,
-        medicineName: m.medicine_name,
-        searchTerm: m.medicine_name,
-        suggestions: [],
-        isOpen: false,
-        quantity_needed: m.quantity_needed || 3,
-        inStockQty: m.in_stock_qty || 0
-      })));
-    } else {
-      setMedicineRows([emptyRow()]);
-    }
-    setShowAddModal(true);
-    toastEvent.trigger(`Editing refill schedule for ${patient.patient_name}`, 'info', '/crm');
-  };
-
   // Effective interval calculation helper
   const getEffectiveIntervalDays = useCallback(() => {
     if (freqMode === 'preset') return addInterval;
@@ -795,16 +770,6 @@ const RefillsSection: React.FC = () => {
                     <Calendar size={10} />
                     {isOverdue ? 'Overdue · ' : 'Due · '}{formatDate(patient.next_refill_date)}
                   </div>
-                  {/* Edit Patient Refill */}
-                  <button
-                    type="button"
-                    onClick={() => handleEditPatientRefill(patient)}
-                    title="Edit patient refill details, medicines, quantities & frequency"
-                    className="flex items-center gap-1 px-3 py-1.5 bg-bg2 border border-border hover:border-primary/50 text-text hover:bg-bg3 rounded-xl text-xs font-bold transition-all cursor-pointer"
-                  >
-                    <Edit2 size={12} className="text-primary" />
-                    <span>Edit</span>
-                  </button>
                   {/* Renew Schedule */}
                   <button
                     type="button"
