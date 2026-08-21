@@ -248,10 +248,10 @@ export const DATA_FETCH_REGISTRY: FetchControlEntry[] = [
   },
   {
     key: 'bg.emailImapPoll',
-    label: 'Email IMAP 5-min Poll',
+    label: 'Background Email Poll',
     page: 'Backend',
-    callSite: 'emailService.ts:1115',
-    defaultMode: 'off',
+    callSite: 'emailService.ts:1162',
+    defaultMode: 'auto',
     external: true
   },
   {

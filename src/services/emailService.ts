@@ -1158,8 +1158,20 @@ export class EmailService {
     }
 
     try {
+      const db = await dbManager.getConnection();
+      const gateRow = await db.get(
+        "SELECT value FROM app_settings WHERE key = 'trigger_email_poller_enabled'"
+      );
+      if (gateRow && gateRow.value === 'false') {
+        return; // User turned Email PDF Invoice Poller OFF in Settings -> Triggers
+      }
+    } catch (gateErr) {
+      console.warn('[Mail] Failed to check trigger_email_poller_enabled setting in pollInbox:', gateErr);
+    }
+
+    try {
       const { getBackendFetchMode } = await import('./dataFetchControl.js');
-      const mode = await getBackendFetchMode('bg.emailImapPoll', 'off');
+      const mode = await getBackendFetchMode('bg.emailImapPoll', 'auto');
       if (mode === 'off') {
         return;
       }
