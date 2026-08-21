@@ -447,25 +447,34 @@ server.on('error', (err: any) => {
   }
 });
 
-  // Asynchronously initialize database, indexes and cache in the background
+  // Deterministic Sequential Staged Boot
   (async () => {
     try {
-      console.log('[Boot] Initializing database schema and index checks...');
+      // ── Phase 1: Database schema & WAL mode verification (Blocking) ─────────────
+      console.log('[Boot:Phase1] Initializing database schema, indexes, and WAL mode...');
       await ensureSchema(DB_PATH);
       schemaReady = true;
-      console.log('[Boot] Schema ready — API requests unblocked.');
+      console.log('[Boot:Phase1] Database schema ready — API requests unblocked.');
 
       const db = await dbManager.getConnection();
-      
-      // Initialize and rebuild compact inventory cache
+
+      // ── Phase 2: In-memory cache pre-warm ───────────────────────────────────────
+      console.log('[Boot:Phase2] Pre-warming in-memory cache & reference dictionary...');
       const { inventoryCache } = await import('./services/inventoryCache.js');
       inventoryCache.initialize(db);
-      // ponytail: don't await — cache auto-rebuilds on first get() call, no need to block boot
       inventoryCache.rebuild(db)
-        .then(() => console.log('[Boot] Compact inventory cache pre-built successfully.'))
-        .catch(err => console.error('[Boot] Inventory cache prebuild failed:', err));
+        .then(() => console.log('[Boot:Phase2] Compact inventory cache pre-built successfully.'))
+        .catch(err => console.error('[Boot:Phase2] Inventory cache prebuild failed:', err));
 
-      // Mark this boot as unclean (will be flipped to 'true' in gracefulShutdown)
+      try {
+        const { seedBundledReference } = await import('./worker/compositionEnricher.js');
+        const res = await seedBundledReference();
+        if (res.loaded > 0) console.log(`[Boot:Phase2] Seeded ${res.loaded} reference APIs into dictionary.`);
+      } catch (seedErr) {
+        console.warn('[Boot:Phase2] Bundled reference seed failed:', seedErr);
+      }
+
+      // Record unclean boot flag (flipped to 'true' on clean gracefulShutdown)
       try {
         const prevShutdown = await db.get("SELECT value FROM app_settings WHERE key = 'last_clean_shutdown'");
         if (prevShutdown && prevShutdown.value === 'false') {
@@ -476,184 +485,142 @@ server.on('error', (err: any) => {
         console.error('[Boot] Could not write last_clean_shutdown flag:', bootErr);
       }
 
-      // Check if background automation is enabled
+      // Check if background automation is enabled in store settings
       await db.run('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT)');
-      const row = await db.get("SELECT value FROM app_settings WHERE key = 'automation_enabled'");
-      const isAutoEnabled = row && row.value === 'true';
+      const autoRow = await db.get("SELECT value FROM app_settings WHERE key = 'automation_enabled'");
+      const isAutoEnabled = autoRow && autoRow.value === 'true';
 
-      // Flatten background initialization sequence using flat step array and Promise.allSettled
-      // Run steps at T+2 seconds (warm caches, workers, Telegram, schedulers)
+      // ── Phase 3: Lightweight workers (gated on automation_enabled === 'true') ──
       setImmediate(async () => {
-        console.log('[Boot] Starting background initialization services...');
+        console.log('[Boot:Phase3] Evaluating lightweight workers & startup evaluation...');
 
-        const initSteps = [
-          // Step 1: WhatsApp client lazy initialization — only started when user visits WhatsApp UI page
-          (async () => {
-            console.log('[Boot] WhatsApp client is lazy-loaded (will only initialize when user opens WhatsApp page).');
-          })(),
+        if (isAutoEnabled) {
+          // Unified Engine stock calculator worker
+          const { startStockCalculatorWorker } = await import('./worker/stockCalculatorWorker.js');
+          startStockCalculatorWorker();
+          console.log('[Boot:Phase3] Unified Engine stock calculator worker started.');
 
-          // Step 2: Unified Engine background workers
-          (async () => {
-            const { startStockCalculatorWorker } = await import('./worker/stockCalculatorWorker.js');
-            startStockCalculatorWorker();
-            console.log('[Boot] Unified Engine background workers started');
-          })(),
+          // Startup refill evaluation
+          try {
+            const { checkAllRefills } = await import('./services/refillService.js');
+            await checkAllRefills(db);
+          } catch (refillErr) {
+            console.error('[Boot:Phase3] Refill startup evaluation error:', refillErr);
+          }
 
-          // Step2b: Seed a small bundled API dictionary into medicine_reference
-          // (offline fallback when the full reference CSV is absent) so API-identity
-          // matching + the scan gate have a working dictionary from first boot.
-          (async () => {
+          // Daily catch-up check (overdue credit notes & monthly expiry returns review)
+          const d = new Date();
+          const todayStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+          const lastCheckRow = await db.get("SELECT value FROM app_settings WHERE key = 'last_daily_check_date'");
+          
+          if (!lastCheckRow || lastCheckRow.value !== todayStr) {
+            console.log(`[Boot:Phase3] Daily check missed today (${todayStr}). Running catch-up daily check...`);
             try {
-              const { seedBundledReference } = await import('./worker/compositionEnricher.js');
-              const res = await seedBundledReference();
-              if (res.loaded > 0) console.log(`[Boot] Seeded ${res.loaded} reference APIs.`);
-            } catch (seedErr) {
-              console.warn('[Boot] Bundled reference seed failed:', seedErr);
-            }
-          })(),
-
-          // Step 3: Startup catch-up check & cron schedules (Refills, overdue credit notes, return processing)
-          (async () => {
-            console.log('[Boot] Running startup evaluation for patient refills and credit notes...');
-            try {
-              const { checkAllRefills } = await import('./services/refillService.js');
-              await checkAllRefills(db);
-            } catch (refillErr) {
-              console.error('[Boot] Refill startup evaluation error:', refillErr);
-            }
-
-            if (isAutoEnabled) {
-              const d = new Date();
-              const todayStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-              const lastCheckRow = await db.get("SELECT value FROM app_settings WHERE key = 'last_daily_check_date'");
+              const { checkOverdueCreditNotes } = await import('./services/creditNoteService.js');
+              await checkOverdueCreditNotes(db);
               
-              if (!lastCheckRow || lastCheckRow.value !== todayStr) {
-                console.log(`[Boot] Daily check missed today (${todayStr}). Running catch-up daily check...`);
-                try {
-                  const { checkOverdueCreditNotes } = await import('./services/creditNoteService.js');
-                  await checkOverdueCreditNotes(db);
-                  
-                  // Auto expiry return review scan on 18th, 19th, 20th of the month
-                  const dayOfMonth = new Date().getDate();
-                  if (dayOfMonth === 18 || dayOfMonth === 19 || dayOfMonth === 20) {
-                    console.log(`[Boot] Today is the ${dayOfMonth}th. Running catch-up scan for expired stock pending pharmacist review...`);
-                    const { scanAndCreateExpiryReviews } = await import('./services/returnsService.js');
-                    await scanAndCreateExpiryReviews(db);
-                  }
-
-                  await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('last_daily_check_date', ?)", [todayStr]);
-                } catch (err) {
-                  console.error('[Boot] Startup catch-up daily check failed:', err);
-                }
+              const dayOfMonth = new Date().getDate();
+              if (dayOfMonth === 18 || dayOfMonth === 19 || dayOfMonth === 20) {
+                console.log(`[Boot:Phase3] Today is the ${dayOfMonth}th. Running catch-up scan for expired stock pending pharmacist review...`);
+                const { scanAndCreateExpiryReviews } = await import('./services/returnsService.js');
+                await scanAndCreateExpiryReviews(db);
               }
+
+              await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('last_daily_check_date', ?)", [todayStr]);
+            } catch (err) {
+              console.error('[Boot:Phase3] Startup catch-up daily check failed:', err);
             }
-          })(),
+          }
 
-          // Step 4: Expiry & Shortage 23-Hour scan check
-          (async () => {
-            if (isAutoEnabled) {
-              const { checkAndRunScheduledExpiryScan } = await import('./services/expiryAlertService.js');
-              await checkAndRunScheduledExpiryScan(90).catch(err => console.error('[Boot] Startup catch-up scan check failed:', err));
+          // Expiry alerts & shortage reminder scans
+          const { checkAndRunScheduledExpiryScan } = await import('./services/expiryAlertService.js');
+          await checkAndRunScheduledExpiryScan(90).catch(err => console.error('[Boot:Phase3] Expiry scan check failed:', err));
 
-              const { checkShortageRequestsAndNotifyAdmin } = await import('./services/shortageReminderService.js');
-              checkShortageRequestsAndNotifyAdmin(db).catch(err => console.error('[Boot] Shortage check failed:', err));
-            }
-          })(),
+          const { checkShortageRequestsAndNotifyAdmin } = await import('./services/shortageReminderService.js');
+          checkShortageRequestsAndNotifyAdmin(db).catch(err => console.error('[Boot:Phase3] Shortage check failed:', err));
+        } else {
+          console.log('[Boot:Phase3] Background automation is disabled in Settings — skipping automatic startup workers.');
+        }
 
-          // Step 4b: Monthly & Mid-Month Scheduled Reports (1st & 15th of month)
-          (async () => {
-            const { monthlyReportService } = await import('./services/monthlyReportService.js');
-            monthlyReportService.checkAndRunScheduledReports().catch(err => console.error('[Boot] Monthly report check failed:', err));
-          })(),
+        // Monthly reports check
+        const { monthlyReportService } = await import('./services/monthlyReportService.js');
+        monthlyReportService.checkAndRunScheduledReports().catch(err => console.error('[Boot:Phase3] Monthly report check failed:', err));
 
+        // Backup scheduler
+        const { initBackupScheduler } = await import('./services/backupService.js');
+        await initBackupScheduler().catch(err => console.error('[Boot:Phase3] Failed to init backup scheduler:', err));
 
-          // Step 5: Telegram Bot initialization (Deferred to T+8s to prevent blocking boot)
-          new Promise<void>((resolve) => {
-            setTimeout(async () => {
-              try {
-                const { telegramBotService } = await import('./telegramBot.js');
-                await telegramBotService.initializeOrReloadBot();
-                console.log('[Boot] Telegram bot initialized');
-              } catch (err) {
-                console.error('[Boot] Failed to initialize Telegram Bot:', err);
-              }
-              resolve();
-            }, 6000); // 2s baseline + 6s delay = 8s
-          }),
+        // Doctor reporting service
+        const { startDoctorReportingScheduler } = await import('./services/doctorReportingService.js');
+        startDoctorReportingScheduler();
 
-          // Step 6: Backup scheduler
-          (async () => {
-            const { initBackupScheduler } = await import('./services/backupService.js');
-            await initBackupScheduler().catch(err => console.error('[Boot] Failed to init backup scheduler:', err));
-          })(),
+        // Push notification service listener
+        import('./services/pushNotificationService.js').catch(err => console.error('[Boot:Phase3] Push service load failed:', err));
 
-          // Step 7: Worker supervisor (deferred T+5s to avoid blocking boot with fork()x2)
-          new Promise<void>((resolve) => {
-            setTimeout(async () => {
-              try {
-                const { workerSupervisor } = await import('./worker/workerSupervisor.js');
-                workerSupervisor.start();
-              } catch (err) {
-                console.error('[Boot] Failed to start worker supervisor:', err);
-              }
-              try {
-                const { startScispacySidecar } = await import('./services/scispacyClient.js');
-                startScispacySidecar();
-              } catch (err) {
-                console.error('[Boot] Failed to start scispaCy sidecar:', err);
-              }
-              resolve();
-            }, 5000);
-          }),
+        // Distributor dispatch reminder worker
+        import('./services/distributorDispatchReminderWorker.js').then(m => m.startDistributorDispatchReminderWorker()).catch(err => console.error('[Boot:Phase3] Distributor reminder worker start failed:', err));
 
-          // Step 8: Schedulers for token refresh, messaging queue and refills fulfillment
-          // Note: Pharmarack token refresh scheduler and background service starts here.
-          (async () => {
-            try {
-              const { tokenRefreshScheduler } = await import('./services/tokenRefreshScheduler.js');
-              tokenRefreshScheduler.start();
-              
-              const { messagingQueue } = await import('./services/messagingQueue.js');
-              messagingQueue.start();
+        // WhatsApp Queue Worker (self-gating on whatsapp_enabled + automation_enabled)
+        import('./services/whatsappQueue.js').then(m => m.whatsappQueue.startWorker()).catch(err => console.error('[Boot:Phase3] WhatsApp queue worker start failed:', err));
 
-              const { orderFulfillmentService } = await import('./services/orderFulfillmentService.js');
-              orderFulfillmentService.start();
-            } catch (srvErr) {
-              console.error('[Boot] Failed to start order/refills services:', srvErr);
-            }
-          })(),
+        // ── Phase 4: Headless browser subsystems & asynchronous workers (staggered) ──
+        console.log('[Boot:Phase4] Staging headless browser & external service schedulers...');
 
-          // Step 9: Doctor reporting service
-          (async () => {
-            const { startDoctorReportingScheduler } = await import('./services/doctorReportingService.js');
-            startDoctorReportingScheduler();
-          })()
-        ];
+        // T+2s: Pharmarack session refresh, messaging queue & order fulfillment
+        setTimeout(async () => {
+          try {
+            const { tokenRefreshScheduler } = await import('./services/tokenRefreshScheduler.js');
+            tokenRefreshScheduler.start();
 
-        // Start all initialization tasks concurrently without blocking
-        Promise.allSettled(initSteps).then((results) => {
-          console.log('[Boot] Background initialization sequence completed');
-        });
+            const { messagingQueue } = await import('./services/messagingQueue.js');
+            messagingQueue.start();
 
-        // Auto-start WhatsApp client on server boot if saved session exists (staggered T+45s to avoid Chrome resource contention with Pharmarack on boot)
+            const { orderFulfillmentService } = await import('./services/orderFulfillmentService.js');
+            orderFulfillmentService.start();
+          } catch (srvErr) {
+            console.error('[Boot:Phase4] Failed to start T+2s services:', srvErr);
+          }
+        }, 2000);
+
+        // T+5s: Worker supervisor & scispaCy NLP sidecar
+        setTimeout(async () => {
+          try {
+            const { workerSupervisor } = await import('./worker/workerSupervisor.js');
+            workerSupervisor.start();
+          } catch (err) {
+            console.error('[Boot:Phase4] Failed to start worker supervisor:', err);
+          }
+          try {
+            const { startScispacySidecar } = await import('./services/scispacyClient.js');
+            startScispacySidecar();
+          } catch (err) {
+            console.error('[Boot:Phase4] Failed to start scispaCy sidecar:', err);
+          }
+        }, 5000);
+
+        // T+8s: Telegram bot service
+        setTimeout(async () => {
+          try {
+            const { telegramBotService } = await import('./telegramBot.js');
+            await telegramBotService.initializeOrReloadBot();
+            console.log('[Boot:Phase4] Telegram bot initialized');
+          } catch (err) {
+            console.error('[Boot:Phase4] Failed to initialize Telegram Bot:', err);
+          }
+        }, 8000);
+
+        // T+45s: WhatsApp client auto-init (silent restoration if saved session exists & WhatsApp is enabled)
         setTimeout(() => {
           import('./whatsappClient.js').then(async (m) => {
-            if (m.hasSavedSession()) {
-              console.log('[Boot] Saved WhatsApp session detected. Auto-starting WhatsApp client (staggered T+45s)...');
-              await m.initClient().catch(err => console.error('[Boot] Auto WhatsApp init failed:', err));
+            if (await m.isWhatsAppExplicitlyDisabled()) {
+              return;
             }
-          }).catch(err => console.error('[Boot] WhatsApp client module load failed:', err));
+            if (m.hasSavedSession()) {
+              console.log('[Boot:Phase4] Saved WhatsApp session detected. Auto-starting WhatsApp client (staggered T+45s)...');
+              await m.initClient().catch(err => console.error('[Boot:Phase4] Auto WhatsApp init failed:', err));
+            }
+          }).catch(err => console.error('[Boot:Phase4] WhatsApp client module load failed:', err));
         }, 45_000);
-
-        // WhatsApp Queue Worker — self-gating: only starts 30s interval if whatsapp_enabled + automation_enabled
-        import('./services/whatsappQueue.js').then(m => m.whatsappQueue.startWorker()).catch(err => console.error('[Boot] WhatsApp queue worker start failed:', err));
-
-        // Distributor Dispatch Reminder Worker — runs 12:30 PM - 1:00 PM auto reminders
-        import('./services/distributorDispatchReminderWorker.js').then(m => m.startDistributorDispatchReminderWorker()).catch(err => console.error('[Boot] Distributor dispatch reminder worker start failed:', err));
-
-        // Push notification event listener (lazy-loaded)
-        import('./services/pushNotificationService.js').catch(err => console.error('[Boot] Push service load failed:', err));
-
       });
 
       // Register crons

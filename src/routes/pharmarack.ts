@@ -1889,10 +1889,8 @@ router.get('/sent-orders', async (req, res) => {
 router.get('/sent-orders/latest-map', async (req, res) => {
   try {
     const db = await dbManager.getConnection();
-    const fortyEightHoursAgo = Date.now() - (48 * 60 * 60 * 1000);
     const rows = await db.all(
-      `SELECT * FROM pharmarack_placed_orders WHERE placed_at >= ? OR batch_sent_at >= ? ORDER BY placed_at DESC`,
-      [fortyEightHoursAgo, fortyEightHoursAgo]
+      `SELECT * FROM pharmarack_placed_orders ORDER BY placed_at DESC`
     );
 
     const sentMap: Record<string, { storeId: number | null; storeName: string; placedAt: number; items: any[] }> = {};

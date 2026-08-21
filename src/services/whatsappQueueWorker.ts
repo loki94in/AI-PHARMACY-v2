@@ -1,5 +1,5 @@
 import { dbManager } from '../database/connection.js';
-import { sendMessage, getWhatsAppStatus, shouldRouteToBusiness, initClient, hashMessageBody, normalizeWhatsAppPhone } from '../whatsappClient.js';
+import { sendMessage, getWhatsAppStatus, shouldRouteToBusiness, initClient, hashMessageBody, normalizeWhatsAppPhone, isWhatsAppExplicitlyDisabled } from '../whatsappClient.js';
 
 export interface QueueItem {
   id: number;
@@ -442,6 +442,11 @@ class WhatsAppQueueWorker {
   /** Internal queue processor that processes items one-by-one with 10–12 second pacing */
   private async processQueueInternal(): Promise<boolean> {
     if (this.isProcessing || this.isPaused) return false;
+
+    if (await isWhatsAppExplicitlyDisabled()) {
+      return false;
+    }
+
     this.isProcessing = true;
 
     try {

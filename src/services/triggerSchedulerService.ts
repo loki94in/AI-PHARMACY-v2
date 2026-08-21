@@ -55,6 +55,9 @@ class TriggerSchedulerService {
       try { clearInterval(handle); } catch (_) {}
     });
     this.intervalHandles.clear();
+
+    import('./distributorDispatchReminderWorker.js').then(m => m.stopDistributorDispatchReminderWorker()).catch(() => {});
+    import('./tokenRefreshScheduler.js').then(m => m.tokenRefreshScheduler.stop()).catch(() => {});
   }
 
   /**
@@ -278,6 +281,11 @@ class TriggerSchedulerService {
       } catch (err) {
         console.error('[TriggerScheduler] Failed to start Pharmarack Token Refresher:', err);
       }
+    } else {
+      try {
+        const { tokenRefreshScheduler } = await import('./tokenRefreshScheduler.js');
+        tokenRefreshScheduler.stop();
+      } catch (_) {}
     }
 
     // ----------------------------------------------------
@@ -305,6 +313,11 @@ class TriggerSchedulerService {
       } catch (err) {
         console.error('[TriggerScheduler] Failed to start Dispatch Reminder Worker:', err);
       }
+    } else {
+      try {
+        const { stopDistributorDispatchReminderWorker } = await import('./distributorDispatchReminderWorker.js');
+        stopDistributorDispatchReminderWorker();
+      } catch (_) {}
     }
 
     // ----------------------------------------------------

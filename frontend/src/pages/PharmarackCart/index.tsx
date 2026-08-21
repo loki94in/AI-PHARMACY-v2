@@ -144,8 +144,7 @@ const mergeItemIntoDistributors = (
     const updatedLineItem: CartLineItem = {
       ...existing,
       qty: newQty,
-      amount: (existing.ptr || 0) * newQty,
-      isChecked: true
+      amount: (existing.ptr || 0) * newQty
     };
     updatedItems = [...dist.items];
     updatedItems[itemIdx] = updatedLineItem;
@@ -427,10 +426,6 @@ export default function PharmarackCart() {
                         placedDate.getMonth() === yesterday.getMonth() &&
                         placedDate.getDate() === yesterday.getDate();
 
-    if (!isToday && !isYesterday) {
-      return { isPastOrdered: false, placedAt: 0, placedDateStr: '', isToday: false, isYesterday: false };
-    }
-
     const placedDateStr = placedDate.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
 
     return {
@@ -655,17 +650,6 @@ export default function PharmarackCart() {
           for (const it of payload) {
             if (it.storeId) delete next[it.storeId];
           }
-          return next;
-        });
-        const readdedKeys: Record<string, boolean> = {};
-        payload.forEach(it => {
-          const k = getItemCheckKey(it.storeId, it);
-          readdedKeys[k] = true;
-        });
-        setUserCheckOverrides(prev => {
-          const next = { ...prev, ...readdedKeys };
-          userCheckOverridesRef.current = next;
-          saveUserCheckOverrides(next);
           return next;
         });
         scheduleCartSync(1500);
@@ -1346,13 +1330,6 @@ export default function PharmarackCart() {
             return next;
           });
         }
-        const k = getItemCheckKey(matchedItem.storeId, { productCode: matchedItem.productCode, productId: matchedItem.productId, productName: matchedItem.name });
-        setUserCheckOverrides(prev => {
-          const next = { ...prev, [k]: true };
-          userCheckOverridesRef.current = next;
-          saveUserCheckOverrides(next);
-          return next;
-        });
         setDistributors(prev => {
           let updated = prev;
           for (const item of payload) {
@@ -1494,13 +1471,6 @@ export default function PharmarackCart() {
             return next;
           });
         }
-        const k = getItemCheckKey(matchedItem.storeId, { productCode: matchedItem.productCode, productId: matchedItem.productId, productName: matchedItem.name });
-        setUserCheckOverrides(prev => {
-          const next = { ...prev, [k]: true };
-          userCheckOverridesRef.current = next;
-          saveUserCheckOverrides(next);
-          return next;
-        });
         setDistributors(prev => {
           let updated = prev;
           for (const item of payload) {
@@ -1813,38 +1783,6 @@ export default function PharmarackCart() {
           items: itemsToLog,
           delivery_persons: dist.deliveryPersons
         });
-
-        // Auto-untick sent items so subsequent batches only include newly added products
-        const sentKeys: Record<string, boolean> = {};
-        itemsToOrder.forEach(it => {
-          const k = getItemCheckKey(dist.storeId, it);
-          sentKeys[k] = false;
-        });
-        setUserCheckOverrides(prev => {
-          const next = { ...prev, ...sentKeys };
-          userCheckOverridesRef.current = next;
-          saveUserCheckOverrides(next);
-          return next;
-        });
-        setDistributors(prev => {
-          const updated = prev.map(d => {
-            if (d.storeId !== dist.storeId) return d;
-            return {
-              ...d,
-              items: d.items.map(it => {
-                const k = getItemCheckKey(d.storeId, it);
-                if (sentKeys[k] !== undefined) {
-                  return { ...it, isChecked: false };
-                }
-                return it;
-              })
-            };
-          });
-          cachedDistributors = updated;
-          persistCartCache(updated, cachedPriceHistory);
-          return updated;
-        });
-
         setHasUnreadSentHistory(true);
         specialOrdersEvent.triggerUpdated();
         window.dispatchEvent(new CustomEvent('refresh-special-orders'));
@@ -1879,7 +1817,7 @@ export default function PharmarackCart() {
 
       // Log placed order to DB history on tab fallback
       try {
-        const freshItems = dist.items.filter(item => isItemIncludedInDispatch(item, dist));
+        const freshItems = dist.items.filter(item => !isItemAlreadySent(item, dist));
         const itemsToLog = freshItems.length > 0 ? freshItems : dist.items;
         await api.logPharmarackPlacedOrder({
           store_id: dist.storeId,
@@ -1887,38 +1825,6 @@ export default function PharmarackCart() {
           items: itemsToLog,
           delivery_persons: dist.deliveryPersons
         });
-
-        // Auto-untick sent items on tab fallback
-        const sentKeys: Record<string, boolean> = {};
-        itemsToLog.forEach(it => {
-          const k = getItemCheckKey(dist.storeId, it);
-          sentKeys[k] = false;
-        });
-        setUserCheckOverrides(prev => {
-          const next = { ...prev, ...sentKeys };
-          userCheckOverridesRef.current = next;
-          saveUserCheckOverrides(next);
-          return next;
-        });
-        setDistributors(prev => {
-          const updated = prev.map(d => {
-            if (d.storeId !== dist.storeId) return d;
-            return {
-              ...d,
-              items: d.items.map(it => {
-                const k = getItemCheckKey(d.storeId, it);
-                if (sentKeys[k] !== undefined) {
-                  return { ...it, isChecked: false };
-                }
-                return it;
-              })
-            };
-          });
-          cachedDistributors = updated;
-          persistCartCache(updated, cachedPriceHistory);
-          return updated;
-        });
-
         setHasUnreadSentHistory(true);
         specialOrdersEvent.triggerUpdated();
         window.dispatchEvent(new CustomEvent('refresh-special-orders'));
@@ -2036,41 +1942,11 @@ export default function PharmarackCart() {
 
         // Mark all mapped distributors as queued in local status map
         const statusUpdates: Record<number, 'queued'> = {};
-        const allDispatchedKeys: Record<string, boolean> = {};
-
         mapped.forEach(d => {
           statusUpdates[d.storeId] = 'queued';
-          const sentItems = d.items.filter(item => isItemIncludedInDispatch(item, d));
-          sentItems.forEach(it => {
-            const k = getItemCheckKey(d.storeId, it);
-            allDispatchedKeys[k] = false;
-          });
         });
 
         setSentWaStatusMap(prev => ({ ...prev, ...statusUpdates }));
-
-        // Auto-untick all dispatched items across all mapped distributors
-        setUserCheckOverrides(prev => {
-          const next = { ...prev, ...allDispatchedKeys };
-          userCheckOverridesRef.current = next;
-          saveUserCheckOverrides(next);
-          return next;
-        });
-        setDistributors(prev => {
-          const updated = prev.map(d => ({
-            ...d,
-            items: d.items.map(it => {
-              const k = getItemCheckKey(d.storeId, it);
-              if (allDispatchedKeys[k] !== undefined) {
-                return { ...it, isChecked: false };
-              }
-              return it;
-            })
-          }));
-          cachedDistributors = updated;
-          persistCartCache(updated, cachedPriceHistory);
-          return updated;
-        });
 
         setHasUnreadSentHistory(true);
         specialOrdersEvent.triggerUpdated();

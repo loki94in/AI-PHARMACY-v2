@@ -73,6 +73,7 @@ process.on('unhandledRejection', (reason: any) => {
 
 let clientInstance: WAClient | null = null;
 let activeClient: WAClient | null = null; // Track currently initializing or active client
+let initPromise: Promise<WAClient | null> | null = null; // Single-flight mutex
 let initializing = false;
 let isSyncing = false;
 let qrTimeout: NodeJS.Timeout | null = null;
@@ -91,6 +92,20 @@ export function setIsReady(ready: boolean) {
   isReady = ready;
 }
 
+/** Check if WhatsApp is explicitly disabled in store settings */
+export async function isWhatsAppExplicitlyDisabled(): Promise<boolean> {
+  try {
+    const db = await dbManager.getConnection();
+    const row = await db.get("SELECT value FROM app_settings WHERE key = 'whatsapp_enabled'");
+    if (row && row.value === 'false') return true;
+    const prefRow = await db.get("SELECT value FROM app_settings WHERE key = 'whatsapp_preferred_system'");
+    if (prefRow && prefRow.value === 'disabled') return true;
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 export async function getWhatsAppStatus() {
   let pendingCount = 0;
   try {
@@ -100,7 +115,7 @@ export async function getWhatsAppStatus() {
   } catch (_) {}
   return {
     isReady,
-    initializing,
+    initializing: initializing || !!initPromise,
     isSyncing,
     pendingQueueCount: pendingCount,
     hasQr: !!currentQr
@@ -314,36 +329,8 @@ async function syncWhatsappData(client: WAClient) {
   }
 }
 
-/** Initialize the WhatsApp client and return it */
-export async function initClient(options: { forceQr?: boolean } = {}): Promise<WAClient | null> {
-  const forceQr = options.forceQr ?? false;
-
-  if (clientInstance) return clientInstance;
-
-  // Unless user explicitly requested connection (forceQr=true) OR an existing saved session exists on disk,
-  // do NOT launch Puppeteer / Chrome to generate unsolicited QR codes.
-  if (!forceQr && !hasSavedSession()) {
-    console.log('[WhatsApp] Auto-init skipped: No saved session on disk. Standing down until explicit user connection.');
-    return null;
-  }
-
-  if (initializing) {
-    return new Promise<WAClient | null>((resolve, reject) => {
-      let attempts = 0;
-      const check = () => {
-        attempts++;
-        if (clientInstance) resolve(clientInstance);
-        else if (!initializing && attempts > 10) resolve(null);
-        else if (attempts > 300) reject(new Error('WhatsApp client initialization timed out (15s)'));
-        else setTimeout(check, 50);
-      };
-      check();
-    });
-  }
-
-  await cleanupProfileLocks();
-
-  initializing = true;
+/** Internal helper to instantiate WAClient and bind event listeners */
+function launchClientInstance(forceQr: boolean): Promise<WAClient> {
   return new Promise<WAClient>((resolve, reject) => {
     let execPath = '';
     const paths = [
@@ -650,6 +637,13 @@ export async function initClient(options: { forceQr?: boolean } = {}): Promise<W
       const errMsg = err?.message || String(err);
       if (isPuppeteerDetachedError(errMsg)) {
         console.warn('[WhatsApp] Initialize interrupted by teardown/reconnect:', errMsg);
+      } else if (
+        errMsg.includes('4294967295') ||
+        errMsg.includes('exit code: -1') ||
+        errMsg.includes('exit code -1') ||
+        errMsg.includes('Failed to launch the browser process')
+      ) {
+        console.warn('[WhatsApp SafeGuard] Browser process closed with transient exit code -1 during launch (retrying silently).');
       } else {
         console.error('[WhatsApp] Failed during initialize():', err);
       }
@@ -660,6 +654,78 @@ export async function initClient(options: { forceQr?: boolean } = {}): Promise<W
       reject(err);
     });
   });
+}
+
+/** Initialize the WhatsApp client and return it */
+export async function initClient(options: { forceQr?: boolean } = {}): Promise<WAClient | null> {
+  const forceQr = options.forceQr ?? false;
+
+  if (clientInstance && isReady) return clientInstance;
+
+  // Single-flight in-flight Promise: if initialization is already running, join it
+  if (initPromise) {
+    return initPromise;
+  }
+
+  // Check if WhatsApp is disabled in settings
+  if (!forceQr && (await isWhatsAppExplicitlyDisabled())) {
+    console.log('[WhatsApp] Auto-init skipped: WhatsApp is disabled in Settings.');
+    return null;
+  }
+
+  // Unless user explicitly requested connection (forceQr=true) OR an existing saved session exists on disk,
+  // do NOT launch Puppeteer / Chrome to generate unsolicited QR codes.
+  if (!forceQr && !hasSavedSession()) {
+    console.log('[WhatsApp] Auto-init skipped: No saved session on disk. Standing down until explicit user connection.');
+    return null;
+  }
+
+  initializing = true;
+
+  initPromise = (async () => {
+    try {
+      // 1. Terminate stale processes and remove lingering profile locks
+      await cleanupProfileLocks();
+
+      // 2. Windows Kernel Drain Grace Period: allow OS 600ms to cleanly release file handles & mutexes
+      if (process.platform === 'win32') {
+        await new Promise(resolve => setTimeout(resolve, 600));
+      }
+
+      // 3. Launch internal client with single silent retry on transient Windows process lock contention
+      try {
+        const client = await launchClientInstance(forceQr);
+        return client;
+      } catch (launchErr: any) {
+        const errMsg = launchErr?.message || String(launchErr);
+        if (
+          errMsg.includes('4294967295') ||
+          errMsg.includes('exit code: -1') ||
+          errMsg.includes('exit code -1') ||
+          errMsg.includes('Failed to launch the browser process')
+        ) {
+          console.warn('[WhatsApp SafeGuard] Transient lock on initial browser launch (Exit Code -1). Draining locks and retrying once silently...');
+          await cleanupProfileLocks();
+          if (process.platform === 'win32') {
+            await new Promise(resolve => setTimeout(resolve, 1000));
+          }
+          const client = await launchClientInstance(forceQr);
+          return client;
+        }
+        throw launchErr;
+      }
+    } catch (err: any) {
+      initializing = false;
+      isReady = false;
+      clientInstance = null;
+      activeClient = null;
+      throw err;
+    } finally {
+      initPromise = null;
+    }
+  })();
+
+  return initPromise;
 }
 
 /** Destroy the WhatsApp client to release file locks on the session folder */
@@ -812,6 +878,10 @@ export async function sendMessage(
 
     let success = false;
     let messageId = `msg_out_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
+
+    if (await isWhatsAppExplicitlyDisabled()) {
+      throw new Error('WhatsApp messaging is disabled in Settings.');
+    }
 
     const useBusiness = await shouldRouteToBusiness();
     if (!useBusiness && (!isReady || !clientInstance)) {

@@ -1,6 +1,6 @@
 // Messaging Hub API (Agent 2)
 import express from 'express';
-import { initClient, sendMessage, currentQr, isReady, forceReconnect, destroyClient, shouldRouteToBusiness, isPuppeteerDetachedError, hasSavedSession, getWhatsAppStatus } from '../whatsappClient.js';
+import { initClient, sendMessage, currentQr, isReady, forceReconnect, destroyClient, shouldRouteToBusiness, isPuppeteerDetachedError, hasSavedSession, getWhatsAppStatus, isWhatsAppExplicitlyDisabled } from '../whatsappClient.js';
 import QRCode from 'qrcode';
 import { dbManager } from '../database/connection.js';
 import { eventService } from '../services/eventService.js';
@@ -45,6 +45,11 @@ router.get('/qr', async (req, res) => {
       return res.json({ isReady: false, qrUrl: null, initializing: true, message: 'Chrome login window is open. Scan the QR code in Chrome.' });
     }
 
+    const explicitlyDisabled = await isWhatsAppExplicitlyDisabled();
+    if (explicitlyDisabled) {
+      return res.json({ isReady: false, qrUrl: null, initializing: false, enabled: false, message: 'WhatsApp is disabled in store settings.' });
+    }
+
     const useBusiness = await shouldRouteToBusiness();
     if (useBusiness) {
       return res.json({ isReady: true, qrUrl: null, initializing: false, message: 'WhatsApp Business API is active.' });
@@ -66,7 +71,12 @@ router.get('/qr', async (req, res) => {
 
     if (hasSavedSession()) {
       // Auto-start connection in background if saved session exists on disk
-      initClient({ forceQr: false }).catch(err => console.error('[WhatsApp QR] Auto-init error:', err));
+      console.log('[WhatsApp Session] Auto-restoring saved session...');
+      initClient({ forceQr: false }).catch(err => {
+        if (!isPuppeteerDetachedError(err?.message)) {
+          console.warn('[WhatsApp Session] Auto-restore notice:', err?.message || err);
+        }
+      });
       return res.json({ isReady: false, qrUrl: null, initializing: true, message: 'Auto-connecting saved WhatsApp session...' });
     }
 
@@ -80,6 +90,10 @@ router.get('/qr', async (req, res) => {
 // Explicitly trigger WhatsApp QR code initialization upon user request
 router.post('/connect', async (req, res) => {
   try {
+    const explicitlyDisabled = await isWhatsAppExplicitlyDisabled();
+    if (explicitlyDisabled) {
+      return res.status(400).json({ error: 'WhatsApp is currently disabled in Settings. Enable WhatsApp before connecting.' });
+    }
     initClient({ forceQr: true }).catch(console.error);
     res.json({ success: true, message: 'Initializing WhatsApp QR code scan...' });
   } catch (err: any) {

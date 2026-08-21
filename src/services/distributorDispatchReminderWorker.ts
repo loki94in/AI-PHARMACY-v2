@@ -151,7 +151,7 @@ export async function syncTodayActiveDistributors(): Promise<any[]> {
         const initialStatus = dist.hasEmailToday ? 'Dispatched' : 'Pending';
         await db.run(
           `INSERT INTO distributor_dispatch_reminders (distributor_id, distributor_name, distributor_phone, date, status, auto_remind, order_source, email_received_at)
-           VALUES (?, ?, ?, ?, ?, 0, ?, ?)`,
+           VALUES (?, ?, ?, ?, ?, 1, ?, ?)`,
           [
             activeId, dist.name, activePhone || '', todayStr, initialStatus,
             dist.hasEmailToday ? 'email' : 'pharmarack',
@@ -464,9 +464,11 @@ export async function checkAndSendAutoReminders() {
 
   try {
     const db = await dbManager.getConnection();
-    const [globalAuto, triggerSetting] = await Promise.all([
+    const [globalAuto, triggerSetting, startSetting, endSetting] = await Promise.all([
       db.get("SELECT value FROM app_settings WHERE key = 'automation_enabled'"),
-      db.get("SELECT value FROM app_settings WHERE key = 'trigger_dispatch_reminder_enabled'")
+      db.get("SELECT value FROM app_settings WHERE key = 'trigger_dispatch_reminder_enabled'"),
+      db.get("SELECT value FROM app_settings WHERE key = 'trigger_dispatch_reminder_time_start'"),
+      db.get("SELECT value FROM app_settings WHERE key = 'trigger_dispatch_reminder_time_end'")
     ]);
 
     const isGlobalEnabled = !globalAuto || globalAuto.value === 'true';
@@ -482,8 +484,17 @@ export async function checkAndSendAutoReminders() {
     const hours = now.getHours();
     const minutes = now.getMinutes();
 
-    // Time window: 12:30 PM (12:30) to 1:00 PM (13:00)
-    const isWithinWindow = (hours === 12 && minutes >= 30) || (hours === 13 && minutes === 0);
+    // Time window: parse configured start & end times (default: 12:30 to 13:00)
+    const startTimeStr = startSetting?.value || '12:30';
+    const endTimeStr = endSetting?.value || '13:00';
+    const [startH, startM] = startTimeStr.split(':').map(Number);
+    const [endH, endM] = endTimeStr.split(':').map(Number);
+
+    const currentMinutesTotal = hours * 60 + minutes;
+    const startMinutesTotal = (isNaN(startH) ? 12 : startH) * 60 + (isNaN(startM) ? 30 : startM);
+    const endMinutesTotal = (isNaN(endH) ? 13 : endH) * 60 + (isNaN(endM) ? 0 : endM);
+
+    const isWithinWindow = currentMinutesTotal >= startMinutesTotal && currentMinutesTotal <= endMinutesTotal;
 
     if (!isWithinWindow) {
       isWorkerRunning = false;
@@ -495,13 +506,13 @@ export async function checkAndSendAutoReminders() {
 
     const pendingReminders = await db.all(
       `SELECT id, distributor_name FROM distributor_dispatch_reminders
-       WHERE date = ? AND status = 'Pending' AND auto_remind = 1
+       WHERE date = ? AND status = 'Pending'
          AND (last_reminded_at IS NULL OR DATE(last_reminded_at) != ?)`,
       [todayStr, todayStr]
     );
 
     if (pendingReminders.length > 0) {
-      console.log(`[DistributorReminderWorker] Found ${pendingReminders.length} pending reminders for 12:30-1:00 PM window.`);
+      console.log(`[DistributorReminderWorker] Found ${pendingReminders.length} pending reminders for ${startTimeStr}-${endTimeStr} window.`);
 
       for (const item of pendingReminders) {
         // Anti-ban safe delay: 5 to 10 seconds between messages (strictly non-bulk)
@@ -636,4 +647,15 @@ export function startDistributorDispatchReminderWorker() {
   }, 5 * 60 * 1000);
 
   console.log('[DistributorReminderWorker] Distributor dispatch reminder background worker initialized with PC offline protection & afternoon Delivery Boy dispatch.');
+}
+
+/**
+ * Stop the periodic background checker
+ */
+export function stopDistributorDispatchReminderWorker() {
+  if (checkIntervalTimer) {
+    clearInterval(checkIntervalTimer);
+    checkIntervalTimer = null;
+    console.log('[DistributorReminderWorker] Distributor dispatch reminder background worker stopped.');
+  }
 }

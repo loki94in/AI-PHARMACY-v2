@@ -216,31 +216,56 @@ export class TokenRefreshScheduler {
     return this.refreshIfNeeded(triggerType);
   }
 
-  public start() {
+  public async start() {
     if (process.env.DISABLE_BACKGROUND_WORKERS !== 'false') {
       console.log('[TokenRefreshScheduler] Background token refresh scheduler is STOPPED and DISABLED.');
       this.stop();
       return;
     }
+
+    try {
+      const db = await dbManager.getConnection();
+      const enabledRow = await db.get("SELECT value FROM app_settings WHERE key = 'trigger_pharmarack_refresh_enabled'");
+      if (enabledRow && enabledRow.value === 'false') {
+        console.log('[TokenRefreshScheduler] Pharmarack token refresher disabled in Settings.');
+        this.stop();
+        return;
+      }
+    } catch (_) {}
+
     if (this.timeoutId) return;
-    console.log('[TokenRefreshScheduler] Starting randomized background token refresh scheduler (40-60 min window)...');
+    console.log('[TokenRefreshScheduler] Starting dynamic background token refresh scheduler...');
     // Run initial check on boot
     this.refreshIfNeeded('boot');
-    // Schedule next randomized execution
+    // Schedule next execution
     this.scheduleNextRun();
   }
 
-  private scheduleNextRun() {
+  private async scheduleNextRun() {
     if (this.timeoutId) {
       clearTimeout(this.timeoutId);
       this.timeoutId = null;
     }
-    // Pick a random interval between 40 and 60 minutes
-    const randomMinutes = Math.floor(Math.random() * 21) + 40;
+
+    let targetInterval = 20;
+    try {
+      const db = await dbManager.getConnection();
+      const intervalRow = await db.get("SELECT value FROM app_settings WHERE key = 'trigger_pharmarack_refresh_interval_min'");
+      if (intervalRow?.value) {
+        const parsed = parseInt(intervalRow.value, 10);
+        if (!isNaN(parsed) && parsed >= 5 && parsed <= 120) {
+          targetInterval = parsed;
+        }
+      }
+    } catch (_) {}
+
+    // Add a slight ±2 minute anti-detection jitter around targetInterval
+    const jitter = Math.floor(Math.random() * 5) - 2;
+    const randomMinutes = Math.max(5, targetInterval + jitter);
     this.nextScheduledMinutes = randomMinutes;
     const delayMs = randomMinutes * 60 * 1000;
 
-    console.log(`[TokenRefreshScheduler] Next background session refresh scheduled in ${randomMinutes} minutes.`);
+    console.log(`[TokenRefreshScheduler] Next background session refresh scheduled in ${randomMinutes} minutes (configured: ${targetInterval}m).`);
 
     this.timeoutId = setTimeout(() => {
       this.refreshIfNeeded('background_random');

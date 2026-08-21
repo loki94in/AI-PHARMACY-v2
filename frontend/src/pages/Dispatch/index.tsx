@@ -113,6 +113,7 @@ const Dispatch = () => {
 
   // Distributor Dispatch Reminders state
   const [distributorReminders, setDistributorReminders] = useState<any[]>([]);
+  const [autoDispatchEnabled, setAutoDispatchEnabled] = useState(true);
   const [distributorSearch, setDistributorSearch] = useState('');
   const [distributorTodayOnly, setDistributorTodayOnly] = useState<boolean>(true);
   const [sendingReminderId, setSendingReminderId] = useState<number | null>(null);
@@ -274,6 +275,9 @@ const Dispatch = () => {
         setDistributorReminders(res.reminders);
         setIsRecentFallback(!!res.is_recent_fallback);
         setRecentDate(res.recent_date || null);
+        if (res.auto_dispatch_enabled !== undefined) {
+          setAutoDispatchEnabled(res.auto_dispatch_enabled);
+        }
         if (res.window_start && res.window_end) {
           setWindowSchedule({ start: res.window_start, end: res.window_end });
         }
@@ -644,6 +648,27 @@ const Dispatch = () => {
     <div className="w-full flex-1 flex flex-col gap-4 pb-8 text-left animate-in fade-in duration-300">
       {/* ── SIGNATURE: LIVE DISTRIBUTOR COLLECTION WINDOW ── */}
       {(() => {
+        if (!autoDispatchEnabled) {
+          return (
+            <div className="rounded-xl border px-4 py-3 flex items-center gap-3 transition-colors duration-500 bg-bg2/40 border-glass-border/80">
+              <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                <Bell size={16} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-xs font-semibold text-text">Distributor collection window</span>
+                  <span className="text-xs font-mono font-bold whitespace-nowrap text-amber-400">
+                    ⏸️ Auto-Reminders Disabled in Settings
+                  </span>
+                </div>
+                <div className="mt-1 text-[11px] text-muted">
+                  Automatic reminder dispatches are paused. Enable "Distributor Dispatch Reminders" in Settings to activate the live auto-send schedule.
+                </div>
+              </div>
+            </div>
+          );
+        }
+
         const cd = getWindowCountdownInfo(nowTime, windowSchedule.start, windowSchedule.end);
         return (
           <div className={`rounded-xl border px-4 py-3 flex items-center gap-3 transition-colors duration-500 ${
