@@ -15,6 +15,7 @@ import PDFDocument from 'pdfkit';
 import { generateInvoiceBarcodeData } from '../services/barcodeService.js';
 import { getAppDataDir } from '../config/index.js';
 import { applySaleDelta, getReorderWindowMonths, computeReorderSuggestion } from '../services/medicineSalesMetricsService.js';
+import { cleanupStagedRefillNotifications } from '../services/refillService.js';
 
 const router = express.Router();
 
@@ -573,13 +574,8 @@ router.post('/', async (req, res) => {
           await db.run('DELETE FROM held_bills WHERE id = ?', [refill.quick_bill_id]);
         }
 
-        // Mark staged message as sent
-        await db.run(
-          `UPDATE automation_notifications 
-           SET lifecycle_status = 'sent', status = 'sent_manually' 
-           WHERE type = 'refill_collection' AND (reference_id = ? OR reference_id LIKE ? OR reference_id LIKE ?) AND status = 'staged'`,
-          [String(refill.id), `${refill.id},%`, `%,${refill.id}%`]
-        ).catch(() => {});
+        // Mark staged message as sent precisely
+        await cleanupStagedRefillNotifications(db, [refill.id], 'sent_manually');
       }
     }
     // Commit transaction

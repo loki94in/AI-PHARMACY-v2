@@ -2,7 +2,7 @@ import { dbManager } from './database/connection.js';
 
 // Bump this number whenever you add new CREATE TABLE, ALTER TABLE, or INSERT OR IGNORE statements below.
 // On normal boots where this version matches the stored version, all DDL is skipped entirely (~3-5s saved).
-const CURRENT_SCHEMA_VERSION = 41;
+const CURRENT_SCHEMA_VERSION = 42;
 
 // FTS5 creates exactly these four shadow tables for an external-content index.
 // While the `medicines_fts` declaration exists in sqlite_master these names are
@@ -1063,6 +1063,10 @@ export async function ensureSchema(dbPath: string) {
     // ponytail: source_type records where a staged purchase originated (e.g. 'email', 'telegram')
     // without mixing that into the distributor identity field
     ['staged_purchases', 'source_type', "ALTER TABLE staged_purchases ADD COLUMN source_type TEXT DEFAULT NULL"],
+    ['refill_fulfillments', 'cycle_due_date', 'ALTER TABLE refill_fulfillments ADD COLUMN cycle_due_date TEXT'],
+    ['refill_fulfillments', 'next_due_date', 'ALTER TABLE refill_fulfillments ADD COLUMN next_due_date TEXT'],
+    ['refill_fulfillments', 'fulfilled_via', 'ALTER TABLE refill_fulfillments ADD COLUMN fulfilled_via TEXT'],
+    ['refill_fulfillments', 'notes', 'ALTER TABLE refill_fulfillments ADD COLUMN notes TEXT'],
   ];
 
   // Pre-check PRAGMA table_info before ALTER TABLE ADD COLUMN to prevent SQLite error outputs
@@ -1440,7 +1444,11 @@ export async function ensureSchema(dbPath: string) {
       fulfilled_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       invoice_id INTEGER,
       invoice_no TEXT,
-      payment_status TEXT DEFAULT 'PAID'
+      payment_status TEXT DEFAULT 'PAID',
+      cycle_due_date TEXT,
+      next_due_date TEXT,
+      fulfilled_via TEXT,
+      notes TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_refill_fulfillments_refill_id ON refill_fulfillments(refill_id);
     CREATE INDEX IF NOT EXISTS idx_refill_fulfillments_customer_id ON refill_fulfillments(customer_id);

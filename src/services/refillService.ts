@@ -320,3 +320,54 @@ export async function triggerPendingSpecialOrdersForMedicineName(db: Database, m
     await db.run("UPDATE special_orders SET status = 'Ready', notified = 0 WHERE id = ?", [order.id]);
   }
 }
+
+/**
+ * Precisely cleans up staged refill_collection notifications for specific refill ID(s).
+ * - If a staged notification's reference_id only contains the targeted ID(s), updates status to targetStatus ('sent_manually' | 'cancelled').
+ * - If a staged notification contains sibling refill IDs, strips out the targeted ID(s) and leaves the notification staged.
+ */
+export async function cleanupStagedRefillNotifications(
+  db: any,
+  refillIds: number | number[] | string | string[],
+  targetStatus: 'sent_manually' | 'cancelled' = 'sent_manually'
+): Promise<void> {
+  const idsToRemove = (Array.isArray(refillIds) ? refillIds : [refillIds]).map(id => String(id).trim()).filter(Boolean);
+  if (idsToRemove.length === 0) return;
+
+  try {
+    const stagedNotifications = await db.all(
+      `SELECT id, reference_id, recipient_phone, recipient_name 
+       FROM automation_notifications 
+       WHERE type = 'refill_collection' AND status = 'staged'`
+    );
+
+    for (const notif of stagedNotifications) {
+      if (!notif.reference_id) continue;
+      const existingRefIds = String(notif.reference_id).split(',').map(s => s.trim()).filter(Boolean);
+      const hasMatch = existingRefIds.some(id => idsToRemove.includes(id));
+      if (!hasMatch) continue;
+
+      const remainingRefIds = existingRefIds.filter(id => !idsToRemove.includes(id));
+
+      if (remainingRefIds.length === 0) {
+        const lifecycle = targetStatus === 'cancelled' ? 'cancelled' : 'sent';
+        await db.run(
+          `UPDATE automation_notifications 
+           SET status = ?, lifecycle_status = ? 
+           WHERE id = ?`,
+          [targetStatus, lifecycle, notif.id]
+        );
+      } else {
+        await db.run(
+          `UPDATE automation_notifications 
+           SET reference_id = ? 
+           WHERE id = ?`,
+          [remainingRefIds.join(','), notif.id]
+        );
+      }
+    }
+  } catch (cleanErr) {
+    console.warn('[Refills] Cleanup of staged notifications warning:', cleanErr);
+  }
+}
+

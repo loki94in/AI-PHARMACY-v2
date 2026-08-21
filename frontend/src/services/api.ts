@@ -826,6 +826,7 @@ export const api = {
   getApkDownloadUrl: () => `${apiClient.defaults.baseURL || '/api'}/notifications/download-apk`,
   getActionLogs: () => apiClient.get('/notifications/action-logs').then(res => res.data),
   clearActionLogs: () => apiClient.post('/notifications/action-logs/clear').then(res => res.data),
+  deleteActionLog: (id: number) => apiClient.delete(`/notifications/action-logs/${id}`).then(res => res.data),
   getAssistantChatLogs: () => apiClient.get('/notifications/chat-logs').then(res => res.data),
   clearAssistantChatLogs: () => apiClient.post('/notifications/chat-logs/clear').then(res => res.data),
 

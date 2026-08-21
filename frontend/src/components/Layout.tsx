@@ -574,12 +574,16 @@ const NotificationPanel = ({
             >
               <SettingsIcon size={15} />
             </button>
-            {notifications.length > 0 && (
+            {combinedActivities.length > 0 && (
               <button
                 type="button"
-                onClick={onClearAll}
+                onClick={async () => {
+                  setActionLogs([]);
+                  await onClearAll();
+                  toastEvent.trigger('All notifications & activity alerts wiped out', 'info');
+                }}
                 className="p-1.5 rounded-xl text-muted hover:text-rose-400 hover:bg-rose-500/10 transition-all cursor-pointer"
-                title="Clear All Notifications"
+                title="Clear All Notifications & Activity Alerts"
               >
                 <Trash2 size={15} />
               </button>
@@ -606,7 +610,7 @@ const NotificationPanel = ({
                   : 'text-muted hover:text-text hover:bg-bg3'
                 }`}
             >
-              All ({notifications.length})
+              All ({combinedActivities.length})
             </button>
             <button
               type="button"
@@ -716,8 +720,14 @@ const NotificationPanel = ({
                     </button>
                     <button
                       type="button"
-                      onClick={e => {
+                      onClick={async e => {
                         e.stopPropagation();
+                        if (typeof notif.id === 'string' && notif.id.startsWith('log-')) {
+                          const numId = parseInt(notif.id.replace('log-', ''), 10);
+                          if (!isNaN(numId)) {
+                            setActionLogs(prev => prev.filter(l => l.id !== numId));
+                          }
+                        }
                         onClearOne(notif.id);
                       }}
                       className="p-1 rounded-lg text-muted/40 hover:text-rose-400 hover:bg-rose-500/10 transition-all"
@@ -789,9 +799,9 @@ const NotificationPanel = ({
       </div>
 
       {/* Footer Summary */}
-      {notifications.length > 0 && (
+      {combinedActivities.length > 0 && (
         <div className="px-4 py-2.5 border-t border-border bg-bg/40 flex items-center justify-between text-xs text-muted font-medium">
-          <span>{notifications.length} total notification{notifications.length !== 1 ? 's' : ''}</span>
+          <span>{combinedActivities.length} total item{combinedActivities.length !== 1 ? 's' : ''}</span>
           <span className="text-[10px] font-mono text-muted/70">Live Activity Feed</span>
         </div>
       )}
@@ -867,8 +877,8 @@ const Topbar = ({
   hasUnread: boolean;
   onNewNotification: (n: ToastEventDetail) => void;
   onClearAll: () => void;
-  onClearOne: (id: number) => void;
-  onMarkRead: (id: number) => void;
+  onClearOne: (id: number | string) => void;
+  onMarkRead: (id: number | string) => void;
   onOpenStagedReview: () => void;
   onOpenConnectModal: () => void;
   onOpenWaQueue?: () => void;
@@ -1879,8 +1889,8 @@ const Topbar = ({
               <NotificationPanel
                 notifications={notifications}
                 onClearAll={onClearAll}
-                onClearOne={(id) => onClearOne(Number(id))}
-                onMarkRead={(id) => onMarkRead(Number(id))}
+                onClearOne={onClearOne}
+                onMarkRead={onMarkRead}
                 onClose={() => setShowPanel(false)}
               />
             )}
@@ -2206,7 +2216,7 @@ const QuickAssistSidebar = ({
     }
   };
 
-  const handleCompleteRefillGroup = async (group: { patient_name: string; medicines: Array<{ id: number }> }) => {
+  const handleCompleteRefillGroup = async (group: { patient_name: string; patient_phone?: string; medicines: Array<{ id: number }> }) => {
     const ids = group.medicines.map(m => m.id);
     setOptimisticHiddenRefillIds(prev => {
       const next = new Set(prev);
@@ -2215,14 +2225,25 @@ const QuickAssistSidebar = ({
     });
 
     try {
-      await Promise.all(ids.map(id => apiClient.post(`/refills/${id}/status`, { status: 'completed' }).catch(() => {})));
-      toastEvent.trigger(`Marked refills for ${group.patient_name} as Completed!`, 'success');
-      queryClient.invalidateQueries({ queryKey: ['refills'] });
-      refillEvent.triggerRefresh();
-      onActionComplete();
-    } catch (err) {
+      const phone = (group.patient_phone || '').trim();
+      const res = await apiClient.post(`/refills/patient/${encodeURIComponent(phone || 'patient')}/fulfill-all`, {
+        patient_phone: phone,
+        refill_ids: ids,
+        fulfilled_via: 'quick_assist'
+      });
+
+      if (res?.data?.success) {
+        toastEvent.trigger(`Marked refills for ${group.patient_name} as Completed!`, 'success');
+        queryClient.invalidateQueries({ queryKey: ['refills'] });
+        refillEvent.triggerRefresh();
+        onActionComplete();
+      } else {
+        throw new Error(res?.data?.error || 'Failed to complete refills');
+      }
+    } catch (err: any) {
       console.error('Failed to complete refills:', err);
-      toastEvent.trigger('Failed to complete refills', 'error');
+      const errMsg = err?.response?.data?.error || err?.message || 'Failed to complete refills';
+      toastEvent.trigger(errMsg, 'error');
       setOptimisticHiddenRefillIds(prev => {
         const next = new Set(prev);
         ids.forEach(id => next.delete(id));
@@ -3414,14 +3435,33 @@ export const Layout = ({
     }
   }, []);
 
-  const handleClearAll = useCallback(() => {
+  const handleClearAll = useCallback(async () => {
     setNotifications([]);
     setHasUnread(false);
+    try {
+      localStorage.removeItem('app_notifications');
+    } catch (_) {}
+    try {
+      await api.clearActionLogs();
+    } catch (err) {
+      console.warn('Failed to clear action logs from DB:', err);
+    }
   }, []);
 
-  const handleClearOne = useCallback((id: number | string) => {
+  const handleClearOne = useCallback(async (id: number | string) => {
+    const idStr = String(id);
+    if (idStr.startsWith('log-')) {
+      const numId = parseInt(idStr.replace('log-', ''), 10);
+      if (!isNaN(numId)) {
+        try {
+          await api.deleteActionLog(numId);
+        } catch (err) {
+          console.warn('Failed to delete action log from DB:', err);
+        }
+      }
+    }
     setNotifications(prev => {
-      const updated = prev.filter(n => String(n.id) !== String(id));
+      const updated = prev.filter(n => String(n.id) !== idStr);
       if (updated.length === 0 || updated.every(n => n.read)) setHasUnread(false);
       return updated;
     });

@@ -7,7 +7,8 @@ jest.unstable_mockModule('../src/whatsappClient.js', () => ({
   getWhatsAppStatus: jest.fn(() => Promise.resolve({ isConnected: true, status: 'CONNECTED' })),
   shouldRouteToBusiness: jest.fn(() => false),
   hashMessageBody: jest.fn(() => 'mock-hash'),
-  normalizeWhatsAppPhone: jest.fn((p: string) => p ? String(p).replace(/\D/g, '') : '')
+  normalizeWhatsAppPhone: jest.fn((p: string) => p ? String(p).replace(/\D/g, '') : ''),
+  isWhatsAppExplicitlyDisabled: jest.fn(() => Promise.resolve(false))
 }));
 
 jest.unstable_mockModule('../src/telegramBot.js', () => ({
@@ -603,6 +604,180 @@ describe('Patient Refills & POS Auto-Save Integration', () => {
       expect(checkRow.reminder_status).toBe('SENT');
       expect(checkRow.reminder_sent_at).toBeTruthy();
       await dbWorker.close();
+    });
+
+    test('Scenario 15: Schema check - refill_fulfillments table includes cycle_due_date, next_due_date, fulfilled_via, notes', async () => {
+      const { open } = await import('sqlite');
+      const sqlite3 = await import('sqlite3');
+      const db = await open({ filename: dbPath, driver: sqlite3.default.Database });
+
+      const columns = await db.all("PRAGMA table_info('refill_fulfillments')");
+      const columnNames = columns.map((c: any) => c.name);
+
+      expect(columnNames).toContain('cycle_due_date');
+      expect(columnNames).toContain('next_due_date');
+      expect(columnNames).toContain('fulfilled_via');
+      expect(columnNames).toContain('notes');
+      await db.close();
+    });
+
+    test('Scenario 16: Bulk fulfill endpoint scopes fulfillment to specific refill_ids with quick_assist provenance', async () => {
+      const { open } = await import('sqlite');
+      const sqlite3 = await import('sqlite3');
+      const db = await open({ filename: dbPath, driver: sqlite3.default.Database });
+
+      // Insert 2 refills for patient A
+      const r1 = await db.run(
+        `INSERT INTO patient_refills (patient_name, patient_phone, medicine_id, next_refill_date, is_active, status, quantity_needed, refill_interval_days)
+         VALUES ('Bulk Patient', '9777766666', 101, '2026-08-20', 1, 'pending', 2, 30)`
+      );
+      const r2 = await db.run(
+        `INSERT INTO patient_refills (patient_name, patient_phone, medicine_id, next_refill_date, is_active, status, quantity_needed, refill_interval_days)
+         VALUES ('Bulk Patient', '9777766666', 102, '2026-08-20', 1, 'pending', 3, 45)`
+      );
+      // Insert a 3rd refill that is NOT included in refill_ids
+      const r3 = await db.run(
+        `INSERT INTO patient_refills (patient_name, patient_phone, medicine_id, next_refill_date, is_active, status, quantity_needed, refill_interval_days)
+         VALUES ('Bulk Patient', '9777766666', 103, '2026-09-30', 1, 'pending', 1, 30)`
+      );
+      await db.close();
+
+      // Call bulk fulfill targeting only r1 and r2
+      const res = await request(app)
+        .post('/api/refills/patient/9777766666/fulfill-all')
+        .send({
+          patient_phone: '9777766666',
+          refill_ids: [r1.lastID, r2.lastID],
+          fulfilled_via: 'quick_assist'
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.fulfilledCount).toBe(2);
+
+      const dbCheck = await open({ filename: dbPath, driver: sqlite3.default.Database });
+      const fRows = await dbCheck.all(
+        'SELECT * FROM refill_fulfillments WHERE patient_phone = "9777766666" AND fulfilled_via = "quick_assist"'
+      );
+      expect(fRows.length).toBe(2);
+      expect(fRows.map((f: any) => f.refill_id).sort()).toEqual([r1.lastID, r2.lastID].sort());
+
+      // r3 should not have been fulfilled
+      const r3Row = await dbCheck.get('SELECT * FROM patient_refills WHERE id = ?', [r3.lastID]);
+      expect(r3Row.next_refill_date).toBe('2026-09-30');
+      await dbCheck.close();
+    });
+
+    test('Scenario 17: Precise staged notification cleanup preserves sibling IDs on single-item fulfillment', async () => {
+      const { open } = await import('sqlite');
+      const sqlite3 = await import('sqlite3');
+      const db = await open({ filename: dbPath, driver: sqlite3.default.Database });
+
+      // Stage a consolidated notification with reference_id = "501,502,503"
+      const notifRes = await db.run(
+        `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, lifecycle_status, reference_id)
+         VALUES ('refill_collection', 'Sibling Test Patient', '9666655555', 'Test multi-item reminder', 'staged', 'staged', '501,502,503')`
+      );
+      const notifId = notifRes.lastID;
+
+      // Also create refill rows for 501 and 502
+      await db.run(
+        `INSERT INTO patient_refills (id, patient_name, patient_phone, medicine_id, next_refill_date, is_active, status)
+         VALUES (501, 'Sibling Test Patient', '9666655555', 101, '2026-08-20', 1, 'pending')`
+      );
+      await db.close();
+
+      // Fulfill refill 501 via status API
+      const res = await request(app)
+        .post('/api/refills/501/status')
+        .send({ status: 'completed' });
+      expect(res.status).toBe(200);
+
+      const dbCheck = await open({ filename: dbPath, driver: sqlite3.default.Database });
+      const notifRow = await dbCheck.get('SELECT * FROM automation_notifications WHERE id = ?', [notifId]);
+      // Sibling IDs 502,503 should still be staged
+      expect(notifRow.status).toBe('staged');
+      expect(notifRow.reference_id).toBe('502,503');
+
+      // Now complete remaining IDs via bulk fulfill
+      await dbCheck.run(
+        `INSERT INTO patient_refills (id, patient_name, patient_phone, medicine_id, next_refill_date, is_active, status)
+         VALUES (502, 'Sibling Test Patient', '9666655555', 102, '2026-08-20', 1, 'pending'),
+                (503, 'Sibling Test Patient', '9666655555', 103, '2026-08-20', 1, 'pending')`
+      );
+      await dbCheck.close();
+
+      const bulkRes = await request(app)
+        .post('/api/refills/patient/9666655555/fulfill-all')
+        .send({
+          patient_phone: '9666655555',
+          refill_ids: [502, 503],
+          fulfilled_via: 'quick_assist'
+        });
+      expect(bulkRes.status).toBe(200);
+
+      const dbCheckFinal = await open({ filename: dbPath, driver: sqlite3.default.Database });
+      const finalNotifRow = await dbCheckFinal.get('SELECT * FROM automation_notifications WHERE id = ?', [notifId]);
+      expect(finalNotifRow.status).toBe('sent_manually');
+      expect(finalNotifRow.lifecycle_status).toBe('sent');
+      await dbCheckFinal.close();
+    });
+
+    test('Scenario 18: POS sale with refill_ids fulfills each refill exactly once without double advance', async () => {
+      const { open } = await import('sqlite');
+      const sqlite3 = await import('sqlite3');
+      const db = await open({ filename: dbPath, driver: sqlite3.default.Database });
+
+      // Create medicine and inventory
+      const mRes = await db.run('INSERT INTO medicines (name, rate, mrp) VALUES ("POS Refill Med", 100, 120)');
+      const medId = mRes.lastID;
+      const invRes = await db.run(`INSERT INTO inventory_master (medicine_id, batch_no, expiry_date, quantity, unit_price, mrp) VALUES (${medId}, "B100", "2028-12-31", 50, 100, 120)`);
+      const invId = invRes.lastID;
+
+      const rRes = await db.run(
+        `INSERT INTO patient_refills (patient_name, patient_phone, medicine_id, next_refill_date, is_active, status, quantity_needed, refill_interval_days)
+         VALUES ('POS Sale Patient', '9555544444', ${medId}, '2026-08-21', 1, 'pending', 2, 30)`
+      );
+      const refillId = rRes.lastID;
+      await db.close();
+
+      // Create sale with refill_ids
+      const salePayload = {
+        patient_name: 'POS Sale Patient',
+        patient_phone: '9555544444',
+        payment_type: 'CASH',
+        items: [
+          {
+            inventory_id: invId,
+            medicine_id: medId,
+            name: 'POS Refill Med',
+            quantity: 2,
+            unit_price: 120,
+            unitPrice: 120,
+            batch: 'B100',
+            expiry: '2028-12-31'
+          }
+        ],
+        refill_ids: [refillId]
+      };
+
+      const saleRes = await request(app).post('/api/sales').send(salePayload);
+      expect(saleRes.status).toBe(200);
+
+      const dbCheck = await open({ filename: dbPath, driver: sqlite3.default.Database });
+      const fRows = await dbCheck.all('SELECT * FROM refill_fulfillments WHERE refill_id = ?', [refillId]);
+      // Exactly ONE fulfillment row
+      expect(fRows.length).toBe(1);
+      expect(fRows[0].fulfilled_via).toBe('pos_sale');
+
+      const refillRow = await dbCheck.get('SELECT * FROM patient_refills WHERE id = ?', [refillId]);
+      // Advance exactly once (30 days from now)
+      const nextRefillDate = new Date(refillRow.next_refill_date);
+      const today = new Date();
+      const diffDays = Math.round((nextRefillDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+      expect(diffDays).toBeGreaterThanOrEqual(29);
+      expect(diffDays).toBeLessThanOrEqual(31);
+      await dbCheck.close();
     });
   });
 

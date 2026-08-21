@@ -2,7 +2,7 @@ import express from 'express';
 import { dbManager } from '../database/connection.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { checkAllRefills } from '../services/refillService.js';
+import { checkAllRefills, cleanupStagedRefillNotifications } from '../services/refillService.js';
 import { sendMessage, normalizeWhatsAppPhone } from '../whatsappClient.js';
 import { whatsappQueueWorker } from '../services/whatsappQueueWorker.js';
 import { getMessage } from '../i18n/getMessage.js';
@@ -940,13 +940,8 @@ router.post('/:id/fulfill', async (req, res) => {
       [nextDateStr, id]
     );
 
-    // 3. Update staged notification to completed
-    await db.run(
-      `UPDATE automation_notifications 
-       SET lifecycle_status = 'sent', status = 'sent_manually' 
-       WHERE type = 'refill_collection' AND (reference_id = ? OR reference_id LIKE ? OR reference_id LIKE ?) AND status = 'staged'`,
-      [String(id), `${id},%`, `%,${id}%`]
-    ).catch(() => {});
+    // 3. Update staged notification to completed precisely
+    await cleanupStagedRefillNotifications(db, [Number(id)], 'sent_manually');
 
     // Re-run checking engine to process the next cycle or sibling refills
     await checkAllRefills(db);
@@ -966,27 +961,45 @@ router.post('/:id/fulfill', async (req, res) => {
 router.post('/patient/:phone/fulfill-all', async (req, res) => {
   const phone = (req.params.phone || req.body.patient_phone || '').trim();
   const customerId = req.body.customer_id ? parseInt(req.body.customer_id, 10) : null;
-  if (!phone && !customerId) {
-    return res.status(400).json({ error: 'Patient phone or customer ID required' });
+  const requestedRefillIds: number[] = Array.isArray(req.body.refill_ids)
+    ? req.body.refill_ids.map(Number).filter((n: number) => !isNaN(n))
+    : [];
+  const fulfilledVia = req.body.fulfilled_via || 'crm_complete';
+
+  if (!phone && !customerId && requestedRefillIds.length === 0) {
+    return res.status(400).json({ error: 'Patient phone, customer ID, or refill IDs required' });
   }
 
   let db;
   try {
     db = await dbManager.getConnection();
-    const activeRefills = await db.all(
-      `SELECT pr.*, m.name as medicine_name 
-       FROM patient_refills pr 
-       LEFT JOIN medicines m ON pr.medicine_id = m.id 
-       WHERE (pr.patient_phone = ? OR (pr.customer_id IS NOT NULL AND pr.customer_id = ?)) 
-         AND pr.is_active = 1`,
-      [phone, customerId]
-    );
+    let activeRefills: any[];
+    if (requestedRefillIds.length > 0) {
+      const placeholders = requestedRefillIds.map(() => '?').join(',');
+      activeRefills = await db.all(
+        `SELECT pr.*, m.name as medicine_name 
+         FROM patient_refills pr 
+         LEFT JOIN medicines m ON pr.medicine_id = m.id 
+         WHERE pr.id IN (${placeholders}) AND pr.is_active = 1`,
+        requestedRefillIds
+      );
+    } else {
+      activeRefills = await db.all(
+        `SELECT pr.*, m.name as medicine_name 
+         FROM patient_refills pr 
+         LEFT JOIN medicines m ON pr.medicine_id = m.id 
+         WHERE (pr.patient_phone = ? OR (pr.customer_id IS NOT NULL AND pr.customer_id = ?)) 
+           AND pr.is_active = 1`,
+        [phone, customerId]
+      );
+    }
 
     if (!activeRefills || activeRefills.length === 0) {
       return res.status(404).json({ error: 'No active refills found for this patient' });
     }
 
     let fulfilledCount = 0;
+    const fulfilledIds: number[] = [];
     for (const refill of activeRefills) {
       const interval = refill.refill_interval_days || 30;
       const nextDate = new Date();
@@ -999,7 +1012,7 @@ router.post('/patient/:phone/fulfill-all', async (req, res) => {
         `INSERT INTO refill_fulfillments (
           refill_id, customer_id, patient_name, patient_phone, medicine_id, medicine_name, 
           quantity_fulfilled, fulfilled_at, cycle_due_date, next_due_date, fulfilled_via
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, 'crm_complete')`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?)`,
         [
           refill.id,
           refill.customer_id,
@@ -1009,7 +1022,8 @@ router.post('/patient/:phone/fulfill-all', async (req, res) => {
           refill.medicine_name || 'Prescribed Medicine',
           fulfilledQty,
           cycleDueDate,
-          nextDateStr
+          nextDateStr,
+          fulfilledVia
         ]
       );
 
@@ -1033,17 +1047,11 @@ router.post('/patient/:phone/fulfill-all', async (req, res) => {
       );
 
       fulfilledCount++;
+      fulfilledIds.push(refill.id);
     }
 
-    // Clean up staged notifications
-    const ids = activeRefills.map(r => String(r.id));
-    const placeholders = ids.map(() => '?').join(',');
-    await db.run(
-      `UPDATE automation_notifications 
-       SET lifecycle_status = 'sent', status = 'sent_manually' 
-       WHERE type = 'refill_collection' AND reference_id IN (${placeholders}) AND status = 'staged'`,
-      ids
-    ).catch(() => {});
+    // Clean up staged notifications precisely
+    await cleanupStagedRefillNotifications(db, fulfilledIds, 'sent_manually');
 
     await checkAllRefills(db);
 
@@ -1161,13 +1169,8 @@ const handleRefillStatusUpdate = async (req: express.Request, res: express.Respo
         [nextDateStr, id]
       );
 
-      // Clean up staged notification for this refill
-      await db.run(
-        `UPDATE automation_notifications 
-         SET status = 'sent_manually', lifecycle_status = 'sent' 
-         WHERE type = 'refill_collection' AND (reference_id = ? OR reference_id LIKE ? OR reference_id LIKE ?) AND status = 'staged'`,
-        [String(id), `${id},%`, `%,${id}%`]
-      ).catch(() => {});
+      // Clean up staged notification for this refill precisely
+      await cleanupStagedRefillNotifications(db, [Number(id)], 'sent_manually');
 
       await checkAllRefills(db);
       return res.json({ success: true, message: 'Refill completed and advanced to next cycle', next_refill_date: nextDateStr });
@@ -1178,12 +1181,7 @@ const handleRefillStatusUpdate = async (req: express.Request, res: express.Respo
          WHERE id = ?`,
         [id]
       );
-      await db.run(
-        `UPDATE automation_notifications 
-         SET status = 'cancelled', lifecycle_status = 'cancelled' 
-         WHERE type = 'refill_collection' AND (reference_id = ? OR reference_id LIKE ? OR reference_id LIKE ?) AND status = 'staged'`,
-        [String(id), `${id},%`, `%,${id}%`]
-      );
+      await cleanupStagedRefillNotifications(db, [Number(id)], 'cancelled');
       return res.json({ success: true, message: 'Refill status updated to notified' });
     } else if (normalizedStatus === 'canceled' || normalizedStatus === 'cancelled') {
       await db.run(
@@ -1192,12 +1190,7 @@ const handleRefillStatusUpdate = async (req: express.Request, res: express.Respo
          WHERE id = ?`,
         [id]
       );
-      await db.run(
-        `UPDATE automation_notifications 
-         SET status = 'cancelled', lifecycle_status = 'cancelled' 
-         WHERE type = 'refill_collection' AND (reference_id = ? OR reference_id LIKE ? OR reference_id LIKE ?) AND status = 'staged'`,
-        [String(id), `${id},%`, `%,${id}%`]
-      );
+      await cleanupStagedRefillNotifications(db, [Number(id)], 'cancelled');
       return res.json({ success: true, message: 'Refill cancelled' });
     } else {
       await db.run(

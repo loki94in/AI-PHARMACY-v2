@@ -2725,8 +2725,10 @@ const POS = () => {
         refillEnabled: refillEnabled,
         refillDays: refillDays,
         refillId: activeRefillId || undefined,
+        refill_ids: pendingRefillIdsRef.current.length > 0 ? [...pendingRefillIdsRef.current] : undefined,
         editingInvoiceId: editingInvoiceId || undefined
       };
+      pendingRefillIdsRef.current = [];
 
       // Verification Layer Check: Pre-save validation
       try {
@@ -2772,18 +2774,6 @@ const POS = () => {
 
       // Refresh the local inventory cache so POS search shows the reduced stock immediately
       api.getCompactInventory().catch(() => {});
-
-      // ponytail: fulfill refill records after a successful NEW bill (not edit-bill)
-      // Fire-and-forget — does not block bill UI or affect the sale record.
-      if (!isEditMode && pendingRefillIdsRef.current.length > 0) {
-        const idsToFulfill = [...pendingRefillIdsRef.current];
-        pendingRefillIdsRef.current = [];
-        idsToFulfill.forEach(rid => {
-          apiClient.post(`/refills/${rid}/fulfill`).catch(err => {
-            console.warn(`[Refill] Failed to fulfill refill #${rid} after sale:`, err);
-          });
-        });
-      }
       
       const isWaSent = Boolean(sendWhatsApp) && !!phoneToUse.trim();
 

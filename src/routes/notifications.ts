@@ -297,6 +297,23 @@ router.post('/notifications/action-logs/clear', async (req, res) => {
   }
 });
 
+// Delete a single action log by id
+router.delete('/notifications/action-logs/:id', async (req, res) => {
+  const { id } = req.params;
+  const numId = parseInt(id, 10);
+  if (isNaN(numId)) {
+    return res.status(400).json({ error: 'Valid numeric log id is required' });
+  }
+  try {
+    const db = await dbManager.getConnection();
+    await db.run('DELETE FROM action_logs WHERE id = ?', [numId]);
+    res.json({ success: true, message: 'Action log deleted successfully' });
+  } catch (err: any) {
+    console.error('Failed to delete action log:', err);
+    res.status(500).json({ error: 'Failed to delete action log: ' + err.message });
+  }
+});
+
 // Save assistant chat log
 router.post('/notifications/chat-logs', async (req, res) => {
   const { sessionId, deviceName, sender, messageText, metadata } = req.body;
