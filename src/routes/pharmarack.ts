@@ -517,6 +517,44 @@ router.post('/login-window', async (req, res) => {
 
       await page.goto('https://retailers.pharmarack.com/loginotp', { waitUntil: 'domcontentloaded', timeout: 60000 });
 
+      // Auto-fill saved credentials if present in app_settings
+      const savedSettings = await getPharmarackSettings();
+      const savedUser = savedSettings['pharmarack_username'] || '';
+      const savedPass = savedSettings['pharmarack_password'] || '';
+
+      if (savedUser || savedPass) {
+        try {
+          await page.evaluate((u: string, p: string) => {
+            const inputs = Array.from(document.querySelectorAll('input'));
+            for (const input of inputs) {
+              if (p && input.type === 'password' && !input.value) {
+                input.value = p;
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                input.dispatchEvent(new Event('change', { bubbles: true }));
+              } else if (u && !input.value && (
+                input.type === 'text' || input.type === 'tel' || input.type === 'number' || input.type === 'email'
+              )) {
+                const id = (input.id || '').toLowerCase();
+                const name = (input.name || '').toLowerCase();
+                const placeholder = (input.placeholder || '').toLowerCase();
+                if (
+                  id.includes('username') || name.includes('username') ||
+                  id.includes('mobile') || name.includes('mobile') || placeholder.includes('mobile') ||
+                  id.includes('phone') || name.includes('phone') ||
+                  id.includes('login') || name.includes('login')
+                ) {
+                  input.value = u;
+                  input.dispatchEvent(new Event('input', { bubbles: true }));
+                  input.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+              }
+            }
+          }, savedUser, savedPass);
+        } catch (fillErr) {
+          console.warn('[Pharmarack Login Window] Auto-fill warning:', fillErr);
+        }
+      }
+
       let lastUsername = '';
       let lastPassword = '';
 
@@ -2408,5 +2446,31 @@ router.post('/dispatch-schedule', async (req, res) => {
   }
 });
 
+// POST /api/pharmarack/trigger-reauth, /api/pharmarack/login, /api/pharmarack/refresh-token
+const handleManualReauth = async (_req: express.Request, res: express.Response) => {
+  try {
+    console.log('[Pharmarack Re-auth] Manual re-auth requested. Checking session...');
+    const token = await tokenRefreshScheduler.triggerImmediateCheck('manual_reauth');
+    if (token) {
+      return res.json({ success: true, message: 'Pharmarack live B2B session refreshed successfully.' });
+    } else {
+      const status = tokenRefreshScheduler.getStatus();
+      return res.json({
+        success: false,
+        needs_login: true,
+        message: status.lastError || 'Session expired or needs manual OTP login. Please open the login window.'
+      });
+    }
+  } catch (err: any) {
+    console.error('[Pharmarack Re-auth] Error during manual reauth:', err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+router.post('/trigger-reauth', handleManualReauth);
+router.post('/login', handleManualReauth);
+router.post('/refresh-token', handleManualReauth);
+
 export default router;
+
 

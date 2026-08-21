@@ -873,16 +873,26 @@ function IntegrationsCredentialsTab({ rawSettings, refetchSettings, isVisible }:
   const handleTriggerPharmarackRefresh = async () => {
     setPharmarackRefreshing(true);
     try {
-      const res = await apiClient.post('/pharmarack/login');
+      const res = await apiClient.post('/pharmarack/trigger-reauth');
       if (res.data?.success) {
         toastEvent.trigger('Pharmarack live B2B session refreshed successfully', 'success');
+        refetchSettings();
       } else {
-        toastEvent.trigger('Pharmarack refresh completed: ' + (res.data?.message || 'Check logs'), 'info');
+        toastEvent.trigger(res.data?.message || 'Session expired. Click "Open Login Window" to complete authentication.', 'info');
       }
     } catch (err: any) {
       toastEvent.trigger('Pharmarack session refresh error: ' + err.message, 'error');
     } finally {
       setPharmarackRefreshing(false);
+    }
+  };
+
+  const handleLaunchPharmarackLogin = async () => {
+    try {
+      toastEvent.trigger('Opening Pharmarack Login window in Chrome...', 'info');
+      await api.launchPharmarackLoginWindow();
+    } catch (err: any) {
+      toastEvent.trigger(err?.response?.data?.error || 'Failed to launch login window', 'error');
     }
   };
 
@@ -1116,7 +1126,7 @@ function IntegrationsCredentialsTab({ rawSettings, refetchSettings, isVisible }:
         <h2 className="text-sm font-bold uppercase tracking-wider text-primary flex items-center gap-2 border-b border-border pb-2">
           <Zap size={16} /> Pharmarack B2B Live Ordering Credentials
         </h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
           <div>
             <label className="block text-xs font-semibold text-text mb-1">Pharmarack Login Username / Phone</label>
             <input
@@ -1124,6 +1134,7 @@ function IntegrationsCredentialsTab({ rawSettings, refetchSettings, isVisible }:
               value={pharmarackUser}
               onChange={(e) => setPharmarackUser(e.target.value)}
               className="w-full px-3 py-2 rounded-xl bg-bg border border-border text-text text-xs focus:border-primary focus:outline-none"
+              placeholder="Mobile / Username"
             />
           </div>
           <div>
@@ -1133,6 +1144,7 @@ function IntegrationsCredentialsTab({ rawSettings, refetchSettings, isVisible }:
               value={pharmarackPass}
               onChange={(e) => setPharmarackPass(e.target.value)}
               className="w-full px-3 py-2 rounded-xl bg-bg border border-border text-text text-xs focus:border-primary focus:outline-none"
+              placeholder="Account Password"
             />
           </div>
           <div>
@@ -1140,10 +1152,22 @@ function IntegrationsCredentialsTab({ rawSettings, refetchSettings, isVisible }:
               type="button"
               onClick={handleTriggerPharmarackRefresh}
               disabled={pharmarackRefreshing}
-              className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-bg3 border border-border text-text font-bold text-xs rounded-xl hover:bg-bg3/80 transition-all cursor-pointer"
+              className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-bg3 border border-border text-text font-bold text-xs rounded-xl hover:bg-bg3/80 transition-all cursor-pointer"
+              title="Attempt silent token refresh from saved Chrome session profile"
             >
               <RefreshCw size={14} className={pharmarackRefreshing ? 'animate-spin' : ''} />
-              <span>Refresh B2B Session</span>
+              <span>Refresh Session</span>
+            </button>
+          </div>
+          <div>
+            <button
+              type="button"
+              onClick={handleLaunchPharmarackLogin}
+              className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-primary text-text font-bold text-xs rounded-xl hover:bg-primary/80 transition-all cursor-pointer shadow-sm"
+              title="Open Chrome window with auto-filled credentials to enter OTP"
+            >
+              <Smartphone size={14} />
+              <span>Open Login (OTP)</span>
             </button>
           </div>
         </div>

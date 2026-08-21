@@ -305,9 +305,12 @@ export class TokenRefreshScheduler {
       const tokenRow = await db.get("SELECT value FROM app_settings WHERE key = 'pharmarack_session_token'");
       const token = tokenRow ? tokenRow.value : '';
 
-      if (!token && triggerType !== 'manual_reauth') {
+      const mainProfilePath = path.resolve(getAppDataDir(), 'data', 'pharmarack_profile');
+      const hasStoredProfile = fs.existsSync(mainProfilePath) && fs.readdirSync(mainProfilePath).length > 0;
+
+      if (!token && !hasStoredProfile && triggerType !== 'manual_reauth') {
         if (!this.hasLoggedNoToken) {
-          console.log('[TokenRefreshScheduler] No token found in app_settings. Skipping background auto-refresh until user logs in.');
+          console.log('[TokenRefreshScheduler] No token or browser profile found. Skipping background auto-refresh until user logs in.');
           this.hasLoggedNoToken = true;
         }
         this.isRefreshing = false;
@@ -328,6 +331,7 @@ export class TokenRefreshScheduler {
       const status = resToken ? 'success' : 'failed';
       await this.logSessionRefresh(triggerType, this.nextScheduledMinutes, status, errorMsg);
     }
+    return resToken;
   }
 
   public async executeRefresh(): Promise<string | null> {
