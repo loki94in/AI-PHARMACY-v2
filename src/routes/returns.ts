@@ -8,6 +8,7 @@ import { aiCameraService } from '../services/aiCameraService.js';
 import { inventoryCache } from '../services/inventoryCache.js';
 import { getAppDataDir } from '../config/index.js';
 import { applyStockDelta, recordStockLedger } from '../utils/stockRebuild.js';
+import { eventService } from '../services/eventService.js';
 
 
 const __filename = fileURLToPath(import.meta.url);
@@ -15,6 +16,27 @@ const __dirname = path.dirname(__filename);
 const DB_PATH = process.env.DB_PATH || path.resolve(__dirname, '..', '..', 'data', 'app.db');
 
 const router = express.Router();
+
+// P1 push event (API_OPTIMIZATION plan): any successful non-GET mutation on this
+// router broadcasts `return_created` (+ `inventory_changed` — returns/restocks
+// and expiry reviews alter stock) so UIs update without polling.
+router.use((req, res, next) => {
+  if (req.method !== 'GET') {
+    const origJson = res.json.bind(res);
+    (res as any).json = (body: any) => {
+      try {
+        if (res.statusCode < 400 && body && typeof body === 'object' && body.success) {
+          eventService.broadcast('return_created', { at: Date.now(), method: req.method });
+          if (!req.path.startsWith('/expiry-reviews')) {
+            eventService.broadcast('inventory_changed', { reason: 'return', method: req.method });
+          }
+        }
+      } catch (_) {}
+      return origJson(body);
+    };
+  }
+  next();
+});
 
 router.get('/', async (req, res) => {
   let db;

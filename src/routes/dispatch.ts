@@ -5,12 +5,30 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { notificationService } from '../services/notificationService.js';
 import { syncTodayActiveDistributors } from '../services/distributorDispatchReminderWorker.js';
+import { eventService } from '../services/eventService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const DB_PATH = process.env.DB_PATH || path.resolve(__dirname, '..', '..', 'data', 'app.db');
 
 const router = express.Router();
+
+// P1 push event (API_OPTIMIZATION plan): any successful non-GET mutation on this
+// router broadcasts `dispatch_updated` so the /dispatch page updates without polling.
+router.use((req, res, next) => {
+  if (req.method !== 'GET') {
+    const origJson = res.json.bind(res);
+    (res as any).json = (body: any) => {
+      try {
+        if (res.statusCode < 400 && body && typeof body === 'object' && body.success) {
+          eventService.broadcast('dispatch_updated', { at: Date.now(), method: req.method, path: req.path });
+        }
+      } catch (_) {}
+      return origJson(body);
+    };
+  }
+  next();
+});
 
 // ─── DISPATCH ORDERS ────────────────────────────────────────────────────────
 

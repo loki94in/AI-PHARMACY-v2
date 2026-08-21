@@ -130,17 +130,20 @@ export default function PhoneSales() {
 
   const pageActive = usePageActive();
 
+  // P1 "events, not timers": poll ONLY while a device session is actually live
+  // (data changes as the phone pushes sales). No device connected → zero calls.
+  const hasLiveDevice = devices.some(d => d.is_online);
+
   useEffect(() => {
     fetchStagedSales();
     fetchDeviceData();
-    // Poll data every 8 seconds — paused while this page isn't the one visible.
-    if (!pageActive) return;
+    if (!pageActive || !hasLiveDevice) return;
     const interval = setInterval(() => {
       fetchStagedSales();
       fetchDeviceData();
     }, 8000);
     return () => clearInterval(interval);
-  }, [fetchStagedSales, fetchDeviceData, pageActive]);
+  }, [fetchStagedSales, fetchDeviceData, pageActive, hasLiveDevice]);
 
   useEffect(() => {
     const handleUpdate = () => {

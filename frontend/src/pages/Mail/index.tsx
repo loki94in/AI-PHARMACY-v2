@@ -409,16 +409,19 @@ const Mail = () => {
 
   const pageActive = usePageActive();
 
+  // P1 "events, not timers": the inbox list re-reads ONLY when new mail actually
+  // arrives (SSE `email_new` push) or on focus — no 15s polling of unchanged data.
   useDeferredEffect(() => {
-    // Live background refresh: re-read local DB every 15s (silent, no loading indicator, 100% offline).
-    // Paused while this page isn't the one visible.
-    let refreshInterval: ReturnType<typeof setInterval> | undefined;
-    if (inboxRefreshControl.shouldFetch && pageActive) {
-      refreshInterval = setInterval(() => silentRefreshLocal(), 15000);
-    }
-
+    if (!inboxRefreshControl.shouldFetch || !pageActive) return;
+    const handleEmailNew = () => silentRefreshLocal();
+    const handleFocus = () => {
+      if (document.visibilityState === 'visible') silentRefreshLocal();
+    };
+    window.addEventListener('sse-email-new', handleEmailNew);
+    window.addEventListener('focus', handleFocus);
     return () => {
-      if (refreshInterval) clearInterval(refreshInterval);
+      window.removeEventListener('sse-email-new', handleEmailNew);
+      window.removeEventListener('focus', handleFocus);
     };
   }, [silentRefreshLocal, inboxRefreshControl.shouldFetch, pageActive]);
 

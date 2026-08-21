@@ -798,7 +798,8 @@ function IntegrationsCredentialsTab({ rawSettings, refetchSettings, isVisible }:
   const [saving, setSaving] = useState(false);
   const queryClient = useQueryClient();
 
-  // WhatsApp Web QR & Status polling
+  // WhatsApp Web QR & Status — P1 "events, not timers": poll rapidly ONLY while
+  // connecting (QR scan in progress). Once ready, refresh via SSE push / focus.
   const [waStatus, setWaStatus] = useState<{ status: string; qr?: string }>({ status: 'UNKNOWN' });
   const fetchWaStatus = useCallback(async () => {
     if (!isVisible) return;
@@ -810,9 +811,21 @@ function IntegrationsCredentialsTab({ rawSettings, refetchSettings, isVisible }:
 
   useEffect(() => {
     fetchWaStatus();
-    const interval = setInterval(fetchWaStatus, 5000);
-    return () => clearInterval(interval);
+    const handleSse = () => fetchWaStatus();
+    window.addEventListener('sse-wa-status-changed', handleSse);
+    window.addEventListener('focus', handleSse);
+    return () => {
+      window.removeEventListener('sse-wa-status-changed', handleSse);
+      window.removeEventListener('focus', handleSse);
+    };
   }, [fetchWaStatus]);
+
+  useEffect(() => {
+    const connecting = waStatus.status !== 'READY' && waStatus.status !== 'CONNECTED';
+    if (!connecting || !isVisible) return;
+    const interval = setInterval(fetchWaStatus, 3000);
+    return () => clearInterval(interval);
+  }, [waStatus.status, isVisible, fetchWaStatus]);
 
   // Telegram status poll
   const { data: telegramStatus } = useApiQuery<{ isReady: boolean }>(

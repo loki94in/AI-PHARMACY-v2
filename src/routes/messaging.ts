@@ -1,6 +1,6 @@
 // Messaging Hub API (Agent 2)
 import express from 'express';
-import { initClient, sendMessage, currentQr, isReady, forceReconnect, destroyClient, shouldRouteToBusiness, isPuppeteerDetachedError, hasSavedSession, getWhatsAppStatus, isWhatsAppExplicitlyDisabled } from '../whatsappClient.js';
+import { initClient, sendMessage, currentQr, isReady, forceReconnect, reconnectClient, destroyClient, shouldRouteToBusiness, isPuppeteerDetachedError, hasSavedSession, getWhatsAppStatus, isWhatsAppExplicitlyDisabled } from '../whatsappClient.js';
 import QRCode from 'qrcode';
 import { dbManager } from '../database/connection.js';
 import { eventService } from '../services/eventService.js';
@@ -321,14 +321,15 @@ router.post('/logout', async (req, res) => {
   }
 });
 
-// Force reconnect and clear session
+// Non-destructive reconnect (P4): restarts the client with the SAVED session.
+// NEVER deletes .wwebjs_auth — credentials survive disconnects/crashes/restarts.
 router.post('/reconnect', async (req, res) => {
 
   try {
-    // Return early to the client, the forceReconnect runs asynchronously 
+    // Return early to the client, the reconnect runs asynchronously
     // and takes a few seconds to destroy and restart the browser
-    forceReconnect().catch(console.error);
-    res.json({ success: true, message: 'Reconnecting...' });
+    reconnectClient().catch(console.error);
+    res.json({ success: true, message: 'Reconnecting with saved session...' });
   } catch (err) {
     console.error('Reconnect error:', err);
     res.status(500).json({ error: 'Failed to reconnect' });

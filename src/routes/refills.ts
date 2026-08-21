@@ -7,6 +7,7 @@ import { sendMessage, normalizeWhatsAppPhone } from '../whatsappClient.js';
 import { whatsappQueueWorker } from '../services/whatsappQueueWorker.js';
 import { getMessage } from '../i18n/getMessage.js';
 import { getConfiguredPharmacyName } from '../services/storeSettingsService.js';
+import { eventService } from '../services/eventService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -26,6 +27,24 @@ router.use(async (_req, _res, next) => {
     const db = await dbManager.getConnection();
     await initRefillsTable(db);
   } catch (_) {}
+  next();
+});
+
+// P1 push event (API_OPTIMIZATION plan): any successful non-GET refill mutation
+// broadcasts `refill_updated` so the UI invalidates caches instead of polling.
+// Covers all current AND future endpoints on this router.
+router.use((req, res, next) => {
+  if (req.method !== 'GET') {
+    const origJson = res.json.bind(res);
+    (res as any).json = (body: any) => {
+      try {
+        if (res.statusCode < 400 && body && typeof body === 'object' && body.success) {
+          eventService.broadcast('refill_updated', { at: Date.now(), method: req.method });
+        }
+      } catch (_) {}
+      return origJson(body);
+    };
+  }
   next();
 });
 

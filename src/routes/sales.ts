@@ -7,6 +7,7 @@ import { applyStockDelta, recordStockLedger } from '../utils/stockRebuild.js';
 import { inventoryCache } from '../services/inventoryCache.js';
 import { verificationService } from '../services/verificationService.js';
 import { activityLogger } from '../services/activityLogger.js';
+import { eventService } from '../services/eventService.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -584,6 +585,10 @@ router.post('/', async (req, res) => {
 
     // Log Activity Alert
     activityLogger.logSale(invoice_no, Number(total || 0), patient_name || 'Walk-in', paymentStatus || 'paid');
+
+    // P1 push events: dashboards/reports/inventory update without polling
+    eventService.broadcast('sale_created', { invoice_no, total: Number(total || 0) });
+    eventService.broadcast('inventory_changed', { reason: 'sale', invoice_no });
 
     // Bill-to-learning feedback loop: confirm OCR scanned items in ocr_corrections
     (async () => {

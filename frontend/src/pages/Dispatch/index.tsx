@@ -473,15 +473,20 @@ const Dispatch = () => {
     };
   }, [fetchAll, fetchDistributorReminders, fetchMessageDates]);
 
-  // Poll for new incoming distributor emails / order status changes so the dispatch
-  // & collection reminder list stays live without requiring a manual refresh.
+  // P1 "events, not timers": reminder list refreshes on SSE push (dispatch/email
+  // changes) and focus — no 45s polling of unchanged data.
   const pageActive = usePageActive();
   useEffect(() => {
     if (!pageActive) return;
-    const interval = setInterval(() => {
-      fetchDistributorReminders(true);
-    }, 45000);
-    return () => clearInterval(interval);
+    const handleSse = () => fetchDistributorReminders(true);
+    window.addEventListener('sse-dispatch-updated', handleSse);
+    window.addEventListener('sse-email-new', handleSse);
+    window.addEventListener('focus', handleSse);
+    return () => {
+      window.removeEventListener('sse-dispatch-updated', handleSse);
+      window.removeEventListener('sse-email-new', handleSse);
+      window.removeEventListener('focus', handleSse);
+    };
   }, [pageActive, fetchDistributorReminders]);
 
   useEffect(() => {

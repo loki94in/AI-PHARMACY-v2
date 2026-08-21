@@ -3347,6 +3347,12 @@ export class EmailService {
       });
 
       console.log(`[Sync] Delta sync complete. Stored ${syncedCount} new email(s).`);
+      // P1 push event (API_OPTIMIZATION plan): Mail page updates without polling
+      if (syncedCount > 0) {
+        try {
+          eventService.broadcast('email_new', { count: syncedCount, at: Date.now() });
+        } catch (_) {}
+      }
       try {
         const dbConn = await dbManager.getConnection();
         await dbConn.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('gmail_auth_status', 'connected')");

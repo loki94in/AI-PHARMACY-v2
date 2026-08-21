@@ -305,6 +305,10 @@ To prevent excessive network traffic, database load, and background resource usa
 3. **No Mount Saturation**: Avoid launching large fetch operations synchronously on page component mount. Utilize local caching, hover-prefetch gating, and on-focus lazily loaded inputs (e.g. Doctor select).
 4. **Silent Refresh on Write**: Mutations from sales (POS), purchases, customer returns, or inventory edits must trigger background updates to the client-side cache without blocking user interaction.
 
+### API Optimization Master Plan (binding reference)
+
+**`API_OPTIMIZATION_IMPLEMENTATION_PLAN.md`** (repository root) is the approved master plan for converting the app from timer-driven polling to event-driven refresh (SSE push via `eventService` → `/api/notifications/stream`), gated background workers, and never-lose-credentials session guarantees (Pharmarack / WhatsApp / Gmail / Telegram). Any agent implementing API-call reduction, adding pages/features/workers, or touching session persistence MUST read it first and follow its 4 principles (P1 events-not-timers, P2 cache-first paint, P3 gated workers, P4 credentials are sacred) and its Section 7 "API Efficiency Standard" for all new features.
+
 ---
 
 ## Page Feature Ownership & Migration Contract

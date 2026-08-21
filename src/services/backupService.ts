@@ -8,6 +8,7 @@ import zlib from 'zlib';
 import { pipeline } from 'stream/promises';
 
 import { config } from '../config/index.js';
+import { getAppDataDir } from '../config/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -15,6 +16,14 @@ const DB_PATH = config.dbPath;
 const BACKUP_DIR = config.backupDir;
 
 const MAX_BACKUPS = 20;
+const MAX_SESSION_BACKUPS = 3;
+
+// Session folders protected by P4 "credentials are sacred" — backed up so logins
+// survive disk failure/reinstall. Cache subfolders are excluded (large, rebuildable).
+const SESSION_EXCLUDED_DIRS = new Set([
+  'Cache', 'Code Cache', 'GPUCache', 'ShaderCache', 'DawnCache',
+  '.wwebjs_cache', 'Crashpad', 'GrShaderCache', 'GraphiteDawnCache', 'Service Worker'
+]);
 
 // Active scheduled task reference (so we can cancel & reschedule)
 let scheduledTask: ScheduledTask | null = null;
@@ -74,6 +83,60 @@ export async function createBackup(reason: string = 'Manual'): Promise<{ filenam
   enforceRetention();
 
   return { filename };
+}
+
+/**
+ * Backup long-lived login sessions (WhatsApp .wwebjs_auth + Pharmarack Chrome profile)
+ * into a single zip inside BACKUP_DIR so credentials survive reinstall/disk failure.
+ * ponytail: AdmZip (already installed), skip rebuildable caches, keep last 3 archives.
+ */
+export async function backupSessions(reason: string = 'Manual'): Promise<{ filename: string } | null> {
+  try {
+    const { default: AdmZip } = await import('adm-zip');
+    const appData = getAppDataDir();
+    const targets = [
+      { name: 'wwebjs_auth', dir: path.join(appData, '.wwebjs_auth') },
+      { name: 'pharmarack_profile', dir: path.join(appData, 'data', 'pharmarack_profile') }
+    ].filter(t => fs.existsSync(t.dir) && fs.readdirSync(t.dir).length > 0);
+
+    if (targets.length === 0) return null;
+
+    if (!fs.existsSync(BACKUP_DIR)) {
+      fs.mkdirSync(BACKUP_DIR, { recursive: true });
+    }
+
+    const zip = new AdmZip();
+    const addDirRecursive = (dir: string, zipPath: string) => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        const rel = path.join(zipPath, entry.name);
+        if (entry.isDirectory()) {
+          if (SESSION_EXCLUDED_DIRS.has(entry.name)) continue;
+          addDirRecursive(full, rel);
+        } else if (entry.isFile()) {
+          try { zip.addLocalFile(full, zipPath); } catch (_) {}
+        }
+      }
+    };
+    for (const t of targets) addDirRecursive(t.dir, t.name);
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const filename = `sessions_backup_${timestamp}.zip`;
+    zip.writeZip(path.join(BACKUP_DIR, filename));
+
+    // Retention: keep newest MAX_SESSION_BACKUPS session archives only
+    const sessionZips = listBackups().filter(b => b.filename.startsWith('sessions_backup_'));
+    for (const old of sessionZips.slice(MAX_SESSION_BACKUPS)) {
+      const p = path.join(BACKUP_DIR, old.filename);
+      if (fs.existsSync(p)) { try { fs.unlinkSync(p); } catch (_) {} }
+    }
+
+    console.log(`[Backup] Session backup created (${reason}): ${filename}`);
+    return { filename };
+  } catch (err: any) {
+    console.error('[Backup] Session backup failed (non-fatal):', err?.message);
+    return null;
+  }
 }
 
 /**
@@ -378,6 +441,7 @@ export function startScheduler(frequency?: string): void {
     try {
       const result = await createBackup(`Scheduled ${frequency}`);
       console.log(`[Backup] Scheduled backup created: ${result.filename}`);
+      await backupSessions(`Scheduled ${frequency}`);
     } catch (err) {
       console.error('[Backup] Scheduled backup failed:', err);
     }

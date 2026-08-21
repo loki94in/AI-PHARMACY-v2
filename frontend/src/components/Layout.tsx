@@ -78,6 +78,7 @@ import { useApiQuery } from '../hooks/useApiQuery';
 import { pageImports } from '../lib/pageImports';
 import BackupCenterModal from './BackupCenterModal';
 import { useFetchMode } from '../hooks/useFetchMode';
+import { useGlobalSseInvalidation } from '../hooks/useGlobalSseInvalidation';
 
 // Defer non-critical startup work until the browser is idle (falls back to a 2s
 // timeout where requestIdleCallback isn't available, e.g. Safari), so it doesn't
@@ -467,8 +468,10 @@ const NotificationPanel = ({
 
   useEffect(() => {
     fetchLogs();
-    const interval = setInterval(fetchLogs, 5000);
-    return () => clearInterval(interval);
+    // P1 "events, not timers": refresh the log list only when a new activity
+    // is actually logged server-side (SSE push) — no 5s polling.
+    window.addEventListener('sse-activity-logged', fetchLogs);
+    return () => window.removeEventListener('sse-activity-logged', fetchLogs);
   }, [fetchLogs]);
 
   // Combine real-time toasts and persistent DB action_logs into unified Activity feed
@@ -899,8 +902,6 @@ const Topbar = ({
   } | null>(null);
   const [enrichmentRunning, setEnrichmentRunning] = useState(false);
 
-  const enrichmentPollControl = useFetchMode('layout.enrichmentPoll');
-
   useEffect(() => {
     const fetchActiveJob = async () => {
       try {
@@ -1097,11 +1098,12 @@ const Topbar = ({
     }
   }, []);
 
-  // Services status: Poll once on mount, then every 30 seconds & on focus/auth events
+  // Services status: fetch on mount, on focus, and on SSE push events.
+  // No interval — P1 "events, not timers" (API_OPTIMIZATION plan Phase 3).
   useEffect(() => {
     if (!compactCacheLoaded) return;
     fetchServicesStatus();
-    const sInterval = setInterval(fetchServicesStatus, 30000);
+    fetchWhatsAppQueueStatus();
 
     const handleRefreshStatus = () => {
       fetchServicesStatus();
@@ -1111,21 +1113,24 @@ const Topbar = ({
     window.addEventListener('focus', handleRefreshStatus);
     window.addEventListener('refresh-pharmarack-cart', handleRefreshStatus);
     window.addEventListener('pharmarack-auth-changed', handleRefreshStatus);
+    window.addEventListener('sse-wa-status-changed', handleRefreshStatus);
+    window.addEventListener('sse-pharmarack-refreshed', fetchServicesStatus);
 
     return () => {
-      clearInterval(sInterval);
       window.removeEventListener('focus', handleRefreshStatus);
       window.removeEventListener('refresh-pharmarack-cart', handleRefreshStatus);
       window.removeEventListener('pharmarack-auth-changed', handleRefreshStatus);
+      window.removeEventListener('sse-wa-status-changed', handleRefreshStatus);
+      window.removeEventListener('sse-pharmarack-refreshed', fetchServicesStatus);
     };
   }, [fetchServicesStatus, fetchWhatsAppQueueStatus, compactCacheLoaded]);
 
-  // WhatsApp queue status: Poll every 15 seconds (or 3 seconds if active), and on queue events
+  // WhatsApp queue status: event-driven. Poll ONLY while the queue is actively
+  // sending (3s), otherwise refresh via queue events / focus / SSE — zero idle calls.
   useEffect(() => {
     if (!compactCacheLoaded) return;
     fetchWhatsAppQueueStatus();
-    const intervalMs = isQueueActive ? 3000 : 15000;
-    const qInterval = setInterval(fetchWhatsAppQueueStatus, intervalMs);
+    const qInterval = isQueueActive ? setInterval(fetchWhatsAppQueueStatus, 3000) : null;
 
     const unsubOpen = whatsappQueueEvent.subscribeOpen(() => {
       onOpenWaQueue?.();
@@ -1136,12 +1141,19 @@ const Topbar = ({
       fetchWhatsAppQueueStatus();
     });
 
+    const handleSseQueue = () => {
+      fetchWhatsAppQueueStatus();
+      fetchServicesStatus();
+    };
+    window.addEventListener('sse-wa-queue-updated', handleSseQueue);
+
     return () => {
-      clearInterval(qInterval);
+      if (qInterval) clearInterval(qInterval);
       unsubOpen();
       unsubUpdated();
+      window.removeEventListener('sse-wa-queue-updated', handleSseQueue);
     };
-  }, [compactCacheLoaded, isQueueActive, fetchWhatsAppQueueStatus, onOpenWaQueue]);
+  }, [compactCacheLoaded, isQueueActive, fetchWhatsAppQueueStatus, fetchServicesStatus, onOpenWaQueue]);
 
   // Active Manual/Automated Message Send 10-second Progress state
   const [activeMsgProgress, setActiveMsgProgress] = useState<{
@@ -1212,11 +1224,26 @@ const Topbar = ({
     } catch (_) { }
   }, []);
 
+  // Upcoming triggers: fetch on mount / focus / relevant SSE events; the local
+  // countdown ticks are UI-only (no network). When a countdown expires we
+  // re-fetch once to pick up the next run time — no fixed interval.
   useEffect(() => {
     fetchUpcomingTriggers();
-    const interval = setInterval(fetchUpcomingTriggers, 30000);
-    return () => clearInterval(interval);
+
+    const handleSseTriggers = () => fetchUpcomingTriggers();
+    window.addEventListener('focus', fetchUpcomingTriggers);
+    window.addEventListener('refresh-special-orders', handleSseTriggers);
+    window.addEventListener('app-refills-updated', handleSseTriggers);
+    window.addEventListener('sse-dispatch-updated', handleSseTriggers);
+    return () => {
+      window.removeEventListener('focus', fetchUpcomingTriggers);
+      window.removeEventListener('refresh-special-orders', handleSseTriggers);
+      window.removeEventListener('app-refills-updated', handleSseTriggers);
+      window.removeEventListener('sse-dispatch-updated', handleSseTriggers);
+    };
   }, [fetchUpcomingTriggers]);
+
+  const triggersRefetchLockRef = useRef(0);
 
   useEffect(() => {
     if (upcomingTriggers.length === 0) return;
@@ -1225,9 +1252,18 @@ const Topbar = ({
         prev.map(t => ({ ...t, secondsUntilRun: Math.max(0, t.secondsUntilRun - 1) }))
           .filter(t => t.secondsUntilRun > 0)
       );
+      // A countdown just expired → a trigger likely ran server-side. Refresh
+      // the upcoming list at most once per minute.
+      if (upcomingTriggers.some(t => t.secondsUntilRun <= 1)) {
+        const now = Date.now();
+        if (now - triggersRefetchLockRef.current > 60000) {
+          triggersRefetchLockRef.current = now;
+          fetchUpcomingTriggers();
+        }
+      }
     }, 1000);
     return () => clearInterval(tick);
-  }, [upcomingTriggers.length]);
+  }, [upcomingTriggers.length, upcomingTriggers, fetchUpcomingTriggers]);
 
   const [countdownSec, setCountdownSec] = useState(278); // 4m 38s live ticking countdown
   const [isCountdownPaused, setIsCountdownPaused] = useState(false);
@@ -3187,7 +3223,7 @@ export const Layout = ({
       const data = await api.getOrders();
       return Array.isArray(data) ? data : [];
     },
-    { refetchInterval: 15000, staleTime: 5000, enabled: compactCacheLoaded }
+    { staleTime: 30000, enabled: compactCacheLoaded }
   );
 
   const { data: refillsList = [], refetch: refetchRefills } = useApiQuery<any[]>(
@@ -3196,8 +3232,12 @@ export const Layout = ({
       const data = await api.getRefills();
       return Array.isArray(data) ? data : [];
     },
-    { refetchInterval: 15000, staleTime: 5000, enabled: compactCacheLoaded }
+    { staleTime: 30000, enabled: compactCacheLoaded }
   );
+
+  // P1 "events, not timers": ONE global SSE listener replaces all periodic
+  // background polling (API_OPTIMIZATION_IMPLEMENTATION_PLAN.md Phase 3).
+  useGlobalSseInvalidation(compactCacheLoaded);
 
   useEffect(() => {
     const handleRefresh = () => {

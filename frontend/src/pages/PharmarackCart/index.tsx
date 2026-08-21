@@ -761,10 +761,17 @@ export default function PharmarackCart() {
     };
 
     syncQueueStatus();
-    const interval = setInterval(syncQueueStatus, 185000);
+    // P1 "events, not timers": sync on SSE queue pushes + focus — no fixed interval.
+    const handleSseQueue = () => syncQueueStatus();
+    const handleFocus = () => {
+      if (document.visibilityState === 'visible') syncQueueStatus();
+    };
+    window.addEventListener('sse-wa-queue-updated', handleSseQueue);
+    window.addEventListener('focus', handleFocus);
     return () => {
       isMounted = false;
-      clearInterval(interval);
+      window.removeEventListener('sse-wa-queue-updated', handleSseQueue);
+      window.removeEventListener('focus', handleFocus);
     };
   }, [distributors, pageActive]);
 

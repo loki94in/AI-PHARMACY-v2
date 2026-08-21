@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { 
   X, RefreshCw, Send, AlertTriangle, CheckCircle2, Clock, 
@@ -98,6 +98,7 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
         setDelayDistributor(cachedDelayDistributor);
         setDelayDeliveryBoy(cachedDelayDeliveryBoy);
       }
+      syncPollTimer(data);
     } catch (err) {
       console.error('Failed to fetch WhatsApp queue status:', err);
     } finally {
@@ -105,13 +106,32 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
     }
   };
 
+  // P1 "events, not timers": poll ONLY while the queue is actively sending;
+  // otherwise refresh via queue events + SSE push — no 2s polling of an idle queue.
+  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const syncPollTimer = (data: any) => {
+    const active = !!data && (
+      (data.counts?.pending || 0) > 0 ||
+      (data.counts?.sending || 0) > 0 ||
+      data.isProcessing
+    );
+    if (active && !pollIntervalRef.current) {
+      pollIntervalRef.current = setInterval(fetchStatus, 2000);
+    } else if (!active && pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
+  };
+
   useEffect(() => {
     fetchStatus();
-    const interval = setInterval(fetchStatus, 2000);
     const unsub = whatsappQueueEvent.subscribeUpdated(() => fetchStatus());
+    const handleSse = () => fetchStatus();
+    window.addEventListener('sse-wa-queue-updated', handleSse);
     return () => {
-      clearInterval(interval);
+      if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
       unsub();
+      window.removeEventListener('sse-wa-queue-updated', handleSse);
     };
   }, []);
 

@@ -76,23 +76,23 @@ const Expiry = () => {
     }
   );
 
-  // Live background update polling & event listener
+  // P1 "events, not timers": refetch ONLY when stock/expiry data actually
+  // changed (window events + SSE push) — no 15s polling of unchanged data.
   useEffect(() => {
     const handleStockWrite = () => {
       refetchExpiry().catch(() => {});
     };
 
     window.addEventListener('stock-write-completed', handleStockWrite);
-
-    const interval = setInterval(() => {
-      if (document.visibilityState === 'visible') {
-        refetchExpiry().catch(() => {});
-      }
-    }, 15000);
+    window.addEventListener('sse-inventory-changed', handleStockWrite);
+    window.addEventListener('sse-invoice-saved', handleStockWrite);
+    window.addEventListener('expiry-list-changed', handleStockWrite);
 
     return () => {
       window.removeEventListener('stock-write-completed', handleStockWrite);
-      clearInterval(interval);
+      window.removeEventListener('sse-inventory-changed', handleStockWrite);
+      window.removeEventListener('sse-invoice-saved', handleStockWrite);
+      window.removeEventListener('expiry-list-changed', handleStockWrite);
     };
   }, [refetchExpiry]);
 

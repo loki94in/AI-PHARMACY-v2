@@ -18,18 +18,31 @@ export class MessagingQueue {
   public start() {
     if (this.intervalId) return;
     console.log('[MessagingQueue] Starting messaging queue processor (every 30 seconds)...');
-    
+
     // Process queue immediately on start
     this.processQueue();
 
-    this.intervalId = setInterval(() => {
-      this.processQueue();
-    }, 30 * 1000); // 30 seconds
+    // P3 gated worker (API_OPTIMIZATION plan): when the user is idle >30 min,
+    // tick once per 15 minutes instead of every 30s. Real pending work is still
+    // drained immediately via queueMessage()/retryMessage() triggers.
+    const tick = async () => {
+      let delay = 30 * 1000;
+      try {
+        const { activityTracker } = await import('../utils/activityTracker.js');
+        if (activityTracker.isIdle()) {
+          delay = 15 * 60 * 1000;
+        }
+      } catch (_) {}
+      this.intervalId = setTimeout(tick, delay) as unknown as NodeJS.Timeout;
+      await this.processQueue();
+    };
+
+    this.intervalId = setTimeout(tick, 30 * 1000) as unknown as NodeJS.Timeout;
   }
 
   public stop() {
     if (this.intervalId) {
-      clearInterval(this.intervalId);
+      clearTimeout(this.intervalId as unknown as NodeJS.Timeout);
       this.intervalId = null;
     }
   }

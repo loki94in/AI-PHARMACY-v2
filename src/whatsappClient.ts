@@ -441,6 +441,11 @@ function launchClientInstance(forceQr: boolean): Promise<WAClient> {
       currentQr = null;
       resolve(client);
 
+      // P1 push event: WA UI updates without polling
+      try {
+        eventService.broadcast('wa_status_changed', { status: 'ready', service: 'whatsapp' });
+      } catch (_) {}
+
       // Extract and save connected phone number to app_settings persistently
       try {
         const infoNumber = (client as any)?.info?.wid?.user || (client as any)?.info?.wid?._serialized?.split('@')[0];
@@ -500,8 +505,12 @@ function launchClientInstance(forceQr: boolean): Promise<WAClient> {
       initializing = false;
       if (qrTimeout) clearTimeout(qrTimeout);
 
+      // P4: session folder on disk stays intact — reconnect reuses saved credentials.
+      try {
+        eventService.broadcast('wa_status_changed', { status: 'disconnected', reason, service: 'whatsapp' });
+      } catch (_) {}
       eventService.broadcast('auth_failure', {
-        message: 'WhatsApp Web disconnected. Please scan the QR code in Settings to reconnect.',
+        message: 'WhatsApp Web disconnected. Use Reconnect in Settings (your session is saved).',
         service: 'whatsapp'
       });
 
@@ -521,6 +530,25 @@ function launchClientInstance(forceQr: boolean): Promise<WAClient> {
       });
 
       reject(new Error(msg));
+    });
+
+    // Real remote-logout detection (P4): WhatsApp invalidated the session server-side.
+    // Session folder on disk is preserved — only an explicit user Logout wipes credentials.
+    client.on('logout', async (_msg?: string) => {
+      console.log('[WhatsApp] Remote logout detected by WhatsApp servers.');
+      initializing = false;
+      isReady = false;
+      activeClient = null;
+      clientInstance = null;
+      if (qrTimeout) clearTimeout(qrTimeout);
+
+      eventService.broadcast('wa_status_changed', {
+        status: 'logged_out',
+        message: 'WhatsApp signed out remotely. Scan the QR code in Settings to sign in again.',
+        service: 'whatsapp'
+      });
+
+      client.destroy().catch(() => {});
     });
 
     client.on('message_create', async (msg: any) => {
@@ -796,6 +824,31 @@ export async function forceReconnect(): Promise<void> {
   initClient().catch(err => {
     console.error('[WhatsApp] Re-initialization after reconnect failed (non-fatal):', err.message);
   });
+}
+
+/**
+ * ponytail: P4 credentials-are-sacred reconnect.
+ * Destroys the running client and restarts it with the SAVED session.
+ * NEVER deletes .wwebjs_auth — QR only appears if WhatsApp itself
+ * invalidated the session remotely. Used by POST /api/messaging/reconnect.
+ */
+export async function reconnectClient(): Promise<void> {
+  console.log('[WhatsApp] Reconnect requested (non-destructive). Restarting with saved session...');
+  await destroyClient();
+  await cleanupProfileLocks();
+  if (process.platform === 'win32') {
+    await new Promise(r => setTimeout(r, 600));
+  }
+  try {
+    await initClient();
+  } catch (err: any) {
+    console.error('[WhatsApp] Non-destructive re-initialization failed (session preserved):', err?.message);
+    eventService.broadcast('wa_status_changed', {
+      status: 'disconnected',
+      message: 'Reconnect failed but your saved WhatsApp session is intact. Retry or scan QR only if asked.',
+      service: 'whatsapp'
+    });
+  }
 }
 
 const recentSendsCache = new Map<string, number>();

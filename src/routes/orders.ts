@@ -5,12 +5,18 @@ import { fileURLToPath } from 'url';
 import { sendMessage } from '../whatsappClient.js';
 import { getStoreMedicalName, getStoreMedicalNameAndPhone, buildOrderReadyNotificationMessage } from '../services/storeSettingsService.js';
 import { whatsappQueueWorker } from '../services/whatsappQueueWorker.js';
+import { eventService } from '../services/eventService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const DB_PATH = process.env.DB_PATH || path.resolve(__dirname, '..', '..', 'data', 'app.db');
 
 const router = express.Router();
+
+// P1 push event: special-order UI updates without polling
+const broadcastOrdersChanged = () => {
+  try { eventService.broadcast('order_updated', { at: Date.now() }); } catch (_) {}
+};
 
 let ordersTableInitialized = false;
 
@@ -192,6 +198,7 @@ router.post('/batch', async (req, res) => {
       }
     }
 
+    broadcastOrdersChanged();
     res.json({ success: true, message: `Successfully logged ${insertedOrders.length} request(s)`, count: insertedOrders.length, orders: insertedOrders });
   } catch (err) {
     console.error('Create batch order request error:', err);
@@ -320,6 +327,7 @@ router.post('/', async (req, res) => {
       }
     }
 
+    broadcastOrdersChanged();
     res.json({ success: true, message: 'Request logged successfully' });
   } catch (err) {
     console.error('Create order request error:', err);
@@ -496,6 +504,7 @@ router.put('/:id', async (req, res) => {
       ).catch(() => {});
     }
 
+    broadcastOrdersChanged();
     res.json({ success: true, message: 'Order updated successfully' });
   } catch (err) {
     console.error('Update order error:', err);
@@ -537,6 +546,7 @@ const handleStatusUpdate = async (req: express.Request, res: express.Response) =
       ).catch(() => {});
     }
 
+    broadcastOrdersChanged();
     res.json({ success: true, message: `Order status updated to ${status}` });
   } catch (err: any) {
     console.error('Update order status error:', err);
@@ -567,6 +577,7 @@ router.delete('/:id', async (req, res) => {
       [String(id), String(id)]
     ).catch(() => {});
     
+    broadcastOrdersChanged();
     res.json({ success: true, message: 'Order deleted successfully' });
   } catch (err) {
     console.error('Delete order error:', err);
@@ -587,6 +598,8 @@ router.post('/convert-to-refill', async (req, res) => {
       Number(refillIntervalDays)
     );
     if (result.success) {
+      broadcastOrdersChanged();
+      try { eventService.broadcast('refill_updated', { at: Date.now(), source: 'convert-to-refill' }); } catch (_) {}
       res.json(result);
     } else {
       res.status(400).json(result);
@@ -633,6 +646,7 @@ router.post('/:id/fulfill', async (req, res) => {
       await whatsappQueueWorker.enqueue(formattedPhone, msg, 'special_order_fulfilled', order.requester || 'Customer');
     }
 
+    broadcastOrdersChanged();
     res.json({ success: true, message: 'Special order marked as Fulfilled' });
   } catch (err: any) {
     console.error('Fulfill order error:', err);

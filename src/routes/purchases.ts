@@ -1139,6 +1139,14 @@ router.post('/manual', async (req, res) => {
     await db.run('COMMIT');
     inventoryCache.invalidate();
 
+    // P1 push events (API_OPTIMIZATION plan): invoice saved → inventory created/updated
+    try {
+      const { eventService: es } = await import('../services/eventService.js');
+      es.broadcast('invoice_saved', { app_invoice_no: appInvoiceNo, purchase_id: purchaseId });
+      es.broadcast('inventory_changed', { reason: 'purchase', purchase_id: purchaseId });
+      es.broadcast('expiry_list_changed', { reason: 'purchase', purchase_id: purchaseId });
+    } catch (_) {}
+
     // Respond instantly to client (<20ms) and perform background tasks asynchronously
     res.json({
       success: true,
@@ -1560,6 +1568,14 @@ async function handleUpdatePurchaseFull(req: express.Request, res: express.Respo
 
     await db.run('COMMIT');
     inventoryCache.invalidate();
+
+    // P1 push events: purchase edit alters stock/expiry
+    try {
+      const { eventService: es } = await import('../services/eventService.js');
+      es.broadcast('invoice_saved', { app_invoice_no: invoice_no, purchase_id: Number(id), action: 'update' });
+      es.broadcast('inventory_changed', { reason: 'purchase_update', purchase_id: Number(id) });
+      es.broadcast('expiry_list_changed', { reason: 'purchase_update', purchase_id: Number(id) });
+    } catch (_) {}
 
     // Respond immediately — cache rebuild is non-critical before user sees success (ponytail: was blocking response)
     res.json({
@@ -2947,6 +2963,14 @@ router.post('/reconciliation/reissue', async (req, res) => {
     await db.run('COMMIT');
     inventoryCache.invalidate();
 
+    // P1 push events: reissue created/updated stock
+    try {
+      const { eventService: es } = await import('../services/eventService.js');
+      es.broadcast('invoice_saved', { app_invoice_no: appInvoiceNo, purchase_id: purchaseId, action: 'reissue' });
+      es.broadcast('inventory_changed', { reason: 'reissue', purchase_id: purchaseId });
+      es.broadcast('expiry_list_changed', { reason: 'reissue', purchase_id: purchaseId });
+    } catch (_) {}
+
     // Trigger refills and special orders in background after transaction commits
     setImmediate(async () => {
       try {
@@ -3235,6 +3259,14 @@ router.post('/staged/:id/approve', async (req, res) => {
 
     await db.run('COMMIT');
     inventoryCache.invalidate();
+
+    // P1 push events: staged approval created/updated stock
+    try {
+      const { eventService: es } = await import('../services/eventService.js');
+      es.broadcast('invoice_saved', { purchase_id: purchaseId, action: 'staged_approve' });
+      es.broadcast('inventory_changed', { reason: 'staged_approve', purchase_id: purchaseId });
+      es.broadcast('expiry_list_changed', { reason: 'staged_approve' });
+    } catch (_) {}
 
     res.json({ success: true, purchase_id: purchaseId });
   } catch (error: any) {

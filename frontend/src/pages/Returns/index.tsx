@@ -449,24 +449,19 @@ const Returns: React.FC = () => {
     { staleTime: 30000 }
   );
 
-  // Live background update polling and real-time event listener
+  // P1 "events, not timers": history refetches ONLY when a return actually
+  // happened (window events + SSE push) — no 10s polling of unchanged data.
   useEffect(() => {
     const handleStockWrite = () => {
       refetchHistory().catch(() => {});
     };
 
     window.addEventListener('stock-write-completed', handleStockWrite);
-
-    // Silent background poll every 10 seconds while component is mounted
-    const interval = setInterval(() => {
-      if (document.visibilityState === 'visible') {
-        refetchHistory().catch(() => {});
-      }
-    }, 10000);
+    window.addEventListener('sse-return-created', handleStockWrite);
 
     return () => {
       window.removeEventListener('stock-write-completed', handleStockWrite);
-      clearInterval(interval);
+      window.removeEventListener('sse-return-created', handleStockWrite);
     };
   }, [refetchHistory]);
 

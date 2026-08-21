@@ -414,7 +414,9 @@ class WhatsAppQueueWorker {
     }
   }
 
-  /** Main background loop that periodically checks for pending queue items */
+  /** Main background loop that periodically checks for pending queue items.
+   *  P3 gated worker (API_OPTIMIZATION plan): when the user is idle >30 min and
+   *  nothing is being processed, tick once per 15 minutes instead of every 10s. */
   private async startWorkerLoop(): Promise<void> {
     if (this.isLoopRunning) return;
     this.isLoopRunning = true;
@@ -422,13 +424,23 @@ class WhatsAppQueueWorker {
     // Run initial cleanup of old sent items & restart recovery
     await this.cleanupOldSentItems();
 
-    const scheduleNextRun = () => {
+    const IDLE_TICK_MS = 15 * 60 * 1000;
+
+    const scheduleNextRun = async () => {
+      let delay = this.lastWasOffline ? 30000 : 10000;
+      try {
+        const { activityTracker } = await import('../utils/activityTracker.js');
+        if (activityTracker.isIdle() && !this.isProcessing) {
+          // P3: user idle >30 min → one queue check per 15 minutes
+          delay = IDLE_TICK_MS;
+        }
+      } catch (_) {}
       setTimeout(async () => {
         if (!this.isProcessing) {
           await this.processQueueInternal();
         }
         scheduleNextRun();
-      }, this.lastWasOffline ? 30000 : 10000);
+      }, delay);
     };
 
     scheduleNextRun();
@@ -448,6 +460,7 @@ class WhatsAppQueueWorker {
     }
 
     this.isProcessing = true;
+    this.broadcastQueueState(true);
 
     try {
       await this.loadPacingConfig();
@@ -660,7 +673,17 @@ class WhatsAppQueueWorker {
       this.isProcessing = false;
       this.currentSendingItemId = null;
       this.nextDispatchTimestamp = null;
+      this.broadcastQueueState(false);
     }
+  }
+
+  /** P1 push event: queue started/stopped processing — UI updates without polling */
+  private broadcastQueueState(active: boolean): void {
+    import('../services/eventService.js')
+      .then(({ eventService }) => {
+        eventService.broadcast('wa_queue_update', { active, at: Date.now() });
+      })
+      .catch(() => {});
   }
 
   /** Retry all failed items */

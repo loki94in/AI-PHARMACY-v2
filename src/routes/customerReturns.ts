@@ -3,8 +3,17 @@ import { dbManager } from '../database/connection.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { inventoryCache } from '../services/inventoryCache.js';
 import { applyStockDelta, recordStockLedger } from '../utils/stockRebuild.js';
+import { eventService } from '../services/eventService.js';
 
 const router = express.Router();
+
+// P1 push event (API_OPTIMIZATION plan): customer return restores stock
+const broadcastCustomerReturn = () => {
+  try {
+    eventService.broadcast('return_created', { at: Date.now(), type: 'customer_return' });
+    eventService.broadcast('inventory_changed', { reason: 'customer_return' });
+  } catch (_) {}
+};
 
 // Search original sales invoice to return items
 router.get('/search-invoice', asyncHandler(async (req: express.Request, res: express.Response) => {
@@ -200,6 +209,7 @@ router.post('/', asyncHandler(async (req: express.Request, res: express.Response
   });
 
   inventoryCache.invalidate();
+  broadcastCustomerReturn();
   res.json({ success: true, return_no: result.returnNo, total_refund: result.totalRefund });
 }));
 

@@ -1023,8 +1023,6 @@ export async function runCatalogImport(jobId: number) {
 }
 
 let isWorking = false;
-const failedDiscoveryAttempts = new Map<string, number>();
-const DISCOVERY_RETRY_DELAY_MS = 5 * 60 * 1000; // 5 minutes
 
 // Loop to poll jobs
 export async function startWorker() {
@@ -1062,15 +1060,30 @@ export async function startWorker() {
 
 
   // ponytail: concurrency lock to avoid CPU/memory leak
-  setInterval(async () => {
+  // P3 gated worker (API_OPTIMIZATION plan): registry key `bg.catalogWorkerLoop`
+  // + idle backoff — 10s poll while active, 60s when user idle >30 min, off = stop.
+  const jobPollTick = async () => {
+    let delay = 10000;
+    try {
+      const { getBackendFetchMode } = await import('../services/dataFetchControl.js');
+      const { activityTracker } = await import('../utils/activityTracker.js');
+      const mode = await getBackendFetchMode('bg.catalogWorkerLoop', 'auto');
+      if (mode === 'off') return; // stay off until next process start
+      if (activityTracker.isIdle()) delay = 60000;
+    } catch (_) {}
+    setTimeout(jobPollRun, delay);
+  };
+
+  const jobPollRun = async () => {
     if (isWorking) {
+      jobPollTick();
       return;
     }
     isWorking = true;
     let db;
     try {
       db = await dbManager.getConnection();
-      
+
       const analysisJob = await db.get(`SELECT * FROM catalog_jobs WHERE status='pending_analysis' ORDER BY id ASC LIMIT 1`);
       if (analysisJob) {
         console.log(`[Worker] Found pending analysis job ${analysisJob.id}, triggering runCatalogAnalysis.`);
@@ -1080,63 +1093,15 @@ export async function startWorker() {
         if (job) {
           console.log(`[Worker] Found pending job ${job.id}, triggering runCatalogImport.`);
           await runCatalogImport(job.id);
-        } else {
-          // [DISABLED] Google discovery for staged medicine reviews — commented out to stop CAPTCHA flood.
-          // To re-enable: remove the block comment below.
-          /* const pendingReviews = await db.all(
-            "SELECT * FROM staged_medicine_reviews WHERE status = 'pending' AND screenshot_path IS NULL ORDER BY id ASC LIMIT 50"
-          );
-          
-          const pendingReview = pendingReviews.find(r => {
-            const lastAttempt = failedDiscoveryAttempts.get(r.medicine_name);
-            return !lastAttempt || (Date.now() - lastAttempt > DISCOVERY_RETRY_DELAY_MS);
-          });
-
-          if (pendingReview) {
-            console.log(`[Worker] Found pending medicine review for "${pendingReview.medicine_name}", starting Google discovery...`);
-            const { googleSearchService } = await import('../services/googleSearchService.js');
-            const searchResult = await googleSearchService.discoverMedicineInfo(pendingReview.medicine_name);
-            
-            if (searchResult) {
-              const extractedJson = JSON.stringify({
-                api_reference: searchResult.api_reference || '',
-                strength: searchResult.strength || '',
-                manufacturer: searchResult.manufacturer || '',
-                dosage_form: searchResult.dosage_form || '',
-                pack_info: searchResult.pack_info || '',
-                therapeutic_class: searchResult.therapeutic_class || ''
-              });
-
-              await db.run(
-                "UPDATE staged_medicine_reviews SET screenshot_path = ?, raw_ocr_text = ?, extracted_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                [
-                  searchResult.screenshot_path || null,
-                  searchResult.raw_text || null,
-                  extractedJson,
-                  pendingReview.id
-                ]
-              );
-              console.log(`[Worker] Enriched medicine review for "${pendingReview.medicine_name}".`);
-              
-              failedDiscoveryAttempts.delete(pendingReview.medicine_name);
-
-              eventService.broadcast('catalog_review_updated', {
-                jobId: pendingReview.job_id,
-                reviewId: pendingReview.id,
-                medicineName: pendingReview.medicine_name,
-                status: 'enriched'
-              });
-            } else {
-              console.log(`[Worker] Google discovery failed or throttled for "${pendingReview.medicine_name}".`);
-              failedDiscoveryAttempts.set(pendingReview.medicine_name, Date.now());
-            }
-          } */
         }
       }
     } catch (err) {
       console.error('Worker polling interval error:', err);
     } finally {
       isWorking = false;
+      jobPollTick();
     }
-  }, 10000);
+  };
+
+  jobPollTick();
 }

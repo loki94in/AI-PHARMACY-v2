@@ -330,15 +330,19 @@ export class TokenRefreshScheduler {
       this.isRefreshing = false;
       const status = resToken ? 'success' : 'failed';
       await this.logSessionRefresh(triggerType, this.nextScheduledMinutes, status, errorMsg);
+      // P1 push event: services-status UI updates without polling
+      try {
+        const { eventService } = await import('./eventService.js');
+        eventService.broadcast('pharmarack_session_refreshed', { status, error: errorMsg });
+      } catch (_) {}
     }
     return resToken;
   }
 
   public async executeRefresh(): Promise<string | null> {
-    if (activityTracker.isIdle()) {
-      console.log('[TokenRefreshScheduler] User is idle (>30m). Skipping background Pharmarack session refresh.');
-      return null;
-    }
+    // P4 decision (API_OPTIMIZATION_IMPLEMENTATION_PLAN.md Phase 1.3): refresh runs
+    // even when the user is idle — its whole purpose is keeping the Pharmarack
+    // session alive overnight so no morning OTP re-login is needed.
 
     const chromePath = findChromePath();
     if (!chromePath) {
@@ -438,11 +442,13 @@ export class TokenRefreshScheduler {
 
       const currentUrl = page.url();
       if (currentUrl.includes('/login') || currentUrl.includes('/auth') || currentUrl.includes('/signin')) {
-        console.warn('[TokenRefreshScheduler] Session expired: Headless browser redirected to login page. Clearing token.');
+        console.warn('[TokenRefreshScheduler] Session expired: Headless browser redirected to login page. Marking token stale (profile cookies preserved for re-login).');
         this.lastError = 'Session expired. Please log in via Settings > External Integrations.';
         try {
           const db = await dbManager.getConnection();
-          await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('pharmarack_session_token', '')");
+          // P4: never blank the stored token on transient/expiry detection —
+          // keep the last value and mark status so the UI can prompt re-login.
+          await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('pharmarack_session_status', 'expired')");
         } catch (_) {}
         return null;
       }
@@ -461,6 +467,7 @@ export class TokenRefreshScheduler {
         const db = await dbManager.getConnection();
         await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('pharmarack_session_token', ?)", [holder.token]);
         await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('pharmarack_mode', 'Live')");
+        await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('pharmarack_session_status', 'active')");
         return holder.token;
       } else {
         console.warn('[TokenRefreshScheduler] Headless navigation completed but no authorization header was captured.');

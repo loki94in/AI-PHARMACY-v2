@@ -4,6 +4,7 @@ import { inventoryCache } from '../services/inventoryCache.js';
 import { dbManager } from '../database/connection.js';
 import { cacheService } from '../services/cacheService.js';
 import { parsePackSizeFromPackaging } from '../utils/packaging.js';
+import { eventService } from '../services/eventService.js';
 
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -13,6 +14,30 @@ const router = express.Router();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const DB_PATH = process.env.DB_PATH || path.resolve(__dirname, '..', '..', 'data', 'app.db');
+
+// P1 push event (API_OPTIMIZATION plan): any successful non-GET mutation on this
+// router broadcasts `inventory_changed` so UIs (Inventory/POS/Dashboard) update
+// without polling. Covers all current AND future endpoints on this router.
+router.use((req, res, next) => {
+  if (req.method !== 'GET') {
+    const origJson = res.json.bind(res);
+    (res as any).json = (body: any) => {
+      try {
+        if (res.statusCode < 400 && body && typeof body === 'object' && body.success) {
+          eventService.broadcast('inventory_changed', { reason: 'manual_edit', method: req.method, path: req.path });
+          if (!req.path.startsWith('/bulk-sell-prices')) {
+            // sell-price edits don't touch expiry data; stock/expiry edits do
+            if (['/override', '/bulk-action'].includes(req.path)) {
+              eventService.broadcast('expiry_list_changed', { reason: 'inventory_edit' });
+            }
+          }
+        }
+      } catch (_) {}
+      return origJson(body);
+    };
+  }
+  next();
+});
 
 // Helper to normalize numeric search terms (e.g., stripping trailing decimal zeros like "31.00" -> "31")
 // to align with SQLite CAST(value AS TEXT) representations.

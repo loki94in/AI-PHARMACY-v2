@@ -134,12 +134,15 @@ async function fetchPharmarack(url: string, options: any = {}): Promise<Response
       console.log(`[Pharmarack Fetch] Retrying API ${url} with fresh token...`);
       response = await executeFetch(freshToken);
     } else {
-      console.log(`[Pharmarack Fetch] Silent background token refresh failed. Clearing expired session token.`);
+      // P4 (API_OPTIMIZATION plan Phase 1.2): never blank the stored token on a
+      // failed silent refresh — the Chrome profile cookies may still be valid and
+      // the scheduler will retry on its next cycle. Mark stale for the UI instead.
+      console.log(`[Pharmarack Fetch] Silent background token refresh failed. Marking session status 'stale' (token preserved).`);
       try {
         const db = await dbManager.getConnection();
-        await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('pharmarack_session_token', '')");
+        await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('pharmarack_session_status', 'stale')");
       } catch (dbErr) {
-        console.error('Failed to clear expired session token:', dbErr);
+        console.error('Failed to mark session stale:', dbErr);
       }
     }
   }

@@ -499,7 +499,29 @@ async function checkDeviceConnections() {
   }
 }
 
-// Check connections status every 10 seconds
-setInterval(checkDeviceConnections, 10000);
+// P3 gated worker (API_OPTIMIZATION plan): device connection monitor.
+// Registry key `bg.deviceMonitor` (default manual) + idle backoff —
+// 10s while the user is active, 2 min when idle >30 min, off when disabled.
+(async () => {
+  const { getBackendFetchMode } = await import('../services/dataFetchControl.js');
+  const { activityTracker } = await import('../utils/activityTracker.js');
+
+  const tick = async () => {
+    let delay = 10000;
+    try {
+      const mode = await getBackendFetchMode('bg.deviceMonitor', 'manual');
+      if (mode === 'off') return; // stay off until next process start
+      if (activityTracker.isIdle()) {
+        delay = mode === 'auto' ? 120000 : 600000;
+      }
+    } catch (_) {}
+    setTimeout(async () => {
+      await checkDeviceConnections();
+      tick();
+    }, delay);
+  };
+  checkDeviceConnections();
+  tick();
+})();
 
 export default router;

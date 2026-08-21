@@ -27,13 +27,32 @@ class InventoryCache {
   private rebuildPromise: Promise<void> | null = null;
 
   public initialize(db?: Database) {
-    // Set up periodic background refresh every 10 minutes
+    // P3 gated worker (API_OPTIMIZATION plan): registry key `bg.inventoryCache`
+    // + idle backoff — 10 min rebuild while active, 30 min when user idle >30 min.
     if (this.refreshInterval) {
       clearInterval(this.refreshInterval);
     }
-    this.refreshInterval = setInterval(() => {
+    const tick = async () => {
+      let delay = 10 * 60 * 1000;
+      try {
+        const { getBackendFetchMode } = await import('./dataFetchControl.js');
+        const mode = await getBackendFetchMode('bg.inventoryCache', 'auto');
+        if (mode === 'off') return; // stay off until next process start
+        if (mode === 'manual') {
+          const { activityTracker } = await import('../utils/activityTracker.js');
+          if (activityTracker.isIdle()) {
+            this.refreshInterval = setTimeout(tick, 5 * 60 * 1000) as unknown as NodeJS.Timeout;
+            return;
+          }
+        } else {
+          const { activityTracker } = await import('../utils/activityTracker.js');
+          if (activityTracker.isIdle()) delay = 30 * 60 * 1000;
+        }
+      } catch (_) {}
       this.rebuild().catch(err => console.error('[InventoryCache] Background rebuild failed:', err));
-    }, 10 * 60 * 1000);
+      this.refreshInterval = setTimeout(tick, delay) as unknown as NodeJS.Timeout;
+    };
+    this.refreshInterval = setTimeout(tick, 10 * 60 * 1000) as unknown as NodeJS.Timeout;
   }
 
   public async get(db?: Database): Promise<CompactInventoryItem[]> {

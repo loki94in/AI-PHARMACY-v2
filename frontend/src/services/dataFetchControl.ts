@@ -87,14 +87,6 @@ export const DATA_FETCH_REGISTRY: FetchControlEntry[] = [
     external: false
   },
   {
-    key: 'crm.waStatusPoll',
-    label: 'CRM WhatsApp Status 5s Poll',
-    page: 'CRM',
-    callSite: 'CRM/index.tsx:440',
-    defaultMode: 'manual',
-    external: false
-  },
-  {
     key: 'crm.waSse',
     label: 'CRM SSE Stream',
     page: 'CRM',
@@ -146,14 +138,6 @@ export const DATA_FETCH_REGISTRY: FetchControlEntry[] = [
   },
   // Global / Layout
   {
-    key: 'layout.enrichmentPoll',
-    label: 'Global Enrichment 5s Poll',
-    page: 'Layout',
-    callSite: 'Layout.tsx:702',
-    defaultMode: 'off',
-    external: false
-  },
-  {
     key: 'layout.hoverPrefetch',
     label: 'Nav Hover Prefetch',
     page: 'Layout',
@@ -184,15 +168,6 @@ export const DATA_FETCH_REGISTRY: FetchControlEntry[] = [
     label: 'Enrichment Status 3s Poll',
     page: 'Composition',
     callSite: 'CompositionQueue/index.tsx:237',
-    defaultMode: 'auto',
-    external: false
-  },
-  // Learning
-  {
-    key: 'learning.qrPoll',
-    label: 'Learning QR 5s Poll',
-    page: 'Learning',
-    callSite: 'Learning/index.tsx:299',
     defaultMode: 'auto',
     external: false
   },
@@ -276,6 +251,14 @@ export const DATA_FETCH_REGISTRY: FetchControlEntry[] = [
     page: 'Backend',
     callSite: 'catalogWorker.ts:1032',
     defaultMode: 'auto',
+    external: false
+  },
+  {
+    key: 'bg.deviceMonitor',
+    label: 'Device Connection Monitor',
+    page: 'Backend',
+    callSite: 'routes/notifications.ts:503',
+    defaultMode: 'manual',
     external: false
   }
 ];
