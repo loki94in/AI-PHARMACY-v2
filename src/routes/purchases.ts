@@ -1201,6 +1201,8 @@ router.post('/manual', async (req, res) => {
                 await overlapDetectionService.detectOverlap({
                   medicineName: medName,
                   distributorId: distId ? Number(distId) : undefined,
+                  distributorName: distName || undefined,
+                  mrp: parseFloat(item.mrp) || undefined,
                   purchaseId,
                   quantity: Number(item.qty) || 1
                 });

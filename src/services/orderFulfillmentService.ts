@@ -1,5 +1,6 @@
 import { Database } from 'sqlite';
 import { dbManager } from '../database/connection.js';
+import { scoreOrderNameMatch, ARRIVAL_MATCH_THRESHOLD } from '../utils/orderNameMatcher.js';
 
 export class OrderFulfillmentService {
   private static instance: OrderFulfillmentService;
@@ -40,26 +41,30 @@ export class OrderFulfillmentService {
    * CONTRACT: The app NEVER automatically sends messages to patients upon medicine arrival.
    * Special orders are updated to 'Ready' (in stock) with notified = 0.
    * The user manually clicks the 'Send Arrival WA' button in the UI to notify the customer.
+   * Matching is scoped strictly to ACTIVE in-app order statuses ('Pending'/'Ordered') and uses
+   * the shared scorer (exact fast-path + High-tier fuzzy >= ARRIVAL_MATCH_THRESHOLD).
    */
   public async reconcileIncomingInventory(db: Database, medicineName: string) {
     if (!medicineName) return;
     
     console.log(`[OrderFulfillmentService] Reconciling incoming inventory for: "${medicineName}"`);
     
-    // Find special orders that are Pending or Ordered for this product
+    // Find active special orders taken through the app; old/fulfilled/cancelled orders never match
     const pendingOrders = await db.all(
       `SELECT * FROM special_orders 
-       WHERE LOWER(product) = LOWER(?) AND (status = 'Pending' OR status = 'Ordered')`,
-      [medicineName.trim()]
+       WHERE status = 'Pending' OR status = 'Ordered'`
     );
 
     for (const order of pendingOrders) {
+      const match = scoreOrderNameMatch(medicineName.trim(), order.product || order.medicine_name);
+      if (match.score < ARRIVAL_MATCH_THRESHOLD) continue;
+
       // Update special order to 'Ready' (in stock) and keep notified = 0 for manual user trigger
       await db.run(
         `UPDATE special_orders SET status = 'Ready', notified = 0 WHERE id = ?`,
         [order.id]
       );
-      console.log(`[OrderFulfillmentService] Special order ID ${order.id} marked as Ready (manual patient notification required via UI button).`);
+      console.log(`[OrderFulfillmentService] Special order ID ${order.id} marked as Ready (${match.matchType}, confidence ${(match.confidence * 100).toFixed(0)}%; manual patient notification required via UI).`);
     }
   }
 

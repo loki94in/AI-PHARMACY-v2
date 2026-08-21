@@ -234,7 +234,8 @@ class WhatsAppQueueWorker {
     targetName?: string,
     explicitScheduledAt?: number,
     mediaUrl?: string,
-    file?: { mimetype: string; data: string; filename?: string }
+    file?: { mimetype: string; data: string; filename?: string },
+    options?: { skipDedupe?: boolean }
   ): Promise<number> {
     const db = await dbManager.getConnection();
     await this.ensureSchema(db);
@@ -348,13 +349,20 @@ class WhatsAppQueueWorker {
     // Atomic dedup + insert: the WHERE NOT EXISTS runs inside the same statement as the INSERT,
     // so two near-simultaneous enqueue() calls for the same number+message can't both pass a
     // separate SELECT check and both insert (that race caused duplicate WhatsApp sends).
+    // skipDedupe is used by explicit user Resend actions, which must never be suppressed.
+    const dedupeGuard = options?.skipDedupe
+      ? `WHERE NOT EXISTS (SELECT 1 FROM whatsapp_send_queue WHERE id = -1)`
+      : `WHERE NOT EXISTS (
+          SELECT 1 FROM whatsapp_send_queue WHERE number = ? AND message = ? AND created_at >= ?
+        )`;
+    const insertParams: any[] = [cleanPhone, message, type, now, scheduledAt, resolvedTargetName || null, mediaUrl || null, fileJsonStr];
+    if (!options?.skipDedupe) insertParams.push(cleanPhone, message, startOfDayMs);
+
     const result = await db.run(
       `INSERT INTO whatsapp_send_queue (number, message, type, status, retry_count, created_at, scheduled_at, target_name, media_url, file_json)
        SELECT ?, ?, ?, 'pending', 0, ?, ?, ?, ?, ?
-       WHERE NOT EXISTS (
-         SELECT 1 FROM whatsapp_send_queue WHERE number = ? AND message = ? AND created_at >= ?
-       )`,
-      [cleanPhone, message, type, now, scheduledAt, resolvedTargetName || null, mediaUrl || null, fileJsonStr, cleanPhone, message, startOfDayMs]
+       ${dedupeGuard}`,
+      insertParams
     );
 
     if (!result.changes) {

@@ -245,8 +245,9 @@ router.post('/enqueue-single', async (req, res) => {
       explicitScheduledAt
     );
 
-    // Trigger queue processing instantly
-    whatsappQueueWorker.triggerProcessing();
+    // User-clicked send: clear any pacing countdown and dispatch immediately so the
+    // UI flips Pending -> Sent without waiting out the safe-pacing delay.
+    await whatsappQueueWorker.forceNext();
 
     res.json({
       success: true,
@@ -311,6 +312,49 @@ router.post('/retry-failed', async (_req, res) => {
     res.json({ success: true, retriedCount, message: `Reset ${retriedCount} failed queue item(s) to pending` });
   } catch (err: any) {
     res.status(500).json({ error: err?.message || 'Failed to retry failed items' });
+  }
+});
+
+// POST resend a previously queued/sent/failed message immediately (creates a NEW queue item)
+router.post('/items/:id/resend', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id || isNaN(id)) {
+    return res.status(400).json({ error: 'Valid item id is required' });
+  }
+  try {
+    const db = await dbManager.getConnection();
+    const source = await db.get('SELECT * FROM whatsapp_send_queue WHERE id = ?', [id]);
+    if (!source) {
+      return res.status(404).json({ error: 'Queue item not found' });
+    }
+
+    let fileObj: any = null;
+    if (source.file_json) {
+      try { fileObj = JSON.parse(source.file_json); } catch (_) {}
+    }
+
+    // skipDedupe: an identical same-day message must still be allowed to go out again
+    const newQueueId = await whatsappQueueWorker.enqueue(
+      source.number,
+      source.message,
+      source.type,
+      source.target_name || undefined,
+      undefined,
+      source.media_url || undefined,
+      fileObj || undefined,
+      { skipDedupe: true }
+    );
+
+    await whatsappQueueWorker.forceNext();
+
+    res.json({
+      success: true,
+      queueId: newQueueId,
+      message: `Resend dispatched for ${source.target_name || source.number}`
+    });
+  } catch (err: any) {
+    console.error('Failed to resend queue item:', err);
+    res.status(500).json({ error: err?.message || 'Failed to resend message' });
   }
 });
 

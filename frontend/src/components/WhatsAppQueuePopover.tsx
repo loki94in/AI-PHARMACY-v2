@@ -232,6 +232,22 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
 
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [clearingFailed, setClearingFailed] = useState(false);
+  const [resendingId, setResendingId] = useState<number | null>(null);
+
+  const handleResendItem = async (id: number, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (resendingId === id) return;
+    setResendingId(id);
+    try {
+      const res = await api.resendWhatsAppQueueItem(id);
+      toastEvent.trigger(res.message || 'Message resent for immediate delivery', 'success');
+      await fetchStatus();
+    } catch (err: any) {
+      toastEvent.trigger(err?.response?.data?.error || err?.message || 'Failed to resend message', 'error');
+    } finally {
+      setResendingId(null);
+    }
+  };
 
   const handleDeleteItem = async (id: number, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
@@ -604,6 +620,19 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
               >
                 <Trash2 size={11} /> Dismiss / Mark Read
               </button>
+
+              {(item.status === 'sent' || item.status.includes('failed')) && (
+                <button
+                  type="button"
+                  onClick={(e) => handleResendItem(item.id, e)}
+                  disabled={resendingId === item.id}
+                  className="px-2.5 py-1 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 font-semibold text-[10px] rounded-lg transition-all flex items-center gap-1 border border-emerald-500/25 disabled:opacity-50"
+                  title="Send this message again immediately"
+                >
+                  {resendingId === item.id ? <RefreshCw size={11} className="animate-spin" /> : <CheckCheck size={11} />}
+                  {resendingId === item.id ? 'Resending...' : 'Resend'}
+                </button>
+              )}
 
               {item.status.includes('failed') && (
                 <button

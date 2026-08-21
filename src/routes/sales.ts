@@ -17,6 +17,7 @@ import { generateInvoiceBarcodeData } from '../services/barcodeService.js';
 import { getAppDataDir } from '../config/index.js';
 import { applySaleDelta, getReorderWindowMonths, computeReorderSuggestion } from '../services/medicineSalesMetricsService.js';
 import { cleanupStagedRefillNotifications } from '../services/refillService.js';
+import { scoreOrderNameMatch, ARRIVAL_MATCH_THRESHOLD } from '../utils/orderNameMatcher.js';
 
 const router = express.Router();
 
@@ -721,55 +722,52 @@ router.post('/', async (req, res) => {
     }
 
     // Match special orders for each item in the saved POS bill.
+    // Uses the shared scorer (exact fast-path + High-tier fuzzy >= ARRIVAL_MATCH_THRESHOLD)
+    // scoped strictly to ACTIVE in-app order statuses, so old/fulfilled/cancelled orders
+    // are never consumed by a new sale.
     const matchedSpecialOrders: any[] = [];
     try {
       const distinctMedNames = Array.from(new Set(
         items.map((it: any) => (it.medicine_name || '').trim()).filter(Boolean)
       ));
-      const specialOrdersByName = new Map<string, any[]>();
       if (distinctMedNames.length > 0) {
-        const lowerNames = distinctMedNames.map(n => n.toLowerCase());
-        const placeholders = lowerNames.map(() => '?').join(',');
-        const allMatching = await db.all(
-          `SELECT id as order_id, product as medicine, qty as qty_ordered, requester, phone as customer_phone, status as order_status,
-                  LOWER(TRIM(product)) as product_key, LOWER(TRIM(medicine_name)) as medicine_name_key
+        const openOrders = await db.all(
+          `SELECT id as order_id, product as medicine, qty as qty_ordered, requester, phone as customer_phone, status as order_status
            FROM special_orders
-           WHERE (LOWER(TRIM(product)) IN (${placeholders}) OR LOWER(TRIM(medicine_name)) IN (${placeholders}))
-             AND status IN ('CREATED', 'PENDING', 'IN_TRANSIT', 'OVERLAP_DETECTED', 'POTENTIAL_ARRIVAL', 'Pending', 'Ordered')`,
-          [...lowerNames, ...lowerNames]
+           WHERE status IN ('CREATED', 'PENDING', 'IN_TRANSIT', 'OVERLAP_DETECTED', 'POTENTIAL_ARRIVAL', 'Pending', 'Ordered', 'Ready')`
         );
-        for (const row of allMatching) {
-          for (const key of new Set([row.product_key, row.medicine_name_key].filter(Boolean))) {
-            if (!specialOrdersByName.has(key)) specialOrdersByName.set(key, []);
-            specialOrdersByName.get(key)!.push(row);
-          }
-        }
-      }
-      const consumedOrderIds = new Set<number>();
+        const consumedOrderIds = new Set<number>();
 
-      for (const item of items) {
-        const medName = (item.medicine_name || '').trim();
-        if (medName) {
-          const matching = (specialOrdersByName.get(medName.toLowerCase()) || [])
-            .filter(m => !consumedOrderIds.has(m.order_id));
-          if (matching && matching.length > 0) {
-            for (const m of matching) {
-              consumedOrderIds.add(m.order_id);
-              const specMsg = `Hi ${m.requester || 'Customer'}, your special order for *${m.medicine}* (Qty: ${item.quantity || 1}) has been billed & fulfilled. Thank you!`;
-              matchedSpecialOrders.push({
-                ...m,
-                qty_sold: Number(item.quantity) || 1,
-                whatsapp_template: specMsg
-              });
-              // Update special order to Fulfilled in DB without auto-sending message
-              try {
-                await db.run(
-                  `UPDATE special_orders SET status = 'Fulfilled' WHERE id = ?`,
-                  [m.order_id]
-                );
-              } catch (specErr) {
-                console.warn(`[Special Order] Failed to update fulfilled status for order #${m.order_id}:`, specErr);
-              }
+        for (const item of items) {
+          const medName = (item.medicine_name || '').trim();
+          if (!medName) continue;
+
+          let best: { order: any; score: number } | null = null;
+          for (const order of openOrders) {
+            if (consumedOrderIds.has(order.order_id)) continue;
+            const match = scoreOrderNameMatch(medName, order.medicine);
+            if (match.score < ARRIVAL_MATCH_THRESHOLD) continue;
+            if (!best || match.score > best.score) best = { order, score: match.score };
+          }
+
+          if (best) {
+            consumedOrderIds.add(best.order.order_id);
+            const m = best.order;
+            const specMsg = `Hi ${m.requester || 'Customer'}, your special order for *${m.medicine}* (Qty: ${item.quantity || 1}) has been billed & fulfilled. Thank you!`;
+            matchedSpecialOrders.push({
+              ...m,
+              qty_sold: Number(item.quantity) || 1,
+              match_confidence: best.score / 100,
+              whatsapp_template: specMsg
+            });
+            // Update special order to Fulfilled in DB without auto-sending message
+            try {
+              await db.run(
+                `UPDATE special_orders SET status = 'Fulfilled' WHERE id = ?`,
+                [m.order_id]
+              );
+            } catch (specErr) {
+              console.warn(`[Special Order] Failed to update fulfilled status for order #${m.order_id}:`, specErr);
             }
           }
         }

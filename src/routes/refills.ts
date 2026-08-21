@@ -1,4 +1,4 @@
-import express from 'express';
+﻿import express from 'express';
 import { dbManager } from '../database/connection.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -75,22 +75,22 @@ export function buildRefillReminderMessage(
 
   if (cleanLang === 'hi') {
     const medList = items
-      .map(m => `• ${m.medicine_name || 'दवाई'} (मात्रा: ${m.quantity_needed || 1})`)
+      .map(m => `â€¢ ${m.medicine_name || 'à¤¦à¤µà¤¾à¤ˆ'} (à¤®à¤¾à¤¤à¥à¤°à¤¾: ${m.quantity_needed || 1})`)
       .join('\n');
-    const dueSuffix = dueDateStr ? `\n\nतारीख: ${dueDateStr}` : '';
-    return `🔔 *दवाई रिफिल रिमाइंडर — ${pharmacyName}*\n\nनमस्ते ${pName},\nआपकी नियमित दवाई का रिफिल समय आ गया है:\n\n${medList}${dueSuffix}\n\n*कृपया डिलीवरी या पिकअप की पुष्टि के लिए उत्तर दें।*`;
+    const dueSuffix = dueDateStr ? `\n\nà¤¤à¤¾à¤°à¥€à¤–: ${dueDateStr}` : '';
+    return `ðŸ”” *à¤¦à¤µà¤¾à¤ˆ à¤°à¤¿à¤«à¤¿à¤² à¤°à¤¿à¤®à¤¾à¤‡à¤‚à¤¡à¤° â€” ${pharmacyName}*\n\nà¤¨à¤®à¤¸à¥à¤¤à¥‡ ${pName},\nà¤†à¤ªà¤•à¥€ à¤¨à¤¿à¤¯à¤®à¤¿à¤¤ à¤¦à¤µà¤¾à¤ˆ à¤•à¤¾ à¤°à¤¿à¤«à¤¿à¤² à¤¸à¤®à¤¯ à¤† à¤—à¤¯à¤¾ à¤¹à¥ˆ:\n\n${medList}${dueSuffix}\n\n*à¤•à¥ƒà¤ªà¤¯à¤¾ à¤¡à¤¿à¤²à¥€à¤µà¤°à¥€ à¤¯à¤¾ à¤ªà¤¿à¤•à¤…à¤ª à¤•à¥€ à¤ªà¥à¤·à¥à¤Ÿà¤¿ à¤•à¥‡ à¤²à¤¿à¤ à¤‰à¤¤à¥à¤¤à¤° à¤¦à¥‡à¤‚à¥¤*`;
   } else if (cleanLang === 'mr') {
     const medList = items
-      .map(m => `• ${m.medicine_name || 'औषध'} (प्रमाण: ${m.quantity_needed || 1})`)
+      .map(m => `â€¢ ${m.medicine_name || 'à¤”à¤·à¤§'} (à¤ªà¥à¤°à¤®à¤¾à¤£: ${m.quantity_needed || 1})`)
       .join('\n');
-    const dueSuffix = dueDateStr ? `\n\nदिनांक: ${dueDateStr}` : '';
-    return `🔔 *औषध रिफिल स्मरणपत्र — ${pharmacyName}*\n\nनमस्कार ${pName},\nआपल्या नियमित औषधांची रिफिल करण्याची वेळ झाली आहे:\n\n${medList}${dueSuffix}\n\n*कृपया डिलिव्हरी किंवा पिकअप निश्चित करण्यासाठी उत्तर द्या.*`;
+    const dueSuffix = dueDateStr ? `\n\nà¤¦à¤¿à¤¨à¤¾à¤‚à¤•: ${dueDateStr}` : '';
+    return `ðŸ”” *à¤”à¤·à¤§ à¤°à¤¿à¤«à¤¿à¤² à¤¸à¥à¤®à¤°à¤£à¤ªà¤¤à¥à¤° â€” ${pharmacyName}*\n\nà¤¨à¤®à¤¸à¥à¤•à¤¾à¤° ${pName},\nà¤†à¤ªà¤²à¥à¤¯à¤¾ à¤¨à¤¿à¤¯à¤®à¤¿à¤¤ à¤”à¤·à¤§à¤¾à¤‚à¤šà¥€ à¤°à¤¿à¤«à¤¿à¤² à¤•à¤°à¤£à¥à¤¯à¤¾à¤šà¥€ à¤µà¥‡à¤³ à¤à¤¾à¤²à¥€ à¤†à¤¹à¥‡:\n\n${medList}${dueSuffix}\n\n*à¤•à¥ƒà¤ªà¤¯à¤¾ à¤¡à¤¿à¤²à¤¿à¤µà¥à¤¹à¤°à¥€ à¤•à¤¿à¤‚à¤µà¤¾ à¤ªà¤¿à¤•à¤…à¤ª à¤¨à¤¿à¤¶à¥à¤šà¤¿à¤¤ à¤•à¤°à¤£à¥à¤¯à¤¾à¤¸à¤¾à¤ à¥€ à¤‰à¤¤à¥à¤¤à¤° à¤¦à¥à¤¯à¤¾.*`;
   } else {
     const medList = items
-      .map(m => `• ${m.medicine_name || 'Medicine'} (Qty: ${m.quantity_needed || 1})`)
+      .map(m => `â€¢ ${m.medicine_name || 'Medicine'} (Qty: ${m.quantity_needed || 1})`)
       .join('\n');
     const dueSuffix = dueDateStr ? `\n\nDue Date: ${dueDateStr}` : '';
-    return `🔔 *MEDICINE REFILL REMINDER — ${pharmacyName}*\n\nDear ${pName},\nYour regular prescription is due for refill:\n\n${medList}${dueSuffix}\n\n*Please reply to confirm delivery or pickup.*`;
+    return `ðŸ”” *MEDICINE REFILL REMINDER â€” ${pharmacyName}*\n\nDear ${pName},\nYour regular prescription is due for refill:\n\n${medList}${dueSuffix}\n\n*Please reply to confirm delivery or pickup.*`;
   }
 }
 
@@ -1307,7 +1307,7 @@ router.post('/:id/send', async (req, res) => {
       ['refill_reminder', patientName, cleanPhone, msg, 'queued', String(id)]
     );
 
-    whatsappQueueWorker.triggerProcessing();
+    await whatsappQueueWorker.forceNext().catch(() => {});
 
     res.json({
       success: true,
@@ -1428,7 +1428,7 @@ router.post('/send-grouped', async (req, res) => {
       );
     }
 
-    whatsappQueueWorker.triggerProcessing();
+    await whatsappQueueWorker.forceNext().catch(() => {});
 
     res.json({
       success: true,
@@ -1540,7 +1540,7 @@ router.post('/send-tomorrow-reminder', async (req, res) => {
       );
     }
 
-    whatsappQueueWorker.triggerProcessing();
+    await whatsappQueueWorker.forceNext().catch(() => {});
 
     res.json({ success: true, queueId, reminder_status: 'QUEUED', message: 'Tomorrow reminder queued successfully via WhatsApp Queue' });
   } catch (err: any) {
@@ -1637,7 +1637,7 @@ router.post('/send-reminder-now', async (req, res) => {
       );
     }
 
-    whatsappQueueWorker.triggerProcessing();
+    await whatsappQueueWorker.forceNext().catch(() => {});
 
     res.json({ success: true, queueId, reminder_status: 'QUEUED', message: 'Refill reminder queued via WhatsApp' });
   } catch (err: any) {

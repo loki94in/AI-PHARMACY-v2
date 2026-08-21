@@ -79,3 +79,17 @@ The engine provides a single, unified approach to medicine availability and alte
 - `src/telegramBot.ts`: uses engine for out-of-stock alternative suggestions
 - `src/routes/sales.ts`: existing batched alternatives approach preserved (compatible)
 - `src/routes/catalog.ts`: catalog enrichment pipeline preserved (compatible)
+
+## Special Order Arrival & Fulfillment Flow (added 2026-08)
+
+- src/utils/orderNameMatcher.ts is the single arrival-matching scorer (exact + High-tier fuzzy, ARRIVAL_MATCH_THRESHOLD = 75). All special-order matching paths MUST use it: overlapDetectionService.detectOverlap, orderFulfillmentService.reconcileIncomingInventory, and sale-time fulfillment in outes/sales.ts.
+- Candidate scoping contract: matching runs ONLY against active in-app statuses (CREATED/PENDING/IN_TRANSIT/OVERLAP_DETECTED/POTENTIAL_ARRIVAL/Pending/Ordered, plus Ready at sale time). Fulfilled/Cancelled/stale orders must never match; strength-variant siblings (base vs Plus/DS) are rejected by the extra-token cap.
+- POST|PUT /api/orders/:id/status: when status becomes Ready, the handler queues the localized arrival WhatsApp inside the SAME user-clicked request via shared helper enqueueArrivalWhatsApp (also used by /:id/notify-arrival). Idempotent on 
+otified===0; missing phone skips silently; response carries whatsapp_queued. This preserves the Strict Manual-Only Patient Messaging Contract: no worker or background job may ever dispatch it.
+- Arrival detection still only flips status to Ready/ARRIVED with 
+otified = 0; real match_type/match_confidence are stored in order_overlaps.
+
+## Instant WhatsApp Dispatch & Resend (added 2026-08)
+
+- User-clicked send paths (/whatsapp/queue/enqueue-single, refill reminder sends in outes/refills.ts, arrival helper enqueueArrivalWhatsApp in outes/orders.ts) call whatsappQueueWorker.forceNext() after enqueue so dispatch skips the pacing countdown and the queue UI flips Pending -> Sent immediately. Background/bulk enqueues keep normal pacing via plain 	riggerProcessing().
+- POST /api/whatsapp/queue/items/:id/resend re-enqueues any sent/failed/pending item as a NEW queue item and force-dispatches it. It relies on enqueue(..., { skipDedupe: true }) because the default same-day number+message dedupe would otherwise silently suppress an identical resend.

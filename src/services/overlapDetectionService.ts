@@ -1,5 +1,6 @@
 import { dbManager } from '../database/connection.js';
 import { orderTrackingService } from './orderTrackingService.js';
+import { scoreOrderNameMatch, ARRIVAL_MATCH_THRESHOLD } from '../utils/orderNameMatcher.js';
 
 export interface OverlapMatch {
   overlapId: number;
@@ -19,6 +20,8 @@ export class OverlapDetectionService {
     medicineId?: number;
     medicineName: string;
     distributorId?: number;
+    distributorName?: string;
+    mrp?: number;
     purchaseId?: number;
     purchaseItemId?: number;
     inventoryMasterId?: number;
@@ -28,6 +31,8 @@ export class OverlapDetectionService {
       medicineId,
       medicineName,
       distributorId,
+      distributorName,
+      mrp,
       purchaseId,
       purchaseItemId,
       inventoryMasterId,
@@ -40,12 +45,12 @@ export class OverlapDetectionService {
     try {
       const db = await dbManager.getConnection();
 
-      // Find pending special orders matching exact name or alias
+      // Candidate scope is strictly ACTIVE in-app order statuses — Fulfilled, Cancelled
+      // and stale orders can never be matched by arrival detection. Name scoring (exact +
+      // High-tier fuzzy) happens below via the shared matcher.
       const matchingOrders = await db.all(
         `SELECT * FROM special_orders 
-         WHERE (LOWER(TRIM(product)) = LOWER(TRIM(?)) OR LOWER(TRIM(medicine_name)) = LOWER(TRIM(?)))
-           AND status IN ('CREATED', 'PENDING', 'IN_TRANSIT', 'OVERLAP_DETECTED', 'POTENTIAL_ARRIVAL', 'Pending', 'Ordered')`,
-        [cleanName, cleanName]
+         WHERE status IN ('CREATED', 'PENDING', 'IN_TRANSIT', 'OVERLAP_DETECTED', 'POTENTIAL_ARRIVAL', 'Pending', 'Ordered')`
       );
 
       if (!matchingOrders || matchingOrders.length === 0) {
@@ -55,6 +60,16 @@ export class OverlapDetectionService {
       const detectedOverlaps: OverlapMatch[] = [];
 
       for (const order of matchingOrders) {
+        // Score against this order's stored name: exact fast-path plus High-tier fuzzy.
+        // Only scores >= ARRIVAL_MATCH_THRESHOLD (75) are accepted as arrivals.
+        const match = scoreOrderNameMatch(cleanName, order.product || order.medicine_name, {
+          incomingDistributor: distributorName || null,
+          orderDistributor: order.pharmarack_distributor || null,
+          incomingMrp: mrp ?? null,
+          orderMrp: order.pharmarack_mrp ?? null
+        });
+        if (match.score < ARRIVAL_MATCH_THRESHOLD) continue;
+
         // Check if overlap record already exists
         const existing = await db.get(
           `SELECT id FROM order_overlaps 
@@ -64,7 +79,7 @@ export class OverlapDetectionService {
 
         if (existing) continue;
 
-        // Record overlap
+        // Record overlap with the real match type and confidence
         const res = await db.run(
           `INSERT INTO order_overlaps (
             special_order_id, purchase_id, purchase_item_id, inventory_master_id, medicine_id,
@@ -76,8 +91,8 @@ export class OverlapDetectionService {
             purchaseItemId || null,
             inventoryMasterId || null,
             medicineId || null,
-            'exact_name',
-            1.0,
+            match.matchType,
+            match.confidence,
             'detected'
           ]
         );
@@ -114,8 +129,8 @@ export class OverlapDetectionService {
           medicineName: cleanName,
           requester: order.requester || 'Customer',
           phone: order.phone || '',
-          matchType: 'exact_name',
-          matchConfidence: 1.0
+          matchType: match.matchType,
+          matchConfidence: match.confidence
         });
       }
 

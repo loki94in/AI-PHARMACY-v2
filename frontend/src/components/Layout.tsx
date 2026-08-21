@@ -2043,11 +2043,11 @@ const QuickAssistSidebar = ({
           patient_phone: group.patient_phone,
           medicines: group.medicines
         });
-        toastEvent.trigger(`Consolidated refill reminder queued for ${group.patient_name}!`, 'success');
+        toastEvent.trigger(`Consolidated refill reminder sent to ${group.patient_name}!`, 'success');
         whatsappQueueEvent.triggerUpdated();
       } else {
         await Promise.all(group.medicines.map(m => api.sendRefillNow(m.id).catch(() => {})));
-        toastEvent.trigger(`Refill reminder queued for ${group.patient_name}!`, 'success');
+        toastEvent.trigger(`Refill reminder sent to ${group.patient_name}!`, 'success');
         whatsappQueueEvent.triggerUpdated();
       }
       refillEvent.triggerRefresh();
@@ -2101,7 +2101,11 @@ const QuickAssistSidebar = ({
     }
   };
 
-  const handleUpdateGroupStatus = async (group: { requester: string; items: Array<{ id: number; product: string }> }, newStatus: string) => {
+  const handleUpdateGroupStatus = async (
+    group: { requester: string; phone?: string; items: Array<{ id: number; product: string; qty: number }> },
+    newStatus: string,
+    opts?: { navigateToPos?: boolean }
+  ) => {
     const itemIds = group.items.map(i => i.id);
 
     setProcessingOrderIds(prev => {
@@ -2119,8 +2123,35 @@ const QuickAssistSidebar = ({
     }
 
     try {
-      await Promise.all(group.items.map(i => apiClient.post(`/orders/${i.id}/status`, { status: newStatus })));
-      toastEvent.trigger(`Marked all requests for "${group.requester}" as ${newStatus}!`, 'success');
+      const results = await Promise.all(group.items.map(i => apiClient.post(`/orders/${i.id}/status`, { status: newStatus })));
+      const queuedCount = results.filter(r => r?.data?.whatsapp_queued).length;
+      if (newStatus === 'Completed' || newStatus === 'Fulfilled') {
+        toastEvent.trigger(`Marked ${group.items.length} request(s) for "${group.requester}" as Completed!`, 'success');
+        if (opts?.navigateToPos) {
+          const sourceOrders = (Array.isArray(specialOrders) ? specialOrders : []).filter((s: any) => itemIds.includes(s.id));
+          const totalAdvance = sourceOrders.reduce((sum: number, s: any) => sum + (Number(s.advance_payment) || 0), 0);
+          toastEvent.trigger(`Opening POS to bill "${group.requester}"...`, 'info', '/pos');
+          navigate('/pos', {
+            state: {
+              prefill: {
+                patientName: group.requester,
+                patientPhone: group.phone || '',
+                specialOrderId: group.items[0]?.id,
+                advancePayment: totalAdvance,
+                medicines: group.items.map(i => ({ medicineName: i.product, quantity_needed: i.qty }))
+              }
+            }
+          });
+        }
+      } else if (newStatus === 'Ready') {
+        toastEvent.trigger(queuedCount > 0
+          ? `Marked ready & arrival WhatsApp queued for ${queuedCount} customer(s)!`
+          : `Marked all requests for "${group.requester}" as Ready!`, 'success');
+      } else if (newStatus === 'Cancelled') {
+        toastEvent.trigger(`Marked all requests for "${group.requester}" as Cancelled!`, 'success');
+      } else {
+        toastEvent.trigger(`Marked all requests for "${group.requester}" as ${newStatus}!`, 'success');
+      }
       queryClient.invalidateQueries({ queryKey: ['orders'] });
       specialOrdersEvent.triggerUpdated();
       window.dispatchEvent(new CustomEvent('refresh-special-orders'));
@@ -2194,7 +2225,7 @@ const QuickAssistSidebar = ({
         }
       }
 
-      toastEvent.trigger(`Consolidated WhatsApp message queued for ${group.recipient_name}!`, 'success');
+      toastEvent.trigger(`Consolidated WhatsApp message sent to ${group.recipient_name}!`, 'success');
       refillEvent.triggerRefresh();
       onActionComplete();
     } catch (err: any) {
@@ -2283,81 +2314,6 @@ const QuickAssistSidebar = ({
       setOptimisticHiddenRefillIds(prev => {
         const next = new Set(prev);
         ids.forEach(id => next.delete(id));
-        return next;
-      });
-    }
-  };
-
-  const handleUpdateSpecialOrderStatus = async (order: any, newStatus: string) => {
-    if (processingOrderIds.has(order.id)) return;
-
-    setProcessingOrderIds(prev => new Set(prev).add(order.id));
-    if (newStatus === 'Completed' || newStatus === 'Cancelled') {
-      setOptimisticHiddenOrderIds(prev => new Set(prev).add(order.id));
-    }
-
-    try {
-      await apiClient.post(`/orders/${order.id}/status`, { status: newStatus });
-      if (newStatus === 'Completed') {
-        toastEvent.trigger(`Marked "${order.product}" as Completed!`, 'success');
-      } else if (newStatus === 'Ready') {
-        toastEvent.trigger(`Marked "${order.product}" as Ready!`, 'success');
-      } else if (newStatus === 'Cancelled') {
-        toastEvent.trigger(`Cancelled request for "${order.product}"`, 'info');
-      } else {
-        toastEvent.trigger(`Updated status for "${order.product}" to ${newStatus}`, 'info');
-      }
-      queryClient.invalidateQueries({ queryKey: ['orders'] });
-      specialOrdersEvent.triggerUpdated();
-      window.dispatchEvent(new CustomEvent('refresh-special-orders'));
-      onActionComplete();
-    } catch (err: any) {
-      console.error(`Failed to update status to ${newStatus}:`, err);
-      toastEvent.trigger('Failed to update request status', 'error');
-      setOptimisticHiddenOrderIds(prev => {
-        const next = new Set(prev);
-        next.delete(order.id);
-        return next;
-      });
-    } finally {
-      setProcessingOrderIds(prev => {
-        const next = new Set(prev);
-        next.delete(order.id);
-        return next;
-      });
-    }
-  };
-
-  const handleSendSpecialOrder = async (order: any) => {
-    if (processingOrderIds.has(order.id)) return;
-
-    setProcessingOrderIds(prev => new Set(prev).add(order.id));
-    try {
-      const msg = `🏬 *QUICK SPECIAL ORDER — AI PHARMACY*\n\n📦 *Item:* ${order.product}\n📊 *Qty:* ${order.qty || 1}\n📋 *Requested By:* ${order.requester || 'Customer'} (${order.phone || 'N/A'})\n\n*Please confirm receipt & order dispatch.*`;
-
-      if (order.phone) {
-        await api.enqueueSingleWhatsApp({
-          number: order.phone,
-          message: msg,
-          type: 'special_order',
-          targetName: order.requester || 'Customer'
-        });
-        whatsappQueueEvent.triggerUpdated();
-      }
-
-      await apiClient.post(`/orders/${order.id}/status`, { status: 'Ordered' });
-      toastEvent.trigger(`Marked special request "${order.product}" as Ordered & queued WhatsApp!`, 'success');
-      queryClient.invalidateQueries({ queryKey: ['orders'] });
-      specialOrdersEvent.triggerUpdated();
-      window.dispatchEvent(new CustomEvent('refresh-special-orders'));
-      onActionComplete();
-    } catch (e: any) {
-      console.error('Failed to send special order:', e);
-      toastEvent.trigger('Failed to update special request status', 'error');
-    } finally {
-      setProcessingOrderIds(prev => {
-        const next = new Set(prev);
-        next.delete(order.id);
         return next;
       });
     }
@@ -2960,9 +2916,9 @@ const QuickAssistSidebar = ({
                       {group.overallStatus === 'Ready' ? (
                         <button
                           disabled={isProcessing}
-                          onClick={() => handleUpdateGroupStatus(group, 'Completed')}
+                          onClick={() => handleUpdateGroupStatus(group, 'Completed', { navigateToPos: true })}
                           className="flex-1 py-1 px-2 rounded bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-[10px] font-bold tracking-wide uppercase transition-colors flex items-center justify-center gap-1 shadow-sm cursor-pointer whitespace-nowrap min-w-0"
-                          title="Mark all requests as Completed and remove from Quick Assist"
+                          title="Mark all requests as Completed, remove from Quick Assist and open POS pre-filled for this customer"
                         >
                           {isProcessing ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
                           Complete All
@@ -2973,16 +2929,16 @@ const QuickAssistSidebar = ({
                             disabled={isProcessing}
                             onClick={() => handleUpdateGroupStatus(group, 'Ready')}
                             className="flex-1 py-1 px-2 rounded bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white text-[10px] font-bold tracking-wide uppercase transition-colors flex items-center justify-center gap-1 shadow-sm cursor-pointer whitespace-nowrap min-w-0"
-                            title="Mark all requests as Ready for customer"
+                            title="Mark all requests as Ready and queue the arrival WhatsApp to each customer"
                           >
                             {isProcessing ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
                             Mark Ready
                           </button>
                           <button
                             disabled={isProcessing}
-                            onClick={() => handleUpdateGroupStatus(group, 'Completed')}
+                            onClick={() => handleUpdateGroupStatus(group, 'Completed', { navigateToPos: true })}
                             className="flex-1 py-1 px-2 rounded bg-purple-600/80 hover:bg-purple-700 disabled:opacity-50 text-white text-[10px] font-bold tracking-wide uppercase transition-colors flex items-center justify-center gap-1 shadow-sm cursor-pointer whitespace-nowrap min-w-0"
-                            title="Directly mark all requests as Completed"
+                            title="Mark all requests as Completed and open POS pre-filled for this customer"
                           >
                             {isProcessing ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
                             Complete
@@ -3001,9 +2957,9 @@ const QuickAssistSidebar = ({
                           </button>
                           <button
                             disabled={isProcessing}
-                            onClick={() => handleUpdateGroupStatus(group, 'Completed')}
+                            onClick={() => handleUpdateGroupStatus(group, 'Completed', { navigateToPos: true })}
                             className="flex-1 py-1 px-2 rounded bg-purple-600/80 hover:bg-purple-700 disabled:opacity-50 text-white text-[10px] font-bold tracking-wide uppercase transition-colors flex items-center justify-center gap-1 shadow-sm cursor-pointer whitespace-nowrap min-w-0"
-                            title="Directly mark all requests as Completed"
+                            title="Mark all requests as Completed and open POS pre-filled for this customer"
                           >
                             {isProcessing ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
                             Complete

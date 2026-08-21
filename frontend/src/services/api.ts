@@ -928,6 +928,7 @@ export const api = {
   flushWhatsAppQueue: () => apiClient.post<{ success: boolean; message: string }>('/whatsapp/queue/flush').then(res => res.data),
   flushNextWhatsAppQueueItem: () => apiClient.post<{ success: boolean; forced: boolean; message: string; state: any }>('/whatsapp/queue/flush-next').then(res => res.data),
   retryFailedWhatsAppQueue: () => apiClient.post<{ success: boolean; retriedCount: number; message: string }>('/whatsapp/queue/retry-failed').then(res => res.data),
+  resendWhatsAppQueueItem: (id: number) => apiClient.post<{ success: boolean; queueId: number; message: string }>(`/whatsapp/queue/items/${id}/resend`).then(res => res.data),
   updateWhatsAppPacingConfig: (minSec: number, maxSec: number) => apiClient.post<{ success: boolean; minSec?: number; maxSec?: number; preset?: string; message: string }>('/whatsapp/queue/pacing', { minSec, maxSec }).then(res => res.data),
   setWhatsAppQueuePacingPreset: (preset: 'turbo' | 'fast' | 'safe') => apiClient.post<{ success: boolean; preset: string; minMs: number; maxMs: number; message: string; state: any }>('/whatsapp/queue/pacing', { preset }).then(res => res.data),
   updateWhatsAppQueueItem: (data: { id: number; number: string; message?: string }) => apiClient.put<{ success: boolean; message: string }>('/whatsapp/queue/update-item', data).then(res => res.data),

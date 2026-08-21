@@ -335,6 +335,32 @@ router.post('/', async (req, res) => {
   }
 });
 
+// Shared helper: queue the localized "order ready / medicine arrived" WhatsApp for a special order.
+// Used by notify-arrival (explicit button) and status transitions to 'Ready' (Mark Ready click).
+async function enqueueArrivalWhatsApp(db: any, order: any): Promise<boolean> {
+  const cleanPhone = String(order.phone || '').replace(/\D/g, '');
+  if (!cleanPhone) return false;
+
+  const formattedPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
+  const custRow = await db.get('SELECT language FROM customers WHERE phone = ? LIMIT 1', [cleanPhone]);
+  const lang = custRow?.language || 'en';
+
+  const msg = await buildOrderReadyNotificationMessage(order.requester, order.product, order.qty, db, lang);
+
+  await whatsappQueueWorker.enqueue(formattedPhone, msg, 'special_order', order.requester || 'Customer');
+
+  // User clicked: clear pacing countdown so the tick appears immediately in the queue UI
+  void whatsappQueueWorker.forceNext().catch(() => {});
+
+  await db.run(
+    `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    ['special_order_arrived', order.requester || 'Customer', formattedPhone, msg, 'queued', String(order.id)]
+  ).catch(() => {});
+
+  return true;
+}
+
 // Trigger WhatsApp Arrival / Status Notification for a special order
 router.post('/:id/notify-arrival', async (req, res) => {
   const { id } = req.params;
@@ -351,26 +377,14 @@ router.post('/:id/notify-arrival', async (req, res) => {
       return res.status(400).json({ error: 'Order has no associated phone number' });
     }
 
-    const cleanPhone = order.phone.replace(/\D/g, '');
-    const formattedPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
-    
-    const custRow = await db.get('SELECT language FROM customers WHERE phone = ? LIMIT 1', [cleanPhone]);
-    const lang = custRow?.language || 'en';
-
-    const msg = await buildOrderReadyNotificationMessage(order.requester, order.product, order.qty, db, lang);
-
-    await whatsappQueueWorker.enqueue(formattedPhone, msg, 'special_order', order.requester || 'Customer');
+    const queued = await enqueueArrivalWhatsApp(db, order);
     
     // Update order status to 'Ready' and mark notified
-    await db.run('UPDATE special_orders SET status = ?, notified = 1 WHERE id = ?', ['Ready', id]);
+    if (queued) {
+      await db.run('UPDATE special_orders SET status = ?, notified = 1 WHERE id = ?', ['Ready', id]);
+    }
 
-    await db.run(
-      `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      ['special_order_arrived', order.requester || 'Customer', formattedPhone, msg, 'queued', String(id)]
-    );
-
-    res.json({ success: true, message: 'Arrival notification queued successfully via WhatsApp' });
+    res.json({ success: true, whatsapp_queued: queued, message: queued ? 'Arrival notification queued successfully via WhatsApp' : 'No phone stored for this order; nothing was sent' });
   } catch (err: any) {
     console.error('Notify arrival error:', err);
     res.status(500).json({ error: 'Failed to queue WhatsApp message: ' + (err.message || 'Unknown error') });
@@ -533,7 +547,18 @@ const handleStatusUpdate = async (req: express.Request, res: express.Response) =
       return res.status(404).json({ error: 'Order not found' });
     }
 
-    const newNotified = status === 'Fulfilled' ? 1 : existing.notified;
+    // Manual-only messaging contract: the arrival WhatsApp is dispatched ONLY inside this
+    // user-clicked request. Idempotent via notified===0; skipped cleanly when no phone is stored.
+    let whatsappQueued = false;
+    if (status === 'Ready' && Number(existing.notified) !== 1) {
+      try {
+        whatsappQueued = await enqueueArrivalWhatsApp(db, existing);
+      } catch (waErr: any) {
+        console.error('Failed to queue arrival WhatsApp on status Ready:', waErr?.message || waErr);
+      }
+    }
+
+    const newNotified = (status === 'Fulfilled' || whatsappQueued) ? 1 : existing.notified;
     await db.run('UPDATE special_orders SET status = ?, notified = ? WHERE id = ?', [status, newNotified, id]);
 
     if (status === 'Fulfilled' || status === 'Cancelled') {
@@ -547,7 +572,7 @@ const handleStatusUpdate = async (req: express.Request, res: express.Response) =
     }
 
     broadcastOrdersChanged();
-    res.json({ success: true, message: `Order status updated to ${status}` });
+    res.json({ success: true, message: `Order status updated to ${status}`, whatsapp_queued: whatsappQueued });
   } catch (err: any) {
     console.error('Update order status error:', err);
     res.status(500).json({ error: 'Internal server error: ' + (err?.message || '') });
