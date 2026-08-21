@@ -202,157 +202,16 @@ class GoogleSearchService {
   }
 
   /**
-   * Run Google Search via Puppeteer, handle verification, and return OCR parsed data
+   * Run Google Search via Puppeteer, handle verification, and return OCR parsed data.
+   * Disabled to prevent background Puppeteer browser spawns, CAPTCHAs, and resource freezing.
    */
   public async discoverMedicineInfo(medicineName: string, searchTerm?: string): Promise<SearchEnrichmentResult | null> {
     if (!medicineName) return null;
-
-    const chromePath = findChromePath();
-    if (!chromePath) {
-      console.error('[GoogleSearchService] Chrome not found. Skipping Google search.');
-      return null;
-    }
-
-    const isLimitExceeded = await this.checkDailyLimit();
-    if (isLimitExceeded) {
-      console.warn('[GoogleSearchService] Daily Google search limit reached. Skipping search.');
-      return null;
-    }
-
-    // Apply configurable delay for throttling
-    const db = await dbManager.getConnection();
-    const delayMinRow = await db.get("SELECT value FROM app_settings WHERE key = 'google_search_delay_min'");
-    const delayMaxRow = await db.get("SELECT value FROM app_settings WHERE key = 'google_search_delay_max'");
-    await dbManager.close();
-
-    const minDelay = delayMinRow ? parseInt(delayMinRow.value, 10) : 2000;
-    const maxDelay = delayMaxRow ? parseInt(delayMaxRow.value, 10) : 5000;
-    const throttleDelay = Math.floor(Math.random() * (maxDelay - minDelay + 1)) + minDelay;
-
-    console.log(`[GoogleSearchService] Throttling query for "${medicineName}". Delaying ${throttleDelay}ms...`);
-    await this.sleep(throttleDelay);
-
-    const query = `${searchTerm || medicineName} API`;
-    await this.logSearch(query);
-
-    let browser: any = null;
-    let page: any = null;
-    let screenshotPath = '';
-    let isHeadful = false;
-
-    const launchBrowser = async (headless: boolean) => {
-      isHeadful = !headless;
-      const puppeteer = await getPuppeteer();
-      return await puppeteer.launch({
-        executablePath: chromePath,
-        headless: headless ? 'shell' : false,
-        defaultViewport: { width: 1280, height: 800 },
-        args: ['--disable-gpu', '--no-sandbox', '--disable-setuid-sandbox']
-      });
-    };
-
-    try {
-      console.log(`[GoogleSearchService] Searching Google for query: "${query}" (Headless Mode)`);
-      browser = await launchBrowser(true);
-      page = (await browser.pages())[0];
-
-      // Configure User Agent
-      await page.setUserAgent(
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-      );
-
-      await page.goto(`https://www.google.com/search?q=${encodeURIComponent(query)}`, {
-        waitUntil: 'networkidle2',
-        timeout: 15000
-      });
-
-      // Check for CAPTCHA/robot detection redirect
-      let pageUrl = page.url();
-      if (pageUrl.includes('google.com/sorry') || (await page.$('#captcha-form')) !== null) {
-        console.warn('[GoogleSearchService] CAPTCHA detected. Transitioning browser to headful mode for human solver...');
-        await browser.close();
-
-        // Broadcast to the user via SSE
-        this.isVerificationActive = true;
-        eventService.broadcast('google_verification_required', { medicineName });
-
-        // Launch headful Chrome
-        browser = await launchBrowser(false);
-        page = (await browser.pages())[0];
-        await page.goto(`https://www.google.com/search?q=${encodeURIComponent(query)}`, {
-          waitUntil: 'load',
-          timeout: 60000
-        });
-
-        // Wait for user to complete captcha
-        // We poll checking if #search or .g element exists
-        let solved = false;
-        const startTime = Date.now();
-        while (Date.now() - startTime < 300000) { // 5 minute limit to solve captcha
-          await this.sleep(2000);
-          
-          if (browser.disconnected) {
-            throw new Error('Chrome browser was closed before CAPTCHA was solved.');
-          }
-
-          const hasSearch = (await page.$('#search, .g, #searchform')) !== null;
-          const hasCaptcha = (await page.$('#captcha-form, iframe[src*="recaptcha"]')) !== null || page.url().includes('google.com/sorry');
-          
-          if (hasSearch && !hasCaptcha) {
-            solved = true;
-            break;
-          }
-        }
-
-        this.isVerificationActive = false;
-        eventService.broadcast('google_verification_solved', { medicineName });
-
-        if (!solved) {
-          throw new Error('Google search CAPTCHA challenge timed out.');
-        }
-
-        console.log('[GoogleSearchService] CAPTCHA solved successfully!');
-        await this.sleep(1000); // Wait for page to fully settle
-      }
-
-      // Take screenshot
-      const filename = `search_${Date.now()}_${medicineName.replace(/[^a-zA-Z0-9]/g, '_')}.jpg`;
-      const absolutePath = path.join(SCREENSHOTS_DIR, filename);
-      screenshotPath = path.join('data', 'search_screenshots', filename);
-
-      await page.screenshot({ path: absolutePath, type: 'jpeg', quality: 80 });
-      console.log(`[GoogleSearchService] Saved Google search screenshot to: ${absolutePath}`);
-
-      // Extract text content from screenshot
-      const imgBuffer = fs.readFileSync(absolutePath);
-      const ocrData = await aiCameraService.extractTextFromImage(imgBuffer);
-      const rawText = ocrData.text || '';
-
-      // Parse structured details
-      const parsed = this.parseFieldsFromText(rawText);
-
-      return {
-        ...parsed,
-        raw_text: rawText,
-        screenshot_path: screenshotPath
-      };
-
-    } catch (err: any) {
-      console.error('[GoogleSearchService] Error during discovery workflow:', err.message);
-      if (this.isVerificationActive) {
-        this.isVerificationActive = false;
-        eventService.broadcast('google_verification_solved', { medicineName, error: err.message });
-      }
-      return null;
-    } finally {
-      if (browser) {
-        try {
-          await browser.close();
-        } catch (closeErr) {}
-      }
-    }
+    console.log(`[GoogleSearchService] Online Google discovery crawler is disabled. Skipping search for "${medicineName}".`);
+    return null;
   }
 }
 
 export const googleSearchService = new GoogleSearchService();
 export default googleSearchService;
+

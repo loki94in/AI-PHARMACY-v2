@@ -52,7 +52,7 @@ function sleep(ms: number) {
 async function queryAllWithRetry(db: Database, sql: string, params: any[] = []) {
   // Ensure busy timeout is set (ms). Safe to call repeatedly.
   try {
-    await db.run('PRAGMA busy_timeout = 5000'); // 5 seconds
+    await db.run('PRAGMA busy_timeout = 30000'); // 30 seconds
   } catch (e) {
     // ignore if not supported
   }

@@ -353,7 +353,12 @@ function launchClientInstance(forceQr: boolean): Promise<WAClient> {
       '--no-first-run',
       '--no-default-browser-check',
       '--disable-session-crashed-bubble',
-      '--disable-gpu'
+      '--disable-gpu',
+      '--disable-extensions',
+      '--disable-component-update',
+      '--disable-background-networking',
+      '--renderer-process-limit=1',
+      '--js-flags=--max-old-space-size=256'
     ];
 
     const client = new Client({

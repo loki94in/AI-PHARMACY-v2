@@ -309,6 +309,10 @@ To prevent excessive network traffic, database load, and background resource usa
 
 **`API_OPTIMIZATION_IMPLEMENTATION_PLAN.md`** (repository root) is the approved master plan for converting the app from timer-driven polling to event-driven refresh (SSE push via `eventService` → `/api/notifications/stream`), gated background workers, and never-lose-credentials session guarantees (Pharmarack / WhatsApp / Gmail / Telegram). Any agent implementing API-call reduction, adding pages/features/workers, or touching session persistence MUST read it first and follow its 4 principles (P1 events-not-timers, P2 cache-first paint, P3 gated workers, P4 credentials are sacred) and its Section 7 "API Efficiency Standard" for all new features.
 
+### Special Order Arrival & Complete Flow Plan (pending implementation)
+
+**`SPECIAL_ORDER_ARRIVAL_IMPLEMENTATION_PLAN.md`** (repository root) documents the planned upgrade of the special-order lifecycle: (A) `Mark Ready` on `/api/orders/:id/status` queues the arrival WhatsApp in the same user-clicked request (idempotent via `notified===0`, skipped cleanly when no phone is stored), (B) purchase-save arrival matching gains a stdlib fuzzy scorer (`src/utils/orderNameMatcher.ts`, threshold 75) scoped strictly to active in-app order statuses so Fulfilled/Cancelled/stale orders can never match, recorded with real `match_type/confidence` in `order_overlaps`, and (C) Quick Assist `Complete/Complete All` hands off to POS via the existing `state.prefill` mechanism. Any agent implementing this plan MUST read it first; it is NOT yet implemented.
+
 ---
 
 ## Page Feature Ownership & Migration Contract

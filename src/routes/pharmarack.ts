@@ -127,7 +127,7 @@ async function fetchPharmarack(url: string, options: any = {}): Promise<Response
 
   let response = await executeFetch(token);
 
-  if ((response.status === 401 || response.status === 403 || response.status === 406) && token) {
+  if ((response.status === 401 || response.status === 403) && token) {
     console.log(`[Pharmarack Fetch] API ${url} returned ${response.status}. Attempting silent background token refresh...`);
     const freshToken = await tokenRefreshScheduler.executeRefresh();
     if (freshToken) {

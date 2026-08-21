@@ -70,7 +70,7 @@ async function fetchPharmarackApi(url: string, options: any = {}): Promise<Respo
 
   let response = await executeFetch(token);
 
-  if ((response.status === 401 || response.status === 403 || response.status === 406) && token) {
+  if ((response.status === 401 || response.status === 403) && token) {
     const now = Date.now();
     if (now - lastRefreshFailedAt > 60000) {
       console.log(`[Catalog Cache Fetch] API ${url} returned ${response.status}. Attempting silent background token refresh...`);
@@ -155,6 +155,8 @@ export async function syncCatalog(): Promise<{ synced: number; errors: number }>
     const storesToSync = targetStores.length > 0 ? targetStores : stores.slice(0, 20);
     let consecutiveErrors = 0;
 
+    const CATALOG_SEEDS = ['tab', 'cap', 'syp', 'inj', 'gel', 'cre', 'sus', 'dro', 'sol', 'oil'];
+
     for (const store of storesToSync) {
       if (consecutiveErrors >= 3) {
         console.warn(`[Catalog Cache] Aborting catalog sync after ${consecutiveErrors} consecutive store errors.`);
@@ -165,84 +167,88 @@ export async function syncCatalog(): Promise<{ synced: number; errors: number }>
       const storeName = store.StoreName || 'Unknown';
       const isMapped = checkIsMapped(store);
 
-      try {
-        // Use 'a' as search keyword to fetch catalog items safely from Elasticsearch
-        const searchPayload = {
-          SearchKeyword: 'a',
-          StoreId: isMapped ? [storeId] : [],
-          NonMappedStoreId: !isMapped ? [storeId] : [],
-          Count: 200,
-          SkipCount: 0,
-          isMappedSearch: isMapped,
-          IsStock: 2,
-          IsScheme: 2,
-          IsSort: 1,
-          CartSource: 'MOVP'
-        };
+      for (const seed of CATALOG_SEEDS) {
+        if (consecutiveErrors >= 3) break;
 
-        let errReason = '';
-        const catalogRes = await fetchPharmarackApi('https://pharmretail-elasticsearch.pharmarack.com/open-search/api/v2/search', {
-          method: 'POST',
-          body: JSON.stringify(searchPayload),
-          signal: AbortSignal.timeout(18000)
-        }).catch((err) => {
-          errReason = err.message || 'Fetch failed';
-          return null;
-        });
-
-        if (!catalogRes || !catalogRes.ok) {
-          errors++;
-          consecutiveErrors++;
-          if (consecutiveErrors === 1) {
-            console.warn(`[Catalog Cache] Search API returned ${catalogRes?.status || errReason} for store ${storeName}`);
-          }
-          continue;
-        }
-
-        const catalogData: any = await catalogRes.json().catch(() => null);
-        if (!catalogData?.data || !Array.isArray(catalogData.data)) {
-          errors++;
-          consecutiveErrors++;
-          continue;
-        }
-
-        consecutiveErrors = 0; // reset on success
-
-        await db.run('BEGIN TRANSACTION');
         try {
-          for (const p of catalogData.data) {
-            const productName = p.ProductName || p.ProductFullName || '';
-            if (!productName) continue;
+          // Use legitimate pharma dosage form seeds (>= 3 chars) to query catalog items safely
+          const searchPayload = {
+            SearchKeyword: seed,
+            StoreId: isMapped ? [storeId] : [],
+            NonMappedStoreId: !isMapped ? [storeId] : [],
+            Count: 100,
+            SkipCount: 0,
+            isMappedSearch: isMapped,
+            IsStock: 2,
+            IsScheme: 2,
+            IsSort: 1,
+            CartSource: 'MOVP'
+          };
 
-            await db.run(
-              `INSERT INTO distributor_catalog (store_id, store_name, product_name, mrp, packaging, dosage_form, manufacturer, distributor_price, availability, is_mapped, last_synced)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-               ON CONFLICT(store_id, product_name) DO UPDATE SET
-                 mrp=excluded.mrp, packaging=excluded.packaging, manufacturer=excluded.manufacturer,
-                 distributor_price=excluded.distributor_price, availability=excluded.availability,
-                 is_mapped=excluded.is_mapped, last_synced=excluded.last_synced`,
-              [
-                storeId, storeName, productName,
-                p.MRP ?? null, p.Packing || '', p.DosageForm || '',
-                p.Company || '', p.PTR ?? null,
-                p.Stock !== undefined ? String(p.Stock) : 'Unknown',
-                isMapped ? 1 : 0, new Date().toISOString()
-              ]
-            );
-            synced++;
+          let errReason = '';
+          const catalogRes = await fetchPharmarackApi('https://pharmretail-elasticsearch.pharmarack.com/open-search/api/v2/search', {
+            method: 'POST',
+            body: JSON.stringify(searchPayload),
+            signal: AbortSignal.timeout(18000)
+          }).catch((err) => {
+            errReason = err.message || 'Fetch failed';
+            return null;
+          });
+
+          if (!catalogRes || !catalogRes.ok) {
+            errors++;
+            consecutiveErrors++;
+            let errorDetail = '';
+            try {
+              if (catalogRes) errorDetail = await catalogRes.text();
+            } catch (_) {}
+            if (consecutiveErrors === 1) {
+              console.warn(`[Catalog Cache] Search API returned ${catalogRes?.status || errReason} for store ${storeName} (keyword: "${seed}"): ${errorDetail || errReason}`);
+            }
+            continue;
           }
-          await db.run('COMMIT');
-        } catch (dbErr) {
-          await db.run('ROLLBACK');
-          console.error(`[Catalog Cache] Database transaction failed for store ${storeName}:`, dbErr);
-          errors++;
-        }
 
-        console.log(`[Catalog Cache] Synced ${catalogData.data.length} products from ${storeName} (${isMapped ? 'mapped' : 'non-mapped'})`);
-      } catch (storeErr: any) {
-        errors++;
-        consecutiveErrors++;
-        console.warn(`[Catalog Cache] Failed to sync store ${storeName}:`, storeErr.message);
+          const catalogData: any = await catalogRes.json().catch(() => null);
+          if (!catalogData?.data || !Array.isArray(catalogData.data) || catalogData.data.length === 0) {
+            continue;
+          }
+
+          consecutiveErrors = 0; // reset on success
+
+          await db.run('BEGIN TRANSACTION');
+          try {
+            for (const p of catalogData.data) {
+              const productName = p.ProductName || p.ProductFullName || '';
+              if (!productName) continue;
+
+              await db.run(
+                `INSERT INTO distributor_catalog (store_id, store_name, product_name, mrp, packaging, dosage_form, manufacturer, distributor_price, availability, is_mapped, last_synced)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 ON CONFLICT(store_id, product_name) DO UPDATE SET
+                   mrp=excluded.mrp, packaging=excluded.packaging, manufacturer=excluded.manufacturer,
+                   distributor_price=excluded.distributor_price, availability=excluded.availability,
+                   is_mapped=excluded.is_mapped, last_synced=excluded.last_synced`,
+                [
+                  storeId, storeName, productName,
+                  p.MRP ?? null, p.Packing || '', p.DosageForm || '',
+                  p.Company || '', p.PTR ?? null,
+                  p.Stock !== undefined ? String(p.Stock) : 'Unknown',
+                  isMapped ? 1 : 0, new Date().toISOString()
+                ]
+              );
+              synced++;
+            }
+            await db.run('COMMIT');
+          } catch (dbErr) {
+            await db.run('ROLLBACK');
+            console.error(`[Catalog Cache] Database transaction failed for store ${storeName}:`, dbErr);
+            errors++;
+          }
+        } catch (storeErr: any) {
+          errors++;
+          consecutiveErrors++;
+          console.warn(`[Catalog Cache] Failed to sync store ${storeName} (keyword: "${seed}"):`, storeErr.message);
+        }
       }
     }
   } catch (err: any) {
