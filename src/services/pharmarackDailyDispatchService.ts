@@ -104,9 +104,43 @@ export async function recordPlacedOrder(
       [todayIST(), storeId || null, storeName, JSON.stringify(items), JSON.stringify(deliveryPersons || []), Date.now()]
     );
     console.log(`[PharmarackBatch] Recorded order for "${storeName}" (${items.length} items)`);
+
+    // Automatically schedule debounced delivery boy summary notification (1-minute buffer)
+    scheduleDebouncedBatchSend(60000);
   } catch (err) {
     console.error('[PharmarackBatch] Failed to record placed order:', err);
   }
+}
+
+let debounceTimer: NodeJS.Timeout | null = null;
+
+/**
+ * Schedules a debounced batch dispatch to delivery boys (default: 60s buffer)
+ * Groups multiple afternoon/additional orders placed closely together into a single summary message.
+ */
+export function scheduleDebouncedBatchSend(delayMs = 60000): void {
+  if (debounceTimer) {
+    clearTimeout(debounceTimer);
+  }
+  console.log(`[PharmarackBatch] Scheduled debounced delivery boy batch dispatch in ${delayMs / 1000}s`);
+  debounceTimer = setTimeout(async () => {
+    debounceTimer = null;
+    try {
+      const db = await dbManager.getConnection();
+      const today = todayIST();
+      const pendingOrders = await db.all(
+        'SELECT * FROM pharmarack_placed_orders WHERE order_date = ? AND batch_sent = 0',
+        [today]
+      );
+      if (pendingOrders.length > 0) {
+        const hasSentInitial = await hasSentTodaysBatch(db);
+        console.log(`[PharmarackBatch] Debounce timer fired. Dispatching ${pendingOrders.length} pending order(s) (isLate=${hasSentInitial}).`);
+        await sendBatchToDeliveryBoys(db, pendingOrders, hasSentInitial);
+      }
+    } catch (err: any) {
+      console.error('[PharmarackBatch] Debounced batch send error:', err);
+    }
+  }, delayMs);
 }
 
 async function buildSeparateDispatchMessages(db: any, orders: any[], isLate = false): Promise<{ distMessages: { distName: string; message: string }[]; summaryMessage: string }> {
@@ -182,8 +216,19 @@ async function buildSeparateDispatchMessages(db: any, orders: any[], isLate = fa
 
     distMessages.push({ distName, message: msg.trim() });
     const cleanP = String(distPhone).replace(/\D/g, '');
-    const displayPhoneNoGap = cleanP.length === 10 ? `+91${cleanP}` : (cleanP.length >= 10 ? `+${cleanP}` : (distPhone || 'N/A'));
-    summaryLines.push(`${distIndex}. *${distName}*: (${items.length} items)\n    ${displayPhoneNoGap}`);
+    const last10 = cleanP.slice(-10);
+    const displayPhoneNoGap = last10.length === 10 ? `+91 ${last10.slice(0, 5)} ${last10.slice(5)}` : (distPhone || 'N/A');
+
+    let tag = '';
+    if (isLate) {
+      const prevSent = await db.get(
+        `SELECT id FROM pharmarack_placed_orders WHERE order_date = ? AND store_name = ? AND batch_sent = 1 LIMIT 1`,
+        [today, distName]
+      );
+      tag = prevSent ? ' 🔄 *Re-order*' : ' 🆕 *New Addition*';
+    }
+
+    summaryLines.push(`${distIndex}. *${distName}* (${items.length} items)${tag}\n    📞 Contact: ${displayPhoneNoGap}`);
     distIndex++;
   }
 
@@ -193,11 +238,18 @@ async function buildSeparateDispatchMessages(db: any, orders: any[], isLate = fa
   const shopNameRow = await db.get("SELECT value FROM app_settings WHERE key IN ('shop_name', 'pharmacy_name') AND value IS NOT NULL AND value != '' LIMIT 1");
   const shopName = shopNameRow?.value || 'AI Pharmacy';
 
-  let summaryMsg = `🏥 *${shopName}*\n📋 *TODAY DISTRIBUTOR SUMMARY & TOTALS — ${dateLabel}*\n\n`;
+  const headerTitle = isLate
+    ? `📋 *ADDITIONAL DISTRIBUTOR PICKUP (AFTERNOON) — ${dateLabel}*`
+    : `📋 *TODAY DISTRIBUTOR SUMMARY & TOTALS — ${dateLabel}*`;
+
+  const distCountLabel = isLate ? 'Additional Distributors' : 'Total Today Distributors';
+  const itemCountLabel = isLate ? 'Additional Items' : 'Total Today Order Items';
+
+  let summaryMsg = `🏥 *${shopName}*\n${headerTitle}\n\n`;
   summaryMsg += summaryLines.join('\n') + `\n\n`;
   summaryMsg += `==================================\n`;
-  summaryMsg += `🚚 *Total Today Distributors:* ${totalDists}\n`;
-  summaryMsg += `📦 *Total Today Order Items:* ${totalItems}\n`;
+  summaryMsg += `🚚 *${distCountLabel}:* ${totalDists}\n`;
+  summaryMsg += `📦 *${itemCountLabel}:* ${totalItems}\n`;
   summaryMsg += `==================================`;
 
   return { distMessages, summaryMessage: summaryMsg.trim() };
@@ -273,7 +325,7 @@ async function resolveDeliveryBoyPhones(db: any, orders: any[]): Promise<{ name:
 async function sendBatchToDeliveryBoys(db: any, orders: any[], isLate = false): Promise<void> {
   if (orders.length === 0) return;
 
-  const { distMessages, summaryMessage } = await buildSeparateDispatchMessages(db, orders, isLate);
+  const { summaryMessage } = await buildSeparateDispatchMessages(db, orders, isLate);
   const boys = await resolveDeliveryBoyPhones(db, orders);
 
   if (boys.length === 0) {
@@ -286,33 +338,25 @@ async function sendBatchToDeliveryBoys(db: any, orders: any[], isLate = false): 
 
   for (const boy of boys) {
     try {
-      // 1. Enqueue individual distributor order messages
-      for (const distObj of distMessages) {
-        await whatsappQueueWorker.enqueue(boy.phone, distObj.message, 'pharmarack_daily_batch', boy.name);
-        await db.run(
-          `INSERT INTO automation_notifications
-             (type, recipient_name, recipient_phone, message, status, reference_id)
-           VALUES (?, ?, ?, ?, ?, ?)`,
-          ['pharmarack_daily_batch', boy.name, boy.phone, distObj.message, 'sent', `batch_${todayIST()}_${distObj.distName}`]
-        );
-      }
+      // Enqueue ONLY the summary message (Delivery Boy strictly receives the distributor summary list, no raw medicine spam)
+      const notifType = isLate ? 'pharmarack_additional_batch_summary' : 'pharmarack_daily_batch_summary';
+      const refId = isLate ? `batch_additional_${todayIST()}_${now}` : `batch_summary_${todayIST()}`;
 
-      // 2. Enqueue separate final summary message
-      await whatsappQueueWorker.enqueue(boy.phone, summaryMessage, 'pharmarack_daily_batch_summary', boy.name);
+      await whatsappQueueWorker.enqueue(boy.phone, summaryMessage, notifType, boy.name);
       await db.run(
         `INSERT INTO automation_notifications
            (type, recipient_name, recipient_phone, message, status, reference_id)
          VALUES (?, ?, ?, ?, ?, ?)`,
-        ['pharmarack_daily_batch_summary', boy.name, boy.phone, summaryMessage, 'sent', `batch_summary_${todayIST()}`]
+        [notifType, boy.name, boy.phone, summaryMessage, 'sent', refId]
       );
 
       // Record in action_logs for Activity Alerts
       await db.run(
         'INSERT INTO action_logs (action_type, description) VALUES (?, ?)',
-        ['PHARMARACK_DISPATCH_BATCH_SENT', `Enqueued daily order pickup list for ${boy.name} (${boy.phone}) for ${distMessages.length} distributors`]
+        ['PHARMARACK_DISPATCH_BATCH_SENT', `Enqueued daily order pickup summary for ${boy.name} (${boy.phone}) for ${orders.length} order(s)`]
       );
 
-      console.log(`[PharmarackBatch] Enqueued ${distMessages.length} separate distributor messages + 1 summary message for ${boy.name} (${boy.phone})`);
+      console.log(`[PharmarackBatch] Enqueued summary message for ${boy.name} (${boy.phone}) [isLate=${isLate}]`);
     } catch (err: any) {
       console.error(`[PharmarackBatch] Failed to enqueue for ${boy.name}:`, err.message);
       await db.run(
@@ -334,9 +378,9 @@ async function sendBatchToDeliveryBoys(db: any, orders: any[], isLate = false): 
 
   if (!isLate) {
     await setSetting(db, 'pharmarack_batch_last_sent_date', todayIST());
-    console.log(`[PharmarackBatch] Morning batch sent to ${boys.length} delivery boy(s).`);
+    console.log(`[PharmarackBatch] Morning batch summary sent to ${boys.length} delivery boy(s).`);
   } else {
-    console.log(`[PharmarackBatch] Late-addition sent to ${boys.length} delivery boy(s).`);
+    console.log(`[PharmarackBatch] Additional afternoon summary sent to ${boys.length} delivery boy(s).`);
   }
 }
 

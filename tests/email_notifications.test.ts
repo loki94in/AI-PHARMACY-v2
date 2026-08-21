@@ -71,7 +71,7 @@ describe('Email Mail Arrival Notifications', () => {
     });
 
     const notifCountBefore = await db.get(
-      "SELECT COUNT(*) as cnt FROM automation_notifications WHERE reference_id = 'email_uid_88102' AND status = 'sent'"
+      "SELECT COUNT(*) as cnt FROM automation_notifications WHERE (reference_id = 'email_uid_88102' OR reference_id LIKE 'email_uid_88102%') AND status = 'sent'"
     );
     expect(notifCountBefore.cnt).toBe(1);
 
@@ -85,7 +85,7 @@ describe('Email Mail Arrival Notifications', () => {
     });
 
     const notifCountAfter = await db.get(
-      "SELECT COUNT(*) as cnt FROM automation_notifications WHERE reference_id = 'email_uid_88102' AND status = 'sent'"
+      "SELECT COUNT(*) as cnt FROM automation_notifications WHERE (reference_id = 'email_uid_88102' OR reference_id LIKE 'email_uid_88102%') AND status = 'sent'"
     );
     // Count remains 1 — duplicate WhatsApp skipped!
     expect(notifCountAfter.cnt).toBe(1);
@@ -121,7 +121,7 @@ describe('Email Mail Arrival Notifications', () => {
     });
 
     const notif = await db.get(
-      "SELECT * FROM automation_notifications WHERE reference_id = 'email_uid_88103' ORDER BY id DESC LIMIT 1"
+      "SELECT * FROM automation_notifications WHERE (reference_id = 'email_uid_88103' OR reference_id LIKE 'email_uid_88103%') ORDER BY id DESC LIMIT 1"
     );
     expect(notif).toBeDefined();
     expect(notif.status).toBe('sent');

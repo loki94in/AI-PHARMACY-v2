@@ -79,12 +79,12 @@ describe('Pharmarack Cart Notifications Tests', () => {
     const result = await notificationService.notifyAboutCartOrder("Test Dist", 123, deliveryPersons, items);
     expect(result).toBe(true);
 
-    const notifs = await db.all("SELECT * FROM automation_notifications ORDER BY id ASC");
-    expect(notifs.length).toBe(2);
+    // Verify distributor notification was enqueued
+    const notifs = await db.all("SELECT * FROM automation_notifications WHERE type = 'distributor_cart_order' ORDER BY id ASC");
+    expect(notifs.length).toBe(1);
     expect(notifs[0].recipient_phone).toBe("919876543210");
-    expect(notifs[1].recipient_phone).toBe("918888888888");
 
-    // Verify messages content
+    // Verify distributor message content
     const msg = notifs[0].message;
     expect(msg).toContain("Items Requested:");
     expect(msg).toContain("Aspirin");
@@ -94,5 +94,28 @@ describe('Pharmarack Cart Notifications Tests', () => {
     expect(msg).toContain("Pack: 100 ml");
     expect(msg).toContain("*5 Bottles*");
     expect(msg).toContain("Delivery Boy John");
+
+    // Verify placed order was recorded for debounced/batch delivery boy summary
+    const placedOrders = await db.all("SELECT * FROM pharmarack_placed_orders WHERE store_name = 'Test Dist'");
+    expect(placedOrders.length).toBe(1);
+
+    // Verify notifyDeliveryBoysBatch sends strictly ONE summary message to delivery boy
+    const batchOrders = [
+      { storeName: "Test Dist", phone: "9876543210", items }
+    ];
+    const batchRes = await notificationService.notifyDeliveryBoysBatch(batchOrders);
+    expect(batchRes).toBe(true);
+
+    const boyNotifs = await db.all("SELECT * FROM automation_notifications WHERE type = 'delivery_boy_batch_summary'");
+    expect(boyNotifs.length).toBe(1);
+    expect(boyNotifs[0].recipient_phone).toBe("918888888888");
+    expect(boyNotifs[0].message).toContain("TODAY DISTRIBUTOR SUMMARY & TOTALS");
+    expect(boyNotifs[0].message).toContain("Test Dist");
+    expect(boyNotifs[0].message).toContain("Total Today Distributors:* 1");
+    expect(boyNotifs[0].message).toContain("Total Today Order Items:* 2");
+
+    // Ensure NO raw itemized medicine breakdown messages were sent to the delivery boy
+    const rawBoyNotifs = await db.all("SELECT * FROM automation_notifications WHERE type = 'delivery_boy_batch_order'");
+    expect(rawBoyNotifs.length).toBe(0);
   });
 });

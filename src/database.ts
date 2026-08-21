@@ -418,7 +418,9 @@ export async function ensureSchema(dbPath: string) {
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       total_amount REAL,
       tax_amount REAL,
-      net_profit REAL DEFAULT 0
+      net_profit REAL DEFAULT 0,
+      payment_medium TEXT DEFAULT 'CASH',
+      payment_status TEXT DEFAULT 'PAID'
     );
     CREATE TABLE IF NOT EXISTS stock_ledger (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -607,10 +609,6 @@ export async function ensureSchema(dbPath: string) {
     CREATE INDEX IF NOT EXISTS idx_sales_invoices_date_status ON sales_invoices (date DESC, payment_status);
     CREATE INDEX IF NOT EXISTS idx_purchases_date_dist ON purchases (date DESC, distributor_id);
     CREATE INDEX IF NOT EXISTS idx_medicines_name_mfg ON medicines (name, manufacturer);
-    CREATE INDEX IF NOT EXISTS idx_action_logs_created_type ON action_logs (created_at DESC, action_type);
-    CREATE INDEX IF NOT EXISTS idx_automation_notifications_type_status ON automation_notifications (type, status);
-    CREATE INDEX IF NOT EXISTS idx_delivery_boys_active ON delivery_boys (is_active);
-    CREATE INDEX IF NOT EXISTS idx_special_orders_status_date ON special_orders (status, date DESC);
     CREATE TABLE IF NOT EXISTS distributor_dispatch_reminders (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       distributor_id INTEGER,

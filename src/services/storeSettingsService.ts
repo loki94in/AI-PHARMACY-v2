@@ -232,7 +232,7 @@ export async function getEmailRetentionLimit(dbInstance?: any): Promise<number> 
   } catch (err) {
     console.warn('[StoreSettings] Error resolving email retention limit:', err);
   }
-  return 50;
+  return 15;
 }
 
 /**

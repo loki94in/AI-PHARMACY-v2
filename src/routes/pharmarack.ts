@@ -719,6 +719,17 @@ router.post('/login-window', async (req, res) => {
   })();
 });
 
+// In-memory 30s burst cache to prevent spamming upstream Pharmarack API across multi-component mounts
+interface ServerCartCacheEntry {
+  distributors: any[];
+  totalItems: number;
+  ts: number;
+}
+let serverCartCache: ServerCartCacheEntry | null = null;
+export const invalidatePharmarackCartCache = () => {
+  serverCartCache = null;
+};
+
 // Add to Pharmarack cart
 router.post('/cart/add', async (req, res) => {
   const { items } = req.body;
@@ -932,6 +943,7 @@ router.post('/cart/add', async (req, res) => {
     } 
 
     if (cartSuccess) {
+      invalidatePharmarackCartCache();
       return res.json({ success: true, message: 'Successfully added to Pharmarack cart!', mode: 'Live' });
     } else {
       return res.status(503).json({ error: 'Failed to add items to actual Pharmarack cart', details: lastError });
@@ -1156,6 +1168,7 @@ router.post('/delete-cart-item', async (req, res) => {
     }
 
     if (deleteSuccess) {
+      invalidatePharmarackCartCache();
       return res.json({ success: true, message: 'Successfully removed item from Pharmarack live cart!' });
     } else {
       return res.status(500).json({ error: 'Failed to delete item from Pharmarack live cart', details: lastError });
@@ -1249,6 +1262,18 @@ router.post('/cart/notify-delivery-boys-batch', async (req, res) => {
 // Fetch current Pharmarack cart
 router.get('/cart', async (req, res) => {
   try {
+    // 30-second burst cache to prevent spamming upstream Pharmarack API across multi-component mounts
+    const forceRefresh = req.query.fresh === 'true' || req.query.refresh === 'true';
+    if (!forceRefresh && serverCartCache && (Date.now() - serverCartCache.ts < 30_000)) {
+      return res.json({
+        success: true,
+        mode: 'Live',
+        distributors: serverCartCache.distributors,
+        totalItems: serverCartCache.totalItems,
+        cached: true
+      });
+    }
+
     const settings = await getPharmarackSettings();
     const token = settings['pharmarack_session_token'] || '';
 
@@ -1454,6 +1479,12 @@ router.get('/cart', async (req, res) => {
     import('../services/pharmarackDailyDispatchService.js')
       .then(m => m.handleCartPageVisit())
       .catch(err => console.warn('[PharmarackBatch] handleCartPageVisit error:', err));
+
+    serverCartCache = {
+      distributors,
+      totalItems,
+      ts: Date.now()
+    };
 
     return res.json({ success: true, mode: 'Live', distributors, totalItems });
   } catch (err: any) {
@@ -1858,8 +1889,10 @@ router.get('/sent-orders', async (req, res) => {
 router.get('/sent-orders/latest-map', async (req, res) => {
   try {
     const db = await dbManager.getConnection();
+    const fortyEightHoursAgo = Date.now() - (48 * 60 * 60 * 1000);
     const rows = await db.all(
-      `SELECT * FROM pharmarack_placed_orders ORDER BY placed_at DESC`
+      `SELECT * FROM pharmarack_placed_orders WHERE placed_at >= ? OR batch_sent_at >= ? ORDER BY placed_at DESC`,
+      [fortyEightHoursAgo, fortyEightHoursAgo]
     );
 
     const sentMap: Record<string, { storeId: number | null; storeName: string; placedAt: number; items: any[] }> = {};
@@ -1897,7 +1930,7 @@ router.get('/sent-orders/latest-map', async (req, res) => {
             const existingIndex = sentMap[key].items.findIndex((ex: any) => {
               if (pi.productCode && ex.productCode && pi.productCode === ex.productCode) return true;
               const exNormName = (ex.productName || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-              return piNormName && exNormName && (piNormName === exNormName || (piNormName.length >= 4 && exNormName.length >= 4 && (piNormName.includes(exNormName) || exNormName.includes(piNormName))));
+              return piNormName && exNormName && piNormName === exNormName;
             });
             if (existingIndex === -1) {
               sentMap[key].items.push(pi);
@@ -2316,77 +2349,6 @@ router.get('/session-logs', async (_req, res) => {
   } catch (err: any) {
     console.error('Error fetching session refresh logs:', err);
     res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// POST /api/pharmarack/trigger-reauth
-// GET /api/pharmarack/live-cart-summary
-// Consolidated endpoint fetching cart distributors, pending special orders, and auto-refill suggestions in parallel
-router.get('/live-cart-summary', async (_req, res) => {
-  try {
-    const db = await dbManager.getConnection();
-
-    const [cartRow, specialOrders, autoRefillRows] = await Promise.all([
-      db.get("SELECT value FROM app_settings WHERE key = 'pharmarack_cart_cache'"),
-      db.all("SELECT * FROM special_orders WHERE status IN ('Pending', 'Ordered') ORDER BY id DESC"),
-      db.all(`
-        SELECT 
-          m.id as medicine_id,
-          m.name as medicine_name,
-          m.manufacturer,
-          m.packaging,
-          COALESCE(SUM(inv.quantity), 0) as current_stock,
-          MAX(inv.reorder_level) as reorder_level,
-          MAX(m.max_stock_level) as max_stock_level,
-          (
-            SELECT COALESCE(SUM(si.quantity), 0)
-            FROM sale_items si
-            JOIN sales_invoices sinv ON si.invoice_id = sinv.id
-            WHERE si.inventory_id IN (SELECT id FROM inventory_master WHERE medicine_id = m.id)
-            AND sinv.date >= datetime('now', '-30 days')
-          ) as sales_30d
-        FROM medicines m
-        LEFT JOIN inventory_master inv ON inv.medicine_id = m.id
-        GROUP BY m.id
-        HAVING (current_stock <= COALESCE(reorder_level, 5) OR current_stock = 0) AND sales_30d > 0
-        ORDER BY sales_30d DESC
-        LIMIT 25
-      `)
-    ]);
-
-    let distributors: any[] = [];
-    if (cartRow && cartRow.value) {
-      try {
-        const parsed = JSON.parse(cartRow.value);
-        distributors = Array.isArray(parsed) ? parsed : (parsed.distributors || []);
-      } catch (_) {}
-    }
-
-    const autoRefills = (autoRefillRows || []).map(r => {
-      const sales30d = Number(r.sales_30d || 0);
-      const stock = Number(r.current_stock || 0);
-      const cap = r.max_stock_level ? Number(r.max_stock_level) : Math.max(10, Math.ceil(sales30d * 1.25));
-      return {
-        medicine_id: r.medicine_id,
-        medicine_name: r.medicine_name,
-        manufacturer: r.manufacturer || '',
-        packaging: r.packaging || '',
-        current_stock: stock,
-        sales_30d: sales30d,
-        reorder_level: r.reorder_level || 5,
-        recommended_qty: Math.max(1, cap - stock)
-      };
-    });
-
-    res.json({
-      success: true,
-      cart: { distributors },
-      orders: Array.isArray(specialOrders) ? specialOrders : [],
-      autoRefills
-    });
-  } catch (err: any) {
-    console.error('Error fetching live cart summary:', err);
-    res.status(500).json({ error: 'Failed to fetch live cart summary: ' + err.message });
   }
 });
 

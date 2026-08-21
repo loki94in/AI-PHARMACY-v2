@@ -150,7 +150,6 @@ const Mail = () => {
     orderId?: number;
   } | null;
 
-  const imapSyncControl = useFetchMode('mail.imapSync');
   const inboxRefreshControl = useFetchMode('mail.inboxRefresh');
 
   const [emails, setEmails] = useState<EmailRecord[]>(() => cachedEmails);
@@ -411,30 +410,17 @@ const Mail = () => {
   const pageActive = usePageActive();
 
   useDeferredEffect(() => {
-    let syncDelay: ReturnType<typeof setTimeout> | undefined;
-    if (cachedEmails.length === 0 && imapSyncControl.shouldFetch) {
-      syncDelay = setTimeout(() => triggerSync(), 1500);
-    }
-
-    // Live background refresh: re-read local DB every 15s (silent, no loading indicator).
+    // Live background refresh: re-read local DB every 15s (silent, no loading indicator, 100% offline).
     // Paused while this page isn't the one visible.
     let refreshInterval: ReturnType<typeof setInterval> | undefined;
     if (inboxRefreshControl.shouldFetch && pageActive) {
       refreshInterval = setInterval(() => silentRefreshLocal(), 15000);
     }
 
-    // Periodic IMAP sync every 300s (5 minutes). Paused while this page isn't the one visible.
-    let syncInterval: ReturnType<typeof setInterval> | undefined;
-    if (imapSyncControl.shouldFetch && pageActive) {
-      syncInterval = setInterval(() => triggerSync(), 300000);
-    }
-
     return () => {
-      if (syncDelay) clearTimeout(syncDelay);
       if (refreshInterval) clearInterval(refreshInterval);
-      if (syncInterval) clearInterval(syncInterval);
     };
-  }, [triggerSync, silentRefreshLocal, imapSyncControl.shouldFetch, inboxRefreshControl.shouldFetch, pageActive]);
+  }, [silentRefreshLocal, inboxRefreshControl.shouldFetch, pageActive]);
 
   const handleManualRefresh = () => {
     checkImapStatus();
@@ -858,16 +844,12 @@ const Mail = () => {
                 <MailIcon size={28} className="opacity-50" />
                 {isOffline
                   ? 'No emails stored locally. Connect to internet and refresh to sync.'
-                  : imapSyncControl.mode === 'manual' && !imapSyncControl.loaded
-                  ? 'Auto-sync from Gmail is deferred.'
-                  : 'No emails yet. Syncing from Gmail...'}
-                {imapSyncControl.mode === 'manual' && !imapSyncControl.loaded && !isOffline && (
+                  : 'No emails found in local inbox.'}
+                {!isOffline && (
                   <button
-                    onClick={() => {
-                      imapSyncControl.requestLoad();
-                      triggerSync();
-                    }}
-                    className="mt-3 px-4 py-1.5 rounded-xl bg-primary/20 text-primary border border-primary/20 hover:bg-primary/30 hover:text-text transition-all font-bold not-italic"
+                    onClick={handleManualRefresh}
+                    disabled={syncing}
+                    className="mt-3 px-4 py-1.5 rounded-xl bg-primary/20 text-primary border border-primary/20 hover:bg-primary/30 hover:text-text transition-all font-bold not-italic disabled:opacity-50"
                   >
                     Sync Gmail Now
                   </button>

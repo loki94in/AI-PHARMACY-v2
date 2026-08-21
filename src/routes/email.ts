@@ -64,8 +64,7 @@ router.post('/', async (req, res) => {
   }
 });
 
-// GET /api/email/inbox — serves from local SQLite DB (offline-capable)
-// Also triggers a background IMAP delta sync for new emails
+// GET /api/email/inbox — serves from local SQLite DB (offline-first, zero IMAP network side-effects)
 router.get('/inbox', async (req, res) => {
   const limit = req.query.limit ? parseInt(req.query.limit as string) : 30;
   const since = req.query.since as string | undefined;

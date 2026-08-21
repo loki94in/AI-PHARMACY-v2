@@ -598,37 +598,12 @@ export class NotificationService {
         }
       }
 
-      // Send to delivery boy(s)
-      for (const boy of resolvedDeliveryBoys) {
-        if (uniqueDistPhones.includes(boy.phone)) {
-          console.log(`[CartOrderNotif] Skipping duplicate send to delivery boy ${boy.name} at ${boy.phone} (already messaged in distributor batch).`);
-          continue;
-        }
-        try {
-          const queueId = await whatsappQueueWorker.enqueue(
-            boy.phone,
-            message,
-            'delivery_boy_cart_order',
-            boy.name
-          );
-          sentCount++;
-          await db.run(
-            `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
-             VALUES (?, ?, ?, ?, ?, ?)`,
-            ['delivery_boy_cart_order', boy.name, boy.phone, message, 'sent', `store_${storeId}`]
-          );
-        } catch (err: any) {
-          console.error(`[CartOrderNotif] Failed to notify delivery boy ${boy.name} at ${boy.phone}:`, err);
-        }
-      }
-
       return { ok: sentCount > 0, sentCount, suppressedCount: 0 };
     } catch (err) {
       console.error('[CartOrderNotif] Error sending cart order notifications:', err);
       return { ok: false, sentCount: 0, suppressedCount: 0 };
     } finally {
-      // Always record this order for the daily morning batch to delivery boys
-      // (fire-and-forget — does not block the response)
+      // Record this order and trigger 1-minute debounced delivery boy summary dispatch
       try {
         const batchDb = await dbManager.getConnection();
         await recordPlacedOrder(batchDb, storeName, storeId, items || [], deliveryPersons || []);
@@ -771,11 +746,10 @@ export class NotificationService {
         distMessages.push({ distName: order.storeName, message: msg.trim() });
       }
 
-      // 5. Enqueue to each delivery boy in centralized queue
+      // 5. Enqueue strictly ONE summary message to each delivery boy in centralized queue
       let sentCount = 0;
       for (const boy of resolvedDeliveryBoys) {
         try {
-          // A. Enqueue Summary Message
           await whatsappQueueWorker.enqueue(boy.phone, summaryMessage, 'delivery_boy_batch_summary', boy.name);
           sentCount++;
           await db.run(
@@ -784,18 +758,7 @@ export class NotificationService {
             ['delivery_boy_batch_summary', boy.name, boy.phone, summaryMessage, 'sent', `batch_summary_${Date.now()}`]
           );
 
-          // B. Enqueue Individual Distributor Messages
-          for (const distObj of distMessages) {
-            await whatsappQueueWorker.enqueue(boy.phone, distObj.message, 'delivery_boy_batch_order', boy.name);
-            sentCount++;
-            await db.run(
-              `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
-               VALUES (?, ?, ?, ?, ?, ?)`,
-              ['delivery_boy_batch_order', boy.name, boy.phone, distObj.message, 'sent', `batch_${Date.now()}_${distObj.distName}`]
-            );
-          }
-
-          console.log(`[CartBatchNotif] Enqueued summary + ${distMessages.length} distributor order messages for delivery boy ${boy.name}`);
+          console.log(`[CartBatchNotif] Enqueued single summary message for delivery boy ${boy.name}`);
         } catch (err: any) {
           console.error(`[CartBatchNotif] Failed to enqueue batch for ${boy.name}:`, err.message);
         }

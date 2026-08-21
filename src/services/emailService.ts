@@ -2864,80 +2864,14 @@ export class EmailService {
   }
 
   /**
-   * Syncs attachments for the latest N emails in background and cleans up older ones if they are saved.
+   * Cleans up older emails beyond retention limit in background (pure local SQLite/disk operation).
+   * Kept for interface compatibility; delta sync already downloads attachments on arrival.
    */
   public async syncAndCleanAttachments(): Promise<void> {
-    let connection: any = null;
     try {
-      const db = await dbManager.getConnection();
-      
-      // Check if auto-delete/cleanup is enabled
-      const autodeleteRow = await db.get("SELECT value FROM app_settings WHERE key = 'email_autodelete_enabled'");
-      const autodeleteEnabled = autodeleteRow ? autodeleteRow.value === 'true' : true;
-
-      const limitRow = await db.get("SELECT value FROM app_settings WHERE key = 'email_autodelete_limit'");
-      const autodeleteLimit = limitRow ? parseInt(limitRow.value, 10) || 10 : 10;
-
-      const { imapConfig, isConfigured } = await this.buildImapConfig();
-      if (!isConfigured) {
-        return;
-      }
-
-      const config = { imap: imapConfig };
-      connection = await imap.connect(config);
-      await connection.openBox('INBOX');
-
-      // Fetch ALL messages to find the latest UIDs
-      const searchCriteria = ['ALL'];
-      const fetchOptions = { bodies: [''], struct: true };
-      const results = await connection.search(searchCriteria, fetchOptions);
-
-      // Sort by UID descending (newest first)
-      results.sort((a: any, b: any) => b.attributes.uid - a.attributes.uid);
-      const latestResults = results.slice(0, autodeleteLimit);
-      const latestUids = latestResults.map((item: any) => item.attributes.uid);
-
-      console.log(`[Sync] Syncing attachments for latest ${latestUids.length} UIDs:`, latestUids);
-
-      const uploadsDir = process.env.UPLOADS_DIR || path.join(getAppDataDir(), 'uploads');
-      if (!fs.existsSync(uploadsDir)) {
-        fs.mkdirSync(uploadsDir, { recursive: true });
-      }
-
-      const cachedFiles = fs.readdirSync(uploadsDir);
-
-      // 1. Auto-download attachments for the latest emails in background if not already cached
-      for (const item of latestResults) {
-        const uid = item.attributes.uid;
-        const prefix = `att-${uid}-`;
-        const hasCached = cachedFiles.some(f => f.startsWith(prefix));
-
-        if (!hasCached) {
-          const bodyPart = item.parts.find((p: any) => p.which === '');
-          if (bodyPart) {
-            const parsed = await simpleParser(bodyPart.body);
-            if (parsed.attachments && parsed.attachments.length > 0) {
-              console.log(`[Sync] Auto-downloading attachments in background for UID ${uid}`);
-              await this.processAttachments(parsed.attachments.map((a: any) => ({
-                filename: a.filename || 'unknown',
-                content: a.content,
-                contentType: a.contentType || 'application/octet-stream'
-              })), uid);
-            }
-          }
-        }
-      }
-
-      // 2. Clean up / Auto-delete older emails beyond retention limit (saved emails are exempt)
-      await this.pruneOldEmails(db);
+      await this.pruneOldEmails();
     } catch (err) {
-      console.error('[Sync] Error during syncAndCleanAttachments:', err);
-    } finally {
-      if (connection) {
-        try {
-          await connection.end();
-        } catch (e) {}
-      }
+      console.error('[Sync] Error during email cleanup:', err);
     }
   }
 
@@ -3010,19 +2944,10 @@ export class EmailService {
 
 
   /**
-   * Returns emails from the LOCAL database (offline-first, instant).
-   * Also triggers a background IMAP delta sync so new emails appear automatically.
+   * Returns emails from the LOCAL database (offline-first, instant, zero external network side-effects).
    */
   public async fetchInbox(limit: number = 50, since?: string): Promise<Array<any>> {
-    // 1. Serve from local DB immediately (works offline)
-    const localEmails = await this.getLocalInbox(limit, since);
-
-    // 2. Trigger background IMAP delta sync (non-blocking, only new UIDs)
-    this.syncNewEmailsFromIMAP().catch(err => {
-      console.error('[Mail] Background IMAP sync failed:', err);
-    });
-
-    return localEmails;
+    return this.getLocalInbox(limit, since);
   }
 
   /**
@@ -3404,14 +3329,10 @@ export class EmailService {
         console.error('[Sync] Error scanning un-notified emails:', scanErr);
       }
 
-      // Trigger background auto-delete cleanups for database and files.
-      // Delay by 5 s to ensure the delta-sync IMAP connection fully closes
-      // before opening a second connection (avoids ConnectionTimeoutError).
-      setTimeout(() => {
-        this.syncAndCleanAttachments().catch(err => {
-          console.error('[Sync] Background email cleanup failed:', err);
-        });
-      }, 5000);
+      // Trigger background local cleanup for database and files (pure SQLite/disk operation, zero secondary IMAP connections)
+      this.pruneOldEmails(db).catch(err => {
+        console.error('[Sync] Background email prune failed:', err);
+      });
 
       console.log(`[Sync] Delta sync complete. Stored ${syncedCount} new email(s).`);
       try {
