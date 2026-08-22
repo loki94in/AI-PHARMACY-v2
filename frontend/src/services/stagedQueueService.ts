@@ -9,8 +9,8 @@ export interface StagedItem {
   discount?: number;
   payment_medium?: string;
   total_amount?: number;
-  items_json?: string | any[];
-  items?: any[];
+  items_json?: string | unknown[];
+  items?: unknown[];
   product?: string;
   qty?: number;
   priority?: string;

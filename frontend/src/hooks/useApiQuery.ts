@@ -1,8 +1,10 @@
 import { useQuery, useMutation, useQueryClient, QueryClient } from '@tanstack/react-query';
 import type { UseQueryOptions } from '@tanstack/react-query';
 
+type MutationContext = { previousData?: unknown };
+
 export interface UseApiQueryOptions<TData = unknown, TError = Error>
-  extends Omit<UseQueryOptions<TData, TError, TData, any>, 'queryKey' | 'queryFn'> {
+  extends Omit<UseQueryOptions<TData, TError, TData, readonly unknown[]>, 'queryKey' | 'queryFn'> {
   enabled?: boolean;
 }
 
@@ -11,7 +13,7 @@ export function useApiQuery<TData = unknown, TError = Error>(
   fn: () => Promise<TData>,
   options?: UseApiQueryOptions<TData, TError>
 ) {
-  return useQuery<TData, TError, TData, any>({
+  return useQuery<TData, TError, TData, readonly unknown[]>({
     queryKey: Array.isArray(key) ? key : [key],
     queryFn: fn,
     enabled: options?.enabled ?? true,
@@ -26,20 +28,20 @@ export interface UseApiMutationOptions<TData = unknown, TVariables = unknown, TE
   invalidateKeys?: (string | readonly unknown[])[];
   optimisticUpdate?: {
     queryKey: string | readonly unknown[];
-    updateFn: (oldData: any, variables: TVariables) => any;
+    updateFn: (oldData: unknown, variables: TVariables) => unknown;
   };
 }
 
-export function useApiMutation<TData = unknown, TVariables = unknown, TError = Error, TContext = any>(
+export function useApiMutation<TData = unknown, TVariables = unknown, TError = Error, TContext = unknown>(
   fn: (vars: TVariables) => Promise<TData>,
   options?: UseApiMutationOptions<TData, TVariables, TError, TContext>
 ) {
   const queryClient = useQueryClient();
 
-  return useMutation<TData, TError, TVariables, any>({
+  return useMutation<TData, TError, TVariables, MutationContext>({
     mutationFn: fn,
     onMutate: async (variables: TVariables) => {
-      const context: any = {};
+      const context: MutationContext = {};
       if (options?.optimisticUpdate) {
         const qKey = Array.isArray(options.optimisticUpdate.queryKey)
           ? options.optimisticUpdate.queryKey
@@ -53,7 +55,7 @@ export function useApiMutation<TData = unknown, TVariables = unknown, TError = E
         context.previousData = previousData;
 
         // Optimistically update
-        queryClient.setQueryData(qKey, (old: any) => options.optimisticUpdate!.updateFn(old, variables));
+        queryClient.setQueryData(qKey, (old: unknown) => options.optimisticUpdate!.updateFn(old, variables));
       }
       return context;
     },
@@ -64,10 +66,10 @@ export function useApiMutation<TData = unknown, TVariables = unknown, TError = E
           : [options.optimisticUpdate.queryKey];
         queryClient.setQueryData(qKey, context.previousData);
       }
-      options?.onError?.(err, variables, context);
+      options?.onError?.(err, variables, context as TContext);
     },
     onSuccess: (data, variables, context) => {
-      options?.onSuccess?.(data, variables, context);
+      options?.onSuccess?.(data, variables, context as TContext);
       if (options?.invalidateKeys) {
         options.invalidateKeys.forEach((key) => {
           const qKey = Array.isArray(key) ? key : [key];
@@ -82,7 +84,7 @@ export function useApiMutation<TData = unknown, TVariables = unknown, TError = E
           : [options.optimisticUpdate.queryKey];
         queryClient.invalidateQueries({ queryKey: qKey });
       }
-      options?.onSettled?.(data, error, variables, context);
+      options?.onSettled?.(data, error, variables, context as TContext);
     },
   });
 }

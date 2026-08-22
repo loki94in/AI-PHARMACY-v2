@@ -8,9 +8,13 @@ import { useState, useCallback, useEffect } from 'react';
 // it stays active across mounts of the same page/component session.
 const manualOverrides = new Set<string>();
 
+interface ServerSettings {
+  data_fetch_control?: string;
+}
+
 export function useFetchMode(key: string) {
   // Use React Query to fetch settings. It shares the same query cache.
-  const { data: serverSettings } = useQuery<Record<string, any>>({
+  const { data: serverSettings } = useQuery<ServerSettings>({
     queryKey: SETTINGS_QUERY_KEY,
     queryFn: () => apiClient.get('/settings').then(res => res.data),
     staleTime: 0,

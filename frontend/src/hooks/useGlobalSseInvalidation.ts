@@ -51,6 +51,13 @@ const SSE_CUSTOM_EVENTS: Record<string, string[]> = {
   google_verification_solved: ['sse-google-verification'],
 };
 
+// Minimal shape of a parsed SSE frame; payload fields stay free-form so
+// CustomEvent consumers can read domain-specific properties off `detail`.
+interface SseFrame {
+  type?: string;
+  [field: string]: unknown;
+}
+
 export function useGlobalSseInvalidation(enabled: boolean = true) {
   const queryClient = useQueryClient();
   // ponytail: throttle identical bursts (e.g. bulk imports emitting many events)
@@ -62,7 +69,7 @@ export function useGlobalSseInvalidation(enabled: boolean = true) {
 
     const handleMessage = (e: MessageEvent) => {
       let type: string;
-      let parsed: any;
+      let parsed: SseFrame;
       try {
         parsed = JSON.parse(e.data);
         type = parsed?.type || '';

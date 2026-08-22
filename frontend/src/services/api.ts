@@ -22,20 +22,21 @@ export const toCamelCase = (str: string): string => {
   });
 };
 
-export const objectToCamelCase = (obj: any): any => {
+export const objectToCamelCase = (obj: unknown): unknown => {
   if (obj === null || typeof obj !== 'object') {
     return obj;
   }
-  
+
   if (Array.isArray(obj)) {
     return obj.map(item => objectToCamelCase(item));
   }
-  
-  return Object.keys(obj).reduce((result, key) => {
+
+  const record = obj as Record<string, unknown>;
+  return Object.keys(record).reduce((result, key) => {
     const camelKey = toCamelCase(key);
-    result[camelKey] = objectToCamelCase(obj[key]);
+    result[camelKey] = objectToCamelCase(record[key]);
     return result;
-  }, {} as Record<string, any>);
+  }, {} as Record<string, unknown>);
 };
 
 // Extend Axios request config to support standardization flag
@@ -108,17 +109,17 @@ apiClient.interceptors.response.use(
         if (res.data && res.data.success) {
           const msg = `Backend & DB healthy — endpoint-specific issue on: ${config.url}`;
           console.error(`[Verification Layer] Diagnostics: ${msg}`);
-          (error as any)._diagnostics = msg;
+          (error as { _diagnostics?: string })._diagnostics = msg;
         } else {
           const msg = `Database or backend failure: ${res.data?.message || 'Unknown'}`;
           console.error(`[Verification Layer] Diagnostics: ${msg}`);
-          (error as any)._diagnostics = msg;
+          (error as { _diagnostics?: string })._diagnostics = msg;
         }
       })
       .catch(healthErr => {
         const msg = `Backend fully unreachable: ${healthErr.message}`;
         console.error(`[Verification Layer] Diagnostics: ${msg}`);
-        (error as any)._diagnostics = msg;
+        (error as { _diagnostics?: string })._diagnostics = msg;
       });
     }
 
@@ -151,7 +152,7 @@ export type {
 
 const COMPACT_INVENTORY_SESSION_KEY = 'pharmacy_compact_inventory_v1';
 
-let compactInventoryCache: any[] | null = null;
+let compactInventoryCache: CompactInventoryItem[] | null = null;
 
 function tryHydrateCompactCacheFromSession(): void {
   if (compactInventoryCache || typeof window === 'undefined') return;
@@ -172,16 +173,16 @@ tryHydrateCompactCacheFromSession();
 // Short-lived shared cache for WhatsApp queue status. Layout's active-queue
 // poller (3s) populates it on every fetch; the queue popover reuses fresh
 // entries instead of firing a second concurrent request for the same endpoint.
-let waQueueStatusCache: { data: any; at: number } | null = null;
+let waQueueStatusCache: { data: WhatsAppQueueStatus | null; at: number } | null = null;
 
-export const peekWhatsAppQueueStatusCache = (maxAgeMs = 2500): any | null => {
+export const peekWhatsAppQueueStatusCache = (maxAgeMs = 2500): WhatsAppQueueStatus | null => {
   return waQueueStatusCache && Date.now() - waQueueStatusCache.at < maxAgeMs ? waQueueStatusCache.data : null;
 };
 
-export const getCompactInventoryCache = (): any[] => {
+export const getCompactInventoryCache = (): CompactInventoryItem[] => {
   if (compactInventoryCache) return compactInventoryCache;
   if (typeof window !== 'undefined' && window.__INVENTORY__) {
-    compactInventoryCache = window.__INVENTORY__ as any[];
+    compactInventoryCache = window.__INVENTORY__ as CompactInventoryItem[];
     return compactInventoryCache || [];
   }
   return [];
@@ -190,7 +191,7 @@ export const getCompactInventoryCache = (): any[] => {
 export const isCompactInventoryCacheReady = (): boolean => compactInventoryCache !== null;
 
 export const setCompactInventoryCache = (
-  data: any[],
+  data: CompactInventoryItem[],
   options?: { persist?: boolean }
 ) => {
   compactInventoryCache = data;
@@ -212,7 +213,7 @@ export const invalidateCompactInventoryCache = (): void => {
   if (typeof window !== 'undefined') {
     try {
       sessionStorage.removeItem(COMPACT_INVENTORY_SESSION_KEY);
-      delete (window as any).__INVENTORY__;
+      delete window.__INVENTORY__;
     } catch {}
     window.dispatchEvent(new Event('inventory-cache-invalidated'));
   }
@@ -262,9 +263,9 @@ interface PurchasePayload {
   reconcile_expiry_return_id?: number | null;
   source_filename?: string;
   source_file_headers?: string[];
-  mapping_config?: Record<string, any>;
+  mapping_config?: Record<string, unknown>;
   email_uid?: string | number | null;
-  items: any[];
+  items: unknown[];
   total_amount?: number;
   discount?: number;
 }
@@ -298,12 +299,415 @@ interface CustomerReturnPayload {
     quantity: number;
     unit_price: number;
   }>;
-  return_items?: any;
+  return_items?: unknown;
   total_amount?: number;
 }
 
 interface AppSettings {
   [key: string]: string | number | boolean | null | undefined;
+}
+
+// ── Row/payload shapes observed from the backend route handlers ──────────────
+
+export interface CompactInventoryItem {
+  medicine_id: number;
+  inventory_id: number;
+  id: number;
+  name: string;
+  batch_no: string;
+  expiry_date: string;
+  mrp: number;
+  sell_price?: number | null;
+  stock_qty: number;
+  loose_quantity: number;
+  quantity?: number;
+  unit_price: number;
+  cost_price: number;
+  item_code: string;
+  manufacturer: string;
+  packaging: string;
+  pack_size: number | null;
+  salts?: string;
+  medicine_name: string;
+  loose_qty?: number;
+}
+
+export interface WhatsAppQueueItem {
+  id: number;
+  number: string;
+  message: string;
+  type: string;
+  status: 'pending' | 'sending' | 'waiting' | 'sent' | 'failed_offline' | 'failed_perm' | 'cancelled' | 'review_required';
+  retry_count: number;
+  created_at: number;
+  sent_at: number | null;
+  error_message?: string;
+  target_name?: string;
+  scheduled_at?: number | null;
+  media_url?: string | null;
+  file_json?: string | null;
+}
+
+export interface WhatsAppQueueStatus {
+  isProcessing: boolean;
+  isPaused?: boolean;
+  isOnline: boolean;
+  nextDispatchCountdownMs: number;
+  nextDispatchTimestamp: number | null;
+  currentPacingMinMs: number;
+  currentPacingMaxMs: number;
+  pacingPreset?: string;
+  currentSendingItemId: number | null;
+  activeTargetName?: string | null;
+  counts: { pending: number; sending: number; sent: number; failed_offline: number; failed_perm: number };
+  delaySettings?: {
+    whatsapp_delay_credit_bill: number;
+    whatsapp_delay_distributor: number;
+    whatsapp_delay_delivery_boy: number;
+  };
+  recentItems: WhatsAppQueueItem[];
+}
+
+export interface ExpiryReviewRecord {
+  id: number;
+  inventory_id: number;
+  medicine_id: number;
+  medicine_name: string;
+  pack_size?: number;
+  batch_no: string;
+  expiry_date: string;
+  quantity: number;
+  current_stock_qty?: number;
+  distributor_id?: number;
+  distributor_name?: string;
+  distributor_display_name?: string;
+  cost_price: number;
+  mrp: number;
+  proposed_return_amount: number;
+  status: 'pending' | 'approved' | 'rejected';
+  created_at: string;
+  reviewed_at?: string;
+  reviewed_by?: string;
+  return_id?: number;
+  return_no?: string;
+  notes?: string;
+}
+
+export interface ExpiryReviewAuditLog {
+  id: number;
+  review_id?: number;
+  action: string;
+  performed_by?: string;
+  details?: string;
+  created_at: string;
+}
+
+export type DistributorReminderStatus = 'Pending' | 'Dispatched' | 'Collected';
+
+export interface DistributorDispatchReminder {
+  id: number;
+  distributor_id: number | null;
+  distributor_name: string;
+  distributor_phone: string;
+  date: string;
+  status: DistributorReminderStatus;
+  auto_remind: number;
+  delivery_boy_id?: number | null;
+  delivery_boy_name?: string;
+  delivery_boy_phone?: string;
+  last_reminded_at?: string;
+  email_received_at?: string;
+  order_source?: string;
+  has_pharmarack_order_today?: number;
+  has_order_today?: number;
+  created_at?: string;
+}
+
+export interface NonMovingReportItem {
+  id: number;
+  medicineId: number;
+  medicineName: string;
+  batchNo: string | null;
+  quantity: number;
+  purchaseDate: string | null;
+  lastTransactionDate: string | null;
+  daysSinceLastTransaction: number;
+  mrp: number | null;
+  totalValue: number;
+  costPrice?: number | null;
+  totalCostValue?: number;
+  expiryDate?: string | null;
+}
+
+export interface ProductTracePurchaseRow {
+  id: number;
+  batch_no: string;
+  expiry_date: string;
+  quantity: number;
+  cost_price: number;
+  mrp: number;
+  invoice_no: string;
+  transaction_date: string;
+  distributor_name: string;
+  medicine_name: string;
+}
+
+export interface ProductTraceSaleRow {
+  id: number;
+  batch_no: string;
+  expiry_date: string;
+  quantity: number;
+  unit_price: number;
+  mrp: number;
+  invoice_no: string;
+  transaction_date: string;
+  customer_name: string;
+  medicine_name: string;
+}
+
+export interface PharmarackSentOrderItem {
+  productCode?: string;
+  productName?: string;
+  qty?: number;
+  placedAt?: number;
+  [key: string]: unknown;
+}
+
+export interface PharmarackSentOrder {
+  id: number;
+  order_date: string;
+  store_id: number | null;
+  store_name: string;
+  items: PharmarackSentOrderItem[];
+  delivery_persons: Array<Record<string, unknown>>;
+  placed_at: number;
+  batch_sent: boolean;
+  batch_sent_at: number | null;
+}
+
+export interface PharmarackLatestSentMapEntry {
+  storeId: number | null;
+  storeName: string;
+  placedAt: number;
+  items: PharmarackSentOrderItem[];
+}
+
+export interface ContactRecord {
+  id: number;
+  name: string;
+  type: string;
+  phone?: string;
+  email?: string;
+  address?: string;
+  gstin?: string;
+  notes?: string;
+  alias_names?: string;
+  is_active?: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface StorageLocation {
+  id: number;
+  name: string;
+  code?: string;
+  type?: string;
+  description?: string;
+  is_default: number;
+  is_active: number;
+}
+
+export interface RegisteredDevice {
+  token: string;
+  device_id: string;
+  device_name: string;
+  os: string;
+  last_seen: string;
+  is_online: number;
+}
+
+export interface ComplianceLogRow {
+  id: number;
+  date: string;
+  drug_name: string;
+  patient_name: string;
+  doctor_name: string | null;
+  license_no?: string | null;
+  qty: number;
+  bill_no: string;
+  schedule_type: string;
+  missing_license?: number;
+}
+
+export interface QuickEditMedicinePayload {
+  name?: string;
+  generic_name?: string;
+  manufacturer?: string;
+  marketed_by?: string;
+  packaging?: string;
+  pack_unit?: string;
+  item_code?: string;
+  category?: string;
+  api_reference?: string;
+  inventory_id?: number | null;
+  quantity?: number;
+  rack_location?: string;
+  hsn_code?: string;
+  item_type?: string;
+  therapeutic?: string;
+  sub_therapeutic?: string;
+  schedule_type?: string;
+  short_code?: string;
+  ucode?: string;
+  cgst_per?: number;
+  sgst_per?: number;
+  igst_per?: number;
+  reorder_level?: number;
+  max_stock_level?: number;
+  rack?: string;
+  disable_auto_barcode?: number | boolean;
+  tb_medicine?: number | boolean;
+  sell_price?: number | string | null;
+  mrp?: number;
+  rate?: number;
+  metadata?: unknown;
+  allow_loose_sale?: number | boolean;
+}
+
+export interface CatalogReviewApproval {
+  name?: string;
+  api_reference?: string;
+  strength?: string;
+  packaging?: string;
+  manufacturer?: string;
+  marketed_by?: string;
+  choice?: string;
+}
+
+export interface ManualEmailPayload {
+  subject: string;
+  from: string;
+  body?: string;
+  date?: string;
+  attachments?: unknown[];
+}
+
+export interface SupplierReturnProcessItem {
+  medicine_id?: number | null;
+  batch_no?: string;
+  quantity?: number;
+  cost_price?: number;
+  mrp?: number;
+  distributor_id?: number | null;
+  invoice_no?: string;
+  [key: string]: unknown;
+}
+
+export interface DispatchOrderPayload {
+  patient_name?: string;
+  patient_phone?: string;
+  address?: string;
+  items?: string;
+  notes?: string;
+  delivery_boy_id?: number | string | null;
+  invoice_no?: string;
+  status?: string;
+}
+
+export interface InvestigationSearchParams {
+  q?: string;
+  patientName?: string;
+  medicineName?: string;
+  salesBillNo?: string;
+  purchaseBillNo?: string;
+  batchNo?: string;
+  distributor?: string;
+  expiryDate?: string;
+  mrp?: number | string;
+  quantity?: number | string;
+  startDate?: string;
+  endDate?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  type?: string;
+  batch_number?: string;
+  reference?: string;
+  party?: string;
+  page?: number;
+  limit?: number;
+  [key: string]: unknown;
+}
+
+export interface InvestigationInventoryCorrection {
+  quantity?: number;
+  loose_quantity?: number;
+  batch_no?: string;
+  expiry_date?: string;
+  mrp?: number;
+  cost_price?: number;
+  rack_location?: string;
+}
+
+export interface StagedSaleApprovalPayload {
+  items: readonly unknown[];
+  patient_name?: string;
+  patient_phone?: string;
+  discount?: number;
+}
+
+export interface StagedPurchaseApprovalPayload {
+  items: readonly unknown[];
+  distributor_name?: string;
+  invoice_no?: string;
+  date?: string;
+  total_amount?: number;
+}
+
+export interface StagedSaleCreatePayload {
+  patient_name: string;
+  patient_phone?: string;
+  discount?: number;
+  items: readonly unknown[];
+}
+
+export interface ReorderSuggestion {
+  medicineId: number;
+  medicineName: string;
+  company: string;
+  packaging: string;
+  ptr: number;
+  mrp: number;
+  twoDaySales: number;
+  twoMonthSales: number;
+  twoMonthPurchases: number;
+  sixMonthTotalSales: number;
+  sixMonthTotalPurchases: number;
+  monthlyWeightedConsumption: number;
+  currentStock: number;
+  suggestedQty: number;
+  isHotMover: boolean;
+  isLowStockSafety: boolean;
+}
+
+export type CommunicationAuditLog = AutomationNotification;
+
+export interface BatchLastPurchaseResult {
+  query: string;
+  found: boolean;
+  medicine_id?: number;
+  medicine_name?: string;
+  batch_no?: string;
+  expiry_date?: string;
+  cost_price?: number;
+  mrp?: number;
+  cgst_per?: number;
+  sgst_per?: number;
+  quantity?: number;
+  free_qty?: number;
+  distributor_name?: string;
+  distributor_id?: number;
+  purchase_date?: string;
+  invoice_no?: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -314,12 +718,12 @@ export const api = {
   saveSingleSetting: (key: string, value: string) => apiClient.post('/settings/save-single', { key, value }),
   getDashboard: () => apiClient.get<DashboardStats>('/dashboard').then(res => res.data),
   dismissDashboardAlert: (id: number) => apiClient.delete(`/dashboard/alerts/${id}`).then(res => res.data),
-  getCompactInventory: () => apiClient.get<any[]>('/medicines/compact').then(res => {
+  getCompactInventory: () => apiClient.get<CompactInventoryItem[]>('/medicines/compact').then(res => {
     setCompactInventoryCache(res.data);
     return res.data;
   }),
   getMedicineQuickDetails: (id: number) => apiClient.get(`/medicines/${id}/quick-details`).then(res => res.data),
-  
+
   // Inventory
   getInventory: (params?: {
     search?: string;
@@ -336,12 +740,12 @@ export const api = {
     date_from?: string;
     date_to?: string;
     stock_filter?: string;
-  }) => apiClient.get<any>('/inventory', { params }).then(res => res.data),
+  }) => apiClient.get('/inventory', { params }).then(res => res.data),
   addMedicine: (data: Partial<InventoryItem>) => apiClient.post('/inventory', data).then(res => res.data),
   updateMedicine: (id: number, data: Partial<InventoryItem>) => apiClient.put(`/inventory/${id}`, data).then(res => res.data),
   getEnrichedMedicine: (id: number) => apiClient.get(`/inventory/medicines/${id}/enriched`).then(res => res.data),
   getQuickEditMedicine: (id: number) => apiClient.get(`/inventory/medicines/${id}/quick-edit`).then(res => res.data),
-  updateQuickEditMedicine: (id: number, data: any) => apiClient.put(`/inventory/medicines/${id}/quick-edit`, data).then(res => res.data),
+  updateQuickEditMedicine: (id: number, data: QuickEditMedicinePayload) => apiClient.put(`/inventory/medicines/${id}/quick-edit`, data).then(res => res.data),
   
   // Sell Price
   updateBulkSellPrices: (items: Array<{ medicine_id: number; sell_price: number | null; reorder_level?: number | null; max_stock_level?: number | null }>) =>
@@ -399,13 +803,15 @@ export const api = {
   getDistributors: () => apiClient.get('/distributors').then(res => res.data),
   getPendingReturns: (distributorId: number) => apiClient.get(`/distributors/${distributorId}/pending-returns`).then(res => res.data),
   getLastPurchase: (name: string, medicineId?: number, distributorId?: number) => {
-    const params: any = { name };
+    const params: { name: string; medicine_id?: number; distributor_id?: number } = { name };
     if (medicineId) params.medicine_id = medicineId;
     if (distributorId) params.distributor_id = distributorId;
     return apiClient.get('/purchases/last-purchase', { params }).then(res => res.data);
   },
   batchLastPurchase: (medicines: Array<{name: string}>, distributorId?: number) =>
     apiClient.post('/purchases/batch-last-purchase', { medicines, distributor_id: distributorId }).then(res => res.data),
+  matchPurchaseItems: (names: string[], distributorId?: number | null) =>
+    apiClient.post('/purchases/match-items', { names, distributor_id: distributorId }).then(res => res.data),
   catalogSearch: (q: string) => apiClient.get('/inventory/catalog-search', { params: { q } }).then(res => res.data),
   getBatchInfo: (medicineId: number, batchNo: string) => apiClient.get('/inventory/batch-info', { params: { medicine_id: medicineId, batch_no: batchNo } }).then(res => res.data),
   createMedicineAlias: (aliasName: string, medicineId: number) => apiClient.post('/inventory/medicines/alias', { alias_name: aliasName, medicine_id: medicineId }).then(res => res.data),
@@ -431,43 +837,43 @@ export const api = {
     apiClient.post('/migration/analyze-zip', { fileName }).then(r => r.data),
   analyzeExcelFile: (fileName: string, sheetIndex?: number, skipLines?: number) =>
     apiClient.post('/migration/analyze-excel', { fileName, sheetIndex, skipLines }).then(r => r.data),
-  preMigrationAnalyze: (fileName: string, skipLines: number = 0, sheetIndex: number = 0, userMapping?: any) =>
+  preMigrationAnalyze: (fileName: string, skipLines: number = 0, sheetIndex: number = 0, userMapping?: unknown) =>
     apiClient.post('/migration/pre-migration-analyze', { fileName, skipLines, sheetIndex, userMapping }).then(r => r.data),
-  preMigrationSimulate: (fileName: string, dataType: string, mapping: any, skipLines: number = 0, sheetIndex: number = 0, filters?: any) =>
+  preMigrationSimulate: (fileName: string, dataType: string, mapping: unknown, skipLines: number = 0, sheetIndex: number = 0, filters?: unknown) =>
     apiClient.post('/migration/pre-migration-simulate', { fileName, dataType, mapping, skipLines, sheetIndex, filters }).then(r => r.data),
-  runMigration: (fileName: string, dataType: string, mapping: any, skipLines: number = 0, sheetIndex: number = 0, filters?: any, medicineActions?: any) => 
+  runMigration: (fileName: string, dataType: string, mapping: unknown, skipLines: number = 0, sheetIndex: number = 0, filters?: unknown, medicineActions?: unknown) =>
     apiClient.post('/migration/run', { fileName, dataType, mapping, skipLines, sheetIndex, filters, medicineActions }).then(r => r.data),
-  runMigrationQueue: (tasks: any[]) =>
+  runMigrationQueue: (tasks: readonly Record<string, unknown>[]) =>
     apiClient.post('/migration/run', { tasks }).then(r => r.data),
   getMigrationStatus: () => apiClient.get('/migration/status').then(r => r.data),
   getMigrationSummary: () => apiClient.get('/migration/summary').then(r => r.data),
   getStagingSummary: () => apiClient.get('/migration/staging/summary').then(r => r.data),
   getStagingInventory: () => apiClient.get('/migration/staging/inventory').then(r => r.data),
-  updateStagingInventory: (id: number, data: any) => apiClient.put(`/migration/staging/inventory/${id}`, data).then(r => r.data),
+  updateStagingInventory: (id: number, data: Record<string, unknown>) => apiClient.put(`/migration/staging/inventory/${id}`, data).then(r => r.data),
   deleteStagingInventory: (id: number) => apiClient.delete(`/migration/staging/inventory/${id}`).then(r => r.data),
   getStagingSales: () => apiClient.get('/migration/staging/sales').then(r => r.data),
-  updateStagingSales: (id: number, data: any) => apiClient.put(`/migration/staging/sales/${id}`, data).then(r => r.data),
+  updateStagingSales: (id: number, data: Record<string, unknown>) => apiClient.put(`/migration/staging/sales/${id}`, data).then(r => r.data),
   deleteStagingSales: (id: number) => apiClient.delete(`/migration/staging/sales/${id}`).then(r => r.data),
   getStagingPurchases: () => apiClient.get('/migration/staging/purchases').then(r => r.data),
-  updateStagingPurchases: (id: number, data: any) => apiClient.put(`/migration/staging/purchases/${id}`, data).then(r => r.data),
+  updateStagingPurchases: (id: number, data: Record<string, unknown>) => apiClient.put(`/migration/staging/purchases/${id}`, data).then(r => r.data),
   deleteStagingPurchases: (id: number) => apiClient.delete(`/migration/staging/purchases/${id}`).then(r => r.data),
   getStagingReturns: () => apiClient.get('/migration/staging/returns').then(r => r.data),
-  updateStagingReturns: (id: number, data: any) => apiClient.put(`/migration/staging/returns/${id}`, data).then(r => r.data),
+  updateStagingReturns: (id: number, data: Record<string, unknown>) => apiClient.put(`/migration/staging/returns/${id}`, data).then(r => r.data),
   deleteStagingReturns: (id: number) => apiClient.delete(`/migration/staging/returns/${id}`).then(r => r.data),
   getStagingSaleItems: (id: number) => apiClient.get(`/migration/staging/sales/${id}/items`).then(r => r.data),
-  updateStagingSaleItem: (invoiceId: number, itemId: number, data: any) => apiClient.put(`/migration/staging/sales/${invoiceId}/items/${itemId}`, data).then(r => r.data),
+  updateStagingSaleItem: (invoiceId: number, itemId: number, data: Record<string, unknown>) => apiClient.put(`/migration/staging/sales/${invoiceId}/items/${itemId}`, data).then(r => r.data),
   deleteStagingSaleItem: (invoiceId: number, itemId: number) => apiClient.delete(`/migration/staging/sales/${invoiceId}/items/${itemId}`).then(r => r.data),
-  addStagingSaleItem: (invoiceId: number, data: any) => apiClient.post(`/migration/staging/sales/${invoiceId}/items`, data).then(r => r.data),
+  addStagingSaleItem: (invoiceId: number, data: Record<string, unknown>) => apiClient.post(`/migration/staging/sales/${invoiceId}/items`, data).then(r => r.data),
 
   getStagingPurchaseItems: (id: number) => apiClient.get(`/migration/staging/purchases/${id}/items`).then(r => r.data),
-  updateStagingPurchaseItem: (purchaseId: number, itemId: number, data: any) => apiClient.put(`/migration/staging/purchases/${purchaseId}/items/${itemId}`, data).then(r => r.data),
+  updateStagingPurchaseItem: (purchaseId: number, itemId: number, data: Record<string, unknown>) => apiClient.put(`/migration/staging/purchases/${purchaseId}/items/${itemId}`, data).then(r => r.data),
   deleteStagingPurchaseItem: (purchaseId: number, itemId: number) => apiClient.delete(`/migration/staging/purchases/${purchaseId}/items/${itemId}`).then(r => r.data),
-  addStagingPurchaseItem: (purchaseId: number, data: any) => apiClient.post(`/migration/staging/purchases/${purchaseId}/items`, data).then(r => r.data),
+  addStagingPurchaseItem: (purchaseId: number, data: Record<string, unknown>) => apiClient.post(`/migration/staging/purchases/${purchaseId}/items`, data).then(r => r.data),
 
   getStagingReturnItems: (id: number) => apiClient.get(`/migration/staging/returns/${id}/items`).then(r => r.data),
-  updateStagingReturnItem: (returnId: number, itemId: number, data: any) => apiClient.put(`/migration/staging/returns/${returnId}/items/${itemId}`, data).then(r => r.data),
+  updateStagingReturnItem: (returnId: number, itemId: number, data: Record<string, unknown>) => apiClient.put(`/migration/staging/returns/${returnId}/items/${itemId}`, data).then(r => r.data),
   deleteStagingReturnItem: (returnId: number, itemId: number) => apiClient.delete(`/migration/staging/returns/${returnId}/items/${itemId}`).then(r => r.data),
-  addStagingReturnItem: (returnId: number, data: any) => apiClient.post(`/migration/staging/returns/${returnId}/items`, data).then(r => r.data),
+  addStagingReturnItem: (returnId: number, data: Record<string, unknown>) => apiClient.post(`/migration/staging/returns/${returnId}/items`, data).then(r => r.data),
   getStagingErrors: () => apiClient.get('/migration/staging/errors').then(r => r.data),
   getStagingAudits: (params?: { limit?: number; offset?: number }) => apiClient.get('/migration/staging/audits', { params }).then(r => r.data),
   getStagingAuditSummary: () => apiClient.get('/migration/staging/audit').then(r => r.data),
@@ -484,7 +890,7 @@ export const api = {
   createProject: (name: string) => apiClient.post('/migration/projects', { name }).then(r => r.data),
   deleteProject: (id: number) => apiClient.delete(`/migration/projects/${id}`).then(r => r.data),
   getTemplates: () => apiClient.get('/migration/templates').then(r => r.data),
-  saveTemplate: (name: string, moduleType: string, mappings: any) => apiClient.post('/migration/templates', { name, moduleType, mappings }).then(r => r.data),
+  saveTemplate: (name: string, moduleType: string, mappings: Record<string, unknown>) => apiClient.post('/migration/templates', { name, moduleType, mappings }).then(r => r.data),
   getStagingConflicts: () => apiClient.get('/migration/staging/conflicts').then(r => r.data),
   resolveStagingConflict: (conflictId: number, resolution: string) => apiClient.post('/migration/staging/resolve', { conflictId, resolution }).then(r => r.data),
   getSnapshots: () => apiClient.get('/migration/snapshots').then(r => r.data),
@@ -506,7 +912,7 @@ export const api = {
   getEmailAttachments: () => apiClient.get('/email/attachments').then(res => res.data),
   getEmailAttachmentsById: (emailId: number) => apiClient.get(`/email/${emailId}/attachments`).then(res => res.data),
   parseAttachment: (filename: string, importData: boolean = true) => apiClient.post('/email/attachments/parse', { filename, importData }).then(res => res.data),
-  importManualEmail: (data: any) => apiClient.post('/email/import-manual', data).then(res => res.data),
+  importManualEmail: (data: ManualEmailPayload) => apiClient.post('/email/import-manual', data).then(res => res.data),
   markEmailSeen: (emailId: number) => apiClient.post(`/email/${emailId}/seen`).then(res => res.data),
   markEmailSaved: (uid: number) => apiClient.post(`/email/${uid}/saved`).then(res => res.data),
   triggerEmailSync: () => apiClient.post('/email/sync').then(res => res.data),
@@ -565,8 +971,8 @@ export const api = {
     packagingFilter?: string;
     distributorFilter?: string;
   }) => apiClient.post('/medicines/bulk-delete', data).then(res => res.data),
-  createMedicine: (data: any) => apiClient.post('/medicines', data).then(res => res.data),
-  quickEditMedicine: (id: number, data: any) => apiClient.put(`/medicines/${id}/quick-edit`, data).then(res => res.data),
+  createMedicine: (data: QuickEditMedicinePayload) => apiClient.post('/medicines', data).then(res => res.data),
+  quickEditMedicine: (id: number, data: QuickEditMedicinePayload) => apiClient.put(`/medicines/${id}/quick-edit`, data).then(res => res.data),
   patchAllowLooseSale: (id: number, allow_loose_sale: number | boolean) => apiClient.patch(`/medicines/${id}/allow-loose-sale`, { allow_loose_sale: allow_loose_sale ? 1 : 0 }).then(res => res.data),
 
   getMedicinePriceHistory: (name: string) => apiClient.get('/purchases/price-history', { params: { name } }).then(res => res.data),
@@ -606,7 +1012,7 @@ export const api = {
   }) => apiClient.post('/pharmarack/delete-cart-item', data).then(res => res.data),
   getPharmarackCart: () => apiClient.get('/pharmarack/cart').then(res => res.data),
   getStartupSyncStatus: () => apiClient.get<{ success: boolean; cartLoaded: boolean; syncPending: boolean; elapsedMs: number; timedOut: boolean }>('/pharmarack/startup-sync-status').then(res => res.data),
-  sendManualCartNotification: (data: { storeId: number; storeName: string; deliveryPersons: any[]; items: any[] }) =>
+  sendManualCartNotification: (data: { storeId: number; storeName: string; deliveryPersons: readonly unknown[]; items: readonly unknown[] }) =>
     apiClient.post('/pharmarack/cart/notify-manual', data).then(res => res.data),
   getPharmarackDistributors: () => apiClient.get('/pharmarack/distributors').then(res => res.data),
   getPharmarackDistributorMappings: () => apiClient.get<{ success: boolean; mappings: { store_name: string; distributor_id: number; phone?: string; distributor_name?: string }[] }>('/pharmarack/distributor-mappings').then(res => res.data),
@@ -668,22 +1074,22 @@ export const api = {
   getReturnItems: (id: number) => apiClient.get(`/returns/${id}/items`).then(res => res.data),
   resolveReturnMissing: (id: number) => apiClient.get(`/returns/${id}/resolve-missing`).then(res => res.data),
   deleteReturn: (id: number) => apiClient.delete(`/returns/${id}`).then(res => res.data),
-  updateReturn: (id: number, data: { items: any[]; total_amount: number }) => apiClient.put(`/returns/${id}`, data).then(res => res.data),
+  updateReturn: (id: number, data: { items: Array<Record<string, unknown>>; total_amount: number }) => apiClient.put(`/returns/${id}`, data).then(res => res.data),
   createReturn: (data: ReturnPayload) => apiClient.post('/returns', data).then(res => res.data),
   getNearExpiry: (months: number = 6) => apiClient.get('/returns/near-expiry', { params: { months } }).then(res => res.data),
   lookupPurchases: (name: string, batch?: string) => {
-    const params: any = { name };
+    const params: { name: string; batch?: string } = { name };
     if (batch) params.batch = batch;
     return apiClient.get('/returns/lookup-purchases', { params }).then(res => res.data);
   },
-  processReturns: (items: any[], lossPercentage?: number) => apiClient.post('/returns/process-returns', { items, loss_percentage: lossPercentage }).then(res => res.data),
-  exportReturnsPDF: (items: any[]) => apiClient.post('/returns/export-pdf-report', { items }, { responseType: 'blob' }).then(res => res.data),
+  processReturns: (items: SupplierReturnProcessItem[], lossPercentage?: number) => apiClient.post('/returns/process-returns', { items, loss_percentage: lossPercentage }).then(res => res.data),
+  exportReturnsPDF: (items: readonly Record<string, unknown>[]) => apiClient.post('/returns/export-pdf-report', { items }, { responseType: 'blob' }).then(res => res.data),
   
   // Expiry Return Reviews (Pharmacist Approval Gate)
   getExpiryReviews: (params?: { status?: string; search?: string; date_from?: string; date_to?: string }) =>
     apiClient.get<{
       success: boolean;
-      reviews: any[];
+      reviews: ExpiryReviewRecord[];
       stats: {
         pendingCount: number;
         approvedCount: number;
@@ -709,7 +1115,7 @@ export const api = {
   bulkApproveExpiryReviews: (ids: number[], lossPercentage: number) =>
     apiClient.post<{ success: boolean; message: string; approvedCount: number; returnNos: string[] }>('/returns/expiry-reviews/bulk-approve', { ids, loss_percentage: lossPercentage }).then(res => res.data),
   getExpiryReviewsAuditHistory: () =>
-    apiClient.get<{ success: boolean; logs: any[] }>('/returns/expiry-reviews/audit-history').then(res => res.data),
+    apiClient.get<{ success: boolean; logs: ExpiryReviewAuditLog[] }>('/returns/expiry-reviews/audit-history').then(res => res.data),
   
   // Purchase PDF
   getPurchasePDF: (id: number) => apiClient.get(`/purchases/${id}/pdf`, { responseType: 'blob' }).then(res => res.data),
@@ -721,7 +1127,7 @@ export const api = {
   // Orders & Special Requests
   getOrders: () => apiClient.get<SpecialOrder[]>('/orders').then(res => res.data),
   createOrder: (data: Partial<SpecialOrder>) => apiClient.post('/orders', data).then(res => res.data),
-  createBatchOrders: (data: { items: any[]; requester: string; phone: string; priority?: string; advance_payment?: number; customer_id?: number; language?: string; sendWhatsApp?: boolean }) =>
+  createBatchOrders: (data: { items: readonly unknown[]; requester: string; phone: string; priority?: string; advance_payment?: number; customer_id?: number; language?: string; sendWhatsApp?: boolean }) =>
     apiClient.post('/orders/batch', data).then(res => res.data),
   updateOrder: (id: number, data: Partial<SpecialOrder>) => apiClient.put(`/orders/${id}`, data).then(res => res.data),
   updateOrderStatus: (id: number, status: string) => apiClient.post(`/orders/${id}/status`, { status }).then(res => res.data),
@@ -749,8 +1155,8 @@ export const api = {
 
   // Dispatch Orders
   getDispatchOrders: () => apiClient.get('/dispatch/orders').then(res => res.data),
-  createDispatchOrder: (data: any) => apiClient.post('/dispatch/orders', data).then(res => res.data),
-  updateDispatchOrder: (id: number, data: any) => apiClient.put(`/dispatch/orders/${id}`, data).then(res => res.data),
+  createDispatchOrder: (data: DispatchOrderPayload) => apiClient.post('/dispatch/orders', data).then(res => res.data),
+  updateDispatchOrder: (id: number, data: DispatchOrderPayload) => apiClient.put(`/dispatch/orders/${id}`, data).then(res => res.data),
   deleteDispatchOrder: (id: number) => apiClient.delete(`/dispatch/orders/${id}`).then(res => res.data),
   getDeliveryBoys: () => apiClient.get('/dispatch/delivery-boys').then(res => res.data),
   addDeliveryBoy: (data: { name: string; whatsapp_number?: string; telegram_chat_id?: string; is_active?: number }) =>
@@ -759,8 +1165,8 @@ export const api = {
     apiClient.put(`/dispatch/delivery-boys/${id}`, data).then(res => res.data),
   deleteDeliveryBoy: (id: number) => apiClient.delete(`/dispatch/delivery-boys/${id}`).then(res => res.data),
   getDeliveryBoyMessageDates: () => apiClient.get<{ success: boolean; dates: string[] }>('/dispatch/messages/dates').then(res => res.data),
-  getDeliveryBoyMessages: (date?: string) => apiClient.get<{ success: boolean; date: string; messages: any[] }>('/dispatch/messages', { params: { date } }).then(res => res.data),
-  getTodayDistributorReminders: () => apiClient.get<{ success: boolean; auto_dispatch_enabled?: boolean; window_start?: string; window_end?: string; afternoon_enabled?: boolean; afternoon_time?: string; is_recent_fallback?: boolean; recent_date?: string | null; reminders: any[] }>('/dispatch/distributor-reminders/today').then(res => res.data),
+  getDeliveryBoyMessages: (date?: string) => apiClient.get<{ success: boolean; date: string; messages: AutomationNotification[] }>('/dispatch/messages', { params: { date } }).then(res => res.data),
+  getTodayDistributorReminders: () => apiClient.get<{ success: boolean; auto_dispatch_enabled?: boolean; window_start?: string; window_end?: string; afternoon_enabled?: boolean; afternoon_time?: string; is_recent_fallback?: boolean; recent_date?: string | null; reminders: DistributorDispatchReminder[] }>('/dispatch/distributor-reminders/today').then(res => res.data),
   toggleDistributorAutoRemind: (id: number, auto_remind: boolean) => apiClient.post('/dispatch/distributor-reminders/toggle-auto', { id, auto_remind }).then(res => res.data),
   updateDistributorReminderStatus: (id: number, data: { status?: string; delivery_boy_id?: number | null; distributor_name?: string; distributor_phone?: string }) => apiClient.put(`/dispatch/distributor-reminders/${id}/status`, data).then(res => res.data),
   sendDistributorReminderNow: (id: number, custom_message?: string) => apiClient.post(`/dispatch/distributor-reminders/${id}/send-now`, { custom_message }).then(res => res.data),
@@ -784,14 +1190,14 @@ export const api = {
   },
   getCatalogJobs: () => apiClient.get('/jobs').then(res => res.data),
   getCatalogJobStatus: (id: number) => apiClient.get(`/catalog/job/${id}`).then(res => res.data),
-  importCatalog: (medicines: any[]) => apiClient.post('/catalog/import', { medicines }).then(res => res.data),
-  importCatalogJob: (id: number, mappings?: any, filters?: any) => apiClient.post(`/catalog/import-job/${id}`, { mappings, filters }).then(res => res.data),
+  importCatalog: (medicines: readonly Record<string, unknown>[]) => apiClient.post('/catalog/import', { medicines }).then(res => res.data),
+  importCatalogJob: (id: number, mappings?: Record<string, unknown>, filters?: Record<string, unknown>) => apiClient.post(`/catalog/import-job/${id}`, { mappings, filters }).then(res => res.data),
   pauseCatalogJob: (id: number) => apiClient.post(`/catalog/job/${id}/pause`).then(res => res.data),
   resumeCatalogJob: (id: number) => apiClient.post(`/catalog/job/${id}/resume`).then(res => res.data),
   deleteCatalogJob: (id: number) => apiClient.delete(`/catalog/job/${id}`).then(res => res.data),
   getCatalogJobReviews: (id: number) => apiClient.get(`/catalog/job/${id}/reviews`).then(res => res.data),
   getPendingWhatsappReviews: () => apiClient.get('/catalog/reviews/pending?source=whatsapp').then(res => res.data),
-  approveCatalogReview: (id: number, approvedData: any) => apiClient.post(`/catalog/review/${id}/approve`, { approvedData }).then(res => res.data),
+  approveCatalogReview: (id: number, approvedData: CatalogReviewApproval) => apiClient.post(`/catalog/review/${id}/approve`, { approvedData }).then(res => res.data),
   rejectCatalogReview: (id: number) => apiClient.post(`/catalog/review/${id}/reject`).then(res => res.data),
   enrichCatalogReview: (id: number) => apiClient.post(`/catalog/review/${id}/enrich`).then(res => res.data),
   getGoogleSearchStatus: () => apiClient.get(`/catalog/search-status`).then(res => res.data),
@@ -801,7 +1207,7 @@ export const api = {
   getReconciliationPreview: (emailUid: number) => apiClient.get(`/purchases/reconciliation/preview/${emailUid}`).then(res => res.data),
   reissueOrder: (emailUid: number) => apiClient.post('/purchases/reconciliation/reissue', { email_uid: emailUid }).then(res => res.data),
   resolveOrderManually: (emailUid: number) => apiClient.post('/purchases/reconciliation/resolve', { email_uid: emailUid }).then(res => res.data),
-  saveDistributorMapping: (data: { distributor_id?: number; distributor_name?: string; mapping_config: any }) => apiClient.post('/purchases/reconciliation/learn-mapping', data).then(res => res.data),
+  saveDistributorMapping: (data: { distributor_id?: number; distributor_name?: string; mapping_config: Record<string, unknown> }) => apiClient.post('/purchases/reconciliation/learn-mapping', data).then(res => res.data),
   getIgnoredWords: () => apiClient.get('/purchases/ignored-words').then(res => res.data),
   addIgnoredWord: (word: string, source = 'recon') => apiClient.post('/purchases/ignored-words', { word, source }).then(res => res.data),
   removeIgnoredWord: (id: number) => apiClient.delete(`/purchases/ignored-words/${id}`).then(res => res.data),
@@ -810,11 +1216,11 @@ export const api = {
 
   // Staged / Offline Sync Review
   getStagedSales: (all?: boolean) => apiClient.get(all ? '/sales/staged?all=true' : '/sales/staged').then(res => res.data),
-  createStagedSale: (data: { patient_name: string; patient_phone?: string; discount?: number; items: any[] }) => apiClient.post('/sales/staged', data).then(res => res.data),
-  approveStagedSale: (id: number, data: any) => apiClient.post(`/sales/staged/${id}/approve`, data).then(res => res.data),
+  createStagedSale: (data: StagedSaleCreatePayload) => apiClient.post('/sales/staged', data).then(res => res.data),
+  approveStagedSale: (id: number, data: StagedSaleApprovalPayload) => apiClient.post(`/sales/staged/${id}/approve`, data).then(res => res.data),
   rejectStagedSale: (id: number) => apiClient.post(`/sales/staged/${id}/reject`).then(res => res.data),
   getStagedPurchases: () => apiClient.get('/purchases/staged').then(res => res.data),
-  approveStagedPurchase: (id: number, data: any) => apiClient.post(`/purchases/staged/${id}/approve`, data).then(res => res.data),
+  approveStagedPurchase: (id: number, data: StagedPurchaseApprovalPayload) => apiClient.post(`/purchases/staged/${id}/approve`, data).then(res => res.data),
   rejectStagedPurchase: (id: number) => apiClient.post(`/purchases/staged/${id}/reject`).then(res => res.data),
   getConnectionInfo: () => apiClient.get('/notifications/connection-info').then(res => res.data),
   getApkDownloadUrl: () => `${apiClient.defaults.baseURL || '/api'}/notifications/download-apk`,
@@ -847,12 +1253,12 @@ export const api = {
   manualNotification: (id: number) => apiClient.post(`/automation/notifications/${id}/manual`).then(res => res.data),
 
   // Investigation Center
-  searchInvestigation: (params: any) => apiClient.get('/investigation/search', { params }).then(res => res.data),
-  getInvestigationTimeline: (params: any) => apiClient.get('/investigation/timeline', { params }).then(res => res.data),
+  searchInvestigation: (params: InvestigationSearchParams) => apiClient.get('/investigation/search', { params }).then(res => res.data),
+  getInvestigationTimeline: (params: InvestigationSearchParams) => apiClient.get('/investigation/timeline', { params }).then(res => res.data),
   getInvestigationDetails: (inventoryId: number) => apiClient.get(`/investigation/details/${inventoryId}`).then(res => res.data),
-  updateInvestigationInventory: (inventoryId: number, data: any) => apiClient.put(`/investigation/inventory/${inventoryId}`, data).then(res => res.data),
-  updateInvestigationSaleBill: (invoiceId: number, data: any) => apiClient.put(`/investigation/sales/${invoiceId}`, data).then(res => res.data),
-  updateInvestigationPurchaseBill: (purchaseId: number, data: any) => apiClient.put(`/investigation/purchases/${purchaseId}`, data).then(res => res.data),
+  updateInvestigationInventory: (inventoryId: number, data: InvestigationInventoryCorrection) => apiClient.put(`/investigation/inventory/${inventoryId}`, data).then(res => res.data),
+  updateInvestigationSaleBill: (invoiceId: number, data: { items: Array<Record<string, unknown>>; discount?: number }) => apiClient.put(`/investigation/sales/${invoiceId}`, data).then(res => res.data),
+  updateInvestigationPurchaseBill: (purchaseId: number, data: { items: Array<Record<string, unknown>> }) => apiClient.put(`/investigation/purchases/${purchaseId}`, data).then(res => res.data),
   getInvestigationAuditLogs: (inventoryId: number) => apiClient.get(`/investigation/audit-logs/${inventoryId}`).then(res => res.data),
   
   // Online enrichment & search
@@ -869,8 +1275,8 @@ export const api = {
   exportReportsPDF: (params: { type: string; fromDate?: string; toDate?: string; days?: number; split?: boolean }) => apiClient.get('/reports/export-pdf', { params, responseType: 'blob' }).then(res => res.data),
   exportReportsExcel: (params: { type: string; fromDate?: string; toDate?: string; days?: number; split?: boolean }) => apiClient.get('/reports/export-csv', { params, responseType: 'blob' }).then(res => res.data),
   exportReportsCSV: (params: { type: string; fromDate?: string; toDate?: string; days?: number; split?: boolean }) => apiClient.get('/reports/export-csv', { params, responseType: 'blob' }).then(res => res.data),
-  getNonMovingReportData: (params: { days: number }) => apiClient.get<{ success: boolean; periodDays: number; count: number; items: any[] }>('/reports/non-moving/data', { params }).then(res => res.data),
-  getProductTrace: (params: { q: string }) => apiClient.get<{ purchases: any[]; sales: any[] }>('/reports/product-trace', { params }).then(res => res.data),
+  getNonMovingReportData: (params: { days: number }) => apiClient.get<{ success: boolean; periodDays: number; count: number; items: NonMovingReportItem[] }>('/reports/non-moving/data', { params }).then(res => res.data),
+  getProductTrace: (params: { q: string }) => apiClient.get<{ purchases: ProductTracePurchaseRow[]; sales: ProductTraceSaleRow[] }>('/reports/product-trace', { params }).then(res => res.data),
 
   // Database Force Unlock & Master Catalog Seeding
   unlockDatabase: () => apiClient.post('/utilities/db/unlock').then(res => res.data),
@@ -879,9 +1285,9 @@ export const api = {
 
   // Pharmarack Sent Orders History
   getPharmarackSentDates: () => apiClient.get<{ success: boolean; dates: string[] }>('/pharmarack/sent-orders/dates').then(res => res.data),
-  getPharmarackSentOrders: (date?: string) => apiClient.get<{ success: boolean; date: string; orders: any[] }>('/pharmarack/sent-orders', { params: { date } }).then(res => res.data),
-  getPharmarackLatestSentMap: () => apiClient.get<{ success: boolean; sentMap: Record<string, { storeId: number | null; storeName: string; placedAt: number; items: any[] }> }>('/pharmarack/sent-orders/latest-map').then(res => res.data),
-  logPharmarackPlacedOrder: (data: { store_id?: number | null; store_name: string; items: any[]; delivery_persons?: any[] }) => apiClient.post('/pharmarack/log-placed-order', data).then(res => res.data),
+  getPharmarackSentOrders: (date?: string) => apiClient.get<{ success: boolean; date: string; orders: PharmarackSentOrder[] }>('/pharmarack/sent-orders', { params: { date } }).then(res => res.data),
+  getPharmarackLatestSentMap: () => apiClient.get<{ success: boolean; sentMap: Record<string, PharmarackLatestSentMapEntry> }>('/pharmarack/sent-orders/latest-map').then(res => res.data),
+  logPharmarackPlacedOrder: (data: { store_id?: number | null; store_name: string; items: readonly unknown[]; delivery_persons?: readonly unknown[] }) => apiClient.post('/pharmarack/log-placed-order', data).then(res => res.data),
 
   // System Services Live Health Status
   getServicesStatus: () => apiClient.get<{
@@ -902,32 +1308,19 @@ export const api = {
   triggerManualReauth: () => apiClient.post<{ success: boolean; message: string }>('/pharmarack/trigger-reauth').then(res => res.data),
 
   // Resilient WhatsApp Queue & Live Control
-  getWhatsAppQueueStatus: () => apiClient.get<{
-    isProcessing: boolean;
-    isPaused?: boolean;
-    isOnline: boolean;
-    nextDispatchCountdownMs: number;
-    nextDispatchTimestamp: number | null;
-    currentPacingMinMs: number;
-    currentPacingMaxMs: number;
-    currentSendingItemId: number | null;
-    activeTargetName?: string | null;
-    counts: { pending: number; sending: number; sent: number; failed_offline: number; failed_perm: number };
-    delaySettings?: { whatsapp_delay_credit_bill: number; whatsapp_delay_distributor: number; whatsapp_delay_delivery_boy: number };
-    recentItems: any[];
-  }>('/whatsapp/queue/status').then(res => {
+  getWhatsAppQueueStatus: () => apiClient.get<WhatsAppQueueStatus>('/whatsapp/queue/status').then(res => {
     waQueueStatusCache = { data: res.data, at: Date.now() };
     return res.data;
   }),
   enqueueDistributorCollection: (data: { orderIds: number[]; deliveryBoyPhone: string; deliveryBoyName?: string }) => apiClient.post<{ success: boolean; enqueuedCount: number; queueIds: number[]; message: string }>('/whatsapp/queue/enqueue-distributor-collection', data).then(res => res.data),
-  enqueuePharmarackBatch: (data: { orders: { storeName: string; storeId: number; phone: string; message: string; lineTotal?: number; items: any[] }[]; deliveryBoyPhone?: string; deliveryBoyName?: string }) => apiClient.post<{ success: boolean; enqueuedCount: number; queueIds: number[]; message: string }>('/whatsapp/queue/enqueue-pharmarack-batch', data).then(res => res.data),
+  enqueuePharmarackBatch: (data: { orders: { storeName: string; storeId: number; phone: string; message: string; lineTotal?: number; items: readonly unknown[] }[]; deliveryBoyPhone?: string; deliveryBoyName?: string }) => apiClient.post<{ success: boolean; enqueuedCount: number; queueIds: number[]; message: string }>('/whatsapp/queue/enqueue-pharmarack-batch', data).then(res => res.data),
   enqueueSingleWhatsApp: (data: { number: string; message: string; type?: string; targetName?: string; explicitScheduledAt?: number }) => apiClient.post<{ success: boolean; queueId: number; message: string }>('/whatsapp/queue/enqueue-single', data).then(res => res.data),
   flushWhatsAppQueue: () => apiClient.post<{ success: boolean; message: string }>('/whatsapp/queue/flush').then(res => res.data),
-  flushNextWhatsAppQueueItem: () => apiClient.post<{ success: boolean; forced: boolean; message: string; state: any }>('/whatsapp/queue/flush-next').then(res => res.data),
+  flushNextWhatsAppQueueItem: () => apiClient.post<{ success: boolean; forced: boolean; message: string; state: WhatsAppQueueStatus | null }>('/whatsapp/queue/flush-next').then(res => res.data),
   retryFailedWhatsAppQueue: () => apiClient.post<{ success: boolean; retriedCount: number; message: string }>('/whatsapp/queue/retry-failed').then(res => res.data),
   resendWhatsAppQueueItem: (id: number) => apiClient.post<{ success: boolean; queueId: number; message: string }>(`/whatsapp/queue/items/${id}/resend`).then(res => res.data),
   updateWhatsAppPacingConfig: (minSec: number, maxSec: number) => apiClient.post<{ success: boolean; minSec?: number; maxSec?: number; preset?: string; message: string }>('/whatsapp/queue/pacing', { minSec, maxSec }).then(res => res.data),
-  setWhatsAppQueuePacingPreset: (preset: 'turbo' | 'fast' | 'safe') => apiClient.post<{ success: boolean; preset: string; minMs: number; maxMs: number; message: string; state: any }>('/whatsapp/queue/pacing', { preset }).then(res => res.data),
+  setWhatsAppQueuePacingPreset: (preset: 'turbo' | 'fast' | 'safe') => apiClient.post<{ success: boolean; preset: string; minMs: number; maxMs: number; message: string; state: WhatsAppQueueStatus | null }>('/whatsapp/queue/pacing', { preset }).then(res => res.data),
   updateWhatsAppQueueItem: (data: { id: number; number: string; message?: string }) => apiClient.put<{ success: boolean; message: string }>('/whatsapp/queue/update-item', data).then(res => res.data),
   deleteWhatsAppQueueItem: (id: number) => apiClient.delete<{ success: boolean; deleted: boolean; message: string }>(`/whatsapp/queue/item/${id}`).then(res => res.data),
   clearFailedWhatsAppQueue: () => apiClient.post<{ success: boolean; clearedCount: number; message: string }>('/whatsapp/queue/clear-failed').then(res => res.data),
@@ -939,23 +1332,23 @@ export const api = {
 
 
   // Unified Contacts Management API
-  getContacts: (type?: string, search?: string) => apiClient.get<{ success: boolean; count: number; data: any[] }>('/contacts', { params: { type, search } }).then(res => res.data),
-  saveContact: (data: { name: string; type: string; phone?: string; email?: string; address?: string; gstin?: string; notes?: string; alias_names?: string; is_active?: number }) => apiClient.post<{ success: boolean; message: string; data: any }>('/contacts', data).then(res => res.data),
-  updateContact: (id: number, data: Partial<{ name: string; type: string; phone: string; email: string; address: string; gstin: string; notes: string; alias_names: string; is_active: number }>) => apiClient.put<{ success: boolean; message: string; data: any }>(`/contacts/${id}`, data).then(res => res.data),
+  getContacts: (type?: string, search?: string) => apiClient.get<{ success: boolean; count: number; data: ContactRecord[] }>('/contacts', { params: { type, search } }).then(res => res.data),
+  saveContact: (data: { name: string; type: string; phone?: string; email?: string; address?: string; gstin?: string; notes?: string; alias_names?: string; is_active?: number }) => apiClient.post<{ success: boolean; message: string; data: ContactRecord }>('/contacts', data).then(res => res.data),
+  updateContact: (id: number, data: Partial<{ name: string; type: string; phone: string; email: string; address: string; gstin: string; notes: string; alias_names: string; is_active: number }>) => apiClient.put<{ success: boolean; message: string; data: ContactRecord }>(`/contacts/${id}`, data).then(res => res.data),
   deleteContact: (id: number) => apiClient.delete<{ success: boolean; message: string }>(`/contacts/${id}`).then(res => res.data),
 
   // Storage Locations Management API
-  getStorageLocations: () => apiClient.get<any[]>('/settings/storage-locations').then(res => res.data),
-  saveStorageLocation: (data: { name: string; code?: string; type?: string; description?: string; is_default?: boolean; is_active?: boolean }) => apiClient.post<{ success: boolean; data: any }>('/settings/storage-locations', data).then(res => res.data),
-  updateStorageLocation: (id: number, data: Partial<{ name: string; code: string; type: string; description: string; is_default: boolean; is_active: boolean }>) => apiClient.put<{ success: boolean; data: any }>(`/settings/storage-locations/${id}`, data).then(res => res.data),
+  getStorageLocations: () => apiClient.get<StorageLocation[]>('/settings/storage-locations').then(res => res.data),
+  saveStorageLocation: (data: { name: string; code?: string; type?: string; description?: string; is_default?: boolean; is_active?: boolean }) => apiClient.post<{ success: boolean; data: StorageLocation }>('/settings/storage-locations', data).then(res => res.data),
+  updateStorageLocation: (id: number, data: Partial<{ name: string; code: string; type: string; description: string; is_default: boolean; is_active: boolean }>) => apiClient.put<{ success: boolean; data: StorageLocation }>(`/settings/storage-locations/${id}`, data).then(res => res.data),
   // Registered Mobile Devices API
-  getRegisteredDevices: () => apiClient.get<{ success: boolean; devices: any[] }>('/settings/registered-devices').then(res => res.data),
+  getRegisteredDevices: () => apiClient.get<{ success: boolean; devices: RegisteredDevice[] }>('/settings/registered-devices').then(res => res.data),
   renameDevice: (token: string, deviceName: string) => apiClient.put<{ success: boolean; message: string }>('/settings/registered-devices/rename', { token, device_name: deviceName }).then(res => res.data),
   revokeDevice: (token: string) => apiClient.delete<{ success: boolean; message: string }>(`/settings/registered-devices/${token}`).then(res => res.data),
   getWhatsAppStatus: () => apiClient.get<{ isReady: boolean; qrUrl?: string; message?: string }>('/messaging/qr').then(res => res.data),
 
   // Sales Reorder Suggestions API
-  getSalesReorderSuggestions: () => apiClient.get<{ success: boolean; count: number; items: any[] }>('/sales/reorder-suggestions').then(res => res.data),
+  getSalesReorderSuggestions: () => apiClient.get<{ success: boolean; count: number; items: ReorderSuggestion[] }>('/sales/reorder-suggestions').then(res => res.data),
 
   // Sale Invoice Barcode API
   generateSaleInvoiceBarcode: (invoiceNo: string) => apiClient.get<{
@@ -969,22 +1362,22 @@ export const api = {
 
   // Schedule H1 Regulatory Compliance API
   getComplianceDashboard: () => apiClient.get<{ success: boolean; todayH1Sales: number; monthlyH1Sales: number; pendingDoctorAssignments: number; totalComplianceLogs: number }>('/compliance/dashboard').then(res => res.data),
-  getH1Register: (params?: { startDate?: string; endDate?: string; search?: string; doctor?: string; scheduleType?: string }) => apiClient.get<any[]>('/compliance/h1-register', { params }).then(res => res.data),
+  getH1Register: (params?: { startDate?: string; endDate?: string; search?: string; doctor?: string; scheduleType?: string }) => apiClient.get<ComplianceLogRow[]>('/compliance/h1-register', { params }).then(res => res.data),
   updateComplianceDoctor: (id: number, data: { doctor_name: string; license_no?: string }) => apiClient.put<{ success: boolean; message: string }>(`/compliance/${id}/doctor`, data).then(res => res.data),
 
   // Therapeutic Search API
-  searchByTherapeutic: (query: string) => apiClient.get<any[]>('/inventory/therapeutic-search', { params: { query } }).then(res => res.data),
+  searchByTherapeutic: (query: string) => apiClient.get<Array<Medicine & { inventory_id?: number; quantity?: number; batch_no?: string; rate?: number; rack_location?: string }>>('/inventory/therapeutic-search', { params: { query } }).then(res => res.data),
 
   // Smart Reminders & Audit Logs API
   createManualDistributorOrderReminder: (data: { distributor_name: string; distributor_phone?: string; distributor_id?: number; delivery_boy_id?: number; date?: string }) =>
-    apiClient.post<{ success: boolean; reminder: any }>('/dispatch/distributor-reminders/manual-order', data).then(res => res.data),
+    apiClient.post<{ success: boolean; reminder: DistributorDispatchReminder }>('/dispatch/distributor-reminders/manual-order', data).then(res => res.data),
   retryDistributorReminder: (id: number, data?: { updated_phone?: string; custom_message?: string }) =>
     apiClient.post<{ success: boolean; message: string }>(`/dispatch/distributor-reminders/${id}/retry`, data).then(res => res.data),
   getCommunicationAuditLogs: (params?: { limit?: number; status?: string }) =>
-    apiClient.get<{ success: boolean; count: number; logs: any[] }>('/dispatch/audit-logs', { params }).then(res => res.data),
+    apiClient.get<{ success: boolean; count: number; logs: CommunicationAuditLog[] }>('/dispatch/audit-logs', { params }).then(res => res.data),
 
   // Price & Purchase History APIs
-  getBatchLastPurchase: (medicines: { name: string }[], distributor_id?: number) => apiClient.post<any[]>('/purchases/batch-last-purchase', { medicines, distributor_id }).then(res => res.data),
+  getBatchLastPurchase: (medicines: { name: string }[], distributor_id?: number) => apiClient.post<BatchLastPurchaseResult[]>('/purchases/batch-last-purchase', { medicines, distributor_id }).then(res => res.data),
 
   // Pharmarack Reorder Recent API
   getPharmarackReorderRecent: (months?: number) =>

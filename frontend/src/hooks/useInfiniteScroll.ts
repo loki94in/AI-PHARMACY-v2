@@ -1,18 +1,54 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useInfiniteQuery } from '@tanstack/react-query';
 
+// Shared server-filter contract across all pages that page through lists via
+// this hook (Inventory, Sells, PurchaseHistory, CustomerReturnHistory,
+// Investigation). Keys are optional so each page passes only its own subset.
+export interface InfiniteScrollFilters {
+  search?: string;
+  start?: string;
+  end?: string;
+  medicine?: string;
+  id?: string;
+  batch?: string;
+  expiry?: string;
+  packs?: string;
+  loose?: string;
+  mrp?: string;
+  rack?: string;
+  stock_filter?: string;
+  date_from?: string;
+  date_to?: string;
+  min_amount?: string;
+  max_amount?: string;
+  payment_medium?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  type?: string;
+  medicineName?: string;
+  batchNo?: string;
+  reference?: string;
+  party?: string;
+}
+
+// Aggregate metadata a fetchPage may return alongside rows (PurchaseHistory
+// returns totalAmount; other pages omit meta entirely).
+export interface InfiniteScrollMeta {
+  totalAmount?: number;
+}
+
 interface UseInfiniteScrollOptions<T> {
   queryKey: string;
   cacheKey: string;
-  fetchPage: (pageParam: number, filters: any) => Promise<{ data: T[]; totalItems: number; totalPages: number; meta?: Record<string, any> }>;
-  serverFilters?: any;
+  fetchPage: (pageParam: number, filters: InfiniteScrollFilters) => Promise<{ data: T[]; totalItems: number; totalPages: number; meta?: InfiniteScrollMeta }>;
+  serverFilters?: InfiniteScrollFilters;
   clientFilterFn?: (item: T) => boolean;
   pageSize?: number;
 }
 
-const globalModuleCache: Record<string, any[]> = {};
+const globalModuleCache: Record<string, unknown[]> = {};
 const globalTotalItems: Record<string, number> = {};
-const globalMeta: Record<string, Record<string, any>> = {};
+const globalMeta: Record<string, InfiniteScrollMeta> = {};
 
 export const clearInfiniteScrollCache = (cacheKey?: string) => {
   if (cacheKey) {
@@ -44,7 +80,7 @@ export function useInfiniteScroll<T>({
     return globalTotalItems[cacheKey] || 0;
   });
 
-  const [meta, setMeta] = useState<Record<string, any>>(() => {
+  const [meta, setMeta] = useState<InfiniteScrollMeta>(() => {
     return globalMeta[cacheKey] || {};
   });
 
@@ -63,7 +99,7 @@ export function useInfiniteScroll<T>({
     return () => window.removeEventListener('clear-module-cache', handleClear);
   }, [cacheKey]);
 
-  const prevFiltersRef = useRef<any>(serverFilters);
+  const prevFiltersRef = useRef<InfiniteScrollFilters>(serverFilters);
 
   // Clear cache and reset state when server filters change to prevent stale flash
   const filtersChanged = useMemo(() => {
