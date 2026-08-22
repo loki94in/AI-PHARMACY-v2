@@ -18,5 +18,17 @@ export default defineConfig([
     languageOptions: {
       globals: globals.browser,
     },
+    rules: {
+      // Empty catch blocks are an intentional silent-fail pattern in this
+      // codebase (localStorage/theme reads that must never throw).
+      'no-empty': ['error', { allowEmptyCatch: true }],
+      // Underscore prefix = deliberately ignored binding (codebase convention).
+      '@typescript-eslint/no-unused-vars': ['error', {
+        argsIgnorePattern: '^_',
+        caughtErrorsIgnorePattern: '^_',
+        varsIgnorePattern: '^_',
+        destructuredArrayIgnorePattern: '^_',
+      }],
+    },
   },
 ])
