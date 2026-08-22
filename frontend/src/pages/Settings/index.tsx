@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { sanitizePhoneInput, isValid10DigitPhone } from '../../utils/phone';
+import {} from '../../utils/phone';
 import { PhoneInputWithBadge } from '../../components/PhoneInputWithBadge';
 import { apiClient, api } from '../../services/api';
 import { useSettingsQuery } from '../../hooks/useSettingsQuery';
@@ -12,44 +12,26 @@ import { invalidateAfterStockWrite } from '../../utils/cacheInvalidation';
 import {
   Settings as SettingsIcon,
   Building2,
-  Bell,
   Database,
   Trash2,
-  HardDrive,
   Save,
   RefreshCw,
   Zap,
   Clock,
-  Download,
   RotateCcw,
   Shield,
   AlertTriangle,
   X,
-  QrCode,
-  History,
-  BarChart3,
   FileText,
   Send,
-  Eye,
   MapPin,
   Plus,
-  Pencil,
   CheckCircle2,
-  ArrowRight,
-  Brain,
   MessageCircle,
   Mail,
   Stethoscope,
-  Search,
   Truck,
-  Check,
-  Edit,
-  Building,
-  Key,
-  Users,
-  Smartphone,
-  ExternalLink,
-  Copy
+  Smartphone
 } from 'lucide-react';
 import { toastEvent } from '../../services/events';
 import { BackupCenterContent } from '../../components/BackupCenterModal';
@@ -74,29 +56,6 @@ interface RegisteredDevice {
   os: string;
   last_seen: string;
   is_online: number;
-}
-
-interface Doctor {
-  id: number;
-  name: string;
-  reg_number: string;
-  phone: string;
-  address: string;
-}
-
-interface OcrCorrection {
-  id: number;
-  raw_text: string;
-  corrected_name: string;
-  confidence: number;
-  created_at: string;
-}
-
-interface MedicineAlias {
-  id: number;
-  alias_name: string;
-  medicine_id: number;
-  medicine_name: string;
 }
 
 // Map legacy tab search params to the 4 store infrastructure tabs

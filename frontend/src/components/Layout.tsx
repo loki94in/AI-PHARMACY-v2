@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
@@ -8,7 +8,6 @@ import {
   ShoppingCart,
   Receipt,
   Users,
-  UserPlus,
   Settings as SettingsIcon,
   Activity,
   Brain,
@@ -16,7 +15,6 @@ import {
   Database,
   RotateCcw,
   ClipboardList,
-  CalendarDays,
   Plus,
   Check,
   AlertTriangle,
@@ -40,26 +38,20 @@ import {
   Menu,
   Truck,
   Package,
-  Download,
   Keyboard,
   FileText,
   Loader2,
   ChevronDown,
 } from 'lucide-react';
 import { shortcutEvent, SHORTCUT_DIRECTORY } from '../services/keyboardShortcuts';
-import { usePWAInstall } from '../hooks/usePWAInstall';
 import {
   ChevronLeft as ChevronLeftIcon,
   ChevronRight as ChevronRightIcon,
   Activity as ActivityIcon,
   ShieldCheck as ShieldCheckIcon,
-  CheckSquare as CheckSquareIcon,
-  ShoppingCart as CartIcon,
   Clock as ClockIcon,
   AlertTriangle as AlertIcon,
   MessageSquare as MessageSquareIcon,
-  Play as PlayIcon,
-  Pause as PauseIcon,
   Send as SendIcon
 } from 'lucide-react';
 
@@ -80,18 +72,20 @@ import BackupCenterModal from './BackupCenterModal';
 import { useFetchMode } from '../hooks/useFetchMode';
 import { useGlobalSseInvalidation } from '../hooks/useGlobalSseInvalidation';
 
+export interface AppNotification {
+  id: number | string;
+  message: string;
+  type: 'success' | 'error' | 'info' | 'mail' | 'automation';
+  time: Date;
+  read: boolean;
+  link?: string;
+  distributor?: string;
+  qty?: string | number;
+}
+
 // Defer non-critical startup work until the browser is idle (falls back to a 2s
 // timeout where requestIdleCallback isn't available, e.g. Safari), so it doesn't
 // compete with first paint / LCP. Returns a cancel function for effect cleanup.
-function deferUntilIdle(fn: () => void): () => void {
-  const ric = (window as any).requestIdleCallback;
-  if (typeof ric === 'function') {
-    const handle = ric(fn, { timeout: 3000 });
-    return () => (window as any).cancelIdleCallback?.(handle);
-  }
-  const timeoutId = setTimeout(fn, 2000);
-  return () => clearTimeout(timeoutId);
-}
 
 // ──────────────────────────────────────────────
 // Notification Types
@@ -106,16 +100,6 @@ export interface AppNotification {
   distributor?: string;
   qty?: string | number;
 }
-
-// Minimal page-switch loading fallback — renders instantly, no layout shift
-export const PageLoader = () => (
-  <div className="flex-1 flex items-center justify-center h-full">
-    <div className="flex flex-col items-center gap-3">
-      <div className="w-8 h-8 rounded-full border-2 border-primary/30 border-t-primary animate-spin" />
-      <span className="text-xs text-muted font-semibold uppercase tracking-widest">Loading...</span>
-    </div>
-  </div>
-);
 
 // ──────────────────────────────────────────────
 // Sidebar
@@ -133,7 +117,6 @@ const Sidebar = ({
   mobileOpen?: boolean;
   onClose?: () => void;
 }) => {
-  const location = useLocation();
   const queryClient = useQueryClient();
   const hoverPrefetchControl = useFetchMode('layout.hoverPrefetch');
   const menuItems = [
@@ -428,7 +411,7 @@ const NotificationPanel = ({
   const panelRef = useRef<HTMLDivElement>(null);
   const [activeFilter, setActiveFilter] = useState<'all' | 'unread' | 'alerts'>('all');
   const [actionLogs, setActionLogs] = useState<any[]>([]);
-  const [loadingLogs, setLoadingLogs] = useState(false);
+  const [] = useState(false);
 
   // Close on outside click
   useEffect(() => {
@@ -841,7 +824,6 @@ const LiveHeaderClock = () => {
   }, []);
 
   const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
-  const dateStr = now.toLocaleDateString([], { weekday: 'short', day: '2-digit', month: 'short' });
 
   return (
     <div
@@ -888,9 +870,7 @@ const Topbar = ({
   onMenuClick?: () => void;
   compactCacheLoaded?: boolean;
 }) => {
-  const location = useLocation();
   const navigate = useNavigate();
-  const { isInstallable, isInstalled, promptInstall } = usePWAInstall();
   const [showPanel, setShowPanel] = useState(false);
   const [flashToast, setFlashToast] = useState<(ToastEventDetail & { id: number }) | null>(null);
   const [catalogJob, setCatalogJob] = useState<{
@@ -1515,16 +1495,6 @@ const Topbar = ({
     });
   }, [onNewNotification]);
 
-  const queuePillVisible = Boolean(
-    waQueueDetail?.isProcessing
-    || (waQueueDetail?.counts?.pending || 0) > 0
-    || (waQueueDetail?.counts?.sending || 0) > 0
-    || (waQueueDetail?.counts?.failed_offline || 0) > 0
-    || (waQueueDetail?.counts?.failed_perm || 0) > 0
-    || (lastQueueCompletedAt && Date.now() - lastQueueCompletedAt < 5000)
-  );
-  const queueCompletedRecently = lastQueueCompletedAt && Date.now() - lastQueueCompletedAt < 5000;
-
   const onlineDevicesCount = connectedDevices.filter(d => d.is_online === 1).length;
 
   return (
@@ -1956,20 +1926,11 @@ const QuickAssistSidebar = ({
 
   // Expand / collapse state for grouped patients (collapsed by default)
   const [expandedRefillKeys, setExpandedRefillKeys] = useState<Set<string>>(new Set());
-  const [expandedDueSoonKeys, setExpandedDueSoonKeys] = useState<Set<string>>(new Set());
+  const [] = useState<Set<string>>(new Set());
   const [expandedSpecialOrderKeys, setExpandedSpecialOrderKeys] = useState<Set<string>>(new Set());
 
   const toggleRefillKey = (key: string) => {
     setExpandedRefillKeys(prev => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  };
-
-  const toggleDueSoonKey = (key: string) => {
-    setExpandedDueSoonKeys(prev => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
       else next.add(key);
@@ -2138,16 +2099,6 @@ const QuickAssistSidebar = ({
         itemIds.forEach(id => next.delete(id));
         return next;
       });
-    }
-  };
-
-  const handleAcknowledge = async (id: number) => {
-    try {
-      await api.acknowledgeRefill(id);
-      refillEvent.triggerRefresh();
-      onActionComplete();
-    } catch (e) {
-      console.error('Failed to acknowledge refill:', e);
     }
   };
 
