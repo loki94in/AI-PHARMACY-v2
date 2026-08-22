@@ -102,7 +102,7 @@ const DISTRIBUTOR_BORDER_COLORS = [
   'border-l-orange-500',
 ];
 
-export const getDistributorColor = (name: string | undefined): string => {
+const getDistributorColor = (name: string | undefined): string => {
   if (!name) return 'border-l-primary';
   let hash = 0;
   for (let i = 0; i < name.length; i++) {
@@ -113,7 +113,7 @@ export const getDistributorColor = (name: string | undefined): string => {
 };
 
 // Filter out emails, DL numbers, phone numbers, and GSTINs from being parsed as distributor names
-export const isValidDistributorName = (name: string | null | undefined): boolean => {
+const isValidDistributorName = (name: string | null | undefined): boolean => {
   if (!name) return false;
   const trimmed = String(name).trim();
   if (!trimmed || trimmed.length < 2) return false;
@@ -231,7 +231,7 @@ const getEffectiveRate = (rate: number, schemeStr: string | undefined, qty: numb
 };
 
 // Helper to check if a medicine name is permanently ignored
-export const isMedicineIgnored = (name: string | undefined | null, ignoredList: Array<{ word: string }>): boolean => {
+const isMedicineIgnored = (name: string | undefined | null, ignoredList: Array<{ word: string }>): boolean => {
   if (!name || !name.trim()) return false;
   const clean = name.trim().toLowerCase();
   for (const item of ignoredList) {
@@ -272,6 +272,8 @@ let cachedPendingRefills: Refill[] = [];
 let cachedReconOrders: LocalReconOrder[] = [];
 let cachedAutoRefillItems: LocalAutoRefillItem[] = [];
 let cachedIgnoredWords: Array<{ id: number; word: string; source: string; created_at: string }> = [];
+const makeLocalIgnoredEntry = (word: string) => ({ id: Date.now(), word, source: 'user_ignore', created_at: new Date().toISOString() });
+const setIgnoreNextSearchRef = (ref: { current: boolean }, value: boolean) => { ref.current = value; };
 let cachedSkippedItemKeys: Set<string> = loadInitialSkippedKeys();
 let cachedPrMode: 'Live' | 'Unknown' = 'Live';
 const clientSearchCache = new Map<string, SuggestionMedicine[]>();
@@ -513,7 +515,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
       await api.addIgnoredWord(clean, 'user_ignore');
 
       // 1. Immediately update ignoredWords state so the badge count increments instantly
-      const newEntry = { id: Date.now(), word: clean, source: 'user_ignore', created_at: new Date().toISOString() };
+      const newEntry = makeLocalIgnoredEntry(clean);
       const updatedIgnored = [newEntry, ...cachedIgnoredWords.filter((w) => w.word.toLowerCase() !== clean.toLowerCase())];
       cachedIgnoredWords = updatedIgnored;
       setIgnoredWords(updatedIgnored);
@@ -1027,7 +1029,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
 
   const selectSuggestion = (med: SuggestionMedicine) => {
     if (med.isErrorMessage) return;
-    ignoreNextSearchRef.current = true;
+    setIgnoreNextSearchRef(ignoreNextSearchRef, true);
     
     // Save current suggestions candidate list for cheaper option cross-checking
     setCandidateOptions(suggestions.filter(s => !s.isErrorMessage));

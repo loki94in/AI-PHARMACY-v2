@@ -242,6 +242,7 @@ const InvestigationCenter = () => {
     return defaultVisible;
   });
   const [showColMenu, setShowColMenu] = useState(false);
+  const [searchMedicineResults, setSearchMedicineResults] = useState<LocalMedSearchRow[]>([]);
   const colMenuRef = useRef<HTMLDivElement>(null);
   const medicineSearchRef = useRef<HTMLDivElement>(null);
 
@@ -298,7 +299,6 @@ const InvestigationCenter = () => {
   const [editingBillNo, setEditingBillNo] = useState<string>('');
   const [billItems, setBillItems] = useState<LocalBillItem[]>([]);
   const [billDiscount, setBillDiscount] = useState<number>(0);
-  const [searchMedicineResults, setSearchMedicineResults] = useState<LocalMedSearchRow[]>([]);
   const [searchMedicineQuery, setSearchMedicineQuery] = useState('');
 
   // Notification Toast

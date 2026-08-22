@@ -650,9 +650,13 @@ const Mail = () => {
   };
 
   // Relative time string
+  const [syncedDisplayTs, setSyncedDisplayTs] = useState(() => Date.now());
+  useEffect(() => {
+    setSyncedDisplayTs(Date.now());
+  }, [lastSyncedAt]);
   const relTime = lastSyncedAt
     ? (() => {
-        const secs = Math.floor((Date.now() - lastSyncedAt.getTime()) / 1000);
+        const secs = Math.floor((syncedDisplayTs - lastSyncedAt.getTime()) / 1000);
         if (secs < 5) return 'just now';
         if (secs < 60) return `${secs}s ago`;
         return `${Math.floor(secs / 60)}m ago`;

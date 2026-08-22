@@ -264,6 +264,18 @@ const PurchaseHistory = () => {
     refetch();
   };
 
+  const fetchReconciliation = async () => {
+    try {
+      setLoadingRecon(true);
+      const data = await api.getReconciliationList();
+      setReconciliationList(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error('Error fetching reconciliation list:', err);
+    } finally {
+      setLoadingRecon(false);
+    }
+  };
+
   useEffect(() => {
     fetchReconciliation();
   }, []);
@@ -280,18 +292,6 @@ const PurchaseHistory = () => {
       window.removeEventListener('app-purchases-updated', handleUpdate);
     };
   }, [refetch]);
-
-  const fetchReconciliation = async () => {
-    try {
-      setLoadingRecon(true);
-      const data = await api.getReconciliationList();
-      setReconciliationList(Array.isArray(data) ? data : []);
-    } catch (err) {
-      console.error('Error fetching reconciliation list:', err);
-    } finally {
-      setLoadingRecon(false);
-    }
-  };
 
   const handleReissue = async (uid: number) => {
     try {

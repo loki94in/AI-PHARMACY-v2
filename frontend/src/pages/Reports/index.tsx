@@ -55,6 +55,9 @@ import { formatINR, formatCount } from '../../utils/currency';
 // Module-level cache for instant report hydration on tab switches / re-mounts
 const cachedReportsMap: Record<string, { summary: LocalReportSummary; records: LocalReportRow[] }> = {};
 const cachedNonMovingMap: Record<number, { success: boolean; periodDays: number; count: number; items: NonMovingReportItem[] }> = {};
+const storeCachedReport = (key: string, result: { summary: LocalReportSummary; records: LocalReportRow[] }) => { cachedReportsMap[key] = result; };
+const splitExportBase = (tab: string) => `report_${tab}_split30_${Date.now()}`;
+const stampedDownloadName = (tab: string, ext: string) => `report_${tab}_${Date.now()}.${ext}`;
 
 const Reports = () => {
   const queryClient = useQueryClient();
@@ -189,7 +192,7 @@ const Reports = () => {
 
       if (exportSplitMode && exportData.length > 0) {
         // Multi-file export mode: generate & download separate files for each 30 items chunk
-        const filename = `report_${activeTab}_split30_${Date.now()}`;
+        const filename = splitExportBase(activeTab);
         if (exportFormat === 'pdf') {
           exportToPDF(exportData, exportColumns, filename, reportTitle, { split: true, itemsPerPage: 30 });
         } else {
@@ -214,7 +217,7 @@ const Reports = () => {
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `report_${activeTab}_${Date.now()}.${exportFormat === 'pdf' ? 'pdf' : 'csv'}`;
+        a.download = stampedDownloadName(activeTab, exportFormat === 'pdf' ? 'pdf' : 'csv');
         document.body.appendChild(a);
         a.click();
         window.URL.revokeObjectURL(url);
@@ -292,7 +295,7 @@ const Reports = () => {
       if (activeTab === 'nonMoving' || activeTab === 'trace') {
         const summaryData = await api.getReportsSummary({ type: activeTab, fromDate, toDate });
         const result = { summary: summaryData, records: [] };
-        if (summaryData) cachedReportsMap[cacheKeyStr] = result;
+        if (summaryData) storeCachedReport(cacheKeyStr, result);
         return result;
       }
 
@@ -301,7 +304,7 @@ const Reports = () => {
         api.getReportsData({ type: activeTab, fromDate, toDate })
       ]);
       const result = { summary: summaryData, records: Array.isArray(tableData) ? tableData : [] };
-      if (summaryData && Array.isArray(tableData)) cachedReportsMap[cacheKeyStr] = result;
+      if (summaryData && Array.isArray(tableData)) storeCachedReport(cacheKeyStr, result);
       return result;
     },
     { 

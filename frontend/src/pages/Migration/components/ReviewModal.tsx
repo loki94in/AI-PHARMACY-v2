@@ -213,15 +213,6 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
     }
   }, [isOpen, fileEntry]);
 
-  useEffect(() => {
-    if (isOpen && fileEntry && Object.keys(mappings).length > 0) {
-      const delayDebounce = setTimeout(() => {
-        runValidation(mappings);
-      }, 300);
-      return () => clearTimeout(delayDebounce);
-    }
-  }, [mappings, isOpen]);
-
   const runValidation = async (currentMappings: Record<string, string>) => {
     setValidating(true);
     try {
@@ -244,6 +235,15 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
       setValidating(false);
     }
   };
+
+  useEffect(() => {
+    if (isOpen && fileEntry && Object.keys(mappings).length > 0) {
+      const delayDebounce = setTimeout(() => {
+        runValidation(mappings);
+      }, 300);
+      return () => clearTimeout(delayDebounce);
+    }
+  }, [mappings, isOpen]);
 
   const handleMappingChange = (header: string, targetCol: string) => {
     const updated = { ...mappings, [header]: targetCol };

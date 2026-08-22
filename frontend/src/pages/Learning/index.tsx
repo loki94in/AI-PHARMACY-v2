@@ -93,6 +93,7 @@ let cachedDoctorsList: LocalDoctorRow[] = [];
 let cachedProfiles: LearningProfileSummary[] = [];
 let cachedOcrCorrections: OcrCorrection[] = [];
 const cachedProfileDetailsMap: Record<number, LocalProfileDetailRow> = {};
+const forgetCachedProfileDetails = (id: number) => { delete cachedProfileDetailsMap[id]; };
 
 const VALID_LEARNING_TABS = ['clinical', 'doctors', 'distributors'];
 
@@ -226,7 +227,7 @@ const Learning: React.FC = () => {
 
       toastEvent.trigger('Distributor details & OCR rules updated successfully!', 'success');
       setEditingDistributor(null);
-      delete cachedProfileDetailsMap[editingDistributor.id];
+      forgetCachedProfileDetails(editingDistributor.id);
       await broadcastContactDataChanged();
       refetchProfiles();
     } catch (err) {
@@ -243,7 +244,7 @@ const Learning: React.FC = () => {
     }
     try {
       await apiClient.delete(`/distributors/${id}`);
-      delete cachedProfileDetailsMap[id];
+      forgetCachedProfileDetails(id);
       if (selectedProfileId === id) setSelectedProfileId(null);
       if (editingDistributor?.id === id) setEditingDistributor(null);
       toastEvent.trigger(`Distributor layout profile "${name}" deleted successfully!`, 'success');
@@ -732,7 +733,7 @@ const Learning: React.FC = () => {
               <div>
                 <div className="text-xs text-muted font-bold">Learned Rx Combos</div>
                 <div className="text-2xl font-black text-text mt-0.5 font-mono">
-                  {stats?.learnedRxCombos ?? 142}
+                  {stats ? stats.learnedRxCombos : '—'}
                 </div>
               </div>
             </div>
@@ -744,7 +745,7 @@ const Learning: React.FC = () => {
               <div>
                 <div className="text-xs text-muted font-bold">Salt Mappings Baseline</div>
                 <div className="text-2xl font-black text-primary mt-0.5 font-mono">
-                  24,500+
+                  —
                 </div>
               </div>
             </div>
@@ -967,7 +968,7 @@ const Learning: React.FC = () => {
               <div>
                 <div className="text-xs text-muted font-bold">Directory Status</div>
                 <div className="text-xs font-black text-emerald-400 mt-1 uppercase tracking-wider">
-                  Active & Synced
+                  {loadingDoctors ? 'Syncing…' : doctorsListArray.length > 0 ? 'Active & Synced' : 'Empty'}
                 </div>
               </div>
             </div>

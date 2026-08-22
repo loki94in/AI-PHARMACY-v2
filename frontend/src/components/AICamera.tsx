@@ -37,11 +37,6 @@ const AICamera: React.FC<AICameraProps> = ({ onScanResult, onClose }) => {
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    startCamera();
-    return () => stopCamera();
-  }, []);
-
   const startCamera = async () => {
     try {
       const mediaStream = await navigator.mediaDevices.getUserMedia({
@@ -62,6 +57,11 @@ const AICamera: React.FC<AICameraProps> = ({ onScanResult, onClose }) => {
       stream.getTracks().forEach(track => track.stop());
     }
   };
+
+  useEffect(() => {
+    startCamera();
+    return () => stopCamera();
+  }, []);
 
   const captureAndAnalyze = async () => {
     if (!videoRef.current || !canvasRef.current) return;

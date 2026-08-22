@@ -144,6 +144,7 @@ const getExpiryUrgencyStatus = (expiryStr: string): { label: string; className: 
 };
 
 let cachedReturnHistory: any[] | null = null;
+const nowStamp = () => Date.now();
 
 const Returns: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -349,7 +350,7 @@ const Returns: React.FC = () => {
 
   const addNewTab = () => {
     const nextNum = tabs.length + 1;
-    const newId = 'tab_' + Date.now();
+    const newId = 'tab_' + nowStamp();
     const newTab = {
       id: newId,
       name: `Return ${nextNum}`,
@@ -869,9 +870,9 @@ const Returns: React.FC = () => {
       const blob = await api.exportReturnsPDF(parsedItemsForExport);
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = url;
-      a.download = `return-${group.distributor_name}-${group.invoice_no}-${Date.now()}.pdf`;
-      document.body.appendChild(a);
+        a.href = url;
+        a.download = `return-${group.distributor_name}-${group.invoice_no}-${nowStamp()}.pdf`;
+        document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
@@ -1049,7 +1050,7 @@ const Returns: React.FC = () => {
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `return-${group.distributor_name}-${group.invoice_no}-${Date.now()}.pdf`;
+      a.download = `return-${group.distributor_name}-${group.invoice_no}-${nowStamp()}.pdf`;
         document.body.appendChild(a);
         a.click();
         window.URL.revokeObjectURL(url);
@@ -1195,6 +1196,28 @@ const Returns: React.FC = () => {
                   min="2020-01-01"
                   max={getTodayString()}
                   onChange={e => { setManualToDate(true); handleDateToChange(e.target.value); }}
+                  className="flex-1 px-2 py-1 bg-bg border border-border/60 rounded-lg text-[10px] text-text font-mono focus:outline-none focus:border-primary/60"
+                />
+              </div>
+              <div className="flex items-center gap-1.5">
+                <label className="text-muted font-semibold w-7">Min ₹</label>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  min="0"
+                  placeholder="0"
+                  value={minAmount}
+                  onChange={e => setMinAmount(e.target.value)}
+                  className="flex-1 px-2 py-1 bg-bg border border-border/60 rounded-lg text-[10px] text-text font-mono focus:outline-none focus:border-primary/60"
+                />
+                <label className="text-muted font-semibold w-4 text-center">Max</label>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  min="0"
+                  placeholder="∞"
+                  value={maxAmount}
+                  onChange={e => setMaxAmount(e.target.value)}
                   className="flex-1 px-2 py-1 bg-bg border border-border/60 rounded-lg text-[10px] text-text font-mono focus:outline-none focus:border-primary/60"
                 />
               </div>

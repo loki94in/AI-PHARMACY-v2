@@ -483,6 +483,7 @@ const CatalogUpload = () => {
   const [previewRows, setPreviewRows] = useState<LocalPreviewRow[]>([]);
   const [previewHeaders, setPreviewHeaders] = useState<string[]>([]);
   const [importing, setImporting] = useState(false);
+  const [googleSearchStatus, setGoogleSearchStatus] = useState<{ count: number; limit: number } | null>(null);
 
   // History & List States — now driven by React Query
   const queryClient = useQueryClient();
@@ -508,7 +509,6 @@ const CatalogUpload = () => {
   const [loadingReviews, setLoadingReviews] = useState(false);
   const [matchedPreviousJobId, setMatchedPreviousJobId] = useState<number | null>(null);
   const [newlyDetectedColumns, setNewlyDetectedColumns] = useState<string[]>([]);
-  const [googleSearchStatus, setGoogleSearchStatus] = useState<{ count: number; limit: number } | null>(null);
   const [isCaptchaActive, setIsCaptchaActive] = useState(false);
   const [captchaMedicine, setCaptchaMedicine] = useState<string | null>(null);
   const [selectedReview, setSelectedReview] = useState<LocalCatalogReview | null>(null);

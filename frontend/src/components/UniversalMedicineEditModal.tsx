@@ -9,51 +9,6 @@ import { useQueryClient } from '@tanstack/react-query';
 import { invalidateAfterStockWrite } from '../utils/cacheInvalidation';
 import { toastEvent } from '../services/events';
 
-export const updateMedicineNameWithPackSize = (currentName: string, newPackaging: string, oldPackaging?: string): string => {
-  if (!currentName) return '';
-  const trimmedName = currentName.trim();
-  const trimmedNewPkg = newPackaging.trim();
-
-  if (!trimmedNewPkg) return trimmedName;
-
-  if (oldPackaging) {
-    const trimmedOldPkg = oldPackaging.trim();
-    if (trimmedOldPkg) {
-      const escapedOldPkg = trimmedOldPkg.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
-      const directRegex = new RegExp(`\\b${escapedOldPkg}\\s*$`, 'i');
-      if (directRegex.test(trimmedName)) {
-        return trimmedName.replace(directRegex, trimmedNewPkg);
-      }
-    }
-  }
-
-  const pkgParts = trimmedNewPkg.match(/^(\d+(?:x\d+)?)\s*(.*)$/i);
-  const newNum = pkgParts ? pkgParts[1] : trimmedNewPkg;
-  const newUnit = pkgParts ? pkgParts[2].trim() : '';
-
-  const packPatternRegex = /\b(\d+(?:x\d+)?)\s*([a-zA-Z'â€™]+)?\s*$/i;
-  const match = trimmedName.match(packPatternRegex);
-
-  const STRENGTH_FORM_UNITS = /^(mg|mcg|g|ml|l|kg|%|iu|inj|syp|susp|gel|cream|lotion|drops|pf|md|spray|ointment|respu?l|caplet|liq|liquid|drop)$/i;
-
-  if (match) {
-    const matchedStr = match[0];
-    const oldUnitInName = match[2] || '';
-
-    if (!oldUnitInName || !STRENGTH_FORM_UNITS.test(oldUnitInName)) {
-      const targetUnit = newUnit || oldUnitInName || 'TAB';
-      const replacement = `${newNum} ${targetUnit}`.trim();
-      const startIndex = trimmedName.lastIndexOf(matchedStr);
-      if (startIndex !== -1) {
-        return trimmedName.substring(0, startIndex) + replacement;
-      }
-    }
-  }
-
-  const suffix = newUnit ? `${newNum} ${newUnit}` : `${newNum} TAB`;
-  return `${trimmedName} ${suffix}`;
-};
-
 export const parsePackSizeFromPackaging = (packaging: string | null | undefined): number | null => {
   if (!packaging) return null;
   const trimmed = packaging.trim();
