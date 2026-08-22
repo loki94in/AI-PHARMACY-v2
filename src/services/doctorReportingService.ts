@@ -126,8 +126,13 @@ export async function runDailyDoctorReportsIfNeeded(): Promise<void> {
  * Start the daily scheduler checker (runs check every hour)
  */
 export function startDoctorReportingScheduler(): void {
-  // Check every hour (3600000 ms)
-  setInterval(() => {
+  // Check every hour (3600000 ms). P3 gated worker: skip while user idle >30 min;
+  // internal daily dedupe guard guarantees no lost/duplicate runs on wake-up.
+  setInterval(async () => {
+    try {
+      const { activityTracker } = await import('../utils/activityTracker.js');
+      if (activityTracker.isIdle()) return;
+    } catch (_) {}
     runDailyDoctorReportsIfNeeded().catch(console.error);
   }, 60 * 60 * 1000);
   

@@ -1,56 +1,23 @@
-import { dbManager } from '../database/connection.js';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import { whatsappQueueWorker } from './whatsappQueueWorker.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
+/**
+ * Legacy compatibility facade.
+ *
+ * The canonical WhatsApp queue dispatcher is `whatsappQueueWorker`, which
+ * auto-starts its own loop in its constructor and self-gates:
+ *   - checks `isWhatsAppExplicitlyDisabled()` on every processing tick
+ *   - paces 10 s active / 30 s offline / 15 min when user is idle >30 min
+ *     (P3 gated worker, API_OPTIMIZATION plan)
+ *   - exposes forceNext() for instant user-clicked dispatch
+ *
+ * This module previously ran a SECOND, ungated 30 s setInterval draining the
+ * same `whatsapp_send_queue` table. That duplicate timer was removed — it
+ * burned CPU and caused double-processing contention for zero benefit.
+ */
 export class WhatsappQueue {
-  async queueJob(invoiceId: number, phone: string, pdfPath: string, caption: string, explicitScheduledAt?: number): Promise<void> {
-    try {
-      const queueId = await whatsappQueueWorker.enqueue(
-        phone,
-        caption,
-        'credit_sale_invoice',
-        undefined,
-        explicitScheduledAt,
-        pdfPath
-      );
-      console.log(`Queued pending WhatsApp transmission for Invoice ID ${invoiceId} in centralized queue (#${queueId})`);
-    } catch (err) {
-      console.error('Failed to queue WhatsApp job:', err);
-    }
-  }
-
-  async processQueue(): Promise<void> {
-    await whatsappQueueWorker.processQueue();
-  }
-
+  /** No-op: kept so existing boot/trigger call sites keep working. */
   async startWorker(): Promise<void> {
-    // [WHATSAPP QUEUE GATER] Check enabled flags before starting any background timer
-    try {
-      const db = await dbManager.getConnection();
-      const autoRow = await db.get("SELECT value FROM app_settings WHERE key = 'automation_enabled'");
-      if (!autoRow || autoRow.value !== 'true') {
-        console.log('[WHATSAPP QUEUE GATER] Automation is disabled. WhatsApp queue worker will not start.');
-        return;
-      }
-      const waRow = await db.get("SELECT value FROM app_settings WHERE key = 'whatsapp_enabled'");
-      if (!waRow || waRow.value !== 'true') {
-        console.log('[WHATSAPP QUEUE GATER] WhatsApp is disabled. Queue background worker will not start.');
-        return;
-      }
-    } catch (dbErr) {
-      console.warn('[WHATSAPP QUEUE GATER] Could not check enabled flags — worker will not start:', dbErr);
-      return;
-    }
-
-    // Enabled — start the 30-second processing interval
-    setInterval(() => {
-      this.processQueue().catch(console.error);
-    }, 30000);
-    console.log('[WhatsApp Queue] Resilient queue background worker started.');
+    console.log('[WhatsApp Queue] Processing handled by canonical gated worker (whatsappQueueWorker).');
   }
 }
 

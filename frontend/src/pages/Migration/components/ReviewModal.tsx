@@ -295,11 +295,19 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
     }
   };
 
-  // Poll migration worker status during import
+  // Poll migration worker status during import. Polls pause while the tab is
+  // hidden — the import keeps running server-side and polling resumes on return.
   useEffect(() => {
     if (phase !== 'importing') return;
 
-    let pollInterval: ReturnType<typeof setInterval>;
+    let pollInterval: ReturnType<typeof setInterval> | null = null;
+
+    const stopPolling = () => {
+      if (pollInterval) {
+        clearInterval(pollInterval);
+        pollInterval = null;
+      }
+    };
 
     const checkStatus = async () => {
       try {
@@ -307,11 +315,11 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
         setStatus(liveStatus);
 
         if (liveStatus.isStagingReady) {
-          clearInterval(pollInterval);
+          stopPolling();
           await loadStagingData();
           setPhase('staging');
         } else if (liveStatus.message && liveStatus.message.toLowerCase().includes('failed')) {
-          clearInterval(pollInterval);
+          stopPolling();
           setPhase('error');
           setErrorMessage(liveStatus.message);
         }
@@ -320,10 +328,24 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
       }
     };
 
-    pollInterval = setInterval(checkStatus, 1500);
-    checkStatus();
+    const startPolling = () => {
+      if (pollInterval) return;
+      pollInterval = setInterval(checkStatus, 1500);
+      checkStatus();
+    };
 
-    return () => clearInterval(pollInterval);
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') startPolling();
+      else stopPolling();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+
+    if (document.visibilityState === 'visible') startPolling();
+
+    return () => {
+      stopPolling();
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
   }, [phase, loadStagingData]);
 
   if (!isOpen) return null;

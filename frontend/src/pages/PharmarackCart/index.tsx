@@ -210,12 +210,16 @@ const getItemCheckKey = (storeId: number, item: { productCode?: string; productI
 
 let waWindowRef: Window | null = null;
 
+function toWaDigits(raw: string): string {
+  const digits = (raw || '').replace(/\D/g, '');
+  return digits.length === 10 ? `91${digits}` : digits;
+}
+
 function openOrReuseWhatsappTab(url: string, phone?: string, text?: string) {
   // Convert web.whatsapp.com/send to api.whatsapp.com/send for 100% reliable loading
   let targetUrl = url;
   if (phone) {
-    let cleanDigits = phone.replace(/\D/g, '');
-    if (cleanDigits.length === 10) cleanDigits = `91${cleanDigits}`;
+    const cleanDigits = toWaDigits(phone);
     const encodedText = encodeURIComponent(text || '');
     targetUrl = `https://api.whatsapp.com/send?phone=${cleanDigits}&text=${encodedText}`;
   } else if (url.includes('web.whatsapp.com/send')) {
@@ -713,8 +717,7 @@ export default function PharmarackCart() {
 
         distributors.forEach(dist => {
           let phoneNum = getDistributorPhoneNumber(dist);
-          let cleanPhone = phoneNum.replace(/\D/g, '');
-          if (cleanPhone.length === 10) cleanPhone = `91${cleanPhone}`;
+          const cleanPhone = toWaDigits(phoneNum);
 
           const distName = (dist.storeName || '').toLowerCase().trim();
           const matchingItem = recentItems.find((item: any) => {
@@ -1723,16 +1726,12 @@ export default function PharmarackCart() {
 
     let phoneNum = getDistributorPhoneNumber(dist);
 
-    let cleanPhone = phoneNum.replace(/\D/g, '');
+    const cleanPhone = toWaDigits(phoneNum);
     if (!cleanPhone || !isValidPhoneNumber(cleanPhone)) {
       setSentWaStatusMap(prev => ({ ...prev, [dist.storeId]: 'error' }));
       toastEvent.trigger(`Invalid phone number "${phoneNum || 'missing'}" for ${dist.storeName}. Please enter a valid 10-digit number.`, 'error');
       handleOpenEditModal(dist);
       return;
-    }
-
-    if (cleanPhone.length === 10) {
-      cleanPhone = `91${cleanPhone}`;
     }
 
     const msg = buildDistributorOrderMessage(dist);
@@ -1907,15 +1906,11 @@ export default function PharmarackCart() {
         }
 
         let phoneNum = getDistributorPhoneNumber(dist);
-        let cleanPhone = phoneNum.replace(/\D/g, '');
+        const cleanPhone = toWaDigits(phoneNum);
         if (!cleanPhone || !isValidPhoneNumber(cleanPhone)) {
           setSentWaStatusMap(prev => ({ ...prev, [dist.storeId]: 'error' }));
           toastEvent.trigger(`Skipped ${dist.storeName}: Invalid phone number "${phoneNum || 'missing'}"`, 'error');
           continue;
-        }
-
-        if (cleanPhone.length === 10) {
-          cleanPhone = `91${cleanPhone}`;
         }
 
         const msg = buildDistributorOrderMessage(dist, primaryBoy ?? null);
@@ -1986,8 +1981,7 @@ export default function PharmarackCart() {
           mapped.forEach((dist, idx) => {
             setTimeout(() => {
               let phoneNum = getDistributorPhoneNumber(dist);
-              let cleanPhone = phoneNum.replace(/\D/g, '');
-              if (cleanPhone.length === 10) cleanPhone = `91${cleanPhone}`;
+              const cleanPhone = toWaDigits(phoneNum);
               const msg = buildDistributorOrderMessage(dist);
               openOrReuseWhatsappTab('', cleanPhone, msg);
               setSentWaStatusMap(prev => ({ ...prev, [dist.storeId]: 'success' }));

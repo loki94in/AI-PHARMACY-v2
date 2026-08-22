@@ -34,12 +34,20 @@ const SSE_CUSTOM_EVENTS: Record<string, string[]> = {
   return_created: ['sse-return-created'],
   wa_status_changed: ['sse-wa-status-changed'],
   wa_queue_update: ['sse-wa-status-changed', 'sse-wa-queue-updated'],
+  wa_new_message: ['sse-wa-new-message'],
+  ocr_scan_complete: ['sse-ocr-scan-complete'],
+  auth_failure: ['sse-auth-failure'],
   pharmarack_session_refreshed: ['sse-pharmarack-refreshed'],
   dispatch_updated: ['sse-dispatch-updated'],
   email_new: ['sse-email-new'],
   inventory_changed: ['sse-inventory-changed'],
   invoice_saved: ['sse-invoice-saved'],
   sale_created: ['sse-sale-created'],
+  catalog_job_progress: ['sse-catalog-job'],
+  catalog_job_update: ['sse-catalog-job'],
+  catalog_review_updated: ['sse-catalog-review'],
+  google_verification_required: ['sse-google-verification'],
+  google_verification_solved: ['sse-google-verification'],
 };
 
 export function useGlobalSseInvalidation(enabled: boolean = true) {
@@ -53,8 +61,9 @@ export function useGlobalSseInvalidation(enabled: boolean = true) {
 
     const handleMessage = (e: MessageEvent) => {
       let type: string;
+      let parsed: any;
       try {
-        const parsed = JSON.parse(e.data);
+        parsed = JSON.parse(e.data);
         type = parsed?.type || '';
       } catch {
         return;
@@ -70,7 +79,9 @@ export function useGlobalSseInvalidation(enabled: boolean = true) {
         queryKeys.forEach(key => queryClient.invalidateQueries({ queryKey: key }));
       }
       (SSE_CUSTOM_EVENTS[type] || []).forEach(evtName => {
-        window.dispatchEvent(new CustomEvent(evtName));
+        // detail carries the full parsed SSE frame so page-level listeners
+        // can consume payloads without opening their own EventSource
+        window.dispatchEvent(new CustomEvent(evtName, { detail: parsed }));
       });
     };
 

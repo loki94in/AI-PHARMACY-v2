@@ -169,6 +169,15 @@ function tryHydrateCompactCacheFromSession(): void {
 
 tryHydrateCompactCacheFromSession();
 
+// Short-lived shared cache for WhatsApp queue status. Layout's active-queue
+// poller (3s) populates it on every fetch; the queue popover reuses fresh
+// entries instead of firing a second concurrent request for the same endpoint.
+let waQueueStatusCache: { data: any; at: number } | null = null;
+
+export const peekWhatsAppQueueStatusCache = (maxAgeMs = 2500): any | null => {
+  return waQueueStatusCache && Date.now() - waQueueStatusCache.at < maxAgeMs ? waQueueStatusCache.data : null;
+};
+
 export const getCompactInventoryCache = (): any[] => {
   if (compactInventoryCache) return compactInventoryCache;
   if (typeof window !== 'undefined' && window.__INVENTORY__) {
@@ -921,7 +930,10 @@ export const api = {
     counts: { pending: number; sending: number; sent: number; failed_offline: number; failed_perm: number };
     delaySettings?: { whatsapp_delay_credit_bill: number; whatsapp_delay_distributor: number; whatsapp_delay_delivery_boy: number };
     recentItems: any[];
-  }>('/whatsapp/queue/status').then(res => res.data),
+  }>('/whatsapp/queue/status').then(res => {
+    waQueueStatusCache = { data: res.data, at: Date.now() };
+    return res.data;
+  }),
   enqueueDistributorCollection: (data: { orderIds: number[]; deliveryBoyPhone: string; deliveryBoyName?: string }) => apiClient.post<{ success: boolean; enqueuedCount: number; queueIds: number[]; message: string }>('/whatsapp/queue/enqueue-distributor-collection', data).then(res => res.data),
   enqueuePharmarackBatch: (data: { orders: { storeName: string; storeId: number; phone: string; message: string; lineTotal?: number; items: any[] }[]; deliveryBoyPhone?: string; deliveryBoyName?: string }) => apiClient.post<{ success: boolean; enqueuedCount: number; queueIds: number[]; message: string }>('/whatsapp/queue/enqueue-pharmarack-batch', data).then(res => res.data),
   enqueueSingleWhatsApp: (data: { number: string; message: string; type?: string; targetName?: string; explicitScheduledAt?: number }) => apiClient.post<{ success: boolean; queueId: number; message: string }>('/whatsapp/queue/enqueue-single', data).then(res => res.data),

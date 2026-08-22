@@ -39,13 +39,13 @@ export async function resolveActiveDeliveryBoy(
     if (assignedIdentifier) {
       if (typeof assignedIdentifier === 'number' || !isNaN(Number(assignedIdentifier))) {
         boyRow = await db.get(
-          'SELECT name, phone FROM delivery_boys WHERE id = ? AND is_active = 1 LIMIT 1',
+          'SELECT name, whatsapp_number FROM delivery_boys WHERE id = ? AND is_active = 1 LIMIT 1',
           [Number(assignedIdentifier)]
         );
       }
       if (!boyRow && typeof assignedIdentifier === 'string' && assignedIdentifier.trim() !== 'Not assigned yet') {
         boyRow = await db.get(
-          'SELECT name, phone FROM delivery_boys WHERE name LIKE ? AND is_active = 1 LIMIT 1',
+          'SELECT name, whatsapp_number FROM delivery_boys WHERE name LIKE ? AND is_active = 1 LIMIT 1',
           [`%${assignedIdentifier.trim()}%`]
         );
       }
@@ -54,15 +54,15 @@ export async function resolveActiveDeliveryBoy(
     // 2. If no specific boy found or assignedIdentifier was empty / "Not assigned yet", pick first active delivery boy
     if (!boyRow) {
       boyRow = await db.get(
-        'SELECT name, phone FROM delivery_boys WHERE is_active = 1 ORDER BY id ASC LIMIT 1'
+        "SELECT name, whatsapp_number FROM delivery_boys WHERE is_active = 1 AND whatsapp_number IS NOT NULL AND whatsapp_number != '' ORDER BY id ASC LIMIT 1"
       );
     }
 
-    if (boyRow && boyRow.name && boyRow.phone) {
+    if (boyRow && boyRow.name && boyRow.whatsapp_number) {
       return {
         name: boyRow.name.trim(),
-        phone: formatPhoneWithCountryCode(boyRow.phone),
-        rawPhone: boyRow.phone.replace(/\D/g, '')
+        phone: formatPhoneWithCountryCode(boyRow.whatsapp_number),
+        rawPhone: String(boyRow.whatsapp_number).replace(/\D/g, '')
       };
     }
   } catch (err) {

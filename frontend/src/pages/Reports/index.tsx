@@ -32,6 +32,7 @@ import { useApiQuery } from '../../hooks/useApiQuery';
 import { getTodayString, getNDaysAgoString, toDateInputValue } from '../../utils/date';
 import { exportToCSV, exportToPDF } from '../../utils/export';
 import { messageSendEvent } from '../../services/events';
+import { formatINR, formatCount } from '../../utils/currency';
 
 // Module-level cache for instant report hydration on tab switches / re-mounts
 const cachedReportsMap: Record<string, { summary: any; records: any[] }> = {};
@@ -410,7 +411,7 @@ const Reports = () => {
       return [
         {
           label: 'Inactive Medicines',
-          value: deadItems.length.toLocaleString('en-IN'),
+          value: formatCount(deadItems.length),
           icon: Boxes,
           color: 'amber',
           gradient: 'rgba(245,158,11,0.12)',
@@ -418,7 +419,7 @@ const Reports = () => {
         },
         {
           label: 'Locked Capital (Cost)',
-          value: `₹${totalDeadCostValuation.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+          value: `₹${formatINR(totalDeadCostValuation)}`,
           icon: IndianRupee,
           color: 'red',
           gradient: 'rgba(239,68,68,0.12)',
@@ -426,7 +427,7 @@ const Reports = () => {
         },
         {
           label: 'Locked Capital (MRP)',
-          value: `₹${totalDeadValuation.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+          value: `₹${formatINR(totalDeadValuation)}`,
           icon: TrendingUp,
           color: 'sky',
           gradient: 'rgba(14,165,233,0.12)',
@@ -434,7 +435,7 @@ const Reports = () => {
         },
         {
           label: 'Never Sold Items',
-          value: neverMovedCount.toLocaleString('en-IN'),
+          value: formatCount(neverMovedCount),
           icon: HelpCircle,
           color: 'purple',
           gradient: 'rgba(168,85,247,0.12)',
@@ -457,7 +458,7 @@ const Reports = () => {
         },
         {
           label: 'Matching Purchases',
-          value: purchaseCount.toLocaleString('en-IN'),
+          value: formatCount(purchaseCount),
           icon: ShoppingBag,
           color: 'amber',
           gradient: 'rgba(245,158,11,0.12)',
@@ -465,7 +466,7 @@ const Reports = () => {
         },
         {
           label: 'Matching Sales',
-          value: saleCount.toLocaleString('en-IN'),
+          value: formatCount(saleCount),
           icon: FileText,
           color: 'green',
           gradient: 'rgba(34,197,150,0.12)',
@@ -486,7 +487,7 @@ const Reports = () => {
       return [
         {
           label: 'Total Revenue',
-          value: `₹${(stats.totalSales || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+          value: `₹${formatINR((stats.totalSales || 0))}`,
           icon: IndianRupee,
           color: 'green',
           gradient: 'rgba(34,197,150,0.12)',
@@ -494,7 +495,7 @@ const Reports = () => {
         },
         {
           label: 'Cost of Goods Sold (COGS)',
-          value: `₹${(stats.cogs || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+          value: `₹${formatINR((stats.cogs || 0))}`,
           icon: ShoppingBag,
           color: 'sky',
           gradient: 'rgba(14,165,233,0.12)',
@@ -502,7 +503,7 @@ const Reports = () => {
         },
         {
           label: 'Net Profit',
-          value: `₹${(stats.netProfit || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+          value: `₹${formatINR((stats.netProfit || 0))}`,
           icon: TrendingUp,
           color: 'amber',
           gradient: 'rgba(245,158,11,0.12)',
@@ -523,7 +524,7 @@ const Reports = () => {
       return [
         {
           label: 'Total Purchases Cost',
-          value: `₹${(stats.totalPurchases || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+          value: `₹${formatINR((stats.totalPurchases || 0))}`,
           icon: ShoppingBag,
           color: 'sky',
           gradient: 'rgba(14,165,233,0.12)',
@@ -531,7 +532,7 @@ const Reports = () => {
         },
         {
           label: 'Items Purchased',
-          value: (stats.itemsPurchased || 0).toLocaleString('en-IN'),
+          value: formatCount((stats.itemsPurchased || 0)),
           icon: Package,
           color: 'purple',
           gradient: 'rgba(168,85,247,0.12)',
@@ -539,7 +540,7 @@ const Reports = () => {
         },
         {
           label: 'Suppliers/Distributors',
-          value: (stats.suppliersCount || 0).toLocaleString('en-IN'),
+          value: formatCount((stats.suppliersCount || 0)),
           icon: Users,
           color: 'green',
           gradient: 'rgba(34,197,150,0.12)',
@@ -547,7 +548,7 @@ const Reports = () => {
         },
         {
           label: 'Avg Price per Item',
-          value: `₹${(stats.avgItemPrice || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+          value: `₹${formatINR((stats.avgItemPrice || 0))}`,
           icon: IndianRupee,
           color: 'amber',
           gradient: 'rgba(245,158,11,0.12)',
@@ -560,7 +561,7 @@ const Reports = () => {
       return [
         {
           label: 'Total Stock sitting',
-          value: (stats.totalStock || 0).toLocaleString('en-IN'),
+          value: formatCount((stats.totalStock || 0)),
           icon: Package,
           color: 'purple',
           gradient: 'rgba(168,85,247,0.12)',
@@ -568,7 +569,7 @@ const Reports = () => {
         },
         {
           label: 'Total Hold Value (Cost)',
-          value: `₹${(stats.holdValuationCost || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+          value: `₹${formatINR((stats.holdValuationCost || 0))}`,
           icon: IndianRupee,
           color: 'green',
           gradient: 'rgba(34,197,150,0.12)',
@@ -576,7 +577,7 @@ const Reports = () => {
         },
         {
           label: 'Total Hold Value (MRP)',
-          value: `₹${(stats.holdValuationMrp || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+          value: `₹${formatINR((stats.holdValuationMrp || 0))}`,
           icon: TrendingUp,
           color: 'sky',
           gradient: 'rgba(14,165,233,0.12)',
@@ -584,7 +585,7 @@ const Reports = () => {
         },
         {
           label: 'Unique Medicines',
-          value: (stats.uniqueMedicines || 0).toLocaleString('en-IN'),
+          value: formatCount((stats.uniqueMedicines || 0)),
           icon: Boxes,
           color: 'amber',
           gradient: 'rgba(245,158,11,0.12)',
@@ -597,7 +598,7 @@ const Reports = () => {
       return [
         {
           label: 'Expiring Items Qty',
-          value: (stats.expiringStockQty || 0).toLocaleString('en-IN'),
+          value: formatCount((stats.expiringStockQty || 0)),
           icon: Package,
           color: 'purple',
           gradient: 'rgba(168,85,247,0.12)',
@@ -605,7 +606,7 @@ const Reports = () => {
         },
         {
           label: 'Cost Value at Risk',
-          value: `₹${(stats.expiringCostValue || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+          value: `₹${formatINR((stats.expiringCostValue || 0))}`,
           icon: IndianRupee,
           color: 'red',
           gradient: 'rgba(239,68,68,0.12)',
@@ -613,7 +614,7 @@ const Reports = () => {
         },
         {
           label: 'MRP Value at Risk',
-          value: `₹${(stats.expiringMrpValue || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+          value: `₹${formatINR((stats.expiringMrpValue || 0))}`,
           icon: TrendingUp,
           color: 'amber',
           gradient: 'rgba(245,158,11,0.12)',
@@ -621,7 +622,7 @@ const Reports = () => {
         },
         {
           label: 'Unique Medicines',
-          value: (stats.expiringMedicines || 0).toLocaleString('en-IN'),
+          value: formatCount((stats.expiringMedicines || 0)),
           icon: Boxes,
           color: 'sky',
           gradient: 'rgba(14,165,233,0.12)',

@@ -1265,19 +1265,6 @@ const Topbar = ({
     return () => clearInterval(tick);
   }, [upcomingTriggers.length, upcomingTriggers, fetchUpcomingTriggers]);
 
-  const [countdownSec, setCountdownSec] = useState(278); // 4m 38s live ticking countdown
-  const [isCountdownPaused, setIsCountdownPaused] = useState(false);
-
-  useEffect(() => {
-    if (isCountdownPaused) return;
-    const interval = setInterval(() => {
-      setCountdownSec(prev => (prev > 0 ? prev - 1 : 300));
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [isCountdownPaused]);
-
-  const formattedCountdown = `${Math.floor(countdownSec / 60).toString().padStart(2, '0')}:${(countdownSec % 60).toString().padStart(2, '0')}`;
-
   // Consolidate Active Header Notification Carousel Items
   const isWaActive = (waQueueDetail?.counts?.pending || 0) > 0 || (waQueueDetail?.counts?.sending || 0) > 0 || waQueueDetail?.isProcessing;
   const isWaRecentlyDone = !isWaActive && (waQueueDetail?.counts?.sent || 0) > 0 && lastQueueCompletedAt !== null;
@@ -1588,25 +1575,6 @@ const Topbar = ({
                 </div>
 
                 <div className="flex items-center gap-1.5 shrink-0">
-                  {/* Interactive Click-on-Time Countdown Pill (Pause & Resume Timer by Clicking Directly on Time) */}
-                  {currentHeaderItem && (currentHeaderItem.id.includes('advance') || currentHeaderItem.id.includes('scheduled')) && (
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setIsCountdownPaused(prev => !prev);
-                      }}
-                      className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold transition-all cursor-pointer flex items-center gap-1 border ${isCountdownPaused
-                          ? 'bg-amber-500/20 border-amber-500/40 text-amber-300 animate-pulse shadow-[0_0_8px_rgba(245,158,11,0.3)]'
-                          : 'bg-sky-500/15 border-sky-500/30 text-sky-400 hover:bg-sky-500/25'
-                        }`}
-                      title={isCountdownPaused ? "Click Time to Resume Live Countdown" : "Click Time to Pause Countdown"}
-                    >
-                      {isCountdownPaused ? <PauseIcon size={9} className="fill-current text-amber-300" /> : <ClockIcon size={9} className="animate-spin text-sky-400" />}
-                      <span>{isCountdownPaused ? `PAUSED ${formattedCountdown}` : formattedCountdown}</span>
-                    </button>
-                  )}
-
                   {currentHeaderItem && currentHeaderItem.action && (
                     <button
                       type="button"

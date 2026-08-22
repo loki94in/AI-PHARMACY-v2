@@ -26,3 +26,9 @@ This directory contains the Single Page Application (SPA) built using Vite, Reac
 
 - QuickAssistSidebar (components/Layout.tsx) group actions call POST /api/orders/:id/status. The backend queues the arrival WhatsApp when status becomes Ready (response field whatsapp_queued) — toasts must reflect it, never fabricate a queued state.
 - Complete / Complete All mark items Fulfilled and then navigate to /pos with state.prefill {patientName, patientPhone, specialOrderId, advancePayment, medicines[]} — the same prefill shape CRM's Sell Now uses; POS hydrates it on mount.
+
+## Single Global SSE Connection Rule (added 2026-08)
+
+- `useGlobalSseInvalidation` (hooks/useGlobalSseInvalidation.ts), mounted once in Layout, is the ONLY component allowed to own an `EventSource('/api/notifications/stream')`. Pages must NEVER open their own EventSource — CRM and CatalogUpload were converted (2026-08) to consume DOM CustomEvents (`sse-wa-new-message`, `sse-catalog-job`, etc.) dispatched by the global listener with the parsed frame in `event.detail`. New SSE consumers: add a mapping in `SSE_QUERY_MAP`/`SSE_CUSTOM_EVENTS` instead of a new connection.
+- WhatsApp queue status dedupe: Layout's active-queue poller populates `peekWhatsAppQueueStatusCache` (services/api.ts); the queue popover consumes fresh (<2.5 s) entries instead of refetching. Keep this pattern for any second consumer of the same polled endpoint.
+- Shared formatters: use `utils/currency.ts` (`formatINR`, `formatCount`) for INR/count rendering instead of inline `toLocaleString('en-IN', ...)` variants.

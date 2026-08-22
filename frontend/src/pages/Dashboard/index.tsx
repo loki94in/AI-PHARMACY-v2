@@ -5,6 +5,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../../services/api';
 import type { DashboardStats } from '../../services/api';
 import { useApiQuery } from '../../hooks/useApiQuery';
+import { formatINR, formatCount } from '../../utils/currency';
 
 let cachedDashboardStats: DashboardStats | null = null;
 
@@ -122,7 +123,7 @@ const Dashboard = () => {
           
           <div className="text-xs text-muted font-bold uppercase tracking-wider mb-2">Today's Sales</div>
           <div className="text-3xl font-extrabold text-green mb-3">
-            ₹{Number(stats?.todaySales || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            ₹{formatINR(Number(stats?.todaySales || 0))}
           </div>
           <div className="flex items-center gap-1.5 text-xs font-semibold text-green">
             <ArrowUpRight size={14} />

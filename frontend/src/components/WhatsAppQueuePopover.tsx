@@ -4,7 +4,7 @@ import {
   X, RefreshCw, Send, AlertTriangle, CheckCircle2, Clock, 
   WifiOff, Edit3, Play, Pause, ShieldAlert, ChevronDown, ChevronUp, Zap, Truck, Building2, MessageSquare, Calendar, Trash2, CheckCheck
 } from 'lucide-react';
-import { api, apiClient } from '../services/api';
+import { api, apiClient, peekWhatsAppQueueStatusCache } from '../services/api';
 import { toastEvent, whatsappQueueEvent, messageSendEvent } from '../services/events';
 
 interface QueueItem {
@@ -84,7 +84,10 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
 
   const fetchStatus = async () => {
     try {
-      const data = await api.getWhatsAppQueueStatus();
+      // Dedupe with Layout's active-queue poller: reuse its fresh result
+      // instead of hitting the same endpoint again within ~2.5s.
+      const cached = peekWhatsAppQueueStatusCache(2500);
+      const data = cached ?? await api.getWhatsAppQueueStatus();
       cachedQueueState = data;
       setQueueState(data);
       if (data && data.currentPacingMinMs) {

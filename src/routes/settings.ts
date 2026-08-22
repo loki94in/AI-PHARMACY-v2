@@ -455,6 +455,20 @@ router.post('/distributors', async (req, res) => {
 
     let targetId: number;
 
+    const sanitizePhoneDigits = (raw: any): string => {
+      const str = (raw && typeof raw === 'string' && !raw.includes('@') && !raw.includes('<')) ? raw.trim() : (typeof raw === 'number' ? String(raw) : '');
+      let digits = str ? str.replace(/\D/g, '') : '';
+      if (digits.length === 12 && digits.startsWith('91')) {
+        digits = digits.slice(2);
+      } else if (digits.length > 10 && digits.startsWith('91')) {
+        digits = digits.slice(2, 12);
+      } else if (digits.length > 10) {
+        digits = digits.slice(-10);
+      }
+      return digits;
+    };
+    const cleanPhone = sanitizePhoneDigits(phone);
+
     const existing = await db.all(
       `SELECT id FROM distributors WHERE LOWER(name) = LOWER(?) OR (LENGTH(?) > 3 AND LOWER(REPLACE(name, ' ', '')) LIKE ?)`,
       [cleanName, normName, `%${normName}%`]
@@ -464,19 +478,6 @@ router.post('/distributors', async (req, res) => {
       const ids = existing.map(e => e.id);
       targetId = ids[0];
       const placeholders = ids.map(() => '?').join(',');
-      const sanitizePhoneDigits = (raw: any): string => {
-        const str = (raw && typeof raw === 'string' && !raw.includes('@') && !raw.includes('<')) ? raw.trim() : (typeof raw === 'number' ? String(raw) : '');
-        let digits = str ? str.replace(/\D/g, '') : '';
-        if (digits.length === 12 && digits.startsWith('91')) {
-          digits = digits.slice(2);
-        } else if (digits.length > 10 && digits.startsWith('91')) {
-          digits = digits.slice(2, 12);
-        } else if (digits.length > 10) {
-          digits = digits.slice(-10);
-        }
-        return digits;
-      };
-      const cleanPhone = sanitizePhoneDigits(phone);
       await db.run(
         `UPDATE distributors SET 
           phone = CASE WHEN ? != '' THEN ? ELSE phone END,
@@ -488,19 +489,6 @@ router.post('/distributors', async (req, res) => {
         [cleanPhone, cleanPhone, cleanPhone, cleanPhone, cleanEmail, cleanEmail, address || '', address || '', state_code || '', state_code || '', ...ids]
       );
     } else {
-      const sanitizePhoneDigits = (raw: any): string => {
-        const str = (raw && typeof raw === 'string' && !raw.includes('@') && !raw.includes('<')) ? raw.trim() : (typeof raw === 'number' ? String(raw) : '');
-        let digits = str ? str.replace(/\D/g, '') : '';
-        if (digits.length === 12 && digits.startsWith('91')) {
-          digits = digits.slice(2);
-        } else if (digits.length > 10 && digits.startsWith('91')) {
-          digits = digits.slice(2, 12);
-        } else if (digits.length > 10) {
-          digits = digits.slice(-10);
-        }
-        return digits;
-      };
-      const cleanPhone = sanitizePhoneDigits(phone);
       const result = await db.run(
         `INSERT INTO distributors (name, phone, contact, email, address, state_code) VALUES (?, ?, ?, ?, ?, ?)`,
         [cleanName, cleanPhone, cleanPhone, cleanEmail, address || '', state_code || '']

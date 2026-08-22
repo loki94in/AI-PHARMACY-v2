@@ -14,6 +14,7 @@ import { syncDistributorPhoneAcrossTables, resolveDistributorContact } from '../
 import { syncTodayActiveDistributors } from '../services/distributorDispatchReminderWorker.js';
 import { pharmarackCatalogCache } from '../services/pharmarackCatalogCache.js';
 import { startupSyncCoordinator } from '../services/startupSyncCoordinator.js';
+import { findChromePath as findChromiumPath, copyProfileFolder as copyChromeProfileFolder } from '../utils/chromeBrowser.js';
 
 const execAsync = promisify(exec);
 
@@ -26,22 +27,7 @@ const router = express.Router();
 
 
 function findChromePath() {
-  const paths = [
-    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-    process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Google\\Chrome\\Application\\chrome.exe') : null,
-    process.env.PROGRAMFILES ? path.join(process.env.PROGRAMFILES, 'Google\\Chrome\\Application\\chrome.exe') : null,
-    'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
-    'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
-    process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Microsoft\\Edge\\Application\\msedge.exe') : null
-  ].filter(Boolean) as string[];
-
-  for (const p of paths) {
-    if (fs.existsSync(p)) {
-      return p;
-    }
-  }
-  return null;
+  return findChromiumPath({ includeEdge: true });
 }
 
 async function getPharmarackSettings() {
@@ -55,47 +41,7 @@ async function getPharmarackSettings() {
 }
 
 function copyProfileFolder(src: string, dest: string) {
-  if (!fs.existsSync(src)) return;
-  fs.mkdirSync(dest, { recursive: true });
-  const entries = fs.readdirSync(src, { withFileTypes: true });
-
-  const skippedNames = new Set([
-    'cache',
-    'code cache',
-    'gpucache',
-    'dawngraphitecache',
-    'dawnwebgpucache',
-    'gpupersistentcache',
-    'grshadercache',
-    'shadercache',
-    'browsermetrics',
-    'crashpad',
-    'lockfile',
-    'parent.lock',
-    'singletonlock',
-    'lock',
-    'devtoolsactiveport'
-  ]);
-
-  for (const entry of entries) {
-    const lowerName = entry.name.toLowerCase();
-    if (skippedNames.has(lowerName)) {
-      continue;
-    }
-
-    const srcPath = path.join(src, entry.name);
-    const destPath = path.join(dest, entry.name);
-
-    if (entry.isDirectory()) {
-      copyProfileFolder(srcPath, destPath);
-    } else {
-      try {
-        fs.copyFileSync(srcPath, destPath);
-      } catch (err: any) {
-        console.warn(`[Pharmarack Sync] Warning: Could not copy file ${srcPath}: ${err.message}`);
-      }
-    }
-  }
+  copyChromeProfileFolder(src, dest, '[Pharmarack Sync]');
 }
 
 

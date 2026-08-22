@@ -587,58 +587,50 @@ const CatalogUpload = () => {
     }
   }, [jobId, fetchReviews]);
 
+  // Catalog SSE events arrive via the single global listener
+  // (useGlobalSseInvalidation) as DOM CustomEvents with the parsed frame in
+  // `detail` — no page-owned EventSource or manual reconnect loop.
   useEffect(() => {
-    const backendUrl = apiClient.defaults.baseURL || window.location.origin;
-    const cleanBaseUrl = backendUrl.endsWith('/') ? backendUrl.slice(0, -1) : backendUrl;
-    const sseUrl = cleanBaseUrl.startsWith('/api')
-      ? `${cleanBaseUrl}/notifications/stream`
-      : `${cleanBaseUrl}/api/notifications/stream`;
+    const handleCatalogJob = (event: Event) => {
+      const eventData = (event as CustomEvent).detail;
+      if (!eventData) return;
+      try {
+        const { type, payload } = eventData;
 
-    let eventSource: EventSource | null = null;
-    let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
-
-    const connect = () => {
-      eventSource = new EventSource(sseUrl);
-
-      eventSource.onmessage = (event) => {
-        try {
-          const eventData = JSON.parse(event.data);
-          const { type, payload } = eventData;
-
-          if (type === 'catalog_job_progress' && payload) {
-            // Update active job progress if it matches
-            if (payload.id === jobIdRef.current) {
-              setProgress(payload.progress);
-              if (payload.status) {
-                setJobStatus(payload.status);
-              }
-              if (payload.total_count !== undefined) {
-                setStats(prev => ({
-                  total: payload.total_count,
-                  existing: payload.existing_count || 0,
-                  new: payload.new_count || 0,
-                  duplicates: payload.duplicate_count || 0
-                }));
-              }
+        if (type === 'catalog_job_progress' && payload) {
+          // Update active job progress if it matches
+          if (payload.id === jobIdRef.current) {
+            setProgress(payload.progress);
+            if (payload.status) {
+              setJobStatus(payload.status);
             }
-            // Update previousJobs list item progress in React Query cache
-            queryClient.setQueryData<CatalogJob[]>(['catalog-jobs'], (old) => {
-              if (!old) return [];
-              return old.map(job => 
-                job.id === payload.id 
-                  ? { 
-                      ...job, 
-                      status: payload.status || job.status,
-                      progress: payload.progress,
-                      total_count: payload.total_count !== undefined ? payload.total_count : job.total_count,
-                      new_count: payload.new_count !== undefined ? payload.new_count : job.new_count,
-                      existing_count: payload.existing_count !== undefined ? payload.existing_count : job.existing_count,
-                      duplicate_count: payload.duplicate_count !== undefined ? payload.duplicate_count : job.duplicate_count
-                    } 
-                  : job
-              );
-            });
-          } else if (type === 'catalog_job_update' && payload) {
+            if (payload.total_count !== undefined) {
+              setStats(prev => ({
+                total: payload.total_count,
+                existing: payload.existing_count || 0,
+                new: payload.new_count || 0,
+                duplicates: payload.duplicate_count || 0
+              }));
+            }
+          }
+          // Update previousJobs list item progress in React Query cache
+          queryClient.setQueryData<CatalogJob[]>(['catalog-jobs'], (old) => {
+            if (!old) return [];
+            return old.map(job =>
+              job.id === payload.id
+                ? {
+                    ...job,
+                    status: payload.status || job.status,
+                    progress: payload.progress,
+                    total_count: payload.total_count !== undefined ? payload.total_count : job.total_count,
+                    new_count: payload.new_count !== undefined ? payload.new_count : job.new_count,
+                    existing_count: payload.existing_count !== undefined ? payload.existing_count : job.existing_count,
+                    duplicate_count: payload.duplicate_count !== undefined ? payload.duplicate_count : job.duplicate_count
+                  }
+                : job
+            );
+          });
+        } else if (type === 'catalog_job_update' && payload) {
             // Update active job status/progress if it matches
             if (payload.id === jobIdRef.current) {
               setProgress(payload.progress !== undefined ? payload.progress : 0);
@@ -715,25 +707,15 @@ const CatalogUpload = () => {
         } catch (err) {
           console.error('Failed to parse catalog SSE message:', err);
         }
-      };
-
-      eventSource.onerror = (err) => {
-        console.warn('Catalog SSE disconnected or failed, retrying in 5 seconds...', err);
-        eventSource?.close();
-        eventSource = null;
-        reconnectTimeout = setTimeout(connect, 5000);
-      };
     };
 
-    connect();
-
+    window.addEventListener('sse-catalog-job', handleCatalogJob);
+    window.addEventListener('sse-catalog-review', handleCatalogJob);
+    window.addEventListener('sse-google-verification', handleCatalogJob);
     return () => {
-      if (eventSource) {
-        eventSource.close();
-      }
-      if (reconnectTimeout) {
-        clearTimeout(reconnectTimeout);
-      }
+      window.removeEventListener('sse-catalog-job', handleCatalogJob);
+      window.removeEventListener('sse-catalog-review', handleCatalogJob);
+      window.removeEventListener('sse-google-verification', handleCatalogJob);
     };
   }, [queryClient]);
 

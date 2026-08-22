@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { api, apiClient } from '../../services/api';
 import { toastEvent } from '../../services/events';
+import { formatINR, formatCount } from '../../utils/currency';
 
 interface StagedSaleItem {
   inventory_id: number;
@@ -659,7 +660,7 @@ export default function PhoneSales() {
                   </div>
                   <div>
                     <span className="text-[9px] font-bold text-muted uppercase block text-primary">Final Total</span>
-                    <span className="text-base font-bold text-accent">₹{total.toLocaleString('en-IN')}</span>
+                    <span className="text-base font-bold text-accent">₹{formatCount(total)}</span>
                   </div>
                 </div>
 

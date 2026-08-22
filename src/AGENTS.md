@@ -54,7 +54,7 @@ The engine provides a single, unified approach to medicine availability and alte
 |------|---------|
 | `src/services/medicineAvailabilityEngine.ts` | Core service: availability checks, substitute finding, stock levels, learning |
 | `src/worker/stockCalculatorWorker.ts` | Background worker: recalculates stock_config from sale_items daily |
-| `src/worker/substituteCacheWorker.ts` | Background worker: pre-computes substitute relationships weekly |
+| `src/worker/substituteCacheWorker.ts` | No-op stub: exports only `precomputeSubstitutes()` (dynamic composition-match lookup replaced precomputation; its weekly scheduler was removed 2026-08 as dead code) |
 | `src/routes/medicineAvailability.ts` | API endpoints for availability, substitutes, emergency stock, learning |
 
 ### Database Tables (added to `src/database.ts`)
@@ -88,8 +88,18 @@ The engine provides a single, unified approach to medicine availability and alte
 otified===0; missing phone skips silently; response carries whatsapp_queued. This preserves the Strict Manual-Only Patient Messaging Contract: no worker or background job may ever dispatch it.
 - Arrival detection still only flips status to Ready/ARRIVED with 
 otified = 0; real match_type/match_confidence are stored in order_overlaps.
-
 ## Instant WhatsApp Dispatch & Resend (added 2026-08)
 
-- User-clicked send paths (/whatsapp/queue/enqueue-single, refill reminder sends in outes/refills.ts, arrival helper enqueueArrivalWhatsApp in outes/orders.ts) call whatsappQueueWorker.forceNext() after enqueue so dispatch skips the pacing countdown and the queue UI flips Pending -> Sent immediately. Background/bulk enqueues keep normal pacing via plain 	riggerProcessing().
+- User-clicked send paths (/whatsapp/queue/enqueue-single, refill reminder sends in 
+outes/refills.ts, arrival helper enqueueArrivalWhatsApp in 
+outes/orders.ts) call whatsappQueueWorker.forceNext() after enqueue so dispatch skips the pacing countdown and the queue UI flips Pending -> Sent immediately. Background/bulk enqueues keep normal pacing via plain 	riggerProcessing().
 - POST /api/whatsapp/queue/items/:id/resend re-enqueues any sent/failed/pending item as a NEW queue item and force-dispatches it. It relies on enqueue(..., { skipDedupe: true }) because the default same-day number+message dedupe would otherwise silently suppress an identical resend.
+
+## Queue & Worker Consolidation (2026-08 refactor)
+
+- `src/services/whatsappQueue.ts` is now a thin compatibility facade over `whatsappQueueWorker`. Its duplicate ungated 30s setInterval (which double-drained `whatsapp_send_queue`) was removed; do NOT reintroduce a second processor for that table. The canonical worker self-gates: `isWhatsAppExplicitlyDisabled()` per tick, 10 s active / 30 s offline / 15 min when `activityTracker.isIdle()`.
+- Gated background loops (idle-skip added 2026-08): `distributorDispatchReminderWorker` (5 min) and `doctorReportingService` (hourly, internal daily dedupe guard prevents lost runs). Keep new workers following this P3 pattern.
+- `src/middleware/validation.ts` was deleted (zero importers). Do not recreate validation middleware without wiring it into routes.
+- `src/utils/whatsappTemplateBuilder.ts` `resolveActiveDeliveryBoy` is the contract-mandated resolver and reads the `delivery_boys.whatsapp_number` column (NOT `phone`, which does not exist on that table). Existing hand-rolled resolution sites in notificationService/pharmarackDailyDispatchService intentionally remain as-is (multi-boy lists, phone-splitting semantics); changing them requires explicit regression testing of WhatsApp order notifications.
+- `src/utils/chromeBrowser.ts` is the single source for `findChromePath({ includeEdge? })` and `copyProfileFolder(src, dest, logPrefix)`. Pharmarack cart flows pass `{ includeEdge: true }`; tokenRefreshScheduler keeps Chrome-only lookup. Do not re-implement these helpers locally. Note: the three Levenshtein scorers (orderNameMatcher / sales.ts / productNameFilterService) intentionally remain separate — they use different normalization and substring shortcuts, so unifying them would change live matching behavior.
+- Test-suite note: several jest suites (backupRecovery, pharmarackCartNotif, whatsappPipeline, etc.) fail intermittently at baseline due to better-sqlite3 ERR_DLOPEN_FAILED native-module contention between parallel workers and shared DB fixtures. Verify suspected regressions by running the suite in isolation AND comparing against a stashed baseline before attributing to code changes.

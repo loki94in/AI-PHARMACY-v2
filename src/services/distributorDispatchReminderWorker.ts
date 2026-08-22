@@ -639,8 +639,13 @@ export function startDistributorDispatchReminderWorker() {
   checkAndSendAutoReminders().catch(() => {});
   checkAndSendAfternoonDeliveryBoyReminder().catch(() => {});
 
-  // Check every 5 minutes (300,000 ms)
-  checkIntervalTimer = setInterval(() => {
+  // Check every 5 minutes (300,000 ms). P3 gated worker: skip ticks while the
+  // user is idle >30 min; checks resume automatically on the next tick after wake.
+  checkIntervalTimer = setInterval(async () => {
+    try {
+      const { activityTracker } = await import('../utils/activityTracker.js');
+      if (activityTracker.isIdle()) return;
+    } catch (_) {}
     purgeStaleOfflineReminders().catch(() => {});
     checkAndSendAutoReminders().catch(() => {});
     checkAndSendAfternoonDeliveryBoyReminder().catch(() => {});

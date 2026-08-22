@@ -2668,51 +2668,58 @@ function isSameChat(chat: WaChatItem, targetChatId: string, resolvedNum?: string
   return false;
 }
 
-  // SSE event listener for real-time messages
+  // SSE events via the single global listener (useGlobalSseInvalidation) —
+  // no page-owned EventSource, so switching chats never reconnects the stream.
   useEffect(() => {
-    const eventSource = new EventSource('/api/notifications/stream');
-
-    eventSource.onmessage = (event) => {
+    const onWaNewMessage = (event: Event) => {
+      const data = (event as CustomEvent).detail;
+      if (!data?.payload) return;
       try {
-        const data = JSON.parse(event.data);
-        if (data.type === 'wa_new_message') {
-          const newMsg: WaMessageItem = data.payload.message;
-          const chatId: string = data.payload.chat_id;
-          const resolvedNumber: string = data.payload.resolved_number;
+        const newMsg: WaMessageItem = data.payload.message;
+        const chatId: string = data.payload.chat_id;
+        const resolvedNumber: string = data.payload.resolved_number;
 
-          // Use ref to avoid stale closure on activeChat
-          const currentChat = activeChatRef.current;
-          if (currentChat && isSameChat(currentChat, chatId, resolvedNumber)) {
-            setMessages(prev => {
-              if (prev.some(m => m.id === newMsg.id)) return prev;
-              return [...prev, newMsg];
-            });
-            setTimeout(() => threadEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
-          }
-          // Refresh chats list preview
-          loadChats();
-        } else if (data.type === 'ocr_scan_complete') {
-          // OCR result arrived from background scan — update pill badge in chat
-          const { msgId, ocrResult } = data.payload || {};
-          if (msgId && ocrResult) {
-            try {
-              const label = ocrResult?.items?.map((i: any) => i.name || i.medicine_name || i.text).filter(Boolean).join(', ')
-                || ocrResult?.text?.substring(0, 120);
-              if (label) setOcrResults(prev => ({ ...prev, [msgId]: label }));
-            } catch { /* ignore */ }
-          }
-        } else if (data.type === 'auth_failure') {
-          setIsReady(false);
+        // Use ref to avoid stale closure on activeChat
+        const currentChat = activeChatRef.current;
+        if (currentChat && isSameChat(currentChat, chatId, resolvedNumber)) {
+          setMessages(prev => {
+            if (prev.some(m => m.id === newMsg.id)) return prev;
+            return [...prev, newMsg];
+          });
+          setTimeout(() => threadEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
         }
+        // Refresh chats list preview
+        loadChats();
       } catch (err) {
-        console.error('SSE message parse error:', err);
+        console.error('SSE wa_new_message handling error:', err);
       }
     };
 
-    return () => {
-      eventSource.close();
+    const onOcrScanComplete = (event: Event) => {
+      const data = (event as CustomEvent).detail;
+      if (!data) return;
+      // OCR result arrived from background scan — update pill badge in chat
+      const { msgId, ocrResult } = data.payload || {};
+      if (msgId && ocrResult) {
+        try {
+          const label = ocrResult?.items?.map((i: any) => i.name || i.medicine_name || i.text).filter(Boolean).join(', ')
+            || ocrResult?.text?.substring(0, 120);
+          if (label) setOcrResults(prev => ({ ...prev, [msgId]: label }));
+        } catch { /* ignore */ }
+      }
     };
-  }, [activeChat, loadChats]);
+
+    const onAuthFailure = () => setIsReady(false);
+
+    window.addEventListener('sse-wa-new-message', onWaNewMessage);
+    window.addEventListener('sse-ocr-scan-complete', onOcrScanComplete);
+    window.addEventListener('sse-auth-failure', onAuthFailure);
+    return () => {
+      window.removeEventListener('sse-wa-new-message', onWaNewMessage);
+      window.removeEventListener('sse-ocr-scan-complete', onOcrScanComplete);
+      window.removeEventListener('sse-auth-failure', onAuthFailure);
+    };
+  }, [loadChats]);
 
   // Handle ESC key to close modals
   useEffect(() => {

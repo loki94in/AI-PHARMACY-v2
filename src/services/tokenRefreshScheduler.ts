@@ -7,69 +7,11 @@ import { getPuppeteer } from '../utils/lazyPuppeteer.js';
 import { dbManager } from '../database/connection.js';
 import { getAppDataDir } from '../config/index.js';
 import { activityTracker } from '../utils/activityTracker.js';
+import { findChromePath, copyProfileFolder } from '../utils/chromeBrowser.js';
 
 const execAsync = promisify(exec);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
-function findChromePath() {
-  const paths = [
-    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-    process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Google\\Chrome\\Application\\chrome.exe') : null
-  ].filter(Boolean) as string[];
-
-  for (const p of paths) {
-    if (fs.existsSync(p)) {
-      return p;
-    }
-  }
-  return null;
-}
-
-function copyProfileFolder(src: string, dest: string) {
-  if (!fs.existsSync(src)) return;
-  fs.mkdirSync(dest, { recursive: true });
-  const entries = fs.readdirSync(src, { withFileTypes: true });
-
-  const skippedNames = new Set([
-    'cache',
-    'code cache',
-    'gpucache',
-    'dawngraphitecache',
-    'dawnwebgpucache',
-    'gpupersistentcache',
-    'grshadercache',
-    'shadercache',
-    'browsermetrics',
-    'crashpad',
-    'lockfile',
-    'parent.lock',
-    'singletonlock',
-    'lock',
-    'devtoolsactiveport'
-  ]);
-
-  for (const entry of entries) {
-    const lowerName = entry.name.toLowerCase();
-    if (skippedNames.has(lowerName)) {
-      continue;
-    }
-
-    const srcPath = path.join(src, entry.name);
-    const destPath = path.join(dest, entry.name);
-
-    if (entry.isDirectory()) {
-      copyProfileFolder(srcPath, destPath);
-    } else {
-      try {
-        fs.copyFileSync(srcPath, destPath);
-      } catch (err: any) {
-        console.warn(`[TokenRefreshScheduler] Warning: Could not copy file ${srcPath}: ${err.message}`);
-      }
-    }
-  }
-}
 
 export async function killOrphanChromeProcesses(keyword: string = 'pharmarack_profile'): Promise<void> {
   if (process.platform !== 'win32') return;
@@ -392,7 +334,7 @@ export class TokenRefreshScheduler {
         console.log('[TokenRefreshScheduler] Main profile is locked. Copying to temp profile...', launchErr.message);
         const randomSuffix = Math.floor(Math.random() * 1000000);
         const tempProfilePath = path.resolve(getAppDataDir(), 'data', `pharmarack_profile_temp_${Date.now()}_${randomSuffix}`);
-        copyProfileFolder(mainProfilePath, tempProfilePath);
+        copyProfileFolder(mainProfilePath, tempProfilePath, '[TokenRefreshScheduler]');
         cleanProfileLockFiles(tempProfilePath);
         browser = await puppeteer.launch({
           executablePath: chromePath,
@@ -490,7 +432,7 @@ export class TokenRefreshScheduler {
         try {
           if (holder.token) {
             console.log('[TokenRefreshScheduler] Copying updated session back to main profile...');
-            copyProfileFolder(tempProfilePathToDelete, mainProfilePath);
+            copyProfileFolder(tempProfilePathToDelete, mainProfilePath, '[TokenRefreshScheduler]');
           }
         } catch (copyBackErr: any) {
           console.warn('[TokenRefreshScheduler] Could not copy temp profile back to main profile:', copyBackErr.message);
