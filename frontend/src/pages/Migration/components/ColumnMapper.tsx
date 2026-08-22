@@ -9,7 +9,6 @@ interface ColumnMapperProps {
 }
 
 export const ColumnMapper: React.FC<ColumnMapperProps> = ({
-  header,
   value,
   onChange,
   dataType

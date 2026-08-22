@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Zap, ChevronLeft, ChevronRight, X, User, Phone, ShoppingCart, CreditCard, Sparkles } from 'lucide-react';
+import { Zap, ChevronLeft, ChevronRight, X, Phone, ShoppingCart, CreditCard, Sparkles } from 'lucide-react';
 import { stagedQueueService, type StagedItem } from '../services/stagedQueueService';
 
 interface Props {

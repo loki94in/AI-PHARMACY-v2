@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useOnClickOutside } from '../../hooks/useOnClickOutside';
 import { useLocation } from 'react-router-dom';
-import { api, apiClient } from '../../services/api';
-import { RotateCcw, Plus, Trash2, Search, FileText, AlertTriangle, Package, Camera, X, Loader2, Edit, Wand2, ChevronDown, ChevronUp, Building2, Filter, Layers } from 'lucide-react';
+import { api } from '../../services/api';
+import { RotateCcw, Plus, Trash2, Search, FileText, Camera, X, Loader2, Edit, Wand2, ChevronDown, ChevronUp, Building2, Layers } from 'lucide-react';
 import AICamera from '../../components/AICamera';
 import { useApiQuery } from '../../hooks/useApiQuery';
 import { useQueryClient } from '@tanstack/react-query';
@@ -186,7 +186,7 @@ const Returns: React.FC = () => {
     setSearchResults([]);
     setSearchHighlightIndex(-1);
   });
-  const [groupedReturns, setGroupedReturns] = useState<GroupedReturn[]>([]);
+  const [, setGroupedReturns] = useState<GroupedReturn[]>([]);
 
   const [selectedHistoryReturn, setSelectedHistoryReturn] = useState<any | null>(null);
   const [historyReturnItems, setHistoryReturnItems] = useState<any[]>([]);
@@ -301,37 +301,6 @@ const Returns: React.FC = () => {
     } finally {
       setIsResolving(false);
     }
-  };
-
-  const groupGivenItemsByInvoice = (itemsToGroup: ReturnItem[]): GroupedReturn[] => {
-    const validItems = itemsToGroup.filter(item => {
-      const qty = parseFloat(item.quantity as any) || 0;
-      return qty > 0;
-    });
-    
-    const grouped: { [key: string]: GroupedReturn } = {};
-    
-    validItems.forEach(item => {
-      const key = `${item.distributor_id || 0}_${item.invoice_no || 'N/A'}`;
-      const qty = parseFloat(item.quantity as any) || 0;
-      const costPrice = parseFloat(item.cost_price as any) || 0;
-      
-      if (!grouped[key]) {
-        grouped[key] = {
-          distributor_id: item.distributor_id || 0,
-          distributor_name: item.distributor_name || 'Unknown',
-          invoice_no: item.invoice_no || 'N/A',
-          purchase_date: item.purchase_date || '',
-          items: [],
-          total_amount: 0,
-        };
-      }
-      
-      grouped[key].items.push(item);
-      grouped[key].total_amount += costPrice * qty;
-    });
-    
-    return Object.values(grouped);
   };
 
   // Sync items to active tab
@@ -1008,11 +977,6 @@ const Returns: React.FC = () => {
         const costPrice = parseFloat(item.cost_price as any) || 0;
         return sum + (costPrice * qty);
       }, 0);
-  };
-
-  const handlePreviewGrouped = () => {
-    const grouped = groupItemsByInvoice();
-    setGroupedReturns(grouped);
   };
 
   const processReturn = async () => {

@@ -248,21 +248,6 @@ interface SalePayload {
   invoice_no?: string;
 }
 
-interface PurchaseBillItem {
-  medicine_name: string;
-  medicine_id?: number | null;
-  batch_number: string;
-  expiry_date: string;
-  quantity: number;
-  purchase_price: number;
-  mrp: number;
-  cgst_per?: number;
-  sgst_per?: number;
-  hsn_code?: string;
-  rack_location?: string;
-  pack_size?: number;
-}
-
 interface PurchasePayload {
   invoice_no: string;
   distributor_id?: number | null;

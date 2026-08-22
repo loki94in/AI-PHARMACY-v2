@@ -1,9 +1,8 @@
 import React, { useState, useEffect, memo } from 'react';
 import { createPortal } from 'react-dom';
 import { 
-  X, Save, RefreshCw, AlertTriangle, Pill, Package, Factory, 
-  Barcode, Tag, MapPin, Database, ChevronDown, Eye, Shield, 
-  Percent, FileText, Settings, Sparkles, Check, Trash2
+  X, Save, RefreshCw, AlertTriangle, Pill, Barcode, Tag, Database, Eye, Shield, 
+  Percent, Settings, Trash2
 } from 'lucide-react';
 import { api } from '../services/api';
 import { useQueryClient } from '@tanstack/react-query';
@@ -20,7 +19,7 @@ export const updateMedicineNameWithPackSize = (currentName: string, newPackaging
   if (oldPackaging) {
     const trimmedOldPkg = oldPackaging.trim();
     if (trimmedOldPkg) {
-      const escapedOldPkg = trimmedOldPkg.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+      const escapedOldPkg = trimmedOldPkg.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
       const directRegex = new RegExp(`\\b${escapedOldPkg}\\s*$`, 'i');
       if (directRegex.test(trimmedName)) {
         return trimmedName.replace(directRegex, trimmedNewPkg);
@@ -39,7 +38,6 @@ export const updateMedicineNameWithPackSize = (currentName: string, newPackaging
 
   if (match) {
     const matchedStr = match[0];
-    const oldNumInName = match[1];
     const oldUnitInName = match[2] || '';
 
     if (!oldUnitInName || !STRENGTH_FORM_UNITS.test(oldUnitInName)) {
@@ -112,7 +110,7 @@ const splitMedicineName = (name: string, packaging: string) => {
   return { baseName, packType: detectedType };
 };
 
-const getMatchingPreset = (packaging: string, packType: string): string => {
+const getMatchingPreset = (packaging: string, _packType: string): string => {
   const cleanPkg = packaging.trim().toUpperCase();
 
   if (cleanPkg === 'STRIP OF 10 TAB' || cleanPkg === '10 TAB') return '10_TAB';
@@ -468,11 +466,6 @@ const UniversalMedicineEditModalInner: React.FC<UniversalMedicineEditModalProps>
         ? (parseFloat(value) || 0)
         : val
     }));
-  };
-
-  const handleNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setIsManualName(true);
-    setForm((prev: any) => ({ ...prev, name: e.target.value }));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {

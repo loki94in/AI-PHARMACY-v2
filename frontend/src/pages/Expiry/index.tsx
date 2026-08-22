@@ -14,7 +14,7 @@ import { DateRangeFilter } from '../../components/DateRangeFilter';
 import { usePersistedDateRange } from '../../hooks/usePersistedDateRange';
 import { useApiQuery } from '../../hooks/useApiQuery';
 import { useQueryClient } from '@tanstack/react-query';
-import { getTodayString, getNDaysAgoString, toDateInputValue } from '../../utils/date';
+import { getNDaysAgoString, toDateInputValue } from '../../utils/date';
 
 interface ExpiryItem {
   id: number;
@@ -39,7 +39,6 @@ let cachedExpiryItems: ExpiryItem[] | null = null;
 
 const Expiry = () => {
   const navigate = useNavigate();
-  const todayStr = getTodayString();
   const [pendingReviewsCount, setPendingReviewsCount] = useState(0);
 
   useEffect(() => {
@@ -102,7 +101,7 @@ const Expiry = () => {
   // Custom Filters
   const [minQty, setMinQty] = useState('');
   const [maxQty, setMaxQty] = useState('');
-  const [showFilters, setShowFilters] = useState(false);
+  const [] = useState(false);
   const [colFilterId, setColFilterId] = useState('');
   const [colFilterMedName, setColFilterMedName] = useState('');
   const [colFilterBatchNo, setColFilterBatchNo] = useState('');

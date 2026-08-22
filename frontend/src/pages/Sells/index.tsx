@@ -1,12 +1,12 @@
-import { useState, useEffect, useCallback, Fragment, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Edit3, Trash2, X, User, FileText, Save, AlertTriangle, BookOpen, RefreshCw, ShieldAlert, Factory, Calendar, RotateCcw, Download, QrCode, Printer, Search } from 'lucide-react';
+import { Edit3, Trash2, X, User, FileText, Save, AlertTriangle, BookOpen, RefreshCw, ShieldAlert, Factory, Calendar, RotateCcw, Download, QrCode, Printer } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { UniversalMedicineEditModal } from '../../components/UniversalMedicineEditModal';
 import { api } from '../../services/api';
 import { toastEvent } from '../../services/events';
 import { useQueryClient } from '@tanstack/react-query';
-import { DateRangeFilter } from '../../components/DateRangeFilter';
+import {} from '../../components/DateRangeFilter';
 import { usePersistedDateRange } from '../../hooks/usePersistedDateRange';
 import { useInfiniteScroll } from '../../hooks/useInfiniteScroll';
 import { invalidateAfterStockWrite } from '../../utils/cacheInvalidation';
@@ -57,7 +57,6 @@ interface SaleInvoice {
 
 
 // Module-level cache for instant re-mount
-let cachedInvoices: SaleInvoice[] | null = null;
 
 const exportColumns = [
   { key: 'invoice_no', label: 'Invoice No' },
@@ -116,10 +115,10 @@ const Sells = () => {
   const [barcodeModalInvoice, setBarcodeModalInvoice] = useState<string | null>(null);
   const [barcodeData, setBarcodeData] = useState<{ invoiceNo: string; qrDataUrl: string; code128DataUrl: string; pdfUrl: string; barcodeText: string } | null>(null);
   const [loadingBarcode, setLoadingBarcode] = useState(false);
-  const [barcodeModalItems, setBarcodeModalItems] = useState<SaleItem[]>([]);
-  const [productBarcodeSearch, setProductBarcodeSearch] = useState('');
+  const [, setBarcodeModalItems] = useState<SaleItem[]>([]);
+  const [, setProductBarcodeSearch] = useState('');
   const [generatingProductBarcode, setGeneratingProductBarcode] = useState(false);
-  const [activeBarcodeTab, setActiveBarcodeTab] = useState<'invoice' | 'products'>('invoice');
+  const [, setActiveBarcodeTab] = useState<'invoice' | 'products'>('invoice');
 
   const handleOpenBarcode = async (invoiceNo: string, invoiceId?: number, existingItems?: SaleItem[]) => {
     setBarcodeModalInvoice(invoiceNo);
@@ -182,11 +181,6 @@ const Sells = () => {
       setGeneratingProductBarcode(false);
     }
   };
-
-  const isDateFilterExcludingToday = !!(
-    (dateRangeHelper.dateRange.from && dateRangeHelper.dateRange.from > todayStr) ||
-    (dateRangeHelper.dateRange.to && dateRangeHelper.dateRange.to < todayStr)
-  );
 
   const formatShortDate = (dateStr: string) => {
     if (!dateStr) return '';
@@ -259,7 +253,6 @@ const Sells = () => {
   // Infinite Scroll hook setup
   const {
     items,
-    allItems,
     totalItems,
     isFetching,
     isFetchingNextPage,
@@ -301,9 +294,7 @@ const Sells = () => {
     },
   });
 
-  const loading = isFetching && items.length === 0;
-
-  const fetchInvoices = useCallback((silent = false) => {
+  const fetchInvoices = useCallback((_silent = false) => {
     refetch();
   }, [refetch]);
 
@@ -336,12 +327,12 @@ const Sells = () => {
       try {
         const res = await api.generateSaleInvoiceBarcode(full.invoice_no);
         setBarcodeData(res as any);
-      } catch (e) {
+      } catch (_e) {
         // non-blocking barcode preview fetch
       } finally {
         setLoadingBarcode(false);
       }
-    } catch (err) {
+    } catch (_err) {
       toastEvent.trigger('Failed to load invoice details', 'error');
     }
   };
@@ -354,7 +345,7 @@ const Sells = () => {
       setBarcodeModalInvoice(null);
       setBarcodeData(null);
       navigate('/pos', { state: { editSale: full } });
-    } catch (err) {
+    } catch (_err) {
       toastEvent.trigger('Failed to load invoice for editing in POS', 'error');
     }
   };
@@ -390,7 +381,7 @@ const Sells = () => {
       toastEvent.trigger(`Transferring prescription for ${prefillPayload.patientName || 'patient'} to POS...`, 'info', '/pos');
       setViewInvoice(null);
       navigate('/pos', { state: { prefill: prefillPayload } });
-    } catch (err: any) {
+    } catch (_err: any) {
       toastEvent.trigger('Failed to load bill for repeat sale', 'error');
     }
   };
@@ -444,7 +435,7 @@ const Sells = () => {
 
       // Refresh the shared inventory cache so POS search reflects the restored stock
       api.getCompactInventory().catch(() => {});
-    } catch (err) {
+    } catch (_err) {
       toastEvent.trigger('Failed to delete invoice', 'error');
     }
   };

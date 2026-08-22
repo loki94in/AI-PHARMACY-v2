@@ -63,14 +63,13 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
   const [expandedIds, setExpandedIds] = useState<Record<number, boolean>>({});
 
   // Pacing Slider state
-  const [pacingSec, setPacingSec] = useState<number>(() => cachedQueueState?.currentPacingMinMs ? Math.round(cachedQueueState.currentPacingMinMs / 1000) : 10);
+  const [, setPacingSec] = useState<number>(() => cachedQueueState?.currentPacingMinMs ? Math.round(cachedQueueState.currentPacingMinMs / 1000) : 10);
 
   // Delay Timers state
-  const [delayCreditBill, setDelayCreditBill] = useState<number>(() => cachedDelayCreditBill);
-  const [delayDistributor, setDelayDistributor] = useState<number>(() => cachedDelayDistributor);
-  const [delayDeliveryBoy, setDelayDeliveryBoy] = useState<number>(() => cachedDelayDeliveryBoy);
-  const [showDelayConfig, setShowDelayConfig] = useState(false);
-  const [savingDelay, setSavingDelay] = useState(false);
+  const [, setDelayCreditBill] = useState<number>(() => cachedDelayCreditBill);
+  const [, setDelayDistributor] = useState<number>(() => cachedDelayDistributor);
+  const [, setDelayDeliveryBoy] = useState<number>(() => cachedDelayDeliveryBoy);
+  const [] = useState(false);
 
   // Edit item modal state
   const [editingItem, setEditingItem] = useState<QueueItem | null>(null);
@@ -138,30 +137,6 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
     };
   }, []);
 
-  const handleSaveDelayTimer = async (key: string, val: number) => {
-    const updatedCredit = key === 'whatsapp_delay_credit_bill' ? val : delayCreditBill;
-    const updatedDist = key === 'whatsapp_delay_distributor' ? val : delayDistributor;
-    const updatedDeliv = key === 'whatsapp_delay_delivery_boy' ? val : delayDeliveryBoy;
-
-    if (key === 'whatsapp_delay_credit_bill') setDelayCreditBill(val);
-    if (key === 'whatsapp_delay_distributor') setDelayDistributor(val);
-    if (key === 'whatsapp_delay_delivery_boy') setDelayDeliveryBoy(val);
-
-    setSavingDelay(true);
-    try {
-      await apiClient.post('/settings/save', {
-        whatsapp_delay_credit_bill: updatedCredit.toString(),
-        whatsapp_delay_distributor: updatedDist.toString(),
-        whatsapp_delay_delivery_boy: updatedDeliv.toString(),
-      });
-      toastEvent.trigger('WhatsApp message delay timer updated', 'success');
-    } catch (err) {
-      toastEvent.trigger('Failed to save delay setting', 'error');
-    } finally {
-      setSavingDelay(false);
-    }
-  };
-
   const [isFlushing, setIsFlushing] = useState(false);
 
   const handleFlushNow = async () => {
@@ -172,7 +147,7 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
       await api.flushWhatsAppQueue();
       toastEvent.trigger('Queue flush triggered', 'info');
       await fetchStatus();
-    } catch (err) {
+    } catch (_err) {
       toastEvent.trigger('Failed to flush queue', 'error');
     } finally {
       setTimeout(() => setIsFlushing(false), 2000);
@@ -192,7 +167,7 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
         toastEvent.trigger('No pending items in queue', 'info');
       }
       await fetchStatus();
-    } catch (err) {
+    } catch (_err) {
       toastEvent.trigger('Failed to dispatch next message', 'error');
     } finally {
       setTimeout(() => setIsFlushingNext(false), 1000);
@@ -201,15 +176,15 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
 
   const handleSetPacingPreset = async (preset: 'turbo' | 'fast' | 'safe') => {
     try {
-      const res = await api.setWhatsAppQueuePacingPreset(preset);
-      const msg = preset === 'turbo' 
+      await api.setWhatsAppQueuePacingPreset(preset);
+      const msg = preset === 'turbo'
         ? '🚀 Ultra-Fast Turbo Pacing enabled (100ms speed)' 
         : preset === 'fast' 
           ? '⚡ Fast Pacing enabled (1-3s)' 
           : '🛡️ Safe Pacing enabled (8-12s)';
       toastEvent.trigger(msg, 'success');
       await fetchStatus();
-    } catch (err) {
+    } catch (_err) {
       toastEvent.trigger('Failed to update pacing preset', 'error');
     }
   };
@@ -218,7 +193,7 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
     try {
       await apiClient.post('/whatsapp/queue/toggle-pause');
       await fetchStatus();
-    } catch (err) {
+    } catch (_err) {
       toastEvent.trigger('Failed to toggle queue pause', 'error');
     }
   };
@@ -228,7 +203,7 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
       const res = await api.retryFailedWhatsAppQueue();
       toastEvent.trigger(res.message || 'Reset failed items to pending', 'success');
       await fetchStatus();
-    } catch (err) {
+    } catch (_err) {
       toastEvent.trigger('Failed to retry messages', 'error');
     }
   };
@@ -292,7 +267,7 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
       toastEvent.trigger(`Updated item #${editingItem.id} and set to Pending`, 'success');
       setEditingItem(null);
       await fetchStatus();
-    } catch (err) {
+    } catch (_err) {
       toastEvent.trigger('Failed to update queue item', 'error');
     } finally {
       setSavingEdit(false);
@@ -454,7 +429,6 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
   const counts = queueState?.counts || { pending: 0, sending: 0, sent: 0, failed_offline: 0, failed_perm: 0 };
   const pendingTotal = todayPendingCount > 0 ? todayPendingCount : ((counts.pending || 0) + (counts.sending || 0));
   const failedTotal = todayFailedCount > 0 ? todayFailedCount : ((counts.failed_offline || 0) + (counts.failed_perm || 0));
-  const sentTotal = todaySentCount > 0 ? todaySentCount : (counts.sent || 0);
 
   const renderTypeBadge = (type: string) => {
     if (isSpecialOrder(type)) {

@@ -22,13 +22,10 @@ import {
   Layers,
   Filter,
   Calendar,
-  Phone,
   PhoneCall,
-  Copy,
   Zap,
   ShoppingCart,
-  Info,
-} from 'lucide-react';
+  } from 'lucide-react';
 import { api, apiClient } from '../../services/api';
 import { whatsappQueueEvent, toastEvent, messageSendEvent } from '../../services/events';
 import {
@@ -264,8 +261,8 @@ const Dispatch = () => {
   }, []);
 
   // Recent Fallback State
-  const [isRecentFallback, setIsRecentFallback] = useState(false);
-  const [recentDate, setRecentDate] = useState<string | null>(null);
+  const [, setIsRecentFallback] = useState(false);
+  const [, setRecentDate] = useState<string | null>(null);
 
   const fetchDistributorReminders = useCallback(async (silent = false) => {
     if (!silent) setLoadingDistributorReminders(true);
@@ -315,17 +312,6 @@ const Dispatch = () => {
     }
   };
 
-  const handleToggleAutoRemind = async (id: number, currentAuto: number) => {
-    const nextVal = currentAuto ? false : true;
-    try {
-      await api.toggleDistributorAutoRemind(id, nextVal);
-      setDistributorReminders(prev => prev.map(r => r.id === id ? { ...r, auto_remind: nextVal ? 1 : 0 } : r));
-      showNotif(`Auto-reminder ${nextVal ? 'enabled' : 'disabled'}`);
-    } catch (err) {
-      showNotif('Failed to update auto-reminder setting', 'error');
-    }
-  };
-
   const handleUpdateDistributorStatus = async (id: number, status: string, deliveryBoyId?: number | null, itemMeta?: any) => {
     try {
       const targetItem = itemMeta || distributorReminders.find(r => r.id === id);
@@ -339,7 +325,7 @@ const Dispatch = () => {
         setDistributorReminders(prev => prev.map(r => (r.id === id || (targetItem && r.distributor_name === targetItem.distributor_name)) ? res.reminder : r));
         showNotif(`Status updated to ${status}`);
       }
-    } catch (err) {
+    } catch (_err) {
       showNotif('Failed to update status', 'error');
     }
   };
@@ -393,7 +379,7 @@ const Dispatch = () => {
       await api.saveDistributorReminderTemplate(globalTemplate);
       showNotif('Default message template saved successfully!');
       setShowTemplateModal(false);
-    } catch (err: any) {
+    } catch (_err: any) {
       showNotif('Failed to save template', 'error');
     } finally {
       setSavingTemplate(false);
@@ -593,38 +579,6 @@ const Dispatch = () => {
       setOrders(prev => prev.filter(o => o.id !== id));
       showNotif('Dispatch order deleted');
     } catch { showNotif('Failed to delete', 'error'); }
-  };
-
-  const handleSendAllViaWhatsApp = async () => {
-    const activeOrders = orders.filter(o => o.status === 'Pending' || o.status === 'In Transit');
-    if (activeOrders.length === 0) {
-      showNotif('No active dispatch orders to send', 'error');
-      return;
-    }
-
-    const targetBoy = deliveryBoys.find(b => b.whatsapp_number) || allBoys.find(b => b.whatsapp_number);
-    let targetPhone = targetBoy?.whatsapp_number;
-    
-    if (!targetPhone) {
-      const input = prompt('Enter Delivery Boy WhatsApp Phone Number (e.g. 919876543210):');
-      if (!input) return;
-      targetPhone = input.trim();
-    }
-
-    try {
-      const orderIds = activeOrders.map(o => o.id);
-      messageSendEvent.triggerSendProgress(targetBoy?.name || targetPhone || 'Delivery Boy', 'Distributor collection batch dispatch...', 10);
-      await api.enqueueDistributorCollection({
-        orderIds,
-        deliveryBoyPhone: targetPhone,
-        deliveryBoyName: targetBoy?.name
-      });
-      whatsappQueueEvent.triggerOpen();
-      whatsappQueueEvent.triggerUpdated();
-      setTimeout(() => fetchMessageDates(), 2000);
-    } catch (err: any) {
-      showNotif(err?.response?.data?.error || 'Failed to enqueue WhatsApp messages', 'error');
-    }
   };
 
   // Metrics

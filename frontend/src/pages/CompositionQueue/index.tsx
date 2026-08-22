@@ -44,7 +44,7 @@ interface Token { text: string; included: boolean; }
 
 function SearchTermEditor({ item, onEnriched }: { item: QueueItem; onEnriched: (id: number) => void }) {
   const [tokens, setTokens] = useState<Token[]>([]);
-  const [preview, setPreview] = useState('');
+  const [, setPreview] = useState('');
   const [loading, setLoading] = useState(true);
   const [searching, setSearching] = useState(false);
   const [done, setDone] = useState(false);
@@ -327,7 +327,7 @@ export default function CompositionQueue() {
   };
 
   // Called by SearchTermEditor after triggering online search — removes row after delay
-  const handleOnlineEnriched = (id: number) => {
+  const handleOnlineEnriched = (_id: number) => {
     setExpandedTokenEditor(null);
     // Reload queue after delay to pick up any result the background worker produced
     setTimeout(() => { loadQueue(); loadStatus(); }, 10000);
@@ -342,7 +342,7 @@ export default function CompositionQueue() {
       const result = await api.importReferenceCsv(file);
       setImportMsg(`Imported ${result.loaded} medicines into reference`);
       setTimeout(() => setImportMsg(''), 4000);
-    } catch (err) {
+    } catch (_err) {
       setImportMsg('Import failed');
       setTimeout(() => setImportMsg(''), 4000);
     } finally {

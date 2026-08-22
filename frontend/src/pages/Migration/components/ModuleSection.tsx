@@ -40,7 +40,6 @@ const rowVariants = {
 export const ModuleSection: React.FC<ModuleSectionProps> = ({
   dataType,
   label,
-  totalRows,
   headers,
   mapping,
   onMappingChange,

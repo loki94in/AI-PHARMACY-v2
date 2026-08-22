@@ -1,4 +1,4 @@
-import { Calendar, X, RotateCcw } from 'lucide-react';
+import { X } from 'lucide-react';
 import { usePersistedDateRange } from '../hooks/usePersistedDateRange';
 import { toDateInputValue } from '../utils/date';
 
@@ -63,8 +63,8 @@ export function DateRangeFilter({
 
   const isPresetActive = (days: number) => {
     const d = new Date();
-    let expectedFrom = '';
-    let expectedTo = '';
+    let expectedFrom;
+    let expectedTo;
     const isFuture = h.futurePresets || false;
     
     if (isFuture) {

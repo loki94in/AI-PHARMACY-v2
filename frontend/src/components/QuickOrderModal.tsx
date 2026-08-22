@@ -26,8 +26,8 @@ import {
   MessageCircle
 } from 'lucide-react';
 import { api } from '../services/api';
-import { toastEvent, quickOrderEvent, specialOrdersEvent } from '../services/events';
-import { useApiQuery } from '../hooks/useApiQuery';
+import { toastEvent, specialOrdersEvent } from '../services/events';
+import {} from '../hooks/useApiQuery';
 
 interface SuggestionMedicine {
   inventory_id?: number;
@@ -49,34 +49,6 @@ interface SuggestionMedicine {
   productCode?: string;
   company?: string;
 }
-
-const getStockStyle = (stockStr: string | undefined): string => {
-  if (!stockStr) return 'bg-bg3 text-muted border border-border';
-  const stock = stockStr.trim();
-  
-  if (stock.toLowerCase() === 'high') {
-    return 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30';
-  }
-  if (stock.toLowerCase() === 'medium') {
-    return 'bg-blue-500/15 text-blue-400 border border-blue-500/30';
-  }
-  if (stock.toLowerCase() === 'low' || stock.toLowerCase() === 'out of stock' || stock.toLowerCase() === 'no stock' || stock === '0') {
-    return 'bg-red-500/15 text-red-400 border border-red-500/30';
-  }
-  
-  const num = parseInt(stock);
-  if (!isNaN(num)) {
-    if (num >= 50) {
-      return 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30';
-    } else if (num >= 15) {
-      return 'bg-blue-500/15 text-blue-400 border border-blue-500/30';
-    } else {
-      return 'bg-red-500/15 text-red-400 border border-red-500/30';
-    }
-  }
-  
-  return 'bg-bg3 text-muted border border-border';
-};
 
 interface SchemeInfo {
   buy: number;
@@ -144,7 +116,7 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
   const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(-1);
   const [searchLoading, setSearchLoading] = useState(false);
   
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSubmitting] = useState(false);
   const [prMode, setPrMode] = useState<'Live' | 'Unknown'>('Live');
 
   // Duplicate check states
@@ -543,7 +515,7 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
     e.preventDefault();
     
     // Auto stage current input if cart is empty but something is typed
-    let finalItems = [...cart];
+    const finalItems = [...cart];
     if (finalItems.length === 0) {
       if (!product.trim()) {
         toastEvent.trigger('Please stage at least one product name first.', 'error');

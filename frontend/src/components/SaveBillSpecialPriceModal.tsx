@@ -39,7 +39,6 @@ export const SaveBillSpecialPriceModal: React.FC<SaveBillSpecialPriceModalProps>
   isOpen,
   onClose,
   invoiceNo,
-  distributorName,
   items,
   onSaveComplete
 }) => {

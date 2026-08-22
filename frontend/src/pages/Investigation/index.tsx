@@ -14,8 +14,6 @@ import {
   Download,
   Calendar,
   Sliders,
-  ArrowUpRight,
-  ArrowDownLeft,
   RotateCcw,
   ShoppingCart,
   Plus,
@@ -23,8 +21,6 @@ import {
   History,
   FileText,
   AlertCircle,
-  TrendingUp,
-  TrendingDown,
   ChevronRight,
   Info,
   PackageSearch
@@ -40,19 +36,6 @@ import { InfiniteTable } from '../../components/InfiniteTable';
 import { VirtualRow } from '../../components/VirtualRow';
 import { InfiniteScrollStatus } from '../../components/InfiniteScrollStatus';
 import { exportToCSV, exportToPDF } from '../../utils/export';
-
-interface SearchFilters {
-  q: string;
-  patientName: string;
-  medicineName: string;
-  salesBillNo: string;
-  purchaseBillNo: string;
-  batchNo: string;
-  distributor: string;
-  dateFrom: string;
-  dateTo: string;
-  type: string;
-}
 
 interface SelectedDetails {
   inventory: {
@@ -133,7 +116,7 @@ const InvestigationCenter = () => {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [details, setDetails] = useState<SelectedDetails | null>(null);
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
-  const [detailsLoading, setDetailsLoading] = useState(false);
+  const [, setDetailsLoading] = useState(false);
 
   // Column Visibility — persisted in localStorage
   const COL_KEYS = [
@@ -238,7 +221,6 @@ const InvestigationCenter = () => {
   // Infinite Scroll setup
   const {
     items,
-    allItems,
     totalItems,
     isFetching,
     isFetchingNextPage,
@@ -291,7 +273,7 @@ const InvestigationCenter = () => {
     overscan: 10,
   });
 
-  const runSearch = (page?: number, isAppend?: boolean) => {
+  const runSearch = (_page?: number, _isAppend?: boolean) => {
     refetch();
   };
 
@@ -356,7 +338,7 @@ const InvestigationCenter = () => {
         rack_location: inv.rack_location || ''
       });
       setEditingType('inventory');
-    } catch (err) {
+    } catch (_err) {
       showToast('Failed to fetch medicine inventory details.', 'error');
     } finally {
       setDetailsLoading(false);

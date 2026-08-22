@@ -5,7 +5,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../../services/api';
 import type { DashboardStats } from '../../services/api';
 import { useApiQuery } from '../../hooks/useApiQuery';
-import { formatINR, formatCount } from '../../utils/currency';
+import { formatINR } from '../../utils/currency';
 
 let cachedDashboardStats: DashboardStats | null = null;
 

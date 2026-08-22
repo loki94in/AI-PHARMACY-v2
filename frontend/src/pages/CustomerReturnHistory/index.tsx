@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef } from 'react';
 import { api } from '../../services/api';
 import { History, Search, ArrowLeft, Download, Loader2 } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
@@ -23,13 +23,11 @@ export default function CustomerReturnHistory() {
 
   const {
     items,
-    allItems,
     totalItems,
     isFetching,
     isFetchingNextPage,
     hasNextPage,
     fetchNextPage,
-    refetch,
     sentinelRef,
   } = useInfiniteScroll<any>({
     queryKey: 'customer-returns-history-list',

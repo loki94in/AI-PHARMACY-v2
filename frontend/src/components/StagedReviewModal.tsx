@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { X, Check, Trash2, AlertTriangle, RefreshCw, Receipt, ShoppingCart, User, Calendar, Plus, Pill } from 'lucide-react';
+import { X, Check, Trash2, AlertTriangle, RefreshCw, Receipt, ShoppingCart, Calendar } from 'lucide-react';
 import { api } from '../services/api';
 import { stagedQueueService } from '../services/stagedQueueService';
 import { isValidDistributorName } from '../utils/distributorValidator';
@@ -74,7 +74,7 @@ export const StagedReviewModal: React.FC<Props> = ({ onClose, onActionComplete }
     try {
       const items = typeof tx.items_json === 'string' ? JSON.parse(tx.items_json) : tx.items_json;
       setEditingItems(Array.isArray(items) ? items : []);
-    } catch (e) {
+    } catch (_e) {
       setEditingItems([]);
     }
 
@@ -295,7 +295,7 @@ export const StagedReviewModal: React.FC<Props> = ({ onClose, onActionComplete }
                   let items: any[] = [];
                   try {
                     items = typeof tx.items_json === 'string' ? JSON.parse(tx.items_json) : tx.items_json;
-                  } catch (e) {}
+                  } catch (_e) {}
 
                   const itemSummary = Array.isArray(items) 
                     ? items.slice(0, 3).map(i => `${i.name || i.medicine_name} (x${i.quantity})`).join(', ') + (items.length > 3 ? '...' : '')

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { 
   BarChart3, 
@@ -9,17 +9,14 @@ import {
   Package, 
   FileText, 
   Info, 
-  Calendar, 
   Search, 
   Loader2, 
-  Clock, 
   AlertTriangle,
   History,
   FileCheck2,
   PieChart,
   Boxes,
   HelpCircle,
-  Undo2,
   Percent,
   Users,
   Send,
@@ -94,13 +91,12 @@ const Reports = () => {
 
   // WhatsApp & PDF Dispatch State
   const [sendingWhatsapp, setSendingWhatsapp] = useState(false);
-  const [sendingSamples, setSendingSamples] = useState(false);
 
   // Complete Report Export Modal State
   const [showExportModal, setShowExportModal] = useState(false);
   const [exportFormat, setExportFormat] = useState<'pdf' | 'csv'>('csv');
   const [exportSplitMode, setExportSplitMode] = useState<boolean>(false);
-  const [isExporting, setIsExporting] = useState(false);
+  const [, setIsExporting] = useState(false);
 
   const handleDownloadExport = async () => {
     setIsExporting(true);
@@ -237,28 +233,6 @@ const Reports = () => {
     } finally {
       setSendingWhatsapp(false);
     }
-  };
-
-  const handleSendAllTemplateSamples = async () => {
-    setSendingSamples(true);
-    try {
-      messageSendEvent.triggerSendProgress('Store Owner WhatsApp', 'Sending template samples PDF...', 10);
-      const res = await apiClient.post('/reports/send-all-template-samples', {});
-      if (res.data?.success) {
-        alert('All 3 PDF Template Samples (Classic, Corporate, Executive) queued & sent to WhatsApp!');
-      } else {
-        alert(res.data?.message || 'Failed to send PDF samples');
-      }
-    } catch (err: any) {
-      alert(err.response?.data?.message || 'Error sending PDF samples via WhatsApp');
-    } finally {
-      setSendingSamples(false);
-    }
-  };
-
-  const handleDownloadPdfReport = () => {
-    const url = `/api/reports/monthly-scheduled-preview?type=custom&startDate=${fromDate}&endDate=${toDate}&download=pdf`;
-    window.open(url, '_blank');
   };
 
   useEffect(() => {
@@ -642,24 +616,6 @@ const Reports = () => {
     { id: 'nonMoving', label: 'Non-Moving Inventory', icon: PieChart, color: 'text-purple-400', activeBg: 'bg-purple-500/10 text-purple-400 border-purple-500/20' },
     { id: 'trace', label: 'Product Trace & Audit', icon: History, color: 'text-teal-400', activeBg: 'bg-teal-500/10 text-teal-400 border-teal-500/20' },
   ] as const;
-
-  const colorMap: Record<string, string> = {
-    green: 'text-green',
-    sky: 'text-sky-400',
-    amber: 'text-amber-500',
-    primary: 'text-primary',
-    purple: 'text-purple-400',
-    red: 'text-red',
-  };
-
-  const borderMap: Record<string, string> = {
-    green: 'border-green/30 hover:border-green/50',
-    sky: 'border-sky-500/30 hover:border-sky-500/50',
-    amber: 'border-amber-500/30 hover:border-amber-500/50',
-    primary: 'border-primary/30 hover:border-primary/50',
-    purple: 'border-purple-500/30 hover:border-purple-500/50',
-    red: 'border-red/30 hover:border-red/50',
-  };
 
   return (
     <div className="h-full flex flex-col gap-4 min-h-0 overflow-hidden text-text bg-bg p-4 animate-in fade-in duration-300">

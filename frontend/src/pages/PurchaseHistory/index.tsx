@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { api, apiClient } from '../../services/api';
 import { useApiQuery } from '../../hooks/useApiQuery';
-import { Search, Filter, Download, Eye, Clock, CheckCircle, XCircle, AlertCircle, Database, RefreshCw, Trash2, Edit, ChevronDown, ChevronUp, Calendar, Loader2, QrCode } from 'lucide-react';
+import { Download, Eye, CheckCircle, AlertCircle, RefreshCw, Trash2, Edit, Calendar, Loader2, QrCode } from 'lucide-react';
 import { usePersistedDateRange } from '../../hooks/usePersistedDateRange';
 import { getTodayString, getNDaysAgoString, formatDisplayDate, toDateInputValue } from '../../utils/date';
 import { useInfiniteScroll } from '../../hooks/useInfiniteScroll';
@@ -32,7 +32,6 @@ interface PurchaseTransaction {
 
 
 // Module-level cache for instant re-mount
-let cachedTransactions: PurchaseTransaction[] | null = null;
 
 const PurchaseHistory = () => {
   const navigate = useNavigate();
@@ -80,7 +79,6 @@ const PurchaseHistory = () => {
   // Infinite Scroll setup
   const {
     items,
-    allItems,
     totalItems,
     meta,
     isFetching,
@@ -141,7 +139,6 @@ const PurchaseHistory = () => {
   const [loadingRecon, setLoadingRecon] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<any | null>(null);
   const [reissuingUid, setReissuingUid] = useState<number | null>(null);
-  const [resolvingUid, setResolvingUid] = useState<number | null>(null);
   const [viewPurchase, setViewPurchase] = useState<any | null>(null);
   const [generatingBarcodeId, setGeneratingBarcodeId] = useState<number | null>(null);
   const [generatingItemIndex, setGeneratingItemIndex] = useState<number | null>(null);
@@ -270,26 +267,6 @@ const PurchaseHistory = () => {
     }
   };
 
-  const handleResolveManually = async (uid: number) => {
-    if (!confirm('Mark this email order as manually resolved/saved? This will not add items to inventory.')) {
-      return;
-    }
-    try {
-      setResolvingUid(uid);
-      const result = await api.resolveOrderManually(uid);
-      alert(result.message || 'Order resolved manually.');
-      await fetchReconciliation();
-      if (selectedOrder?.email_uid === uid) {
-        setSelectedOrder(null);
-      }
-    } catch (err: any) {
-      console.error('Resolve manually error:', err);
-      alert('Failed to resolve order: ' + (err.response?.data?.error || err.message));
-    } finally {
-      setResolvingUid(null);
-    }
-  };
-
   const openView = async (id: number) => {
     try {
       const data = await api.getPurchase(id);
@@ -336,26 +313,6 @@ const PurchaseHistory = () => {
     } catch (err) {
       console.error('Failed to load purchase details:', err);
       alert('Failed to load purchase details.');
-    }
-  };
-
-  const getStatusColor = (status?: string) => {
-    switch (status) {
-      case 'Paid': return 'text-green-400 bg-green-400/10 border-green-400/20';
-      case 'Pending': return 'text-yellow-400 bg-yellow-400/10 border-yellow-400/20';
-      case 'Refunded': return 'text-blue-400 bg-blue-400/10 border-blue-400/20';
-      case 'Failed': return 'text-red-400 bg-red-400/10 border-red-400/20';
-      default: return 'text-gray-400 bg-gray-400/10 border-gray-400/20';
-    }
-  };
-
-  const getStatusIcon = (status?: string) => {
-    switch (status) {
-      case 'Paid': return <CheckCircle size={14} className="mr-1" />;
-      case 'Pending': return <Clock size={14} className="mr-1" />;
-      case 'Refunded': return <AlertCircle size={14} className="mr-1" />;
-      case 'Failed': return <XCircle size={14} className="mr-1" />;
-      default: return null;
     }
   };
 
@@ -956,7 +913,7 @@ const PurchaseHistory = () => {
                         toastEvent.trigger('Marked as reconciled', 'success');
                         setSelectedOrder(null);
                         fetchReconciliation();
-                      } catch (e) {
+                      } catch (_e) {
                         toastEvent.trigger('Failed to update status', 'error');
                       }
                     }}

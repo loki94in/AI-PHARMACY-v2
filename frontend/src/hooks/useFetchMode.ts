@@ -46,7 +46,7 @@ export function useFetchMode(key: string) {
           mode = parsed[key] as FetchMode;
         }
       }
-    } catch (e) {}
+    } catch (_e) {}
   }
 
   // shouldFetch is true if mode is 'auto', or if we manually triggered load

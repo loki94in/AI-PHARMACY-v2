@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Database, Upload, FileText, CheckCircle, AlertCircle, Loader2, History, Check, AlertTriangle, Play, RefreshCw, Trash2, X, Plus } from 'lucide-react';
+import { Database, Upload, FileText, CheckCircle, Loader2, History, Check, AlertTriangle, Play, RefreshCw, Trash2, X, Plus } from 'lucide-react';
 import { api, apiClient } from '../../services/api';
 import { useApiQuery } from '../../hooks/useApiQuery';
 import { useQueryClient } from '@tanstack/react-query';
@@ -448,7 +448,7 @@ const CatalogUpload = () => {
 
   // History & List States — now driven by React Query
   const queryClient = useQueryClient();
-  const { data: previousJobs = [], isLoading: loadingJobs, refetch: refetchJobs } = useApiQuery<CatalogJob[]>(
+  const { data: previousJobs = [], isLoading: loadingJobs } = useApiQuery<CatalogJob[]>(
     'catalog-jobs',
     async () => {
       const jobs = await api.getCatalogJobs();
@@ -605,7 +605,7 @@ const CatalogUpload = () => {
               setJobStatus(payload.status);
             }
             if (payload.total_count !== undefined) {
-              setStats(prev => ({
+              setStats(() => ({
                 total: payload.total_count,
                 existing: payload.existing_count || 0,
                 new: payload.new_count || 0,
@@ -637,7 +637,7 @@ const CatalogUpload = () => {
               setJobStatus(payload.status);
 
               if (payload.total_count !== undefined) {
-                setStats(prev => ({
+                setStats(() => ({
                   total: payload.total_count,
                   existing: payload.existing_count || 0,
                   new: payload.new_count || 0,
@@ -1646,7 +1646,6 @@ const CatalogUpload = () => {
                         const sampleValue = previewRows[0]?.[header] || '—';
 
                         const isCustomMapping = currentMapping.startsWith('custom_col_');
-                        const customFieldName = isCustomMapping ? currentMapping.substring(11) : '';
 
                         return (
                           <div 

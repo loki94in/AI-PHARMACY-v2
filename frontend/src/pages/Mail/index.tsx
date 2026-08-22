@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useDeferredEffect } from '../../hooks/useDeferredEffect';
-import { getLocalDateString, getTodayString, toDateInputValue } from '../../utils/date';
+import { getTodayString, toDateInputValue } from '../../utils/date';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { usePageActive } from '../../lib/keepAlive/PageActiveContext';
 import {
@@ -23,9 +23,6 @@ import { api } from '../../services/api';
 import { toastEvent } from '../../services/events';
 import { useFetchMode } from '../../hooks/useFetchMode';
 import { isValidDistributorName } from '../../utils/distributorValidator';
-
-// Local midnight, as a UTC ISO string — the mailbox strictly shows today's/present-date emails only.
-const getTodayStartIso = () => new Date(new Date().setHours(0, 0, 0, 0)).toISOString();
 
 interface EmailRecord {
   id?: number;
@@ -560,7 +557,7 @@ const Mail = () => {
         }).catch(console.error);
       }
 
-      const invoiceNoMatch = selectedEmail.subject.match(/INV-\d+-\d+/i) || selectedEmail.subject.match(/\b([A-Z0-9_\-\/]{4,15})\b/);
+      const invoiceNoMatch = selectedEmail.subject.match(/INV-\d+-\d+/i) || selectedEmail.subject.match(/\b([A-Z0-9_\-/]{4,15})\b/);
 
       toastEvent.trigger('Imported invoice data from email! Review items and click Save Purchase.', 'info', '/purchases');
 

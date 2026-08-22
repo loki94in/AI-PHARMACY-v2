@@ -5,7 +5,6 @@ import {
   XCircle, 
   RefreshCw, 
   Search, 
-  Calendar, 
   Clock, 
   Building2, 
   FileText, 
@@ -14,9 +13,7 @@ import {
   Check, 
   X, 
   History, 
-  Sparkles,
-  ChevronRight,
-  Filter
+  Sparkles
 } from 'lucide-react';
 import { api } from '../../services/api';
 import { useQueryClient } from '@tanstack/react-query';

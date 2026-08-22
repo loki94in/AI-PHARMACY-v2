@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Database as DatabaseIcon, Search, RefreshCw, BookOpen, ArrowDownAZ, Clock, X, Edit, Trash2, Plus, Upload, Unlock, ShoppingCart } from 'lucide-react';
+import { Database as DatabaseIcon, RefreshCw, BookOpen, ArrowDownAZ, Clock, X, Edit, Trash2, Plus, Upload, Unlock, ShoppingCart } from 'lucide-react';
 import { api } from '../../services/api';
-import { UniversalMedicineEditModal, updateMedicineNameWithPackSize, parsePackSizeFromPackaging } from '../../components/UniversalMedicineEditModal';
+import { UniversalMedicineEditModal, parsePackSizeFromPackaging } from '../../components/UniversalMedicineEditModal';
 import { useApiQuery } from '../../hooks/useApiQuery';
 import { useQueryClient } from '@tanstack/react-query';
 import { useSearchParams, useNavigate } from 'react-router-dom';
@@ -64,7 +64,7 @@ const DatabasePage = () => {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [allSelectedAcrossPages, setAllSelectedAcrossPages] = useState(false);
   const [sort, setSort] = useState('name_asc');
-  const [letter, setLetter] = useState('');
+  const [letter] = useState('');
   const [universalEditMedicineId, setUniversalEditMedicineId] = useState<number | null>(null);
   const [universalEditMode, setUniversalEditMode] = useState<'create' | 'edit'>('edit');
   const [universalEditItem, setUniversalEditItem] = useState<any>(null);
@@ -184,7 +184,7 @@ const DatabasePage = () => {
       }
 
       navigate('/pos', { state: { prefill: prefillPayload } });
-    } catch (err: any) {
+    } catch (_err: any) {
       const prefillPayload = {
         medicineId: item.id,
         medicineName: item.name,

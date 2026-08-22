@@ -11,13 +11,10 @@ import {
   Pause,
   Trash2,
   Clock,
-  Settings,
   X,
-  Download,
   AlertTriangle,
   RotateCcw,
-  CheckCircle2,
-} from 'lucide-react';
+  } from 'lucide-react';
 import { apiClient } from '../services/api';
 import { toastEvent } from '../services/events';
 
@@ -175,7 +172,7 @@ export const BackupCenterContent: React.FC<BackupCenterContentProps> = ({
         toastEvent.trigger('Fresh installation initialized.', 'success');
         if (onClose) onClose();
       }
-    } catch (err: any) {
+    } catch (_err: any) {
       toastEvent.trigger('Failed to initialize fresh install', 'error');
     } finally {
       setActionLoading(false);

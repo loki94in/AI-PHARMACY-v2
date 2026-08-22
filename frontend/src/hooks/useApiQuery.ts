@@ -39,7 +39,7 @@ export function useApiMutation<TData = unknown, TVariables = unknown, TError = E
   return useMutation<TData, TError, TVariables, any>({
     mutationFn: fn,
     onMutate: async (variables: TVariables) => {
-      let context: any = {};
+      const context: any = {};
       if (options?.optimisticUpdate) {
         const qKey = Array.isArray(options.optimisticUpdate.queryKey)
           ? options.optimisticUpdate.queryKey

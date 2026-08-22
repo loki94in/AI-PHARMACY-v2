@@ -1,4 +1,4 @@
-import { Plus } from 'lucide-react';
+import {} from 'lucide-react';
 
 const BrandBanner = () => (
   <div className="flex items-center justify-end border-b border-glass-border/30 pb-2 bg-gradient-to-r from-sky/10 via-transparent to-transparent px-2">

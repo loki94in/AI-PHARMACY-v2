@@ -35,7 +35,6 @@ export function useInfiniteScroll<T>({
   fetchPage,
   serverFilters = {},
   clientFilterFn,
-  pageSize = 100,
 }: UseInfiniteScrollOptions<T>) {
   const [items, setItems] = useState<T[]>(() => {
     return (globalModuleCache[cacheKey] as T[]) || [];

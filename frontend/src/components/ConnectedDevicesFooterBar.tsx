@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Smartphone, QrCode, Wifi, WifiOff, Edit2, Save, X, MessageCircle } from 'lucide-react';
+import { Smartphone, QrCode, Wifi, WifiOff, Edit2, Save, X } from 'lucide-react';
 import { api } from '../services/api';
 
 export interface RegisteredDevice {
@@ -21,7 +21,7 @@ export const ConnectedDevicesFooterBar: React.FC<ConnectedDevicesFooterBarProps>
   const [devices, setDevices] = useState<RegisteredDevice[]>([]);
   const [editingToken, setEditingToken] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
-  const [waReady, setWaReady] = useState<boolean | null>(null);
+  const [, setWaReady] = useState<boolean | null>(null);
 
   const fetchDevicesStatus = useCallback(async () => {
     try {

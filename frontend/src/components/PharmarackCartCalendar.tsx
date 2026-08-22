@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Calendar as CalendarIcon, Clock, Pause, Play, ChevronLeft, ChevronRight, ShoppingCart, Send, Building2 } from 'lucide-react';
+import { Calendar as Clock, Pause, Play, ChevronLeft, ChevronRight, ShoppingCart, Send } from 'lucide-react';
 import { api, apiClient } from '../services/api';
-import { toastEvent, whatsappQueueEvent } from '../services/events';
+import { toastEvent } from '../services/events';
 
 // Indian Public & National Holidays (2026 reference)
 const INDIAN_HOLIDAYS_2026: Record<string, string> = {

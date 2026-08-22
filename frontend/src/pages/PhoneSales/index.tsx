@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Link } from 'react-router-dom';
+import {} from 'react-router-dom';
 import { usePageActive } from '../../lib/keepAlive/PageActiveContext';
 import { 
   Smartphone, 
@@ -8,20 +8,14 @@ import {
   Trash2, 
   Check, 
   X, 
-  AlertTriangle, 
   RefreshCw, 
   Search, 
-  ShoppingCart, 
   Clock, 
-  Sparkles, 
-  Pill, 
-  Plus, 
-  ArrowRight,
-  Send
+  Pill
 } from 'lucide-react';
 import { api, apiClient } from '../../services/api';
 import { toastEvent } from '../../services/events';
-import { formatINR, formatCount } from '../../utils/currency';
+import { formatCount } from '../../utils/currency';
 
 interface StagedSaleItem {
   inventory_id: number;
@@ -70,7 +64,7 @@ let cachedLogs: ConnectionLog[] = [];
 export default function PhoneSales() {
   const [sales, setSales] = useState<StagedSale[]>(cachedPhoneSales);
   const [loading, setLoading] = useState(cachedPhoneSales.length === 0);
-  const [error, setError] = useState<string | null>(null);
+  const [, setError] = useState<string | null>(null);
   
   // Selection & Editing
   const [selectedSale, setSelectedSale] = useState<StagedSale | null>(null);
@@ -83,7 +77,7 @@ export default function PhoneSales() {
 
   const [devices, setDevices] = useState<Device[]>(cachedDevices);
   const [logs, setLogs] = useState<ConnectionLog[]>(cachedLogs);
-  const [logsLoading, setLogsLoading] = useState(false);
+  const [, setLogsLoading] = useState(false);
 
   // Search & Filters
   const [searchQuery, setSearchQuery] = useState('');
@@ -165,11 +159,11 @@ export default function PhoneSales() {
     setPatientPhone(sale.patient_phone || '');
     setDiscount(sale.discount || 0);
 
-    let parsedItems: StagedSaleItem[] = [];
+    let parsedItems: StagedSaleItem[];
     try {
       parsedItems = typeof sale.items_json === 'string' ? JSON.parse(sale.items_json) : sale.items_json;
       if (!Array.isArray(parsedItems)) parsedItems = [];
-    } catch (e) {
+    } catch (_e) {
       parsedItems = [];
     }
     
@@ -309,7 +303,7 @@ export default function PhoneSales() {
         if (foundDay) {
           foundDay.value++;
         }
-      } catch (e) {}
+      } catch (_e) {}
     });
 
     return days;
@@ -393,7 +387,7 @@ export default function PhoneSales() {
                   try {
                     items = typeof sale.items_json === 'string' ? JSON.parse(sale.items_json) : sale.items_json;
                     if (!Array.isArray(items)) items = [];
-                  } catch (e) {}
+                  } catch (_e) {}
 
                   const itemSummary = items
                     .slice(0, 2)

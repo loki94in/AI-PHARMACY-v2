@@ -1,16 +1,16 @@
 import { useState, useEffect, useCallback, lazy, Suspense } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useDeferredEffect } from '../../hooks/useDeferredEffect';
+import {} from '../../hooks/useDeferredEffect';
 import { useApiQuery } from '../../hooks/useApiQuery';
 import { useQueryClient } from '@tanstack/react-query';
-import { PackageSearch, Plus, Minus, RefreshCw, X, AlertTriangle, ShieldAlert, BookOpen, Factory, Send, ChevronDown, Edit, Save, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Loader2, Columns3, Check, Download, ShoppingCart } from 'lucide-react';
+import { PackageSearch, Plus, Minus, RefreshCw, X, AlertTriangle, ShieldAlert, BookOpen, Factory, Edit, Save, Loader2, Columns3, Check, Download, ShoppingCart } from 'lucide-react';
 import { api, type InventoryItem } from '../../services/api';
 import { toastEvent } from '../../services/events';
 import { parsePackSizeFromPackaging } from '../../components/UniversalMedicineEditModal';
 // import { UniversalMedicineEditModal } from '../../components/UniversalMedicineEditModal';
 import { createPortal } from 'react-dom';
-import { DateRangeFilter } from '../../components/DateRangeFilter';
-import { usePersistedDateRange } from '../../hooks/usePersistedDateRange';
+import {} from '../../components/DateRangeFilter';
+import {} from '../../hooks/usePersistedDateRange';
 import { useInfiniteScroll } from '../../hooks/useInfiniteScroll';
 import { useVirtualizer } from '../../hooks/useVirtualizer';
 import { InfiniteTable } from '../../components/InfiniteTable';
@@ -68,9 +68,6 @@ const formatExpiryToMMYY = (val: string): string => {
   }
   return val;
 };
-
-let cachedItems: any[] | null = null;
-let cachedSpecialOrders: any[] | null = null;
 
 const Inventory = () => {
   const navigate = useNavigate();
@@ -200,7 +197,7 @@ const Inventory = () => {
 
       setPanelOpen(false);
       navigate('/pos', { state: { prefill: prefillPayload } });
-    } catch (err: any) {
+    } catch (_err: any) {
       const prefillPayload = {
         medicineId: item.medicine_id || item.id,
         medicineName: item.name || item.medicine_name,
@@ -274,7 +271,6 @@ const Inventory = () => {
   // Infinite Scroll hook setup
   const {
     items,
-    allItems,
     totalItems,
     isFetching,
     isFetchingNextPage,
@@ -329,8 +325,6 @@ const Inventory = () => {
     estimateSize: () => 52,
     overscan: 5,
   });
-
-  const loading = isFetching && items.length === 0;
 
   const loadInventory = useCallback(() => {
     refetch();

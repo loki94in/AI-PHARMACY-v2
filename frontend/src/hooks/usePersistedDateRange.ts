@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { getLocalDateString, getTodayString } from '../utils/date';
+import { getLocalDateString } from '../utils/date';
 
 interface DateRange {
   from: string;

@@ -127,7 +127,7 @@ export const sanitizeMonth = (mStr: string): string => {
 
 export const formatExpiryToMMYY = (val: string): string => {
   if (!val) return '';
-  let cleaned = val.trim().replace(/\s+/g, '');
+  const cleaned = val.trim().replace(/\s+/g, '');
 
   // Handle ISO YYYY-MM-DD
   if (/^\d{4}-\d{2}-\d{2}/.test(cleaned)) {
@@ -193,8 +193,8 @@ export const isExpiredDate = (expiry_date?: string | null): boolean => {
   const currentYear = now.getFullYear();
   const currentMonth = now.getMonth() + 1; // 1-12
 
-  let expYear = 0;
-  let expMonth = 0;
+  let expYear;
+  let expMonth;
 
   if (/^\d{1,2}\/\d{2}$/.test(trimmed)) {
     const parts = trimmed.split('/');

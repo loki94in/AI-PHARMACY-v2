@@ -64,8 +64,8 @@ export const PhoneInputWithBadge: React.FC<PhoneInputWithBadgeProps> = ({
     }
   };
 
-  let badgeText = '';
-  let badgeColor = '';
+  let badgeText;
+  let badgeColor;
 
   if (isComplete) {
     badgeText = '10/10 ✓ Valid';

@@ -5,41 +5,29 @@ import { usePageActive } from '../../lib/keepAlive/PageActiveContext';
 import {
   Brain,
   Database,
-  FileText,
   Trash2,
   RefreshCw,
-  AlertTriangle,
   CheckCircle2,
   X,
-  Settings,
   Plus,
   Sparkles,
   Play,
   Stethoscope,
   Search,
-  Truck,
   Check,
   Edit,
   GitMerge,
   Building2,
-  ExternalLink,
   AlertCircle,
-  Clock,
-  TrendingUp,
-  FileCode,
   CheckSquare,
   ShieldCheck,
-  Layers,
-  Activity,
-  Zap,
-  ArrowRight,
-  Copy
+  Activity
 } from 'lucide-react';
 import { api, apiClient } from '../../services/api';
 import { toastEvent } from '../../services/events';
-import { shortcutEvent } from '../../services/keyboardShortcuts';
+import {} from '../../services/keyboardShortcuts';
 import { useApiQuery } from '../../hooks/useApiQuery';
-import { getNDaysAgoString, formatDisplayDate } from '../../utils/date';
+import { formatDisplayDate } from '../../utils/date';
 import { useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import { PhoneInputWithBadge } from '../../components/PhoneInputWithBadge';
@@ -100,7 +88,7 @@ const Learning: React.FC = () => {
   const [activeTab, setActiveTab] = useState<string>(normalizeTab(searchParams.get('tab')));
   const [selectedProfileId, setSelectedProfileId] = useState<number | null>(null);
   const [profileSearchQuery, setProfileSearchQuery] = useState('');
-  const [globalSearch, setGlobalSearch] = useState('');
+  const [globalSearch] = useState('');
 
   // Sandbox state
   const [testBrandInput, setTestBrandInput] = useState('');
@@ -303,7 +291,7 @@ const Learning: React.FC = () => {
   const queryClient = useQueryClient();
 
   // ponytail: Stagger initial mount fetches
-  const [showSecondaryData, setShowSecondaryData] = useState(false);
+  const [, setShowSecondaryData] = useState(false);
   useEffect(() => {
     const timer = setTimeout(() => setShowSecondaryData(true), 400);
     return () => clearTimeout(timer);
@@ -344,7 +332,7 @@ const Learning: React.FC = () => {
   );
 
   // Today's Pharmarack Sent Orders Query
-  const { data: todaySentOrdersData, isLoading: loadingTodaySentOrders } = useApiQuery<any>(
+  const { data: todaySentOrdersData } = useApiQuery<any>(
     'learning-today-pharmarack-sent-orders',
     async () => {
       const res = await apiClient.get('/pharmarack/sent-orders');

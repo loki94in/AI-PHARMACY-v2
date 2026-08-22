@@ -49,11 +49,6 @@ const PACKAGING_STOP_WORDS = new Set([
   '10s', '15s', '20s', '30s', '5s', '1s', '6s', '10', '15', '20', '30', '50', '100', '200', '500'
 ]);
 
-function getTokens(str: string): Set<string> {
-  const words = normalizeStr(str).split(' ').filter(w => w.length > 0);
-  return new Set(words);
-}
-
 function getCoreMedicineTokens(str: string): Set<string> {
   const words = normalizeStr(str).split(' ').filter(w => w.length > 0 && !PACKAGING_STOP_WORDS.has(w));
   return new Set(words.length > 0 ? words : normalizeStr(str).split(' ').filter(w => w.length > 0));
@@ -87,7 +82,7 @@ export function evaluateOrderCartMatch(
   const coreOrderStr = Array.from(coreTokensOrder).join('');
   const coreItemStr = Array.from(coreTokensItem).join('');
 
-  let titleScore = 0;
+  let titleScore;
   if (noSpaceOrder === noSpaceItem) {
     titleScore = 1.0;
     matchReasons.push('Exact title match');

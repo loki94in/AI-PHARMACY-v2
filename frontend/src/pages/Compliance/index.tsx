@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Shield, Calendar, Search, Download, Printer, User, FileText, 
-  AlertTriangle, RefreshCw, CheckCircle, Filter, Edit3, ChevronRight, Check, X
+  AlertTriangle, RefreshCw, Filter, Edit3, Check, X
 } from 'lucide-react';
 import { api } from '../../services/api';
 import { formatDisplayDate, toDateInputValue } from '../../utils/date';
@@ -353,7 +353,6 @@ const CompliancePage: React.FC = () => {
               ) : (
                 logs.map((log) => {
                   const isDoctorPending = !log.doctor_name || log.doctor_name.includes('Pending') || log.doctor_name.includes('Self') || !!log.missing_license;
-                  const isLicenseMissing = !!log.missing_license || !log.license_no;
                   return (
                     <tr key={log.id} className="hover:bg-bg3/50 transition-colors">
                       <td className="p-3 font-mono text-muted whitespace-nowrap">{formatDisplayDate(log.date)}</td>

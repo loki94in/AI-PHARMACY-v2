@@ -32,7 +32,7 @@ export const HoverPriceIntelTable: React.FC<HoverPriceIntelTableProps> = ({ medi
     try {
       const res = await api.getMedicinePriceHistory(medicineName);
       setRecords(res?.data || []);
-    } catch (err: any) {
+    } catch (_err: any) {
       setError('Could not load price history.');
     } finally {
       setLoading(false);
