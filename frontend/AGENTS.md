@@ -27,6 +27,18 @@ This directory contains the Single Page Application (SPA) built using Vite, Reac
 - A search/autocomplete dropdown list must NEVER appear (and must never trigger its network fetch) from focus or click alone. It may only open when the user has TYPED at least 2 characters (Purchase medicine rows keep their existing ≥3-char rule) AND results exist. Applies to every page: POS patient/doctor/medicine, Purchases distributor/medicine, CRM special-order rows, Pharmarack search, and any future autocomplete.
 - Never re-add unconditional `onFocus`/`onClick => setOpen(true)` on a search input, and never seed dropdowns with fabricated/default entries (the hardcoded POS default doctors were removed under this rule).
 
+## Lint Debt Policy (added 2026-08)
+
+- Phase-1 rule categories (unused-vars, prefer-const, no-useless-assignment, no-useless-escape, no-empty) are **zero-tolerance**: `eslint.config.js` allows `allowEmptyCatch` and `^_`-prefixed ignored bindings by convention; never reintroduce raw violations. New code must not add `any` types (Phase-2 target) and must follow the Single Global SSE Connection + react-query-first fetch rules above (Phase-4 migration target).
+
+## POS Cart-First Keyboard Flow & Doctor-Rx Suggestions (added 2026-08)
+
+- Keyboard medicine entry lives in the cart's trailing empty row (`row-med-input-*`), NOT the top search box: doctor selection, Qty Enter, Loose-Qty/Discount/Rate/MRP Enter + Tab-chain ends all focus `focusCartMedicineInput()`; Qty Shift+Tab on row 0 goes to Doctor. The top Search Medicine box remains fully functional for mouse users.
+- Doctor-prescription chips (`handleDoctorSuggestionClick`) render beside the AI Camera button ONLY when a registered doctor is selected; clicking fills the trailing empty row via `fetchDetailsAndChangeRowMedicine(idx, med, { presetQty: most_common_qty, presetLooseQty })` and lands on that row's Qty. Never render chips without real `/crm/doctors/:id/suggestions` data.
+- Patient dropdown marks returning patients: violet `🔁 Refill` chip (`active_refill===1`, from enriched GET /patients) and muted `↩ last <date>` when `purchase_count > 0` — so same-name different persons are distinguishable.
+- Pick-person-first guard: the refill banner (`matchedRefill`) must NEVER fire on a bare typed name — only when `selectedCustomerIdRef` is pinned OR phone has ≥5 digits; panel-cache fallback matches by normalized-phone first, name only when id is pinned.
+- Direct Save shows invoice-number-only toast (`Bill #<inv> saved!`); Save & Print keeps its barcode modal.
+
 ## Quick Assist Special-Order Hand-off (added 2026-08)
 
 - QuickAssistSidebar (components/Layout.tsx) group actions call POST /api/orders/:id/status. The backend queues the arrival WhatsApp when status becomes Ready (response field whatsapp_queued) — toasts must reflect it, never fabricate a queued state.
