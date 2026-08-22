@@ -1,13 +1,13 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { RefreshCw, RotateCw, RotateCcw, ExternalLink, ShoppingCart, Package, AlertCircle, Truck, Clock, Send, Building2, MessageSquare, Phone, UserCheck, Search, Edit2, X, Plus, Check, Calendar, TrendingUp, Layers, Trash2, ArrowLeftRight, Sparkles, Filter, CheckCircle2, ArrowRight } from 'lucide-react';
+import { RotateCw, RotateCcw, ExternalLink, ShoppingCart, Package, AlertCircle, Truck, Clock, Send, Building2, MessageSquare, Phone, Search, Edit2, X, Plus, Check, Calendar, TrendingUp, Layers, Trash2, ArrowLeftRight, ArrowRight } from 'lucide-react';
 import { formatDisplayDate } from '../../utils/date';
 import { api, apiClient, type SpecialOrder, type Refill } from '../../services/api';
 import { toastEvent, liveCartAddEvent, specialOrdersEvent, whatsappQueueEvent, messageSendEvent } from '../../services/events';
 import { findBestCartMatchForOrder } from '../../utils/orderFuzzyMatcher';
 
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { sanitizePhoneInput, isValid10DigitPhone } from '../../utils/phone';
+import { sanitizePhoneInput } from '../../utils/phone';
 import { PharmarackCartCalendar } from '../../components/PharmarackCartCalendar';
 import { usePageActive } from '../../lib/keepAlive/PageActiveContext';
 import { broadcastContactDataChanged } from '../../utils/settingsSync';
@@ -174,7 +174,7 @@ let cachedPriceHistory: Record<string, any[]> = initialPersistedCache.priceHisto
 let cachedLastFetched: Date | null = initialPersistedCache.distributors.length > 0 ? new Date() : null;
 let cachedSentDates: string[] = [];
 let cachedSelectedSentDate: string = '';
-let cachedSentOrdersMap: Record<string, any[]> = {};
+const cachedSentOrdersMap: Record<string, any[]> = {};
 
 const USER_CHECK_STORAGE_KEY = 'pharmacart_user_check_overrides_v1';
 const getTodayDateKey = () => new Date().toISOString().slice(0, 10);
@@ -282,14 +282,12 @@ export default function PharmarackCart() {
   const [priceHistoryCache, setPriceHistoryCache] = useState<Record<string, any[]>>(() => cachedPriceHistory);
   const [sendingNotifId, setSendingNotifId] = useState<number | null>(null);
   const [pendingOrders, setPendingOrders] = useState<SpecialOrder[]>(() => cachedPendingOrders);
-  const [addingOrderId, setAddingOrderId] = useState<number | null>(null);
-  const [pendingRefills, setPendingRefills] = useState<Refill[]>(() => cachedPendingRefills);
-  const [addingRefillId, setAddingRefillId] = useState<number | null>(null);
-  const [showAddedItems, setShowAddedItems] = useState<boolean>(false);
+const [pendingRefills, setPendingRefills] = useState<Refill[]>(() => cachedPendingRefills);
+const [showAddedItems] = useState<boolean>(false);
   const [reorderBannerCollapsed, setReorderBannerCollapsed] = useState<boolean>(false);
 
   const [reorderSuggestions, setReorderSuggestions] = useState<any[]>([]);
-  const [suggestionsLoading, setSuggestionsLoading] = useState<boolean>(false);
+  const [, setSuggestionsLoading] = useState<boolean>(false);
   const [reorderRecentItems, setReorderRecentItems] = useState<{ medicineName: string; lastOrderedDate: string; lastQty: number; lastDistributorName: string }[]>([]);
   const [reorderWindowMonths, setReorderWindowMonths] = useState<number>(2);
 
@@ -334,14 +332,9 @@ export default function PharmarackCart() {
   const [switchingDistributor, setSwitchingDistributor] = useState<boolean>(false);
   const [switchSearchQuery, setSwitchSearchQuery] = useState<string>('');
 
-  // Reorder Hub Filter States
-  const [reorderSearchQuery, setReorderSearchQuery] = useState<string>('');
-  const [reorderDistFilter, setReorderDistFilter] = useState<string>('all');
-  const [reorderCategoryFilter, setReorderCategoryFilter] = useState<'all' | 'yesterday' | 'low_stock' | 'purchased_before' | 'never_purchased' | 'special_requests' | 'refills'>('all');
-
   // Batch Last Purchase Intelligence Map
   const [lastPurchaseMap, setLastPurchaseMap] = useState<Record<string, any>>({});
-  const [lastPurchaseLoading, setLastPurchaseLoading] = useState<boolean>(false);
+  const [, setLastPurchaseLoading] = useState<boolean>(false);
 
   // Reorder Same Medicine Confirmation Modal State
   const [reorderSameModalTarget, setReorderSameModalTarget] = useState<any | null>(null);
@@ -615,61 +608,6 @@ export default function PharmarackCart() {
     }
   }, [currentTab]);
 
-  const handleCopySentItemsToCart = async (items: any[]) => {
-    if (!items || items.length === 0) return;
-    setReaddingSentItems(true);
-    try {
-      const payload = items.map(item => ({
-        productId: item.productId || 0,
-        storeId: item.storeId || item.store_id || 0,
-        qty: item.qty || item.quantity || 1,
-        productCode: item.productCode || '',
-        productName: item.productName || item.product || item.name || '',
-        company: item.company || '',
-        packaging: item.packaging || item.Packing || '',
-        rate: item.ptr || item.rate || 0,
-        mrp: item.mrp || 0,
-        storeName: item.storeName || item.store_name || '',
-        mapped: true
-      })).filter(i => i.productName);
-
-      if (payload.length === 0) {
-        toastEvent.trigger('No valid items to re-add.', 'error');
-        return;
-      }
-
-      const res = await api.addPharmarackCart(payload);
-      if (res && res.success) {
-        setDistributors(prev => {
-          let updated = prev;
-          for (const item of payload) {
-            updated = mergeItemIntoDistributors(updated, item);
-          }
-          cachedDistributors = updated;
-          persistCartCache(updated, cachedPriceHistory);
-          return updated;
-        });
-        setSentWaStatusMap(prev => {
-          const next = { ...prev };
-          for (const it of payload) {
-            if (it.storeId) delete next[it.storeId];
-          }
-          return next;
-        });
-        scheduleCartSync(1500);
-        toastEvent.trigger(`✅ Re-added ${payload.length} item(s) to Pharmarack cart!`, 'success');
-        setSearchParams({ tab: 'cart' });
-      } else {
-        toastEvent.trigger(res?.error || 'Failed to re-add items to cart', 'error');
-      }
-    } catch (err: any) {
-      console.error('Error re-adding sent items to cart:', err);
-      toastEvent.trigger('Failed to re-add items: ' + (err?.response?.data?.error || err.message || 'Server error'), 'error');
-    } finally {
-      setReaddingSentItems(false);
-    }
-  };
-
   const [isSendingBatchWhatsApp, setIsSendingBatchWhatsApp] = useState(false);
   const isSendingBatchRef = useRef(false);
   const [sendingWaDistributorId, setSendingWaDistributorId] = useState<number | null>(null);
@@ -716,7 +654,7 @@ export default function PharmarackCart() {
         const updatedTimes: Record<number, string> = {};
 
         distributors.forEach(dist => {
-          let phoneNum = getDistributorPhoneNumber(dist);
+          const phoneNum = getDistributorPhoneNumber(dist);
           const cleanPhone = toWaDigits(phoneNum);
 
           const distName = (dist.storeName || '').toLowerCase().trim();
@@ -968,7 +906,7 @@ export default function PharmarackCart() {
 
   // Distributor search & contact edit modal state
   const [editingDistributor, setEditingDistributor] = useState<Distributor | null>(null);
-  const [modalSearchTerm, setModalSearchTerm] = useState('');
+  const [, setModalSearchTerm] = useState('');
   const [modalPhoneInput, setModalPhoneInput] = useState('');
   const [selectedSavedDistId, setSelectedSavedDistId] = useState<number | null>(null);
   const [isSavingContact, setIsSavingContact] = useState(false);
@@ -978,11 +916,8 @@ export default function PharmarackCart() {
   const [newDistNameInput, setNewDistNameInput] = useState('');
 
   // Missing delivery boy validation prompt state
-  const [showMissingBoyModal, setShowMissingBoyModal] = useState(false);
-  const [pendingTargetDistributor, setPendingTargetDistributor] = useState<Distributor | 'ALL' | null>(null);
-  const [quickBoyName, setQuickBoyName] = useState('');
-  const [quickBoyPhone, setQuickBoyPhone] = useState('');
-  const [isSavingQuickBoy, setIsSavingQuickBoy] = useState(false);
+  const [, setShowMissingBoyModal] = useState(false);
+  const [, setPendingTargetDistributor] = useState<Distributor | 'ALL' | null>(null);
 
   const hasDeliveryBoyContacts = () => {
     const hasActiveBoys = deliveryBoysList.some(b => b.name && b.whatsapp_number && b.whatsapp_number.trim().length > 0);
@@ -1112,14 +1047,6 @@ export default function PharmarackCart() {
   const isDistributorMapped = (dist: Distributor) => {
     return isValidPhoneNumber(getDistributorPhoneNumber(dist).replace(/\D/g, ''));
   };
-
-  const mappedDistributors = React.useMemo(() => {
-    return distributors.filter(d => isDistributorMapped(d));
-  }, [distributors, customDistributorPhones, savedDistributorsList, distributorMappings]);
-
-  const successDistributors = React.useMemo(() => {
-    return distributors.filter(d => sentWaStatusMap[d.storeId] === 'success');
-  }, [distributors, sentWaStatusMap]);
 
   const failedDistributors = React.useMemo(() => {
     return distributors.filter(d => sentWaStatusMap[d.storeId] === 'error');
@@ -1302,66 +1229,6 @@ export default function PharmarackCart() {
     return null;
   };
 
-  const handleAddRefillToCart = async (refill: Refill) => {
-    setAddingRefillId(refill.id);
-    try {
-      const medName = refill.medicine_name || `Medicine ${refill.medicine_id}`;
-      toastEvent.trigger(`Searching Pharmarack for "${medName}"...`, 'info');
-      const searchResults = await api.searchPharmarack(medName);
-      if (!searchResults || searchResults.length === 0) {
-        toastEvent.trigger(`No Pharmarack matches found for "${medName}"`, 'error');
-        return;
-      }
-
-      // Add the first matching item to Pharmarack cart
-      const matchedItem = searchResults[0];
-      const payload = [{
-        productId: matchedItem.productId,
-        storeId: matchedItem.storeId,
-        qty: 1, // Default to 1 pack for refill replenishment
-        productCode: matchedItem.productCode,
-        productName: matchedItem.name,
-        company: matchedItem.company,
-        packaging: matchedItem.packaging,
-        rate: matchedItem.rate || 0,
-        mrp: matchedItem.mrp || 0,
-        storeName: matchedItem.distributor,
-        mapped: matchedItem.mapped
-      }];
-
-      const res = await api.addPharmarackCart(payload);
-      if (res && res.success) {
-        toastEvent.trigger(`Added "${medName}" to Pharmarack cart!`, 'success');
-        const targetStoreId = matchedItem.storeId;
-        if (targetStoreId) {
-          setSentWaStatusMap(prev => {
-            const next = { ...prev };
-            delete next[targetStoreId];
-            return next;
-          });
-        }
-        setDistributors(prev => {
-          let updated = prev;
-          for (const item of payload) {
-            updated = mergeItemIntoDistributors(updated, item);
-          }
-          cachedDistributors = updated;
-          persistCartCache(updated, cachedPriceHistory);
-          return updated;
-        });
-        scheduleCartSync(1500);
-        await fetchPendingRefills();
-      } else {
-        toastEvent.trigger(res?.error || 'Failed to add item to cart', 'error');
-      }
-    } catch (err: any) {
-      console.error('Failed to add refill to cart:', err);
-      toastEvent.trigger(err?.response?.data?.error || 'Failed to add item to cart', 'error');
-    } finally {
-      setAddingRefillId(null);
-    }
-  };
-
   const fetchPendingOrders = async () => {
     try {
       const data = await api.getOrders();
@@ -1402,106 +1269,6 @@ export default function PharmarackCart() {
   const visiblePendingRefills = React.useMemo(() => {
     return showAddedItems ? pendingRefills : pendingRefills.filter(refill => !getRefillItemInCart(refill));
   }, [pendingRefills, showAddedItems]);
-
-  const handleConfirmCandidateMatch = async (order: SpecialOrder, candidateItem: any) => {
-    try {
-      const prodName = candidateItem.productName || candidateItem.name || order.product;
-      const storeName = candidateItem.distributor || candidateItem.storeName || order.pharmarack_distributor;
-      const rate = candidateItem.rate || candidateItem.ptr || order.pharmarack_rate;
-      const mrp = candidateItem.mrp || candidateItem.MRP || order.pharmarack_mrp;
-      const scheme = candidateItem.scheme || order.pharmarack_scheme;
-
-      await api.updateOrder(order.id, {
-        status: 'Ordered',
-        product: prodName,
-        pharmarack_distributor: storeName,
-        pharmarack_rate: rate ? Number(rate) : undefined,
-        pharmarack_mrp: mrp ? Number(mrp) : undefined,
-        pharmarack_scheme: scheme || undefined,
-        pharmarack_mapped: 1,
-        cart_add_error: null
-      });
-
-      toastEvent.trigger(`Confirmed & linked "${prodName}" to order #${order.id}!`, 'success');
-      await fetchPendingOrders();
-      await fetchCart();
-    } catch (err: any) {
-      console.error('Failed to confirm candidate match:', err);
-      toastEvent.trigger('Failed to confirm order match', 'error');
-    }
-  };
-
-
-  const handleAddPendingToCart = async (order: SpecialOrder) => {
-    setAddingOrderId(order.id);
-    try {
-      toastEvent.trigger(`Searching Pharmarack for "${order.product}"...`, 'info');
-      const searchResults = await api.searchPharmarack(order.product);
-      if (!searchResults || searchResults.length === 0) {
-        toastEvent.trigger(`No Pharmarack matches found for "${order.product}"`, 'error');
-        return;
-      }
-
-      // Try to find the item from the same distributor if specified
-      let matchedItem = searchResults[0];
-      if (order.pharmarack_distributor) {
-        const exactDist = searchResults.find((r: any) =>
-          r.distributor.toLowerCase().trim() === order.pharmarack_distributor!.toLowerCase().trim()
-        );
-        if (exactDist) {
-          matchedItem = exactDist;
-        }
-      }
-
-      // Add to Pharmarack cart
-      const payload = [{
-        productId: matchedItem.productId,
-        storeId: matchedItem.storeId,
-        qty: order.qty,
-        productCode: matchedItem.productCode,
-        productName: matchedItem.name,
-        company: matchedItem.company,
-        packaging: matchedItem.packaging,
-        rate: order.pharmarack_rate || matchedItem.rate || 0,
-        mrp: order.pharmarack_mrp || matchedItem.mrp || 0,
-        storeName: matchedItem.distributor,
-        mapped: matchedItem.mapped
-      }];
-
-      const res = await api.addPharmarackCart(payload);
-      if (res && res.success) {
-        toastEvent.trigger(`Added "${order.product}" to Pharmarack cart!`, 'success');
-        // Update order status to 'Ordered'
-        await api.updateOrder(order.id, { status: 'Ordered' });
-        const targetStoreId = matchedItem.storeId;
-        if (targetStoreId) {
-          setSentWaStatusMap(prev => {
-            const next = { ...prev };
-            delete next[targetStoreId];
-            return next;
-          });
-        }
-        setDistributors(prev => {
-          let updated = prev;
-          for (const item of payload) {
-            updated = mergeItemIntoDistributors(updated, item);
-          }
-          cachedDistributors = updated;
-          persistCartCache(updated, cachedPriceHistory);
-          return updated;
-        });
-        scheduleCartSync(1500);
-        await fetchPendingOrders();
-      } else {
-        toastEvent.trigger(res?.error || 'Failed to add item to cart', 'error');
-      }
-    } catch (err: any) {
-      console.error('Failed to add pending order to cart:', err);
-      toastEvent.trigger(err?.response?.data?.error || 'Failed to add item to cart', 'error');
-    } finally {
-      setAddingOrderId(null);
-    }
-  };
 
   const [sendingDeliveryBoyNotifId, setSendingDeliveryBoyNotifId] = useState<number | null>(null);
 
@@ -1564,7 +1331,7 @@ export default function PharmarackCart() {
   ) => {
     const formatPhone = (raw: string) => {
       if (!raw) return '';
-      let clean = raw.replace(/\D/g, '');
+      const clean = raw.replace(/\D/g, '');
       if (clean.length === 10) return `+91 ${clean.slice(0, 5)} ${clean.slice(5)}`;
       if (clean.startsWith('91') && clean.length === 12) return `+91 ${clean.slice(2, 7)} ${clean.slice(7)}`;
       if (clean.length > 0) return `+${clean}`;
@@ -1630,73 +1397,17 @@ export default function PharmarackCart() {
     itemsToSend.forEach((item, idx) => {
       const packInfo = formatPackagingAndUnit(item.packaging, item.qty);
       const packBadge = packInfo.packLabel ? ` • 📦 *${packInfo.packLabel}*` : '';
-      const priceStr = item.ptr > 0 ? ` @ ₹${item.ptr}` : '';
-      msg += `${idx + 1}. *${item.productName}*${packBadge}\n   🔢 Order Qty: *${packInfo.unitQtyStr}*${packInfo.totalUnitsNote}${priceStr}\n`;
+      const mrpVal = Number(item.mrp || 0) > 0 ? Number(item.mrp) : (Number(item.ptr || 0) > 0 ? Number(item.ptr) : 0);
+      const mrpStr = mrpVal > 0 ? ` (MRP: ₹${mrpVal % 1 === 0 ? mrpVal : mrpVal.toFixed(2)})` : '';
+      msg += `${idx + 1}. *${item.productName}*${packBadge}\n   🔢 Order Qty: *${packInfo.unitQtyStr}*${mrpStr}\n`;
     });
 
-    msg += `\n🚚 *Assigned Delivery Person:*\n`;
+    msg += `\n🚚 *Delivery Person:*\n`;
     msg += `  👤 *${boyName}*\n  📞 *${boyPhone || 'N/A'}*\n\n`;
 
     msg += `📝 *Note:* Please send invoice bill (${fileFormat}) to ${email}.`;
 
     return msg;
-  };
-
-  const handleSaveQuickDeliveryBoy = async () => {
-    if (!quickBoyName.trim()) {
-      toastEvent.trigger('Delivery boy name is required.', 'error');
-      return;
-    }
-    const cleanPhone = sanitizePhoneInput(quickBoyPhone);
-    if (!isValid10DigitPhone(cleanPhone)) {
-      toastEvent.trigger('Please enter a valid 10-digit WhatsApp phone number.', 'error');
-      return;
-    }
-
-    setIsSavingQuickBoy(true);
-    try {
-      await apiClient.post('/dispatch/delivery-boys', {
-        name: quickBoyName.trim(),
-        whatsapp_number: cleanPhone,
-        is_active: 1
-      });
-      try {
-        await api.saveContact({
-          name: quickBoyName.trim(),
-          type: 'distributor_delivery',
-          phone: cleanPhone
-        });
-      } catch (_) {}
-      toastEvent.trigger(`Added delivery boy "${quickBoyName.trim()}"!`, 'success');
-      setShowMissingBoyModal(false);
-      const distTarget = pendingTargetDistributor;
-      setQuickBoyName('');
-      setQuickBoyPhone('');
-      await broadcastContactDataChanged();
-      await loadContactData();
-
-      if (distTarget === 'ALL') {
-        handleSendAllWhatsAppOrders(true);
-      } else if (distTarget && typeof distTarget === 'object') {
-        handleSendWhatsAppOrder(distTarget, true);
-      }
-    } catch (err: any) {
-      console.error('Failed to add delivery boy:', err);
-      toastEvent.trigger(err?.response?.data?.error || 'Failed to save delivery boy.', 'error');
-    } finally {
-      setIsSavingQuickBoy(false);
-    }
-  };
-
-  const handleSkipMissingBoyAndUseAdmin = () => {
-    setShowMissingBoyModal(false);
-    toastEvent.trigger('Using Admin Contact as delivery boy fallback for order.', 'info');
-    const distTarget = pendingTargetDistributor;
-    if (distTarget === 'ALL') {
-      handleSendAllWhatsAppOrders(true);
-    } else if (distTarget) {
-      handleSendWhatsAppOrder(distTarget, true);
-    }
   };
 
   const handleSendWhatsAppOrder = async (
@@ -1724,7 +1435,7 @@ export default function PharmarackCart() {
       return;
     }
 
-    let phoneNum = getDistributorPhoneNumber(dist);
+    const phoneNum = getDistributorPhoneNumber(dist);
 
     const cleanPhone = toWaDigits(phoneNum);
     if (!cleanPhone || !isValidPhoneNumber(cleanPhone)) {
@@ -1905,7 +1616,7 @@ export default function PharmarackCart() {
           continue;
         }
 
-        let phoneNum = getDistributorPhoneNumber(dist);
+        const phoneNum = getDistributorPhoneNumber(dist);
         const cleanPhone = toWaDigits(phoneNum);
         if (!cleanPhone || !isValidPhoneNumber(cleanPhone)) {
           setSentWaStatusMap(prev => ({ ...prev, [dist.storeId]: 'error' }));
@@ -1980,7 +1691,7 @@ export default function PharmarackCart() {
         if (mapped.length > 0 && window.confirm('Automated background WhatsApp service is currently unavailable. Would you like to open WhatsApp Web tabs to send these orders directly in your browser?')) {
           mapped.forEach((dist, idx) => {
             setTimeout(() => {
-              let phoneNum = getDistributorPhoneNumber(dist);
+              const phoneNum = getDistributorPhoneNumber(dist);
               const cleanPhone = toWaDigits(phoneNum);
               const msg = buildDistributorOrderMessage(dist);
               openOrReuseWhatsappTab('', cleanPhone, msg);
@@ -2145,7 +1856,7 @@ export default function PharmarackCart() {
             try {
               const res = await api.getMedicinePriceHistory(name);
               results.push({ name, data: res?.data || [] });
-            } catch (e) {
+            } catch (_e) {
               results.push({ name, data: [] });
             }
           }
@@ -2455,25 +2166,6 @@ export default function PharmarackCart() {
     }
   };
 
-  const handleTransferSentItemToUnsent = (dist: Distributor, item: CartLineItem) => {
-    const key = getItemCheckKey(dist.storeId, item);
-    setUserCheckOverrides(prev => {
-      const next = { ...prev, [key]: true };
-      userCheckOverridesRef.current = next;
-      saveUserCheckOverrides(next);
-      return next;
-    });
-
-    setSentWaStatusMap(prev => {
-      const next = { ...prev };
-      delete next[dist.storeId];
-      return next;
-    });
-
-    setDistributorFilterTab('unsent');
-    toastEvent.trigger(`✅ Transferred "${item.productName}" to Unsent Cart Orders!`, 'success');
-  };
-
   const handleReaddSingleSentItem = async (item: any, storeId?: number, storeName?: string) => {
     const medName = item.productName || item.product || item.name || '';
     const qty = item.qty || item.quantity || 1;
@@ -2690,11 +2382,6 @@ export default function PharmarackCart() {
   }, [showSuggestionsTier]);
 
   // Card quantity overrides
-  const [cardQtyOverrides, setCardQtyOverrides] = useState<Record<string, number>>({});
-  const handleUpdateCardQty = (cardId: string, qty: number) => {
-    setCardQtyOverrides(prev => ({ ...prev, [cardId]: Math.max(1, qty) }));
-  };
-
   // Load batch last purchase info for candidate names
   const fetchBatchLastPurchases = async (names: string[]) => {
     if (!names || names.length === 0) return;
@@ -2741,227 +2428,6 @@ export default function PharmarackCart() {
 
 
   // 1. Unified Reorder Cards Memo
-  const allCandidateCards = useMemo(() => {
-    const cards: any[] = [];
-    const seenNames = new Set<string>();
-
-    // A. Active Cart Items (already in distributor carts)
-    for (const dist of distributors) {
-      for (const item of dist.items) {
-        const normName = item.productName.toLowerCase().trim();
-        seenNames.add(normName);
-        const pastInfo = getPastOrderedInfo(item, dist);
-        const lastP = lastPurchaseMap[item.productName] || lastPurchaseMap[normName];
-        const cardId = `cart_${dist.storeId}_${item.productCode || item.productName}`;
-
-        const reasonType = pastInfo.isPastOrdered
-          ? (pastInfo.isYesterday ? 'yesterday_order' : 'previous_order')
-          : 'cart_item';
-        const reasonBadgeLabel = pastInfo.isPastOrdered
-          ? (pastInfo.isYesterday ? 'Ordered Yesterday' : 'Previously Dispatched')
-          : 'In Reorder Cart';
-
-        cards.push({
-          id: cardId,
-          medicineId: item.productId || undefined,
-          medicineName: item.productName,
-          company: item.company || '',
-          packaging: item.packaging || '',
-          ptr: item.ptr || 0,
-          mrp: item.mrp || 0,
-          scheme: item.scheme || '',
-          reason: reasonType,
-          reasonLabel: reasonBadgeLabel,
-          reasonDetail: `Staged in ${dist.storeName} cart`,
-          currentStock: item.stock !== null ? item.stock : 0,
-          minStock: 10,
-          suggestedQty: item.qty || 1,
-          orderQty: cardQtyOverrides[cardId] || item.qty || 1,
-          hasPreviousPurchase: Boolean(lastP?.found || pastInfo.isPastOrdered),
-          previousPurchase: lastP?.found ? {
-            supplierName: lastP.distributor_name || dist.storeName,
-            supplierId: lastP.distributor_id || dist.storeId,
-            quantity: lastP.quantity,
-            price: lastP.cost_price,
-            purchaseDate: lastP.purchase_date,
-            batchNo: lastP.batch_no,
-            expiryDate: lastP.expiry_date,
-            invoiceNo: lastP.invoice_no
-          } : undefined,
-          assignedSupplier: {
-            storeId: dist.storeId,
-            storeName: dist.storeName,
-            phone: getDistributorPhoneNumber(dist),
-            isMapped: true
-          },
-          isInCart: true,
-          distributor: dist,
-          rawItem: item
-        });
-      }
-    }
-
-    // B. Sales Reorder Suggestions (Low stock & 70/30 consumption)
-    for (const sug of reorderSuggestions) {
-      const normName = sug.medicineName.toLowerCase().trim();
-      if (seenNames.has(normName)) continue;
-      seenNames.add(normName);
-      const lastP = lastPurchaseMap[sug.medicineName] || lastPurchaseMap[normName];
-      const cardId = `sug_${sug.medicineId}`;
-
-      const isBelowMin = sug.currentStock <= 2 || sug.isLowStockSafety;
-      cards.push({
-        id: cardId,
-        medicineId: sug.medicineId,
-        medicineName: sug.medicineName,
-        company: sug.company || '',
-        packaging: sug.packaging || '',
-        ptr: sug.ptr || 0,
-        mrp: sug.mrp || 0,
-        reason: isBelowMin ? 'below_min_stock' : 'sales_restock',
-        reasonLabel: isBelowMin ? 'Below Min Stock' : 'Sales Restock',
-        reasonDetail: isBelowMin
-          ? `Stock: ${sug.currentStock} (Low stock safety threshold)`
-          : `Monthly Avg: ${sug.monthlyWeightedConsumption} | 2-Day: ${sug.twoDaySales}`,
-        currentStock: sug.currentStock,
-        minStock: 10,
-        suggestedQty: sug.suggestedQty,
-        orderQty: cardQtyOverrides[cardId] || sug.suggestedQty,
-        hasPreviousPurchase: Boolean(lastP?.found),
-        previousPurchase: lastP?.found ? {
-          supplierName: lastP.distributor_name,
-          supplierId: lastP.distributor_id,
-          quantity: lastP.quantity,
-          price: lastP.cost_price,
-          purchaseDate: lastP.purchase_date,
-          batchNo: lastP.batch_no,
-          expiryDate: lastP.expiry_date,
-          invoiceNo: lastP.invoice_no
-        } : undefined,
-        assignedSupplier: lastP?.found ? {
-          storeId: lastP.distributor_id || (distributors[0]?.storeId || 0),
-          storeName: lastP.distributor_name || (distributors[0]?.storeName || 'Unassigned'),
-          isMapped: true
-        } : {
-          storeId: distributors[0]?.storeId || 0,
-          storeName: distributors[0]?.storeName || 'Unassigned',
-          isMapped: Boolean(distributors[0])
-        },
-        isInCart: false
-      });
-    }
-
-    // C. Special Shortage Requests
-    for (const ord of pendingOrders) {
-      const normName = ord.product.toLowerCase().trim();
-      if (seenNames.has(normName)) continue;
-      seenNames.add(normName);
-      const lastP = lastPurchaseMap[ord.product] || lastPurchaseMap[normName];
-      const inCart = Boolean(getOrderItemInCart(ord));
-      const cardId = `order_${ord.id}`;
-
-      cards.push({
-        id: cardId,
-        medicineName: ord.product,
-        company: '',
-        packaging: '',
-        ptr: 0,
-        mrp: 0,
-        reason: 'special_order',
-        reasonLabel: 'Special Customer Request',
-        reasonDetail: `Req by: ${ord.requester} (${ord.phone}) • Qty: ${ord.qty}`,
-        currentStock: 0,
-        minStock: ord.qty || 1,
-        suggestedQty: ord.qty || 1,
-        orderQty: cardQtyOverrides[cardId] || ord.qty || 1,
-        hasPreviousPurchase: Boolean(lastP?.found),
-        previousPurchase: lastP?.found ? {
-          supplierName: lastP.distributor_name,
-          supplierId: lastP.distributor_id,
-          quantity: lastP.quantity,
-          price: lastP.cost_price,
-          purchaseDate: lastP.purchase_date,
-          batchNo: lastP.batch_no,
-          expiryDate: lastP.expiry_date,
-          invoiceNo: lastP.invoice_no
-        } : undefined,
-        assignedSupplier: {
-          storeId: distributors[0]?.storeId || 0,
-          storeName: ord.pharmarack_distributor || distributors[0]?.storeName || 'Unassigned',
-          isMapped: Boolean(distributors[0])
-        },
-        isInCart: inCart,
-        specialOrderId: ord.id
-      });
-    }
-
-    // D. Refills Due
-    for (const ref of pendingRefills) {
-      const rawName = ref.medicine_name || '';
-      if (!rawName) continue;
-      const normName = rawName.toLowerCase().trim();
-      if (seenNames.has(normName)) continue;
-      seenNames.add(normName);
-      const lastP = lastPurchaseMap[rawName] || lastPurchaseMap[normName];
-      const inCart = Boolean(getRefillItemInCart(ref));
-      const cardId = `refill_${ref.id}`;
-
-      cards.push({
-        id: cardId,
-        medicineName: rawName,
-        company: '',
-        packaging: '',
-        ptr: 0,
-        mrp: 0,
-        reason: 'refill_due',
-        reasonLabel: 'Chronic Refill Due',
-        reasonDetail: `Patient: ${ref.patient_name} (${ref.patient_phone}) • Due in ≤7d`,
-        currentStock: ref.in_stock_qty || 0,
-        minStock: ref.quantity_needed || 1,
-        suggestedQty: ref.quantity_needed || 1,
-        orderQty: cardQtyOverrides[cardId] || ref.quantity_needed || 1,
-        hasPreviousPurchase: Boolean(lastP?.found),
-        previousPurchase: lastP?.found ? {
-          supplierName: lastP.distributor_name,
-          supplierId: lastP.distributor_id,
-          quantity: lastP.quantity,
-          price: lastP.cost_price,
-          purchaseDate: lastP.purchase_date,
-          batchNo: lastP.batch_no,
-          expiryDate: lastP.expiry_date,
-          invoiceNo: lastP.invoice_no
-        } : undefined,
-        assignedSupplier: {
-          storeId: distributors[0]?.storeId || 0,
-          storeName: distributors[0]?.storeName || 'Unassigned',
-          isMapped: Boolean(distributors[0])
-        },
-        isInCart: inCart,
-        refillId: ref.id
-      });
-    }
-
-    return cards;
-  }, [distributors, reorderSuggestions, pendingOrders, pendingRefills, lastPurchaseMap, cardQtyOverrides]);
-
-  const handleOpenReorderSameModal = (card: any) => {
-    setReorderSameModalTarget(card);
-    setReorderModalQty(card.orderQty || card.suggestedQty || 1);
-    
-    // Default to previous supplier storeId if mapped, or first distributor
-    let matchedStoreId = distributors[0]?.storeId || 0;
-    if (card.previousPurchase?.supplierName) {
-      const prevName = card.previousPurchase.supplierName.toLowerCase().trim();
-      const match = distributors.find(d => 
-        (d.storeName && d.storeName.toLowerCase().trim() === prevName) ||
-        (d.storeName && (d.storeName.toLowerCase().includes(prevName) || prevName.includes(d.storeName.toLowerCase())))
-      );
-      if (match) matchedStoreId = match.storeId;
-    } else if (card.assignedSupplier?.storeId) {
-      matchedStoreId = card.assignedSupplier.storeId;
-    }
-    setReorderModalSupplierId(matchedStoreId);
-  };
 
   const handleConfirmReorderSame = async () => {
     if (!reorderSameModalTarget) return;
@@ -3020,49 +2486,6 @@ export default function PharmarackCart() {
     } catch (err: any) {
       toastEvent.trigger(err?.message || 'Failed to add reorder item', 'error');
     }
-  };
-
-  const handleOpenPurchaseHistoryModal = async (medicineName: string) => {
-    setPurchaseHistoryModalTarget({ medicineName, loading: true, history: [] });
-    try {
-      const res = await api.getMedicinePriceHistory(medicineName);
-      if (res && Array.isArray(res.data)) {
-        setPurchaseHistoryModalTarget({ medicineName, loading: false, history: res.data });
-      } else {
-        setPurchaseHistoryModalTarget({ medicineName, loading: false, history: [] });
-      }
-    } catch (err) {
-      console.warn('Failed to load purchase history:', err);
-      setPurchaseHistoryModalTarget({ medicineName, loading: false, history: [] });
-    }
-  };
-
-  const handleOpenSwitchModalForCard = (card: any) => {
-    const dummyItem: CartLineItem = {
-      productId: card.medicineId || 0,
-      storeId: card.assignedSupplier?.storeId || (distributors[0]?.storeId || 0),
-      productCode: String(card.medicineId || card.medicineName),
-      productName: card.medicineName,
-      company: card.company || '',
-      packaging: card.packaging || '',
-      qty: card.orderQty || card.suggestedQty || 1,
-      ptr: card.ptr || card.previousPurchase?.price || 0,
-      mrp: card.mrp || 0,
-      scheme: card.scheme || '',
-      stock: card.currentStock || null,
-      amount: (card.orderQty || card.suggestedQty || 1) * (card.ptr || card.previousPurchase?.price || 0),
-      cartSource: 'reorder',
-      isChecked: true,
-      createdDate: new Date().toISOString()
-    };
-    const matchedDist: Distributor = distributors.find(d => d.storeId === dummyItem.storeId) || distributors[0] || {
-      storeId: 0,
-      storeName: card.assignedSupplier?.storeName || 'Unassigned',
-      lineTotal: 0,
-      deliveryPersons: [],
-      items: []
-    };
-    handleOpenSwitchModal(dummyItem, matchedDist);
   };
 
   // Re-fetch pending special orders whenever any page creates/updates an order.
