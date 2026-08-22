@@ -14,11 +14,18 @@ interface Props {
   fallback?: ReactNode;
 }
 
+// ponytail: pool is bounded by the fixed route table (~23 entries); lists inside
+// pages are virtualized/capped, so no LRU eviction needed.
+const visitedPaths: string[] = [];
+
 /**
  * Renders every page visited this session simultaneously, hiding all but the current
  * one with display:none instead of unmounting them. Scroll position, form state, and
- * open modals survive navigation; hidden pages stay mounted so React Query's cache
- * invalidation keeps refreshing them in the background.
+ * open modals survive navigation; hidden pages stay mounted so SSE-driven listeners
+ * and React Query cache invalidation keep refreshing them in the background.
+ *
+ * Pages receive real visibility via PageActiveProvider: usePageActive() is true only
+ * for the currently shown route, gating focus-refetches and background polls.
  */
 export function KeepAliveOutlet({ routes, notFoundElement, fallback }: Props) {
   const location = useLocation();
@@ -28,15 +35,33 @@ export function KeepAliveOutlet({ routes, notFoundElement, fallback }: Props) {
     return <>{notFoundElement}</>;
   }
 
+  if (!visitedPaths.includes(matched.path)) {
+    visitedPaths.push(matched.path);
+  }
+
   return (
-    <div key={matched.path} className="h-full w-full flex-1 flex flex-col min-h-0">
-      <PageActiveProvider value={true}>
-        <PageErrorBoundary pagePath={matched.path}>
-          <Suspense fallback={fallback || null}>
-            {matched.element}
-          </Suspense>
-        </PageErrorBoundary>
-      </PageActiveProvider>
-    </div>
+    <>
+      {visitedPaths.map(path => {
+        const route = routes.find(r => r.path === path);
+        if (!route) return null;
+        const isActive = path === matched.path;
+        return (
+          <div
+            key={path}
+            className="h-full w-full flex-1 flex flex-col min-h-0"
+            style={isActive ? undefined : { display: 'none' }}
+            aria-hidden={!isActive}
+          >
+            <PageActiveProvider value={isActive}>
+              <PageErrorBoundary pagePath={path}>
+                <Suspense fallback={fallback || null}>
+                  {route.element}
+                </Suspense>
+              </PageErrorBoundary>
+            </PageActiveProvider>
+          </div>
+        );
+      })}
+    </>
   );
 }

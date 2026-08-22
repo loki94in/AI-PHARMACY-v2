@@ -2402,15 +2402,36 @@ router.delete('/hold/:id', async (req, res) => {
 });
 
 // Synchronize offline sales from mobile
+// Attribution: each batch carries the selling phone's uuid+name so staged bills
+// can be traced back to a specific device (shown on PC Phone Sales page).
+let stagedDeviceColumnsReady = false;
+async function ensureStagedDeviceColumns(db: Database): Promise<void> {
+  if (stagedDeviceColumnsReady) return;
+  try {
+    const cols = await db.all('PRAGMA table_info(staged_sales)');
+    const names = new Set(cols.map((c: any) => c.name));
+    if (!names.has('sold_from_device')) {
+      await db.run('ALTER TABLE staged_sales ADD COLUMN sold_from_device TEXT');
+    }
+    if (!names.has('device_uuid')) {
+      await db.run('ALTER TABLE staged_sales ADD COLUMN device_uuid TEXT');
+    }
+    stagedDeviceColumnsReady = true;
+  } catch (err) {
+    console.warn('[SalesSync] staged_sales device column ensure failed:', err);
+  }
+}
+
 router.post('/sync', async (req, res) => {
   let db;
   try {
-    const { sales = [], adminMode = false } = req.body;
+    const { sales = [], adminMode = false, deviceName = '', device_uuid = '' } = req.body;
     if (!Array.isArray(sales)) {
       return res.status(400).json({ error: 'Sales array required for synchronization' });
     }
 
     db = await dbManager.getConnection();
+    await ensureStagedDeviceColumns(db);
     await db.run('BEGIN TRANSACTION');
 
     let stagedCount = 0;
@@ -2420,6 +2441,9 @@ router.post('/sync', async (req, res) => {
 
       if (adminMode) {
         // Direct commit for Admin Remote Operations
+        // (per-bill override wins over batch-level device fields)
+        const billDeviceName = sale.sold_from_device || deviceName || 'Unknown Device';
+        const billDeviceUuid = sale.device_uuid || device_uuid || '';
         let customerId = null;
         if (patient_name) {
           const cleanPhone = patient_phone || '';
@@ -2495,12 +2519,18 @@ router.post('/sync', async (req, res) => {
           await db.run('UPDATE inventory_master SET quantity = ?, loose_quantity = ? WHERE id = ?', [newStock.quantity, newStock.loose_quantity, inventory_id]);
           syncStockMap.set(inventory_id, { ...currentStock, quantity: newStock.quantity, loose_quantity: newStock.loose_quantity });
         }
+        await db.run(
+          'INSERT INTO action_logs (action_type, description) VALUES (?, ?)',
+          ['MOBILE_SALE_SYNC', `Invoice ${invoice_no} synced from device "${billDeviceName}"${billDeviceUuid ? ` (${billDeviceUuid})` : ''} — ₹${total}`]
+        );
         stagedCount++;
       } else {
         // Normal staged sync for non-admin staff
+        const billDeviceName = sale.sold_from_device || deviceName || 'Unknown Device';
+        const billDeviceUuid = sale.device_uuid || device_uuid || '';
         await db.run(
-          `INSERT INTO staged_sales (patient_name, patient_phone, discount, sale_date, items_json) VALUES (?, ?, ?, ?, ?)`,
-          [patient_name, patient_phone, Number(discount), sale_date, JSON.stringify(items)]
+          `INSERT INTO staged_sales (patient_name, patient_phone, discount, sale_date, items_json, sold_from_device, device_uuid) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [patient_name, patient_phone, Number(discount), sale_date, JSON.stringify(items), billDeviceName, billDeviceUuid]
         );
         stagedCount++;
       }

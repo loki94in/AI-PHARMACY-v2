@@ -41,6 +41,41 @@ router.get('/patients', async (req, res) => {
     
     const patients = await db.all(query, params);
 
+    // Enrich with lightweight returning/refill signals (chunked to respect SQLite param limits).
+    if (patients.length > 0) {
+      try {
+        const ids: number[] = patients.map((p: any) => p.id);
+        const chunks: number[][] = [];
+        for (let i = 0; i < ids.length; i += 500) chunks.push(ids.slice(i, i + 500));
+        const salesMap = new Map<number, { purchase_count: number; last_sale_date: string }>();
+        const refillSet = new Set<number>();
+        for (const chunk of chunks) {
+          const ph = chunk.map(() => '?').join(',');
+          const salesRows = await db.all(
+            `SELECT customer_id, COUNT(*) AS purchase_count, MAX(date) AS last_sale_date
+             FROM sales_invoices WHERE customer_id IN (${ph}) GROUP BY customer_id`,
+            chunk
+          );
+          for (const r of salesRows) {
+            salesMap.set(r.customer_id, { purchase_count: r.purchase_count, last_sale_date: r.last_sale_date });
+          }
+          const refillRows = await db.all(
+            `SELECT DISTINCT customer_id FROM patient_refills WHERE is_active = 1 AND customer_id IN (${ph})`,
+            chunk
+          );
+          for (const r of refillRows) refillSet.add(r.customer_id);
+        }
+        for (const p of patients) {
+          const s = salesMap.get(p.id);
+          p.purchase_count = s ? s.purchase_count : 0;
+          p.last_sale_date = s ? s.last_sale_date : null;
+          p.active_refill = refillSet.has(p.id) ? 1 : 0;
+        }
+      } catch (enrichErr) {
+        console.warn('[CRM] Patient enrichment failed, returning unenriched rows:', enrichErr);
+      }
+    }
+
     if (q && patients.length === 0) {
       try {
         const allCustomers = await db.all('SELECT id, name, phone, address FROM customers LIMIT 300');

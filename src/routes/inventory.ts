@@ -55,6 +55,17 @@ const normalizeNumericSearch = (val: string): string => {
   return cleaned;
 };
 
+// Cached COUNT(*) for GET /api/inventory — counting the full inventory×medicines join on
+// every keystroke/page-switch was a top latency source. Keyed by filter signature,
+// short TTL + explicit invalidation on inventory writes (see database/connection.ts).
+const INVENTORY_COUNT_TTL_MS = 60_000;
+const inventoryCountCache = new Map<string, { total: number; ts: number }>();
+
+/** Called by the DB write interceptor whenever inventory_master changes. */
+export function invalidateInventoryCountCache() {
+  inventoryCountCache.clear();
+}
+
 // Get inventory master
 router.get('/', async (req, res) => {
   let db;
@@ -150,9 +161,12 @@ router.get('/', async (req, res) => {
                COALESCE(m.name, 'Unlinked Batch (' || COALESCE(im.batch_no, 'No Batch') || ')') as name, 
                COALESCE(m.name, 'Unlinked Batch (' || COALESCE(im.batch_no, 'No Batch') || ')') as medicine_name, 
                im.batch_no as batch_number, 
-               im.quantity as stock_quantity, 
+               im.quantity as stock_quantity,
                m.item_code as item_code,
-               m.sell_price as sell_price
+               m.sell_price as sell_price,
+               m.cgst_per as cgst_per,
+               m.sgst_per as sgst_per,
+               m.pack_size as pack_size
         ${baseQuery}
         ORDER BY COALESCE(m.name, im.batch_no) ASC, im.id DESC
       `, params);
@@ -161,9 +175,17 @@ router.get('/', async (req, res) => {
 
     // Pagination logic
     const offset = (page - 1) * limit;
-    
-    const countRow = await db.get(`SELECT COUNT(*) as total ${baseQuery}`, params);
-    const totalItems = countRow.total;
+
+    let totalItems: number;
+    const countKey = JSON.stringify([search, medicine, id, batch, expiry, packs, loose, mrp, rack, stock_filter]);
+    const cachedCount = inventoryCountCache.get(countKey);
+    if (cachedCount && Date.now() - cachedCount.ts < INVENTORY_COUNT_TTL_MS) {
+      totalItems = cachedCount.total;
+    } else {
+      const countRow = await db.get(`SELECT COUNT(*) as total ${baseQuery}`, params);
+      totalItems = countRow.total;
+      inventoryCountCache.set(countKey, { total: totalItems, ts: Date.now() });
+    }
     const totalPages = Math.ceil(totalItems / limit);
 
     const rows = await db.all(`
@@ -171,9 +193,12 @@ router.get('/', async (req, res) => {
              COALESCE(m.name, 'Unlinked Batch (' || COALESCE(im.batch_no, 'No Batch') || ')') as name, 
              COALESCE(m.name, 'Unlinked Batch (' || COALESCE(im.batch_no, 'No Batch') || ')') as medicine_name, 
              im.batch_no as batch_number, 
-             im.quantity as stock_quantity, 
+             im.quantity as stock_quantity,
              m.item_code as item_code,
-             m.sell_price as sell_price
+             m.sell_price as sell_price,
+             m.cgst_per as cgst_per,
+             m.sgst_per as sgst_per,
+             m.pack_size as pack_size
       ${baseQuery}
       ORDER BY COALESCE(m.name, im.batch_no) ASC, im.id DESC
       LIMIT ? OFFSET ?

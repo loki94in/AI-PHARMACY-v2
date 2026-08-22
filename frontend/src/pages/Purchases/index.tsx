@@ -9,6 +9,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { HoverPriceIntelTable } from '../../components/HoverPriceIntelTable';
 import { createPortal } from 'react-dom';
 import { UniversalMedicineEditModal } from '../../components/UniversalMedicineEditModal';
+import { PurchaseSaveVerificationModal, type SaveVerificationData } from '../../components/PurchaseSaveVerificationModal';
 import { calculateSimilarity } from '../../utils/fuzzy';
 import { invalidateAfterStockWrite } from '../../utils/cacheInvalidation';
 import { getLocalDateString, getTodayString, getNDaysAgoString, toDateInputValue } from '../../utils/date';
@@ -447,9 +448,6 @@ const formatExpiryToMMYY = (val: string): string => {
   return cleaned;
 };
 
-let cachedDistributors: any[] | null = null;
-let cachedPurchaseHistory: any[] | null = null;
-
 const Purchases: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
@@ -606,6 +604,9 @@ const Purchases: React.FC = () => {
   const [universalEditItem, setUniversalEditItem] = useState<any>(null);
   const [universalEditOcrData, setUniversalEditOcrData] = useState<any>(null);
   const [isUniversalModalOpen, setIsUniversalModalOpen] = useState(false);
+  const [showSaveVerify, setShowSaveVerify] = useState(false);
+  const [saveVerifyData, setSaveVerifyData] = useState<SaveVerificationData | null>(null);
+  const sessionNewMedicinesRef = useRef<{ id: number; name: string }[]>([]);
 
   const handleGlobalCdChange = (newVal: number) => {
     setGlobalCdPer(newVal);
@@ -1857,17 +1858,15 @@ const Purchases: React.FC = () => {
 
   const calculateTotals = () => memoizedTotals;
 
-  const savePurchase = async () => {
-    // If already saving but stuck >5s, force-reset and allow retry
-    if (saving) {
-      if (Date.now() - savingStartedAtRef.current > 5000) {
-        setSaving(false);
-        if (savingTimeoutRef.current) clearTimeout(savingTimeoutRef.current);
-      } else {
-        return;
-      }
-    }
+  type PrevalidatedBill = {
+    distIdToSave: number | null;
+    distNameToSave: string;
+    finalInvoiceNo: string;
+    validItems: any[];
+    cleanInvoiceDate: string;
+  };
 
+  const collectBillForSave = (): PrevalidatedBill | null => {
     let distIdToSave = selectedDistributor;
     let distNameToSave = distributorSearch;
 
@@ -1893,13 +1892,13 @@ const Purchases: React.FC = () => {
     if (!distIdToSave && (!distNameToSave || !distNameToSave.trim())) {
       toastEvent.trigger('Distributor required before purchase can be finalized.', 'error', '/purchases');
       alert('Distributor required before purchase can be finalized.');
-      return;
+      return null;
     }
 
     if (!isValidDistributorName(distNameToSave)) {
       toastEvent.trigger('Distributor required before purchase can be finalized.', 'error', '/purchases');
       alert('Distributor required before purchase can be finalized.');
-      return;
+      return null;
     }
 
     let finalInvoiceNo = (invoiceNo || '').trim();
@@ -1918,7 +1917,7 @@ const Purchases: React.FC = () => {
     if (validItems.length === 0) {
       toastEvent.trigger('Please add at least one medicine item with a quantity greater than 0.', 'error', '/purchases');
       alert('Please add at least one medicine item with a quantity greater than 0.');
-      return;
+      return null;
     }
 
     // Strict validation: Every valid item must have legitimate MRP > 0
@@ -1929,7 +1928,7 @@ const Purchases: React.FC = () => {
       if (isNaN(mrpNum) || mrpNum <= 0) {
         toastEvent.trigger(`MRP is required for "${name}". Please enter the actual MRP from invoice before saving.`, 'error', '/purchases');
         alert(`MRP is required for "${name}". Please enter the actual MRP from invoice before saving.`);
-        return;
+        return null;
       }
     }
 
@@ -1937,9 +1936,99 @@ const Purchases: React.FC = () => {
     if (!cleanInvoiceDate) {
       toastEvent.trigger('Invoice date is required. Please enter or verify the actual invoice date before saving.', 'error', '/purchases');
       alert('Invoice date is required. Please enter or verify the actual invoice date before saving.');
-      return;
+      return null;
     }
 
+    return { distIdToSave, distNameToSave, finalInvoiceNo, validItems, cleanInvoiceDate };
+  };
+
+  // Final Verification flow (strict human-verification contract): Save never
+  // commits directly. Unresolved lines are first auto-linked through ONE batched
+  // server call; then PurchaseSaveVerificationModal requires an explicit Confirm.
+  const WEAK_MATCH_TYPES = new Set(['distributor_history_fuzzy', 'prefix_fuzzy', 'catalog_fuzzy']);
+
+  const savePurchase = async () => {
+    // If already saving but stuck >5s, force-reset and allow retry
+    if (saving) {
+      if (Date.now() - savingStartedAtRef.current > 5000) {
+        setSaving(false);
+        if (savingTimeoutRef.current) clearTimeout(savingTimeoutRef.current);
+      } else {
+        return;
+      }
+    }
+
+    const bill = collectBillForSave();
+    if (!bill) return;
+
+    const { validItems } = bill;
+    const unmatched = validItems.filter(it => !it.medicine_id);
+    let fuzzyMatches: SaveVerificationData['fuzzyMatches'] = [];
+    let autoLinkedCount = 0;
+
+    if (unmatched.length > 0) {
+      try {
+        const res = await api.matchPurchaseItems(
+          unmatched.map(it => String(it.medicine_name || it.name || it.medicine || '').trim()),
+          bill.distIdToSave
+        );
+        const results: any[] = res?.results || [];
+        setItems([...items]); // validItems entries are references into items — flush mutations to render
+        results.forEach((r: any, k: number) => {
+          const src = unmatched[k];
+          if (!src || !r?.medicine_id) return;
+          src.medicine_id = r.medicine_id;
+          if (r.matched_name && !(src.medicine_name || src.name)) src.medicine_name = r.matched_name;
+          if (WEAK_MATCH_TYPES.has(r.match_type)) {
+            fuzzyMatches.push({
+              name: String(src.original_name || src.medicine_name || src.name || ''),
+              matchedName: String(r.matched_name || ''),
+              confidence: Number(r.confidence) || 0
+            });
+          } else {
+            autoLinkedCount++;
+          }
+        });
+      } catch (err) {
+        console.warn('[Purchases] batch match-items failed; lines stay unresolved for manual linking', err);
+      }
+    }
+
+    const unresolvedList = validItems
+      .filter(it => !it.medicine_id)
+      .map(it => String(it.medicine_name || it.name || it.medicine || '').trim());
+
+    setSaveVerifyData({
+      distributor: bill.distNameToSave,
+      invoiceNo: bill.finalInvoiceNo,
+      date: bill.cleanInvoiceDate,
+      itemCount: bill.validItems.length,
+      grandTotal: memoizedTotals.grandTotal,
+      autoLinkedCount,
+      fuzzyMatches,
+      newRegistrations: sessionNewMedicinesRef.current.map(m => m.name),
+      unresolved: unresolvedList
+    });
+    setShowSaveVerify(true);
+  };
+
+  const confirmVerifiedSave = async () => {
+    if (saving) {
+      if (Date.now() - savingStartedAtRef.current > 5000) {
+        setSaving(false);
+        if (savingTimeoutRef.current) clearTimeout(savingTimeoutRef.current);
+      } else {
+        return;
+      }
+    }
+
+    const bill = collectBillForSave();
+    if (!bill) {
+      setShowSaveVerify(false);
+      return;
+    }
+    const { distIdToSave, distNameToSave, finalInvoiceNo, validItems, cleanInvoiceDate } = bill;
+    setShowSaveVerify(false);
     setSaving(true);
     savingStartedAtRef.current = Date.now();
     // Safety net: auto-reset after 35s no matter what
@@ -2062,9 +2151,16 @@ const Purchases: React.FC = () => {
       api.getCompactInventory().catch(() => {});
     } catch (error: any) {
       console.error('Error saving purchase:', error);
-      const errMsg = error.response?.data?.error || error.response?.data?.message || error.message || 'Failed to save purchase';
-      toastEvent.trigger(errMsg, 'error', '/purchases');
-      alert(errMsg);
+      const unres = error.response?.data?.unresolved_items;
+      if (Array.isArray(unres) && unres.length > 0) {
+        const names = unres.map((u: any) => `"${u?.name || 'Item'}"`).join(', ');
+        toastEvent.trigger(`Resolve ${unres.length} medicine(s) before saving: ${names}. Link each via search or ✨ Register.`, 'error', '/purchases');
+        alert(`${unres.length} medicine(s) on this bill are not linked to a master record: ${names}. Use search or ✨ Register New Medicine on those rows, then save again.`);
+      } else {
+        const errMsg = error.response?.data?.error || error.response?.data?.message || error.message || 'Failed to save purchase';
+        toastEvent.trigger(errMsg, 'error', '/purchases');
+        alert(errMsg);
+      }
     } finally {
       setSaving(false);
       if (savingTimeoutRef.current) clearTimeout(savingTimeoutRef.current);
@@ -2316,6 +2412,9 @@ const Purchases: React.FC = () => {
   const filteredDistributors = useMemo(() => {
     let term = distributorSearch.toLowerCase().trim();
 
+    // Dropdown must never appear unless the user has typed at least 2 characters.
+    if (term.length < 2) return [];
+
     if (selectedDistributor) {
       const currentSelectedObj = distributors.find(d => d.id === selectedDistributor);
       const currentName = (currentSelectedObj?.name || currentSelectedObj?.distributor_name || '').toLowerCase().trim();
@@ -2460,24 +2559,22 @@ const Purchases: React.FC = () => {
                   value={distributorSearch}
                   onChange={(e) => {
                     setDistributorSearch(e.target.value);
-                    setShowDistributorDropdown(true);
+                    setShowDistributorDropdown(e.target.value.trim().length >= 2);
                     setDistributorHighlightIndex(-1);
                     if (e.target.value === '') {
                       setSelectedDistributor(null);
                     }
                   }}
-                  onFocus={() => setShowDistributorDropdown(true)}
-                  onClick={() => setShowDistributorDropdown(true)}
                   onBlur={() => setTimeout(() => setShowDistributorDropdown(false), 200)}
                   onKeyDown={(e) => {
                     if (e.key === 'ArrowDown') {
-                      if (filteredDistributors.length > 0) {
+                      if (distributorSearch.trim().length >= 2 && filteredDistributors.length > 0) {
                         e.preventDefault();
                         setShowDistributorDropdown(true);
                         setDistributorHighlightIndex(i => Math.min(i + 1, Math.min(filteredDistributors.length - 1, 49)));
                       }
                     } else if (e.key === 'ArrowUp') {
-                      if (filteredDistributors.length > 0) {
+                      if (distributorSearch.trim().length >= 2 && filteredDistributors.length > 0) {
                         e.preventDefault();
                         setShowDistributorDropdown(true);
                         setDistributorHighlightIndex(i => Math.max(i - 1, 0));
@@ -2509,7 +2606,7 @@ const Purchases: React.FC = () => {
                   placeholder="Type to search distributor..."
                   autoComplete="off"
                 />
-                {showDistributorDropdown && (
+                {showDistributorDropdown && distributorSearch.trim().length >= 2 && (
                   <div className="absolute z-dropdown w-full mt-1 bg-bg2 border border-glass-border rounded-xl overflow-hidden max-h-64 overflow-y-auto shadow-2xl">
                     <div className="px-3 py-1.5 bg-bg3 border-b border-glass-border/40 flex items-center justify-between">
                       <span className="text-[11px] font-bold text-muted uppercase tracking-wider">Distributor List ({filteredDistributors.length})</span>
@@ -2533,7 +2630,7 @@ const Purchases: React.FC = () => {
                       <div className="px-4 py-3 text-muted text-xs">
                         {onlyMappedFilter
                           ? 'No mapped distributors match. Toggle "All Distributors" above or click + to add.'
-                          : distributorSearch === '' ? 'No distributors available' : 'No match found. Click + to add.'}
+                          : 'No match found. Click + to add.'}
                       </div>
                     ) : (
                       filteredDistributors.slice(0, 50).map((dist, idx) => {
@@ -3745,6 +3842,11 @@ const Purchases: React.FC = () => {
             setActiveMedicineIndex(null);
           }} 
           onSave={(saved) => {
+            // Track medicines registered by the user in this session for Final Verification disclosure
+            if (saved?.id) {
+              const existingReg = sessionNewMedicinesRef.current.find(m => m.id === saved.id);
+              if (!existingReg) sessionNewMedicinesRef.current.push({ id: saved.id, name: saved.name || '' });
+            }
             if (saved && activeMedicineIndex !== null && items[activeMedicineIndex]) {
               const newItems = [...items];
               const item = newItems[activeMedicineIndex];
@@ -3799,6 +3901,15 @@ const Purchases: React.FC = () => {
             setUniversalEditOcrData(null);
             setActiveMedicineIndex(null);
           }}
+        />
+      )}
+
+      {showSaveVerify && saveVerifyData && (
+        <PurchaseSaveVerificationModal
+          data={saveVerifyData}
+          saving={saving}
+          onConfirm={confirmVerifiedSave}
+          onClose={() => setShowSaveVerify(false)}
         />
       )}
 

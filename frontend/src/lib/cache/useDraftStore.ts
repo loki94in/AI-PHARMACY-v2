@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react';
 
-const draftStore = new Map<string, any>();
+const draftStore = new Map<string, unknown>();
 const listeners = new Set<() => void>();
 
 function subscribe(listener: () => void) {
@@ -17,14 +17,14 @@ function notify() {
 /** Set a draft value in memory without triggering component unmount data loss */
 export function setDraft<T>(key: string, value: T | ((prev: T) => T)) {
   const current = draftStore.get(key);
-  const next = typeof value === 'function' ? (value as (prev: any) => T)(current) : value;
+  const next = typeof value === 'function' ? (value as (prev: unknown) => T)(current) : value;
   draftStore.set(key, next);
   notify();
 }
 
 /** Get a draft value from memory synchronously */
 export function getDraft<T>(key: string): T | undefined {
-  return draftStore.get(key);
+  return draftStore.get(key) as T | undefined;
 }
 
 /** Remove a draft from memory */

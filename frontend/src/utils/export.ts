@@ -1,3 +1,6 @@
+import type { UserOptions } from 'jspdf-autotable';
+import type { jsPDF } from 'jspdf';
+
 export interface ExportColumn {
   key: string;
   label: string;
@@ -8,17 +11,25 @@ export interface ExportOptions {
   itemsPerPage?: number;
 }
 
-export function exportToCSV(data: any[], columns: ExportColumn[], filename: string, options?: ExportOptions) {
+type LocalExportItemCell = { quantity: number | string; medicine_name: string };
+type LocalRow = Record<string, unknown>;
+type LocalAutoTableDoc = jsPDF & {
+  autoTable: (options: UserOptions) => void;
+  internal: jsPDF['internal'] & { getNumberOfPages: () => number };
+};
+
+export function exportToCSV<T extends object>(data: T[], columns: ExportColumn[], filename: string, options?: ExportOptions) {
   const BOM = '\uFEFF';
   const headers = columns.map(c => `"${c.label.replace(/"/g, '""')}"`).join(',');
   const itemsPerPage = options?.itemsPerPage || 30;
 
-  const downloadChunk = (chunkData: any[], chunkFilename: string) => {
+  const downloadChunk = (chunkData: T[], chunkFilename: string) => {
     const rows = chunkData.map(item =>
       columns.map(c => {
+        const cell = (item as LocalRow)[c.key];
         let val = '';
-        if (item[c.key] !== undefined && item[c.key] !== null) {
-          val = String(item[c.key]);
+        if (cell !== undefined && cell !== null) {
+          val = String(cell);
         }
         const cleaned = val.replace(/"/g, '""');
         // Prevent Excel from removing leading zeros and popping up conversion warnings
@@ -57,7 +68,7 @@ export function exportToCSV(data: any[], columns: ExportColumn[], filename: stri
   }
 }
 
-export async function exportToPDF(data: any[], columns: ExportColumn[], filename: string, title: string, options?: ExportOptions) {
+export async function exportToPDF<T extends object>(data: T[], columns: ExportColumn[], filename: string, title: string, options?: ExportOptions) {
   const { jsPDF } = await import('jspdf');
   await import('jspdf-autotable');
   const itemsPerPage = options?.itemsPerPage || 30;
@@ -65,25 +76,25 @@ export async function exportToPDF(data: any[], columns: ExportColumn[], filename
   const tableColumn = columns.map(c => c.label);
   const now = new Date().toLocaleString('en-IN');
 
-  const formatRowData = (itemsList: any[]) =>
+  const formatRowData = (itemsList: T[]) =>
     itemsList.map(item =>
       columns.map(c => {
-        if (item[c.key] === undefined || item[c.key] === null) {
+        if ((item as LocalRow)[c.key] === undefined || (item as LocalRow)[c.key] === null) {
           return '';
         }
-        if (Array.isArray(item[c.key])) {
-          return item[c.key].map((x: any) => `${x.quantity}x ${x.medicine_name}`).join(', ');
+        if (Array.isArray((item as LocalRow)[c.key])) {
+          return ((item as LocalRow)[c.key] as LocalExportItemCell[]).map(x => `${x.quantity}x ${x.medicine_name}`).join(', ');
         }
-        return String(item[c.key]);
+        return String((item as LocalRow)[c.key]);
       })
     );
 
-  const generateAndSavePdfChunk = (chunk: any[], partIndex: number, totalParts: number, chunkFilename: string) => {
+  const generateAndSavePdfChunk = (chunk: T[], partIndex: number, totalParts: number, chunkFilename: string) => {
     const doc = new jsPDF({
       orientation: columns.length > 8 ? 'landscape' : 'portrait',
       unit: 'mm',
       format: 'a4',
-    }) as any;
+    }) as LocalAutoTableDoc;
 
     doc.setFontSize(13);
     doc.setTextColor(33, 37, 41);

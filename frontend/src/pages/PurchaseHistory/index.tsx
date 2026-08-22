@@ -14,6 +14,62 @@ import { InfiniteScrollStatus } from '../../components/InfiniteScrollStatus';
 import { exportToCSV, exportToPDF } from '../../utils/export';
 import { toastEvent } from '../../services/events';
 
+interface LocalPurchaseItem {
+  medicine_id?: number | null;
+  medicine_name?: string | null;
+  name?: string | null;
+  batch_no?: string | null;
+  batch_number?: string | null;
+  batch?: string | null;
+  expiry_date?: string | null;
+  quantity?: number | null;
+  free_qty?: number | null;
+  cost_price?: number | string | null;
+  mrp?: number | string | null;
+  cgst_per?: number | null;
+  sgst_per?: number | null;
+  cd_per?: number | null;
+  cd_value?: number | null;
+}
+
+interface LocalMatchedPurchase {
+  id: number;
+  invoice_no: string;
+  app_invoice_no: string;
+  total_amount: number;
+  date: string;
+}
+
+interface LocalReconRow {
+  email_uid: number;
+  from: string;
+  subject: string;
+  body_snippet: string;
+  date: string;
+  is_seen: boolean;
+  is_saved: boolean;
+  extracted_distributor: string;
+  extracted_invoice_no: string;
+  matched_purchase: LocalMatchedPurchase | null;
+  status: 'Missing' | 'Bounced' | 'Matched';
+  medicine_names: string[];
+  attachments: { filename: string; size: number; content_type: string }[];
+}
+
+interface LocalViewedPurchase {
+  purchase: {
+    id: number;
+    invoice_no: string;
+    distributor_name: string;
+    date: string;
+    total_amount: number;
+    original_amount?: number;
+    cn_amount: number;
+    cn_number?: string;
+  };
+  items: LocalPurchaseItem[];
+}
+
 interface PurchaseTransaction {
   id: number;
   invoice_no: string;
@@ -22,7 +78,7 @@ interface PurchaseTransaction {
   distributor_name: string;
   status?: string; // Paid, Pending, Refunded, Failed
   plan?: string;
-  items?: any[];
+  items?: LocalPurchaseItem[];
   total_qty?: number;
   cn_amount?: number;
   cn_number?: string;
@@ -113,7 +169,7 @@ const PurchaseHistory = () => {
         };
       } else {
         const list = Array.isArray(response) ? response : [];
-        const listAmount = list.reduce((sum: number, t: any) => sum + (t.total_amount || 0), 0);
+        const listAmount = list.reduce((sum: number, t: PurchaseTransaction) => sum + (t.total_amount || 0), 0);
         return {
           data: list,
           totalItems: list.length,
@@ -135,15 +191,15 @@ const PurchaseHistory = () => {
 
   // Reconciliation States
   const [activeTab, setActiveTab] = useState<'history' | 'reconciliation'>('history');
-  const [reconciliationList, setReconciliationList] = useState<any[]>([]);
+  const [reconciliationList, setReconciliationList] = useState<LocalReconRow[]>([]);
   const [loadingRecon, setLoadingRecon] = useState(false);
-  const [selectedOrder, setSelectedOrder] = useState<any | null>(null);
+  const [selectedOrder, setSelectedOrder] = useState<LocalReconRow | null>(null);
   const [reissuingUid, setReissuingUid] = useState<number | null>(null);
-  const [viewPurchase, setViewPurchase] = useState<any | null>(null);
+  const [viewPurchase, setViewPurchase] = useState<LocalViewedPurchase | null>(null);
   const [generatingBarcodeId, setGeneratingBarcodeId] = useState<number | null>(null);
   const [generatingItemIndex, setGeneratingItemIndex] = useState<number | null>(null);
 
-  const handlePrintBillBarcodes = async (purchaseId: number, existingItems?: any[]) => {
+  const handlePrintBillBarcodes = async (purchaseId: number, existingItems?: LocalPurchaseItem[]) => {
     setGeneratingBarcodeId(purchaseId);
     try {
       let billItems = existingItems;
@@ -153,8 +209,8 @@ const PurchaseHistory = () => {
       }
 
       const payload = (billItems || [])
-        .filter((it: any) => (it.name || it.medicine_name || '').trim().length > 0)
-        .map((it: any) => ({
+        .filter((it: LocalPurchaseItem) => (it.name || it.medicine_name || '').trim().length > 0)
+        .map((it: LocalPurchaseItem) => ({
           name: (it.name || it.medicine_name || 'Medicine').trim(),
           batch: (it.batch_no || it.batch_number || it.batch || 'N/A').trim(),
         }));
@@ -179,7 +235,7 @@ const PurchaseHistory = () => {
     }
   };
 
-  const handlePrintSingleProductBarcode = async (item: any, itemIndex?: number) => {
+  const handlePrintSingleProductBarcode = async (item: LocalPurchaseItem, itemIndex?: number) => {
     const name = (item.name || item.medicine_name || 'Medicine').trim();
     const batch = (item.batch_no || item.batch_number || item.batch || 'N/A').trim();
     if (!name) {
@@ -259,7 +315,7 @@ const PurchaseHistory = () => {
           }
         }
       });
-    } catch (err: any) {
+    } catch (err) {
       console.error('Reissue preview error:', err);
       navigate('/purchases');
     } finally {
@@ -293,7 +349,7 @@ const PurchaseHistory = () => {
             cnAmount: data.purchase.cn_amount || 0,
             cnNumber: data.purchase.cn_number || '',
             reconcileExpiryReturnId: data.purchase.reconcile_expiry_return_id || null,
-            items: data.items.map((item: any) => ({
+            items: data.items.map((item: LocalPurchaseItem) => ({
               medicine_id: item.medicine_id,
               medicine_name: item.medicine_name,
               batch_no: item.batch_no,
@@ -1036,7 +1092,7 @@ const PurchaseHistory = () => {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-glass-border/30">
-                      {viewPurchase.items && viewPurchase.items.map((item: any, i: number) => (
+                      {viewPurchase.items && viewPurchase.items.map((item: LocalPurchaseItem, i: number) => (
                         <tr key={i} className="hover:bg-glass-bg">
                           <td className="px-4 py-3 text-text font-medium">{item.medicine_name}</td>
                           <td className="px-4 py-3 text-muted font-mono">{item.batch_no || '-'}</td>

@@ -9,6 +9,7 @@ import { formatDisplayDate } from '../../utils/date';
 interface SaleItem {
   sale_item_id: number;
   inventory_id: number;
+  medicine_id?: number | null;
   medicine_name: string;
   batch_no: string;
   expiry_date: string;
@@ -18,16 +19,33 @@ interface SaleItem {
   returned_qty: number;
 }
 
+interface LocalReturnInvoice {
+  id: number;
+  invoice_no: string;
+  date: string;
+  total_amount: number;
+}
+
+interface LocalPrevReturn {
+  medicine_id: number;
+  batch_no: string;
+  returned_qty: number;
+}
+
+type LocalBarcodeInfo = Awaited<ReturnType<typeof api.generateSaleInvoiceBarcode>>;
+
+type LocalApiError = { response?: { data?: { error?: string } }; message?: string };
+
 export default function CustomerReturn() {
   const queryClient = useQueryClient();
   const [invoiceNo, setInvoiceNo] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [invoice, setInvoice] = useState<any>(null);
+  const [invoice, setInvoice] = useState<LocalReturnInvoice | null>(null);
   const [items, setItems] = useState<SaleItem[]>([]);
   const [returnQuantities, setReturnQuantities] = useState<Record<number, number>>({});
   const [reason, setReason] = useState('');
-  const [barcodeInfo, setBarcodeInfo] = useState<any>(null);
+  const [barcodeInfo, setBarcodeInfo] = useState<LocalBarcodeInfo | null>(null);
   const [_, setSearchParams] = useSearchParams();
 
   const cleanInvoiceNoString = (raw: string) => {
@@ -50,9 +68,9 @@ export default function CustomerReturn() {
       setInvoice(data.invoice);
       setInvoiceNo(data.invoice.invoice_no);
       
-      const enrichedItems = data.items.map((item: any) => {
+      const enrichedItems = data.items.map((item: SaleItem) => {
         // Find if this item was already returned
-        const prev = data.previousReturns.find((p: any) => p.medicine_id === item.medicine_id && p.batch_no === item.batch_no);
+        const prev = data.previousReturns.find((p: LocalPrevReturn) => p.medicine_id === item.medicine_id && p.batch_no === item.batch_no);
         return {
           ...item,
           returned_qty: prev ? prev.returned_qty : 0
@@ -66,8 +84,9 @@ export default function CustomerReturn() {
       api.generateSaleInvoiceBarcode(data.invoice.invoice_no).then(bc => {
         if (bc.success) setBarcodeInfo(bc);
       }).catch(() => {});
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Invoice not found');
+    } catch (err) {
+      const e = err as LocalApiError;
+      setError(e.response?.data?.error || 'Invoice not found');
       setInvoice(null);
       setItems([]);
     } finally {
@@ -100,7 +119,7 @@ export default function CustomerReturn() {
     try {
       setLoading(true);
       await api.createCustomerReturn({
-        original_invoice_id: invoice.id,
+        original_invoice_id: invoice!.id,
         return_items: returnItems,
         reason
       });
@@ -115,8 +134,9 @@ export default function CustomerReturn() {
       setReturnQuantities({});
       setInvoiceNo('');
       setReason('');
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to process return');
+    } catch (err) {
+      const e = err as LocalApiError;
+      setError(e.response?.data?.error || 'Failed to process return');
     } finally {
       setLoading(false);
     }

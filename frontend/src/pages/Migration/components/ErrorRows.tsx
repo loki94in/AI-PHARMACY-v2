@@ -4,7 +4,7 @@ import { ChevronDown, ChevronUp, AlertTriangle } from 'lucide-react';
 interface ErrorRow {
   row: number;
   column: string;
-  value: any;
+  value: unknown;
   message: string;
 }
 

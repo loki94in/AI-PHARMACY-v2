@@ -31,11 +31,53 @@ interface EmailRecord {
   subject: string;
   body: string;
   date?: string;
-  attachments?: any[];
+  attachments?: Record<string, unknown>[];
   distributorName?: string;
   isSeen?: boolean;
   isSaved?: boolean;
   hasAttachments?: boolean;
+}
+
+type LocalApiError = { response?: { data?: { error?: string } }; message?: string };
+
+interface LocalParsedItem {
+  name?: string;
+  quantity?: number | string;
+  free_qty?: number | string;
+  rate?: number | string;
+  mrp?: number | string;
+  batch_no?: string;
+  expiry_date?: string;
+  cgst_per?: number | string;
+  sgst_per?: number | string;
+  cd_per?: number | string;
+  cd_rs?: number | string;
+}
+
+interface LocalParseAttachmentResult {
+  success?: boolean;
+  items?: LocalParsedItem[];
+  distributor_name?: string;
+  invoice_no?: string;
+  invoice_date?: string;
+  total_amount?: number;
+  global_cd_per?: number;
+  headers?: unknown[];
+  mapping_config?: Record<string, unknown>;
+  message?: string;
+}
+
+interface LocalProcessResultRow {
+  filename?: string;
+  success?: boolean;
+  items?: LocalParsedItem[];
+}
+
+interface LocalEmailAttachmentRow {
+  filename: string;
+  size: number;
+  contentType?: string;
+  createdAt?: string;
 }
 
 interface AttachmentFile {
@@ -157,7 +199,7 @@ const Mail = () => {
   const [attachments, setAttachments] = useState<AttachmentFile[]>(() => cachedAttachments);
   const [loadingAttachments, setLoadingAttachments] = useState(false);
   const [processing, setProcessing] = useState(false);
-  const [processResult, setProcessResult] = useState<any>(null);
+  const [processResult, setProcessResult] = useState<LocalProcessResultRow[] | null>(null);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   const [isImapConfigured, setIsImapConfigured] = useState<boolean>(true);
   const [previewContent, setPreviewContent] = useState<string>('');
@@ -175,7 +217,7 @@ const Mail = () => {
         cachedPendingReviews = Array.isArray(rows) ? rows : [];
         setPendingReviews(cachedPendingReviews);
       })
-      .catch((err: any) => console.error('Failed to fetch pending email order reviews:', err));
+      .catch((err) => console.error('Failed to fetch pending email order reviews:', err));
   }, []);
 
   useEffect(() => {
@@ -189,7 +231,7 @@ const Mail = () => {
       cachedPendingReviews = prev.filter(r => r.id !== id);
       return cachedPendingReviews;
     });
-    api.dismissEmailOrderReview(id).catch((err: any) => {
+    api.dismissEmailOrderReview(id).catch((err) => {
       console.error('Failed to dismiss email order review:', err);
       refreshPendingReviews(); // re-sync on failure since the optimistic removal above may be wrong
     });
@@ -231,7 +273,7 @@ const Mail = () => {
   // Check backend IMAP configuration status dynamically
   const checkImapStatus = useCallback(() => {
     api.getEmailStatus()
-      .then((res: any) => {
+      .then((res: { isConfigured?: boolean }) => {
         if (res && typeof res.isConfigured === 'boolean') {
           setIsImapConfigured(res.isConfigured);
         }
@@ -289,16 +331,17 @@ const Mail = () => {
     setPreviewContent('');
 
     api.getAttachmentPreview(activeAtt.filename)
-      .then((res: any) => {
+      .then((res: { success?: boolean; content?: string }) => {
         if (res && res.success) {
           setPreviewContent(res.content || '');
         } else {
           setPreviewContent('Preview failed.');
         }
       })
-      .catch((err: any) => {
+      .catch((err) => {
         console.error('Failed to load attachment preview:', err);
-        setPreviewContent('Failed to load attachment preview: ' + (err.response?.data?.error || err.message));
+        const e = err as LocalApiError;
+        setPreviewContent('Failed to load attachment preview: ' + (e.response?.data?.error || e.message));
       })
       .finally(() => {
         setLoadingPreview(false);
@@ -348,13 +391,13 @@ const Mail = () => {
     }
     api
       .getEmailInbox(30)
-      .then((data: any) => {
+      .then((data: EmailRecord[]) => {
         if (Array.isArray(data)) {
           setEmails(data);
           cachedEmails = data;
         }
       })
-      .catch((err: any) => console.error('Error loading inbox:', err))
+      .catch((err) => console.error('Error loading inbox:', err))
       .finally(() => setLoading(false));
   }, []);
 
@@ -381,7 +424,7 @@ const Mail = () => {
         toastEvent.trigger(`Received ${res.synced} new distributor email(s).`, 'mail', '/mail');
       }
       setLastSyncedAt(new Date());
-    } catch (err: any) {
+    } catch (err) {
       if (!isOffline) console.error('IMAP sync error:', err);
     } finally {
       setSyncing(false);
@@ -393,7 +436,7 @@ const Mail = () => {
   const silentRefreshLocal = useCallback(() => {
     api
       .getEmailInbox(30)
-      .then((data: any) => {
+      .then((data: EmailRecord[]) => {
         if (Array.isArray(data)) setEmails(data);
       })
       .catch(() => {});
@@ -438,8 +481,9 @@ const Mail = () => {
       setSelectedEmail(null);
       setAttachments([]);
       setProcessResult(null);
-    } catch (err: any) {
-      toastEvent.trigger('Failed to clear cache: ' + (err.response?.data?.error || err.message), 'error', '/mail');
+    } catch (err) {
+      const e = err as LocalApiError;
+      toastEvent.trigger('Failed to clear cache: ' + (e.response?.data?.error || e.message), 'error', '/mail');
     }
   };
 
@@ -456,19 +500,19 @@ const Mail = () => {
     );
 
     // Mark as seen on backend (local DB + IMAP best-effort)
-    api.markEmailSeen(email.id).catch((err: any) => {
+    api.markEmailSeen(email.id).catch((err) => {
       console.error('Error marking email as seen:', err);
     });
 
     setLoadingAttachments(true);
     api
       .getEmailAttachmentsById(email.id)
-      .then((data: any) => {
+      .then((data: LocalEmailAttachmentRow[]) => {
         if (Array.isArray(data)) {
-          setAttachments(data.map((a: any) => ({ ...a, isSelected: false })));
+          setAttachments(data.map((a) => ({ ...a, isSelected: false })));
         }
       })
-      .catch((err: any) => console.error('Error fetching attachments:', err))
+      .catch((err) => console.error('Error fetching attachments:', err))
       .finally(() => setLoadingAttachments(false));
   };
 
@@ -517,8 +561,8 @@ const Mail = () => {
     setProcessResult(null);
     try {
       const selectedFiles = attachments.filter((a) => a.isSelected);
-      const allItems: any[] = [];
-      const results: any[] = [];
+      const allItems: LocalParsedItem[] = [];
+      const results: LocalParseAttachmentResult[] = [];
       
       let parsedDistributorName = '';
       let parsedInvoiceNo = '';
@@ -597,7 +641,7 @@ const Mail = () => {
           }
         }
       });
-    } catch (err: any) {
+    } catch (err) {
       console.error('Error processing attachments:', err);
       toastEvent.trigger('Failed to process one or more files.', 'error', '/mail');
     } finally {
@@ -1158,7 +1202,7 @@ const Mail = () => {
                     <div className="font-bold text-green flex items-center gap-1">
                       <CheckCircle size={12} /> Processing Complete
                     </div>
-                    {processResult.map((r: any, i: number) => (
+                    {processResult.map((r, i) => (
                       <div key={i} className="text-green/80">
                         {r.filename}: {r.items?.length || 0} items parsed
                       </div>

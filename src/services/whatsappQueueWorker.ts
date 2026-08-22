@@ -1,5 +1,5 @@
 import { dbManager } from '../database/connection.js';
-import { sendMessage, getWhatsAppStatus, shouldRouteToBusiness, initClient, hashMessageBody, normalizeWhatsAppPhone, isWhatsAppExplicitlyDisabled } from '../whatsappClient.js';
+import { sendMessage, getWhatsAppStatus, shouldRouteToBusiness, initClient, hasSavedSession, hashMessageBody, normalizeWhatsAppPhone, isWhatsAppExplicitlyDisabled } from '../whatsappClient.js';
 
 export interface QueueItem {
   id: number;
@@ -58,6 +58,7 @@ class WhatsAppQueueWorker {
   private isLoopRunning = false;
   private lastWasOffline = false;
   private lastOfflineLogTime = 0;
+  private lastAutoInitAttempt = 0;
   private nextDispatchTimestamp: number | null = null;
   private currentSendingItemId: number | null = null;
   private pacingMinMs = 10000;
@@ -504,6 +505,14 @@ class WhatsAppQueueWorker {
           this.lastOfflineLogTime = logNow;
         }
         this.lastWasOffline = true;
+        // Self-heal a boot restore that failed transiently (Chrome busy/profile lock):
+        // retry the silent saved-session restore on a 60s cooldown so queued items can
+        // flow again without burning per-item retries. Never launches an unsolicited QR.
+        if (hasSavedSession() && !status.initializing && logNow - this.lastAutoInitAttempt > 60_000) {
+          this.lastAutoInitAttempt = logNow;
+          console.log('[WhatsAppQueueWorker] Saved session present but client idle — attempting silent WhatsApp restore...');
+          initClient().catch(() => {});
+        }
         this.isProcessing = false;
         return false;
       }
@@ -517,10 +526,12 @@ class WhatsAppQueueWorker {
         this.currentSendingItemId = item.id;
         this.nextDispatchTimestamp = null; // Currently sending, not waiting
 
-        // Verify connection status before sending each message
+        // Verify connection status before sending each message.
+        // Treat an in-flight init/restore as offline: dispatching mid-restore makes
+        // sendMessage join the boot flight and burns retries toward failed_perm.
         const isBizNow = await shouldRouteToBusiness();
         const currentWaStatus = await getWhatsAppStatus();
-        if (!isBizNow && !currentWaStatus.isReady && !currentWaStatus.initializing) {
+        if (!isBizNow && !currentWaStatus.isReady) {
           console.warn('[WhatsAppQueueWorker] WhatsApp client offline. Leaving remaining queue items pending for next attempt.');
           break;
         }

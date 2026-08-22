@@ -106,10 +106,6 @@ const getInitialPOSActiveTabId = (initialTabs: any[]) => {
   return initialTabs[0]?.id || 'default';
 };
 
-let cachedDoctors: any[] | null = null;
-let cachedCommonCombinations: any[] | null = null;
-let cachedSpecialOrders: any[] | null = null;
-
 // E3: hard cap on recursive nesting so pathological/cyclic `alternatives`
 // data can never cause runaway recursion.
 const GROUP_BATCHES_MAX_DEPTH = 3;
@@ -1219,20 +1215,15 @@ const POS = () => {
     { enabled: mountFetchesReady && doctorsControl.shouldFetch }
   );
 
-  const defaultDoctors = useMemo(() => [
-    { id: 901, name: 'Dr. Priya Mehta (Cardiologist)' },
-    { id: 902, name: 'Dr. Raj Sharma (GP)' },
-    { id: 903, name: 'Dr. Anita Patel (Pediatrician)' }
-  ], []);
+  const allDoctors = useMemo(() => doctorsList || EMPTY_ARRAY, [doctorsList]);
 
-  const allDoctors = useMemo(() => [
-    ...defaultDoctors,
-    ...(doctorsList || EMPTY_ARRAY).filter(d => !defaultDoctors.some(dd => dd.name === d.name))
-  ], [doctorsList, defaultDoctors]);
-
-  const filteredDoctors = useMemo(() => allDoctors.filter(doc => 
-    doc.name.toLowerCase().includes(doctor.toLowerCase())
-  ), [allDoctors, doctor]);
+  // Dropdown must never appear unless the user has typed at least 2 characters.
+  const filteredDoctors = useMemo(() => {
+    if (doctor.trim().length < 2) return EMPTY_ARRAY;
+    return allDoctors.filter(doc =>
+      doc.name.toLowerCase().includes(doctor.toLowerCase())
+    );
+  }, [allDoctors, doctor]);
 
   // Handle auto-resolving doctor ID from typed or selected name
   useEffect(() => {
@@ -1320,6 +1311,18 @@ const POS = () => {
         input.select?.();
       }
     }, 60);
+  }, []);
+
+  // Keyboard-first medicine entry lives in the cart's trailing empty row, not the top search box.
+  const focusCartMedicineInput = useCallback(() => {
+    setTimeout(() => {
+      const inputs = document.querySelectorAll<HTMLInputElement>('input[id^="row-med-input-"]');
+      const target = inputs.length > 0 ? inputs[inputs.length - 1] : null;
+      if (target && !target.disabled) {
+        target.focus();
+        target.select?.();
+      }
+    }, 80);
   }, []);
 
   useEffect(() => {
@@ -1467,6 +1470,13 @@ const POS = () => {
   useEffect(() => {
     const cleanPName = patientName.trim();
     const cleanPPhone = patientPhone.trim();
+    // Pick-person-first guard: a bare typed name can match several DIFFERENT people.
+    // Refill suggestions require a pinned customer (picked from list) or a real phone number.
+    const refillDigits = cleanPPhone.replace(/\D/g, '');
+    if (selectedCustomerIdRef.current === null && refillDigits.length < 5) {
+      setMatchedRefill(null);
+      return;
+    }
     if (cleanPName.length < 2 && cleanPPhone.length < 5) {
       setMatchedRefill(null);
       return;
@@ -1494,17 +1504,21 @@ const POS = () => {
           }
         }
 
-        // 2. Fallback to panel cache
+        // 2. Fallback to panel cache — prefer phone identity; name match only after the
+        // person was explicitly picked from the patient list (id pinned).
         let panelData = refillsPanelCacheRef.current;
         if (!panelData) {
           const response = await apiClient.get('/refills/panel');
           panelData = Array.isArray(response.data) ? response.data : [];
           refillsPanelCacheRef.current = panelData;
         }
-        const match = panelData.find((group: any) =>
-          (cleanPName.length >= 2 && group.patient_name?.toLowerCase().trim() === cleanPName.toLowerCase()) ||
-          (cleanPPhone.length >= 5 && group.patient_phone?.includes(cleanPPhone))
-        );
+        const match =
+          (refillDigits.length >= 5
+            ? panelData.find((group: any) => group.patient_phone?.replace(/\D/g, '').includes(refillDigits))
+            : undefined) ||
+          (selectedCustomerIdRef.current !== null && cleanPName.length >= 2
+            ? panelData.find((group: any) => group.patient_name?.toLowerCase().trim() === cleanPName.toLowerCase())
+            : undefined);
         if (match && match.medicines.length > 0) {
           const med = match.medicines.find((m: any) => m.is_ready === 1 || m.stock_verified_override === 1);
           if (med && med.id !== dismissedRefillId) {
@@ -2237,7 +2251,7 @@ const POS = () => {
     updateCart(prevCart => prevCart.filter(item => item.id !== id));
   };
 
-  const changeRowMedicine = (index: number, med: any) => {
+  const changeRowMedicine = (index: number, med: any, opts?: { presetQty?: number; presetLooseQty?: number }) => {
     const originalItem = cart[index];
     if (originalItem && originalItem.rawOcrText && originalItem.name.toLowerCase().trim() !== med.medicine_name.toLowerCase().trim()) {
       apiClient.post('/aicamera/learn', {
@@ -2246,13 +2260,14 @@ const POS = () => {
       }).catch(err => console.error('Failed to post correction learning:', err));
     }
 
-    const defaultQty = originalItem?.isEmptyRow ? 1 : ((originalItem?.qty ?? 0) || 1);
+    const defaultQty = opts?.presetQty ?? (originalItem?.isEmptyRow ? 1 : ((originalItem?.qty ?? 0) || 1));
+    const defaultLooseQty = opts?.presetLooseQty ?? 0;
     const compactInventory = getCompactInventoryCache();
     const allocated = allocateMedicineBatches({
       medicineId: med.medicine_id || (typeof med.id === 'number' && med.id < 1000000000 ? med.id : 0),
       medicineName: med.medicine_name || med.name || '',
       requestedQty: defaultQty,
-      requestedLooseQty: 0,
+      requestedLooseQty: defaultLooseQty,
       packSize: med.pack_size || 1,
       compactInventory,
       editingInvoiceId
@@ -2273,6 +2288,7 @@ const POS = () => {
         packSize: med.pack_size || 1,
         qty: defaultQty,
         quantity: defaultQty,
+        looseQty: defaultLooseQty,
         availableStock: med.batch_quantity !== undefined ? med.batch_quantity : (med.quantity !== undefined ? med.quantity : 0),
         availableLooseStock: med.loose_quantity !== undefined ? med.loose_quantity : 0,
         isEmptyRow: false
@@ -2292,11 +2308,11 @@ const POS = () => {
     setRowSearchHighlightIndex(-1);
   };
 
-  const fetchDetailsAndChangeRowMedicine = (index: number, med: any) => {
+  const fetchDetailsAndChangeRowMedicine = (index: number, med: any, opts?: { presetQty?: number; presetLooseQty?: number }) => {
     skipEmptyRowAutofocusRef.current = true;
-    
+
     // Apply medicine selection synchronously for instant UI response (<5ms)
-    changeRowMedicine(index, med);
+    changeRowMedicine(index, med, opts);
 
     setTimeout(() => {
       const qtyInput = document.getElementById(`row-qty-input-${index}`);
@@ -2323,6 +2339,24 @@ const POS = () => {
       .catch((error: any) => {
         console.warn('Background quick details fetch failed/skipped:', error);
       });
+  };
+
+  // Doctor-prescription quick-add: fills the cart's trailing empty row with this doctor's usual qty.
+  const handleDoctorSuggestionClick = (s: any) => {
+    const med = { medicine_id: s.id, medicine_name: s.name };
+    const presetOpts = { presetQty: s.most_common_qty || 1, presetLooseQty: s.most_common_loose_qty || 0 };
+    const emptyRows = cart.map(c => c.isEmptyRow === true);
+    const emptyIdx = emptyRows.lastIndexOf(true);
+    if (emptyIdx >= 0) {
+      fetchDetailsAndChangeRowMedicine(emptyIdx, med, presetOpts);
+    } else {
+      // Defensive: no empty row present yet — add via top flow, then apply usual qty.
+      fetchDetailsAndAddToCart(med);
+      setTimeout(() => {
+        const it = cart.find(c => !c.isEmptyRow && c.medicine_id === s.id);
+        if (it) updateCartItem(it.id, 'qty', presetOpts.presetQty);
+      }, 200);
+    }
   };
 
   const updateCartItem = (id: number, field: string, value: any) => {
@@ -2718,7 +2752,7 @@ const POS = () => {
       if (!isDirectSave) {
         setShowBarcodeModal(true);
       } else {
-        toastEvent.trigger(isEditMode ? `Bill #${invoiceNo} updated successfully!` : `Bill #${invoiceNo} saved successfully! ${isWaSent ? '(SMS dispatched)' : ''}`, 'success');
+        toastEvent.trigger(isEditMode ? `Bill #${invoiceNo} updated!` : `Bill #${invoiceNo} saved!`, 'success');
       }
       
       // Clear cart and states
@@ -3067,13 +3101,31 @@ const POS = () => {
                           >
                             <div className="flex items-center gap-2 min-w-0">
                               <span className="font-semibold truncate">{c.name}</span>
+                              {c.active_refill === 1 && (
+                                <span
+                                  className="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-violet-500/15 border border-violet-500/30 text-violet-400 text-[9px] font-bold"
+                                  title="Active refill schedule — returning refill patient"
+                                >
+                                  🔁 Refill
+                                </span>
+                              )}
                               {hasCreditDue && (
                                 <span className="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-amber-500 text-[9px] font-bold">
                                   Credit ₹{Number(c.credit_balance || 0).toFixed(0)}
                                 </span>
                               )}
                             </div>
-                            {c.phone && <span className="text-muted font-mono text-[11px] shrink-0">{c.phone}</span>}
+                            <span className="flex items-center gap-2 shrink-0">
+                              {!c.active_refill && c.purchase_count > 0 && c.last_sale_date && (
+                                <span
+                                  className="text-muted text-[10px] font-semibold"
+                                  title={`Returning patient — ${c.purchase_count} purchase${c.purchase_count > 1 ? 's' : ''}`}
+                                >
+                                  ↩ last {new Date(c.last_sale_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
+                                </span>
+                              )}
+                              {c.phone && <span className="text-muted font-mono text-[11px]">{c.phone}</span>}
+                            </span>
                           </button>
                         );
                       })}
@@ -3145,10 +3197,14 @@ const POS = () => {
                       setDoctor(e.target.value);
                       setSelectedDoctorId(null);
                       setDoctorHighlightIndex(-1);
-                      setIsDoctorDropdownOpen(true);
+                      setIsDoctorDropdownOpen(e.target.value.trim().length >= 2);
                     }}
                     onFocus={() => {
-                      if (selectedDoctorIdRef.current === null && !justSelectedDoctorRef.current) {
+                      if (
+                        selectedDoctorIdRef.current === null &&
+                        !justSelectedDoctorRef.current &&
+                        doctor.trim().length >= 2
+                      ) {
                         setIsDoctorDropdownOpen(true);
                       }
                       doctorsControl.requestLoad();
@@ -3177,7 +3233,7 @@ const POS = () => {
                         }
                         setIsDoctorDropdownOpen(false);
                         setDoctorHighlightIndex(-1);
-                        focusMedicineSearch();
+                        focusCartMedicineInput();
                       } else if (isDoctorDropdownOpen && filteredDoctors.length > 0) {
                         if (e.key === 'ArrowDown') {
                           e.preventDefault();
@@ -3193,7 +3249,7 @@ const POS = () => {
                     }}
                     title="Select or Type Doctor Name"
                   />
-                  {isDoctorDropdownOpen && (
+                  {isDoctorDropdownOpen && doctor.trim().length >= 2 && (
                     <div ref={doctorSuggestionsRef} className="absolute left-0 right-0 top-full z-[100] mt-1 bg-bg2 border border-border rounded-xl overflow-hidden max-h-48 overflow-y-auto shadow-2xl">
                       {filteredDoctors.length > 0 ? (
                         filteredDoctors.map((doc, idx) => (
@@ -3208,7 +3264,7 @@ const POS = () => {
                               setSelectedDoctorId(doc.id);
                               setIsDoctorDropdownOpen(false);
                               setDoctorHighlightIndex(-1);
-                              focusMedicineSearch();
+                              focusCartMedicineInput();
                             }}
                             className={`w-full text-left px-3 py-2 text-xs border-b border-border/10 transition-all font-semibold ${
                               idx === doctorHighlightIndex
@@ -3695,8 +3751,27 @@ const POS = () => {
                 </div>
               </div>
             )}
-              
-              <button 
+
+              {/* Doctor's commonly-prescribed medicines — quick-add chips (usual qty preset) */}
+              {selectedDoctorId != null && doctorSuggestions.length > 0 && (
+                <div className="flex items-center gap-1 min-w-0 max-w-[46%] overflow-x-auto scrollbar-thin shrink-0">
+                  <span className="text-[9px] font-black uppercase tracking-wider text-sky shrink-0">Dr. Rx:</span>
+                  {doctorSuggestions.slice(0, 8).map((s: any) => (
+                    <button
+                      key={s.id}
+                      type="button"
+                      onClick={() => handleDoctorSuggestionClick(s)}
+                      title={`Prescribed ${s.frequency || 1}× by Dr. ${doctor} — usual qty ${s.most_common_qty || 1}${s.most_common_loose_qty ? ` +${s.most_common_loose_qty} loose` : ''}`}
+                      className="flex items-center gap-1 px-2 py-1 rounded-lg bg-sky/10 border border-sky/25 text-sky hover:bg-sky/20 hover:border-sky/40 transition-all text-[10px] font-bold whitespace-nowrap shrink-0 cursor-pointer"
+                    >
+                      <span className="truncate max-w-[120px]">{s.name}</span>
+                      <span className="font-mono text-primary">×{s.most_common_qty || 1}{s.most_common_loose_qty ? `+${s.most_common_loose_qty}` : ''}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <button
                 type="button"
                 aria-label="AI Camera Scan"
                 onClick={() => setShowCamera(true)}
@@ -4099,7 +4174,7 @@ const POS = () => {
                                         if ((e.target as HTMLInputElement).value === '0' || (e.target as HTMLInputElement).value === '') {
                                           updateCartItem(item.id, 'qty', 0);
                                         }
-                                        focusMedicineSearch();
+                                        focusCartMedicineInput();
                                       } else if (e.key === 'Tab') {
                                         const curIdx = cart.indexOf(item);
                                         if (e.shiftKey) {
@@ -4109,13 +4184,14 @@ const POS = () => {
                                             if (prevLoose && !prevLoose.disabled) {
                                               prevLoose.focus();
                                               prevLoose.select?.();
-                                            } else {
-                                              const prevQty = document.getElementById(`row-qty-input-${curIdx - 1}`);
-                                              if (prevQty) { prevQty.focus(); (prevQty as HTMLInputElement).select?.(); }
-                                            }
-                                          } else {
-                                            focusMedicineSearch();
-                                          }
+                                             } else {
+                                               const prevQty = document.getElementById(`row-qty-input-${curIdx - 1}`);
+                                               if (prevQty) { prevQty.focus(); (prevQty as HTMLInputElement).select?.(); }
+                                             }
+                                           } else {
+                                             const docEl = document.getElementById('doctor-name-input');
+                                             if (docEl) { docEl.focus(); (docEl as HTMLInputElement).select?.(); }
+                                           }
                                         } else {
                                           e.preventDefault();
                                           const looseInput = document.getElementById(`row-loose-input-${curIdx}`) as HTMLInputElement | null;
@@ -4123,13 +4199,13 @@ const POS = () => {
                                             looseInput.focus();
                                             looseInput.select?.();
                                           } else {
-                                            const discIn = document.getElementById(`row-disc-input-${curIdx}`) as HTMLInputElement | null;
-                                            if (discIn) {
-                                              discIn.focus();
-                                              discIn.select?.();
-                                            } else {
-                                              focusMedicineSearch();
-                                            }
+                                           const discIn = document.getElementById(`row-disc-input-${curIdx}`) as HTMLInputElement | null;
+                                           if (discIn) {
+                                             discIn.focus();
+                                             discIn.select?.();
+                                           } else {
+                                             focusCartMedicineInput();
+                                           }
                                           }
                                         }
                                       }
@@ -4180,7 +4256,7 @@ const POS = () => {
                                         handlePosRowInputKeyDown(e, cart.indexOf(item), 'looseQty');
                                       } else if (e.key === 'Enter') {
                                         e.preventDefault();
-                                        focusMedicineSearch();
+                                        focusCartMedicineInput();
                                       } else if (e.key === 'Tab' && !e.shiftKey) {
                                         e.preventDefault();
                                         const curIdx = cart.indexOf(item);
@@ -4189,7 +4265,7 @@ const POS = () => {
                                           discIn.focus();
                                           discIn.select?.();
                                         } else {
-                                          focusMedicineSearch();
+                                          focusCartMedicineInput();
                                         }
                                       } else if (e.key === 'Tab' && e.shiftKey) {
                                         e.preventDefault();
@@ -4324,7 +4400,7 @@ const POS = () => {
                                     handlePosRowInputKeyDown(e, cart.indexOf(item), 'discount');
                                   } else if (e.key === 'Enter') {
                                     e.preventDefault();
-                                    focusMedicineSearch();
+                                    focusCartMedicineInput();
                                   } else if (e.key === 'Tab') {
                                     const curIdx = cart.indexOf(item);
                                     if (e.shiftKey) {
@@ -4344,7 +4420,7 @@ const POS = () => {
                                         rateIn.focus();
                                         rateIn.select?.();
                                       } else {
-                                        focusMedicineSearch();
+                                        focusCartMedicineInput();
                                       }
                                     }
                                   }
@@ -4378,7 +4454,7 @@ const POS = () => {
                                 handlePosRowInputKeyDown(e, cart.indexOf(item), 'unitPrice');
                               } else if (e.key === 'Enter') {
                                 e.preventDefault();
-                                focusMedicineSearch();
+                                focusCartMedicineInput();
                               } else if (e.key === 'Tab') {
                                 const curIdx = cart.indexOf(item);
                                 if (e.shiftKey) {
@@ -4395,7 +4471,7 @@ const POS = () => {
                                     mrpIn.focus();
                                     mrpIn.select?.();
                                   } else {
-                                    focusMedicineSearch();
+                                    focusCartMedicineInput();
                                   }
                                 }
                               }
@@ -4421,7 +4497,7 @@ const POS = () => {
                                 handlePosRowInputKeyDown(e, cart.indexOf(item), 'mrp');
                               } else if (e.key === 'Enter') {
                                 e.preventDefault();
-                                focusMedicineSearch();
+                                focusCartMedicineInput();
                               } else if (e.key === 'Tab') {
                                 const curIdx = cart.indexOf(item);
                                 if (e.shiftKey) {
@@ -4433,7 +4509,7 @@ const POS = () => {
                                   }
                                 } else {
                                   e.preventDefault();
-                                  focusMedicineSearch();
+                                  focusCartMedicineInput();
                                 }
                               }
                             }}

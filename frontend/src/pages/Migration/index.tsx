@@ -10,7 +10,7 @@ export interface FileEntry {
   originalName: string;
   ext: string;
   headers: string[];
-  samples: any[];
+  samples: unknown[];
   totalRows?: number;
   detected: { type: string; confidence: number };
   userSelectedType: string;
@@ -43,7 +43,7 @@ const Migration: React.FC = () => {
         throw new Error(analyzeRes.details || 'Analysis failed');
       }
 
-      let samples: any[] = [];
+      let samples: unknown[] = [];
       let totalRows = 0;
       try {
         const sampleData = await api.analyzeMigrationFile(uploadedFileName, 0);
@@ -69,8 +69,9 @@ const Migration: React.FC = () => {
 
       setFileEntry(newEntry);
       setModalOpen(true);
-    } catch (err: any) {
-      setError(err.message || 'An error occurred during file upload');
+    } catch (err) {
+      const e = err as { message?: string };
+      setError(e.message || 'An error occurred during file upload');
     } finally {
       setUploading(false);
     }

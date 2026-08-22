@@ -120,6 +120,34 @@ export class TokenRefreshScheduler {
   private timeoutId: NodeJS.Timeout | null = null;
   private nextScheduledMinutes: number | null = null;
   private hasLoggedNoToken = false;
+  private firstRefreshDone = false;
+  private firstRefreshCallbacks: Array<() => void> = [];
+
+  /**
+   * Invoke cb once the first boot refresh attempt settles (success, failure or skip).
+   * Used to chain the startup live-cart warm-up onto a fresh token without racing
+   * the headless Chrome session refresh. If the first refresh already completed,
+   * cb runs immediately; if the scheduler never runs, callers need their own fallback timer.
+   */
+  public onFirstRefreshComplete(cb: () => void): void {
+    if (this.firstRefreshDone) {
+      try { cb(); } catch (_) {}
+      return;
+    }
+    this.firstRefreshCallbacks.push(cb);
+  }
+
+  private releaseFirstRefreshCallbacks(): void {
+    if (this.firstRefreshDone) return;
+    this.firstRefreshDone = true;
+    const callbacks = [...this.firstRefreshCallbacks];
+    this.firstRefreshCallbacks = [];
+    for (const cb of callbacks) {
+      try { cb(); } catch (err: any) {
+        console.warn('[TokenRefreshScheduler] First-refresh callback failed:', err?.message || err);
+      }
+    }
+  }
 
   public async logSessionRefresh(
     triggerType: 'background_random' | 'manual_reauth' | 'monthly_autosync' | 'boot',
@@ -277,6 +305,9 @@ export class TokenRefreshScheduler {
         const { eventService } = await import('./eventService.js');
         eventService.broadcast('pharmarack_session_refreshed', { status, error: errorMsg });
       } catch (_) {}
+      // Signal boot-phase listeners (e.g. startup live-cart warm-up) that the first
+      // refresh window has settled — covers success, failure and skip paths alike.
+      this.releaseFirstRefreshCallbacks();
     }
     return resToken;
   }

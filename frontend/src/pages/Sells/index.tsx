@@ -54,6 +54,45 @@ interface SaleInvoice {
   items?: SaleItem[];
 }
 
+type LocalSaleItemRow = SaleItem & { batch_no?: string; batch?: string; qty?: number };
+
+interface LocalQuickEditSeed {
+  name?: string;
+  mrp?: number | null;
+  pack_size?: number | null;
+  batch_no?: string;
+  quantity?: number;
+}
+
+interface LocalSaleDetailItem {
+  medicine_id?: number;
+  medicine_name?: string;
+  name?: string;
+  inventory_id?: number;
+  batch_no?: string;
+  batch_number?: string;
+  expiry_date?: string;
+  mrp?: number | string | null;
+  sell_price?: number | string | null;
+  quantity?: number;
+  loose_qty?: number;
+  unit_price?: number | string | null;
+  discount_per?: number;
+  discount?: number;
+  pack_size?: number;
+}
+
+interface LocalEnrichmentData {
+  activeIngredients?: string[];
+  indications?: string;
+  warnings?: string;
+  sideEffects?: string;
+  manufacturer?: string;
+  enrichmentSource?: string;
+}
+
+type LocalApiError = { response?: { data?: { error?: string } }; message?: string };
+
 
 
 // Module-level cache for instant re-mount
@@ -103,13 +142,13 @@ const Sells = () => {
 
   // OpenFDA Enrichment Drawer State
   const [selectedEnrichedItem, setSelectedEnrichedItem] = useState<{ medicine_name: string; batch?: string } | null>(null);
-  const [enrichedData, setEnrichedData] = useState<any>(null);
+  const [enrichedData, setEnrichedData] = useState<LocalEnrichmentData | null>(null);
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
 
   // Universal Edit state
   const [universalEditMedicineId, setUniversalEditMedicineId] = useState<number | null>(null);
-  const [universalEditItem, setUniversalEditItem] = useState<any>(null);
+  const [universalEditItem, setUniversalEditItem] = useState<LocalQuickEditSeed | null>(null);
 
   // Barcode state
   const [barcodeModalInvoice, setBarcodeModalInvoice] = useState<string | null>(null);
@@ -131,7 +170,7 @@ const Sells = () => {
     try {
       const res = await api.generateSaleInvoiceBarcode(invoiceNo);
       if (res.success) {
-        setBarcodeData(res as any);
+        setBarcodeData(res);
       } else {
         toastEvent.trigger('Failed to generate invoice barcode', 'error');
       }
@@ -326,7 +365,7 @@ const Sells = () => {
       setLoadingBarcode(true);
       try {
         const res = await api.generateSaleInvoiceBarcode(full.invoice_no);
-        setBarcodeData(res as any);
+        setBarcodeData(res);
       } catch (_e) {
         // non-blocking barcode preview fetch
       } finally {
@@ -362,7 +401,7 @@ const Sells = () => {
         doctorName: full.doctor_name || invoice.doctor_name || '',
         discount: 0,
         refillPatient: true,
-        medicines: items.map((it: any) => ({
+        medicines: items.map((it: LocalSaleDetailItem) => ({
           medicineId: it.medicine_id,
           medicineName: it.medicine_name || it.name,
           inventory_id: it.inventory_id,
@@ -381,7 +420,7 @@ const Sells = () => {
       toastEvent.trigger(`Transferring prescription for ${prefillPayload.patientName || 'patient'} to POS...`, 'info', '/pos');
       setViewInvoice(null);
       navigate('/pos', { state: { prefill: prefillPayload } });
-    } catch (_err: any) {
+    } catch (_err) {
       toastEvent.trigger('Failed to load bill for repeat sale', 'error');
     }
   };
@@ -412,8 +451,9 @@ const Sells = () => {
 
       // Refresh the shared inventory cache so POS search reflects the adjusted stock
       api.getCompactInventory().catch(() => {});
-    } catch (err: any) {
-      const serverMsg = err?.response?.data?.error || 'Failed to update invoice';
+    } catch (err) {
+      const e = err as LocalApiError;
+      const serverMsg = e?.response?.data?.error || 'Failed to update invoice';
       toastEvent.trigger(serverMsg, 'error');
     } finally {
       setSaving(false);
@@ -968,8 +1008,8 @@ const Sells = () => {
                                         name: item.medicine_name,
                                         mrp: item.mrp,
                                         pack_size: item.pack_size,
-                                        batch_no: (item as any).batch_no || (item as any).batch || '',
-                                        quantity: (item as any).qty || item.quantity || 1
+                                        batch_no: (item as LocalSaleItemRow).batch_no || (item as LocalSaleItemRow).batch || '',
+                                        quantity: (item as LocalSaleItemRow).qty || item.quantity || 1
                                       });
                                       setUniversalEditMedicineId(item.medicine_id);
                                     }

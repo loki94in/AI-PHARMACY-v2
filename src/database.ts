@@ -207,6 +207,9 @@ export async function ensureSchema(dbPath: string) {
       await db.run('CREATE INDEX IF NOT EXISTS idx_auto_notif_created ON automation_notifications(created_at DESC)');
       await db.run('CREATE INDEX IF NOT EXISTS idx_action_logs_created_type ON action_logs(created_at DESC, action_type)');
       await db.run('CREATE INDEX IF NOT EXISTS idx_delivery_boys_active ON delivery_boys(is_active)');
+      // Bare-ORDER-BY list endpoints previously full-scanned these tables per request:
+      await db.run('CREATE INDEX IF NOT EXISTS idx_dispatch_orders_created ON dispatch_orders(created_at DESC)');
+      await db.run('CREATE INDEX IF NOT EXISTS idx_special_orders_date ON special_orders(date DESC)');
       await ensureMedicinesFts(db);
       return;
     }

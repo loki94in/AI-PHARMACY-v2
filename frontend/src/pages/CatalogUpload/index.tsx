@@ -117,8 +117,41 @@ const getHighlightStyles = (targetCol: string, isHovered: boolean) => {
   };
 };
 
+interface LocalReviewJson {
+  name?: string;
+  api_reference?: string;
+  strength?: string;
+  packaging?: string;
+  manufacturer?: string;
+  marketed_by?: string;
+  dosage_form?: string;
+}
+
+interface LocalCatalogReview {
+  id: number;
+  medicine_name: string;
+  status: 'pending' | 'approved' | 'rejected';
+  screenshot_path?: string | null;
+  raw_ocr_text?: string | null;
+  possible_duplicate_of?: number | null;
+  duplicateProduct?: {
+    id?: number;
+    name?: string;
+    api_reference?: string;
+    strength?: string;
+    manufacturer?: string;
+  } | null;
+  approved_json?: LocalReviewJson | null;
+  extracted_json?: LocalReviewJson | null;
+  original_row_data?: Record<string, unknown> | null;
+}
+
+type LocalPreviewRow = Record<string, unknown> & { __is_existing?: boolean };
+
+type LocalApiError = { response?: { data?: { error?: string } }; message?: string };
+
 interface ReviewDetailPaneProps {
-  review: any;
+  review: LocalCatalogReview;
   onApproved: () => void;
   onRejected: () => void;
   googleSearchStatus: { count: number; limit: number } | null;
@@ -137,11 +170,11 @@ const ReviewDetailPane = ({ review, onApproved, onRejected, googleSearchStatus }
   useEffect(() => {
     if (review) {
       setName(review.approved_json?.name || review.extracted_json?.name || review.medicine_name || '');
-      setApiReference(review.approved_json?.api_reference || review.extracted_json?.api_reference || review.original_row_data?.api_reference || '');
-      setStrength(review.approved_json?.strength || review.extracted_json?.strength || review.original_row_data?.strength || '');
-      setPackaging(review.approved_json?.packaging || review.extracted_json?.dosage_form || review.original_row_data?.packaging || '');
-      setManufacturer(review.approved_json?.manufacturer || review.extracted_json?.manufacturer || review.original_row_data?.manufacturer || '');
-      setMarketedBy(review.approved_json?.marketed_by || review.original_row_data?.marketed_by || review.extracted_json?.manufacturer || '');
+      setApiReference(review.approved_json?.api_reference || review.extracted_json?.api_reference || (review.original_row_data?.api_reference as string | undefined) || '');
+      setStrength(review.approved_json?.strength || review.extracted_json?.strength || (review.original_row_data?.strength as string | undefined) || '');
+      setPackaging(review.approved_json?.packaging || review.extracted_json?.dosage_form || (review.original_row_data?.packaging as string | undefined) || '');
+      setManufacturer(review.approved_json?.manufacturer || review.extracted_json?.manufacturer || (review.original_row_data?.manufacturer as string | undefined) || '');
+      setMarketedBy(review.approved_json?.marketed_by || (review.original_row_data?.marketed_by as string | undefined) || review.extracted_json?.manufacturer || '');
     }
   }, [review]);
 
@@ -159,8 +192,9 @@ const ReviewDetailPane = ({ review, onApproved, onRejected, googleSearchStatus }
       await api.approveCatalogReview(review.id, data);
       alert('Record approved and master catalog updated.');
       onApproved();
-    } catch (err: any) {
-      alert('Failed to approve: ' + (err.response?.data?.error || err.message));
+    } catch (err) {
+      const e = err as LocalApiError;
+      alert('Failed to approve: ' + (e.response?.data?.error || e.message));
     } finally {
       setIsSubmitting(false);
     }
@@ -174,8 +208,9 @@ const ReviewDetailPane = ({ review, onApproved, onRejected, googleSearchStatus }
     try {
       await api.rejectCatalogReview(review.id);
       onRejected();
-    } catch (err: any) {
-      alert('Failed to reject: ' + (err.response?.data?.error || err.message));
+    } catch (err) {
+      const e = err as LocalApiError;
+      alert('Failed to reject: ' + (e.response?.data?.error || e.message));
     } finally {
       setIsSubmitting(false);
     }
@@ -186,8 +221,9 @@ const ReviewDetailPane = ({ review, onApproved, onRejected, googleSearchStatus }
     try {
       await api.enrichCatalogReview(review.id);
       alert('Background Google search enrichment triggered. Please wait 5-10 seconds for it to refresh.');
-    } catch (err: any) {
-      alert('Failed to enrich: ' + (err.response?.data?.error || err.message));
+    } catch (err) {
+      const e = err as LocalApiError;
+      alert('Failed to enrich: ' + (e.response?.data?.error || e.message));
     } finally {
       setIsEnriching(false);
     }
@@ -246,8 +282,9 @@ const ReviewDetailPane = ({ review, onApproved, onRejected, googleSearchStatus }
                   await api.approveCatalogReview(review.id, data);
                   alert('Merged with the existing database medicine successfully.');
                   onApproved();
-                } catch (err: any) {
-                  alert('Failed to merge: ' + (err.response?.data?.error || err.message));
+                } catch (err) {
+                  const e = err as LocalApiError;
+                  alert('Failed to merge: ' + (e.response?.data?.error || e.message));
                 } finally {
                   setIsSubmitting(false);
                 }
@@ -274,8 +311,9 @@ const ReviewDetailPane = ({ review, onApproved, onRejected, googleSearchStatus }
                   await api.approveCatalogReview(review.id, data);
                   alert('Saved as a new medicine record.');
                   onApproved();
-                } catch (err: any) {
-                  alert('Failed to approve as new: ' + (err.response?.data?.error || err.message));
+                } catch (err) {
+                  const e = err as LocalApiError;
+                  alert('Failed to approve as new: ' + (e.response?.data?.error || e.message));
                 } finally {
                   setIsSubmitting(false);
                 }
@@ -442,7 +480,7 @@ const CatalogUpload = () => {
     duplicates: 0
   });
   
-  const [previewRows, setPreviewRows] = useState<any[]>([]);
+  const [previewRows, setPreviewRows] = useState<LocalPreviewRow[]>([]);
   const [previewHeaders, setPreviewHeaders] = useState<string[]>([]);
   const [importing, setImporting] = useState(false);
 
@@ -466,14 +504,14 @@ const CatalogUpload = () => {
   const [isDragOver, setIsDragOver] = useState(false);
 
   // Staged Reviews & Google Extraction States
-  const [stagedReviews, setStagedReviews] = useState<any[]>([]);
+  const [stagedReviews, setStagedReviews] = useState<LocalCatalogReview[]>([]);
   const [loadingReviews, setLoadingReviews] = useState(false);
   const [matchedPreviousJobId, setMatchedPreviousJobId] = useState<number | null>(null);
   const [newlyDetectedColumns, setNewlyDetectedColumns] = useState<string[]>([]);
   const [googleSearchStatus, setGoogleSearchStatus] = useState<{ count: number; limit: number } | null>(null);
   const [isCaptchaActive, setIsCaptchaActive] = useState(false);
   const [captchaMedicine, setCaptchaMedicine] = useState<string | null>(null);
-  const [selectedReview, setSelectedReview] = useState<any | null>(null);
+  const [selectedReview, setSelectedReview] = useState<LocalCatalogReview | null>(null);
   const [activeReviewSubTab, setActiveReviewSubTab] = useState<'details' | 'staged'>('staged');
   const [reviewSearchTerm, setReviewSearchTerm] = useState('');
   const [reviewStatusFilter, setReviewStatusFilter] = useState<'pending' | 'approved' | 'rejected' | 'all'>('pending');
@@ -489,7 +527,7 @@ const CatalogUpload = () => {
   const [showExistingColor, setShowExistingColor] = useState<boolean>(true);
   const [showNewColor, setShowNewColor] = useState<boolean>(true);
 
-  const initMappingModal = (mappings: Record<string, string>, headers: string[], preview: any[]) => {
+  const initMappingModal = (mappings: Record<string, string>, headers: string[], preview: LocalPreviewRow[]) => {
     setFileHeaders(headers);
     setPreviewRows(preview);
     
@@ -504,7 +542,7 @@ const CatalogUpload = () => {
     setColumnMappings(mappings);
     
     // Initialize custom columns
-    const initialCustom = Object.values(mappings).filter((val: any) => typeof val === 'string' && val.startsWith('custom_col_')) as string[];
+    const initialCustom = Object.values(mappings).filter((val) => typeof val === 'string' && val.startsWith('custom_col_')) as string[];
     setCustomColumns(Array.from(new Set(initialCustom)));
     
     // Initialize history
@@ -755,9 +793,10 @@ const CatalogUpload = () => {
       } else {
         throw new Error(res.message || 'Upload failed');
       }
-    } catch (err: any) {
+    } catch (err) {
+      const e = err as LocalApiError;
       console.error(err);
-      setError(err.response?.data?.error || err.message || 'Failed to upload catalogue file');
+      setError(e.response?.data?.error || e.message || 'Failed to upload catalogue file');
       setUploading(false);
       setJobStatus(null);
     }
@@ -802,9 +841,10 @@ const CatalogUpload = () => {
       } else {
         throw new Error(res.message || 'Failed to trigger import');
       }
-    } catch (err: any) {
+    } catch (err) {
+      const e = err as LocalApiError;
       console.error(err);
-      setError(err.response?.data?.error || err.message || 'Failed to initiate batch import');
+      setError(e.response?.data?.error || e.message || 'Failed to initiate batch import');
       setImporting(false);
       setJobStatus(null);
     }
@@ -818,9 +858,10 @@ const CatalogUpload = () => {
         setJobStatus('paused');
       }
       queryClient.invalidateQueries({ queryKey: ['catalog-jobs'] });
-    } catch (err: any) {
+    } catch (err) {
+      const e = err as LocalApiError;
       console.error('Pause failed:', err);
-      setError(err.response?.data?.error || err.message || 'Failed to pause ingestion');
+      setError(e.response?.data?.error || e.message || 'Failed to pause ingestion');
     }
   };
 
@@ -833,9 +874,10 @@ const CatalogUpload = () => {
         setJobStatus('processing');
       }
       queryClient.invalidateQueries({ queryKey: ['catalog-jobs'] });
-    } catch (err: any) {
+    } catch (err) {
+      const e = err as LocalApiError;
       console.error('Resume failed:', err);
-      setError(err.response?.data?.error || err.message || 'Failed to resume ingestion');
+      setError(e.response?.data?.error || e.message || 'Failed to resume ingestion');
     }
   };
 
@@ -852,9 +894,10 @@ const CatalogUpload = () => {
         setPreviewRows([]);
       }
       queryClient.invalidateQueries({ queryKey: ['catalog-jobs'] });
-    } catch (err: any) {
+    } catch (err) {
+      const e = err as LocalApiError;
       console.error(err);
-      setError(err.response?.data?.error || err.message || 'Failed to delete job');
+      setError(e.response?.data?.error || e.message || 'Failed to delete job');
     }
   };
 
@@ -890,7 +933,7 @@ const CatalogUpload = () => {
       setUploading(false);
       setActiveTab('upload');
       setSuccess(`Viewing review for Catalogue Job #${job.id}.`);
-    } catch (err: any) {
+    } catch (err) {
       console.error(err);
       setError('Failed to load catalogue preview details.');
       setUploading(false);
@@ -1269,7 +1312,7 @@ const CatalogUpload = () => {
                               return (
                                 <tr key={ri} className={rowClass}>
                                   {previewHeaders.map((header) => (
-                                    <td key={header} className="p-3 max-w-xs truncate" title={row[header]}>
+                                    <td key={header} className="p-3 max-w-xs truncate" title={row[header] as string | undefined}>
                                       {String(row[header] ?? '—')}
                                     </td>
                                   ))}
@@ -1297,7 +1340,7 @@ const CatalogUpload = () => {
                           />
                           <select
                             value={reviewStatusFilter}
-                            onChange={e => setReviewStatusFilter(e.target.value as any)}
+                            onChange={e => setReviewStatusFilter(e.target.value as 'pending' | 'approved' | 'rejected' | 'all')}
                             className="w-full bg-black/40 border border-glass-border text-white text-xs rounded-lg p-2 outline-none focus:border-primary font-medium"
                           >
                             <option value="pending">Pending Review</option>
@@ -1796,8 +1839,8 @@ const CatalogUpload = () => {
                                     key={header} 
                                     onMouseEnter={() => setHoveredHeader(header)}
                                     onMouseLeave={() => setHoveredHeader(null)}
-                                    className={`px-4 py-2 truncate max-w-[200px] transition-all duration-150 ${styles.cell}`} 
-                                    title={row[header]}
+                                    className={`px-4 py-2 truncate max-w-[200px] transition-all duration-150 ${styles.cell}`}
+                                    title={row[header] as string | undefined}
                                   >
                                     {row[header] !== undefined ? String(row[header]) : ''}
                                   </td>
@@ -1844,8 +1887,9 @@ const CatalogUpload = () => {
                         } else {
                           throw new Error(res.message || 'Ingestion trigger failed');
                         }
-                      } catch (err: any) {
-                        setError(err.response?.data?.error || err.message || 'Failed to trigger ingestion');
+                      } catch (err) {
+                        const e = err as LocalApiError;
+                        setError(e.response?.data?.error || e.message || 'Failed to trigger ingestion');
                         setImporting(false);
                         setJobStatus(null);
                       }

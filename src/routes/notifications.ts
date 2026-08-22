@@ -95,28 +95,93 @@ router.get('/notifications/stream', (req, res) => {
 // Memory cache of online/offline status of devices to detect status changes
 const deviceOnlineStateCache = new Map<string, number>();
 
+// Throttle map so a blocked phone pinging every 15s doesn't spam PC toasts
+const blockedNoticeAt = new Map<string, number>();
+
+// Stable multi-device identity: push_tokens.device_uuid may not exist on older DBs.
+// Lazy PRAGMA ensure runs regardless of the schema-version boot fast-path.
+let deviceUuidColumnReady = false;
+async function ensureDeviceUuidColumn(db: any): Promise<void> {
+  if (deviceUuidColumnReady) return;
+  try {
+    const cols = await db.all('PRAGMA table_info(push_tokens)');
+    const names = new Set(cols.map((c: any) => c.name));
+    if (!names.has('device_uuid')) {
+      await db.run('ALTER TABLE push_tokens ADD COLUMN device_uuid TEXT');
+    }
+    if (!names.has('is_blocked')) {
+      await db.run('ALTER TABLE push_tokens ADD COLUMN is_blocked INTEGER DEFAULT 0');
+    }
+    deviceUuidColumnReady = true;
+  } catch (err) {
+    console.warn('[Devices] device registry column ensure failed:', err);
+  }
+}
+
 // Register push notification token from mobile device
 router.post('/notifications/register-token', async (req, res) => {
-  const { token, deviceName, os } = req.body;
+  const { token, deviceName, os, device_uuid } = req.body;
   if (!token) {
     return res.status(400).json({ error: 'Token is required' });
   }
 
   try {
     const db = await dbManager.getConnection();
+    await ensureDeviceUuidColumn(db);
     const devName = deviceName || 'Unknown';
     const devOs = os || 'Unknown';
+    // Stable identity: uuid survives Expo token rotation; legacy clients fall back to token
+    const identity = device_uuid || token;
 
-    // Check if token was previously offline in cache (or not cached yet)
-    const isNewOrOffline = !deviceOnlineStateCache.has(token) || deviceOnlineStateCache.get(token) === 0;
-
-    await db.run(
-      'INSERT OR REPLACE INTO push_tokens (token, device_name, os, last_seen) VALUES (?, ?, ?, CURRENT_TIMESTAMP)',
-      [token, devName, devOs]
+    // Reject devices that have been explicitly blocked by the owner
+    const blockRow = await db.get(
+      'SELECT is_blocked FROM push_tokens WHERE (device_uuid IS NOT NULL AND device_uuid = ?) OR token = ? LIMIT 1',
+      [device_uuid || '', token]
     );
+    if (blockRow && blockRow.is_blocked === 1) {
+      // Throttled admin notice — the blocked phone pings every 15s, don't spam toasts
+      const now = Date.now();
+      if (now - (blockedNoticeAt.get(identity) || 0) > 5 * 60 * 1000) {
+        blockedNoticeAt.set(identity, now);
+        eventService.emit('server_event', {
+          type: 'notification',
+          message: `Blocked device "${devName}" tried to connect`,
+          payload: {
+            type: 'error',
+            message: `Blocked device "${devName}" tried to connect`,
+            link: '/settings'
+          }
+        });
+      }
+      return res.status(403).json({ error: 'This device has been blocked by the pharmacy owner.', blocked: true });
+    }
+
+    // Check if device was previously offline in cache (or not cached yet)
+    const isNewOrOffline = !deviceOnlineStateCache.has(identity) || deviceOnlineStateCache.get(identity) === 0;
+
+    if (device_uuid) {
+      // Upsert by stable uuid — preserves created_at and prevents duplicate rows per phone
+      const existing = await db.get('SELECT token FROM push_tokens WHERE device_uuid = ? LIMIT 1', [device_uuid]);
+      if (existing) {
+        await db.run(
+          'UPDATE push_tokens SET token = ?, device_name = ?, os = ?, last_seen = CURRENT_TIMESTAMP WHERE device_uuid = ?',
+          [token, devName, devOs, device_uuid]
+        );
+      } else {
+        await db.run(
+          'INSERT INTO push_tokens (token, device_name, os, device_uuid, last_seen) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)',
+          [token, devName, devOs, device_uuid]
+        );
+      }
+    } else {
+      await db.run(
+        'INSERT OR REPLACE INTO push_tokens (token, device_name, os, last_seen) VALUES (?, ?, ?, CURRENT_TIMESTAMP)',
+        [token, devName, devOs]
+      );
+    }
 
     if (isNewOrOffline) {
-      deviceOnlineStateCache.set(token, 1);
+      deviceOnlineStateCache.set(identity, 1);
       // Log to database
       await db.run(
         'INSERT INTO device_connection_logs (token, device_name, os, status) VALUES (?, ?, ?, ?)',
@@ -139,11 +204,11 @@ router.post('/notifications/register-token', async (req, res) => {
       });
       eventService.emit('server_event', {
         type: 'device_status_change',
-        payload: { token, device_name: devName, os: devOs, status: 'connected', timestamp: new Date().toISOString() }
+        payload: { token, device_id: identity, device_name: devName, os: devOs, status: 'connected', timestamp: new Date().toISOString() }
       });
     } else {
       // Just update cache/last seen
-      deviceOnlineStateCache.set(token, 1);
+      deviceOnlineStateCache.set(identity, 1);
     }
 
     res.json({ success: true, message: 'Push token registered successfully' });
@@ -157,18 +222,22 @@ router.post('/notifications/register-token', async (req, res) => {
 router.get('/notifications/devices', async (req, res) => {
   try {
     const db = await dbManager.getConnection();
-    // Deduplicate: for each (device_name, os) pair keep only the most-recently-seen row
+    await ensureDeviceUuidColumn(db);
+    // Deduplicate by stable identity (uuid, falling back to token for legacy rows):
+    // keep only the most-recently-seen row per device.
     // A device offline = no last_seen update in 40 seconds (mobile pings every 15s)
     const rows = await db.all(`
-      SELECT 
-        token, 
-        device_name, 
-        os, 
+      SELECT
+        token,
+        COALESCE(device_uuid, 'tok-' || token) AS device_id,
+        device_name,
+        os,
         created_at,
         last_seen,
-        CASE 
-          WHEN last_seen IS NOT NULL AND (strftime('%s', 'now') - strftime('%s', last_seen) < 40) THEN 1 
-          ELSE 0 
+        COALESCE(is_blocked, 0) as is_blocked,
+        CASE
+          WHEN last_seen IS NOT NULL AND (strftime('%s', 'now') - strftime('%s', last_seen) < 40) THEN 1
+          ELSE 0
         END as is_online,
         CASE
           WHEN last_seen IS NULL THEN 999999
@@ -177,7 +246,7 @@ router.get('/notifications/devices', async (req, res) => {
       FROM push_tokens
       WHERE rowid IN (
         SELECT rowid FROM push_tokens p2
-        WHERE p2.device_name = push_tokens.device_name AND p2.os = push_tokens.os
+        WHERE COALESCE(p2.device_uuid, 'tok-' || p2.token) = COALESCE(push_tokens.device_uuid, 'tok-' || push_tokens.token)
         ORDER BY last_seen DESC NULLS LAST
         LIMIT 1
       )
@@ -187,6 +256,44 @@ router.get('/notifications/devices', async (req, res) => {
   } catch (err: any) {
     console.error('Failed to get registered devices:', err);
     res.status(500).json({ error: 'Failed to get devices: ' + err.message });
+  }
+});
+
+// Block or unblock a device — blocked phones are refused at registration (403)
+router.put('/notifications/devices/:token/block', async (req, res) => {
+  const { token } = req.params;
+  const { blocked } = req.body;
+  if (typeof blocked !== 'boolean') {
+    return res.status(400).json({ error: 'blocked (boolean) is required' });
+  }
+  try {
+    const db = await dbManager.getConnection();
+    await ensureDeviceUuidColumn(db);
+    const row = await db.get('SELECT device_name, os, device_uuid FROM push_tokens WHERE token = ? LIMIT 1', [token]);
+    if (!row) {
+      return res.status(404).json({ error: 'Device not found' });
+    }
+    await db.run('UPDATE push_tokens SET is_blocked = ? WHERE token = ?', [blocked ? 1 : 0, token]);
+    const identity = row.device_uuid || token;
+    if (blocked) {
+      // Force offline transition so the monitor doesn't wait for missed pings
+      deviceOnlineStateCache.set(identity, 0);
+    } else {
+      // Allow immediate re-registration on next ping
+      blockedNoticeAt.delete(identity);
+    }
+    await db.run(
+      'INSERT INTO action_logs (action_type, description) VALUES (?, ?)',
+      [blocked ? 'DEVICE_BLOCKED' : 'DEVICE_UNBLOCKED', `Mobile device "${row.device_name}" (${row.os}) was ${blocked ? 'blocked' : 'unblocked'}`]
+    );
+    eventService.emit('server_event', {
+      type: 'device_block_change',
+      payload: { token, device_id: identity, device_name: row.device_name, os: row.os, blocked, timestamp: new Date().toISOString() }
+    });
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error('Failed to update device block state:', err);
+    res.status(500).json({ error: 'Failed to update block state: ' + err.message });
   }
 });
 
@@ -404,31 +511,33 @@ router.post('/notifications/chat-logs/clear', async (req, res) => {
 async function checkDeviceConnections() {
   try {
     const db = await dbManager.getConnection();
+    await ensureDeviceUuidColumn(db);
     const rows = await db.all(`
-      SELECT 
-        token, 
-        device_name, 
-        os, 
-        CASE 
-          WHEN last_seen IS NOT NULL AND (strftime('%s', 'now') - strftime('%s', last_seen) < 40) THEN 1 
-          ELSE 0 
+      SELECT
+        token,
+        COALESCE(device_uuid, 'tok-' || token) AS device_id,
+        device_name,
+        os,
+        CASE
+          WHEN last_seen IS NOT NULL AND (strftime('%s', 'now') - strftime('%s', last_seen) < 40) THEN 1
+          ELSE 0
         END as is_online
       FROM push_tokens
       WHERE rowid IN (
         SELECT rowid FROM push_tokens p2
-        WHERE p2.device_name = push_tokens.device_name AND p2.os = push_tokens.os
+        WHERE COALESCE(p2.device_uuid, 'tok-' || p2.token) = COALESCE(push_tokens.device_uuid, 'tok-' || push_tokens.token)
         ORDER BY last_seen DESC NULLS LAST
         LIMIT 1
       )
     `);
 
     for (const row of rows) {
-      const { token, device_name, os, is_online } = row;
-      const cached = deviceOnlineStateCache.get(token);
+      const { token, device_id, device_name, os, is_online } = row;
+      const cached = deviceOnlineStateCache.get(device_id);
 
       if (cached !== undefined) {
         if (cached === 0 && is_online === 1) {
-          deviceOnlineStateCache.set(token, 1);
+          deviceOnlineStateCache.set(device_id, 1);
           await db.run(
             'INSERT INTO device_connection_logs (token, device_name, os, status) VALUES (?, ?, ?, ?)',
             [token, device_name, os, 'connected']
@@ -448,10 +557,10 @@ async function checkDeviceConnections() {
           });
           eventService.emit('server_event', {
             type: 'device_status_change',
-            payload: { token, device_name, os, status: 'connected', timestamp: new Date().toISOString() }
+            payload: { token, device_id, device_name, os, status: 'connected', timestamp: new Date().toISOString() }
           });
         } else if (cached === 1 && is_online === 0) {
-          deviceOnlineStateCache.set(token, 0);
+          deviceOnlineStateCache.set(device_id, 0);
           await db.run(
             'INSERT INTO device_connection_logs (token, device_name, os, status) VALUES (?, ?, ?, ?)',
             [token, device_name, os, 'disconnected']
@@ -471,11 +580,11 @@ async function checkDeviceConnections() {
           });
           eventService.emit('server_event', {
             type: 'device_status_change',
-            payload: { token, device_name, os, status: 'disconnected', timestamp: new Date().toISOString() }
+            payload: { token, device_id, device_name, os, status: 'disconnected', timestamp: new Date().toISOString() }
           });
         }
       } else {
-        deviceOnlineStateCache.set(token, is_online);
+        deviceOnlineStateCache.set(device_id, is_online);
         // Ensure initial connection log exists to populate charts and logs immediately
         const status = is_online === 1 ? 'connected' : 'disconnected';
         const lastLog = await db.get(
@@ -509,7 +618,7 @@ async function checkDeviceConnections() {
   const tick = async () => {
     let delay = 10000;
     try {
-      const mode = await getBackendFetchMode('bg.deviceMonitor', 'manual');
+      const mode = await getBackendFetchMode('bg.deviceMonitor', 'auto');
       if (mode === 'off') return; // stay off until next process start
       if (activityTracker.isIdle()) {
         delay = mode === 'auto' ? 120000 : 600000;

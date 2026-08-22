@@ -41,6 +41,58 @@ interface MedicineRow {
 // Module-level cache for instant re-mount
 let cachedMedicines: MedicineRow[] | null = null;
 
+interface LocalPriceHistoryRow {
+  date?: string;
+  distributor_name?: string;
+  batch_no?: string;
+  expiry_date?: string;
+  rate?: number;
+  mrp?: number;
+  cd_per?: number;
+  cd_rs?: number;
+  cgst_per?: number;
+  sgst_per?: number;
+  igst_per?: number;
+}
+
+interface LocalQuickEditSeed {
+  name?: string;
+  mrp?: number | null;
+  pack_size?: number | null;
+  batch_no?: string;
+  quantity?: number;
+}
+
+interface LocalPrefillMedicine {
+  medicineId: number;
+  medicineName?: string;
+  inventory_id?: number;
+  batch_no?: string;
+  expiry_date?: string;
+  mrp?: number;
+  sell_price?: number | null;
+  quantity?: number;
+  loose_qty?: number;
+  unit_price?: number;
+  discount?: number;
+  packaging?: string;
+  pack_size?: number;
+}
+
+interface LocalPosPrefill {
+  medicineId: number;
+  medicineName?: string;
+  quantity: number;
+  looseQty?: number;
+  patientName?: string;
+  patientPhone?: string;
+  selectedCustomerId?: number | null;
+  doctorName?: string;
+  medicines: LocalPrefillMedicine[];
+}
+
+type LocalApiError = { response?: { data?: { error?: string } }; message?: string };
+
 const DatabasePage = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -67,7 +119,7 @@ const DatabasePage = () => {
   const [letter] = useState('');
   const [universalEditMedicineId, setUniversalEditMedicineId] = useState<number | null>(null);
   const [universalEditMode, setUniversalEditMode] = useState<'create' | 'edit'>('edit');
-  const [universalEditItem, setUniversalEditItem] = useState<any>(null);
+  const [universalEditItem, setUniversalEditItem] = useState<LocalQuickEditSeed | null>(null);
   const [isUniversalModalOpen, setIsUniversalModalOpen] = useState(false);
 
   // Bulk Multi-Add state
@@ -90,9 +142,10 @@ const DatabasePage = () => {
       invalidateAfterStockWrite(queryClient);
       setPage(1);
       loadDatabase();
-    } catch (err: any) {
+    } catch (err) {
+      const e = err as LocalApiError;
       console.error(err);
-      alert(err.response?.data?.error || err.message || 'Failed to seed master catalog');
+      alert(e.response?.data?.error || e.message || 'Failed to seed master catalog');
     } finally {
       setSeedingMaster(false);
     }
@@ -106,9 +159,10 @@ const DatabasePage = () => {
       invalidateAfterStockWrite(queryClient);
       setPage(1);
       loadDatabase();
-    } catch (err: any) {
-      console.error(err);
-      alert(err.response?.data?.error || err.message || 'Failed to sync inventory to master');
+    } catch (err) {
+      const e = err as LocalApiError;
+      console.error(e);
+      alert(e.response?.data?.error || e.message || 'Failed to sync inventory to master');
     } finally {
       setSyncingInventory(false);
     }
@@ -121,7 +175,7 @@ const DatabasePage = () => {
 
   // Price History Modal States
   const [showPriceHistoryModal, setShowPriceHistoryModal] = useState(false);
-  const [priceHistory, setPriceHistory] = useState<any[]>([]);
+  const [priceHistory, setPriceHistory] = useState<LocalPriceHistoryRow[]>([]);
   const [priceHistoryMedicine, setPriceHistoryMedicine] = useState('');
   const [loadingHistory, setLoadingHistory] = useState(false);
 
@@ -131,7 +185,7 @@ const DatabasePage = () => {
       const lastSale = refillInfo?.last_sale;
       const bestInv = refillInfo?.best_inventory;
 
-      const prefillPayload: any = {
+      const prefillPayload: LocalPosPrefill = {
         medicineId: item.id,
         medicineName: item.name,
         quantity: lastSale?.quantity || 1,
@@ -184,7 +238,7 @@ const DatabasePage = () => {
       }
 
       navigate('/pos', { state: { prefill: prefillPayload } });
-    } catch (_err: any) {
+    } catch (_err) {
       const prefillPayload = {
         medicineId: item.id,
         medicineName: item.name,
@@ -209,11 +263,11 @@ const DatabasePage = () => {
     setPriceHistory([]);
     
     api.getMedicinePriceHistory(medicineName)
-      .then((res: any) => {
+      .then((res: { data?: LocalPriceHistoryRow[] }) => {
         setPriceHistory(res.data || []);
         setLoadingHistory(false);
       })
-      .catch((err: any) => {
+      .catch((err) => {
         console.error('Failed to load medicine price history:', err);
         setLoadingHistory(false);
       });
@@ -234,9 +288,10 @@ const DatabasePage = () => {
       invalidateAfterStockWrite(queryClient);
       api.getCompactInventory().catch(() => {});
       queryClient.invalidateQueries({ queryKey: ['database-medicines'] });
-    } catch (err: any) {
-      console.error(err);
-      const errorMsg = err.response?.data?.error || 'Failed to delete medicine.';
+    } catch (err) {
+      const e = err as LocalApiError;
+      console.error(e);
+      const errorMsg = e.response?.data?.error || 'Failed to delete medicine.';
       alert(errorMsg);
       // Revert on error
       queryClient.invalidateQueries({ queryKey: ['database-medicines'] });
@@ -307,9 +362,10 @@ const DatabasePage = () => {
           (failedNames.length > 5 ? `, and ${failedNames.length - 5} more...` : '')
         );
       }
-    } catch (err: any) {
-      console.error(err);
-      const errorMsg = err.response?.data?.error || 'Failed to bulk delete medicines.';
+    } catch (err) {
+      const e = err as LocalApiError;
+      console.error(e);
+      const errorMsg = e.response?.data?.error || 'Failed to bulk delete medicines.';
       alert(errorMsg);
       queryClient.invalidateQueries({ queryKey: ['database-medicines'] });
     }
@@ -354,7 +410,7 @@ const DatabasePage = () => {
   
   const observerTarget = useRef<HTMLTableRowElement>(null);
 
-  const { data: pageData, isFetching: queryIsFetching } = useApiQuery<any>(
+  const { data: pageData, isFetching: queryIsFetching } = useApiQuery<{ data?: MedicineRow[]; totalPages?: number; totalItems?: number }>(
     ['database-medicines', page, sort, letter, productNameTerm, mrpTerm, apiTerm, packagingTerm, distributorTerm],
     () => api.getMedicines(page, limit, '', sort, letter, productNameTerm, mrpTerm, apiTerm, packagingTerm, distributorTerm, ''),
     { staleTime: 30000 }
@@ -383,7 +439,7 @@ const DatabasePage = () => {
         setAllSelectedAcrossPages(false);
       } else {
         setMedicines(prev => {
-          const newIds = new Set(data.map((m: any) => m.id));
+          const newIds = new Set(data.map(m => m.id));
           const filteredPrev = prev.filter(p => !newIds.has(p.id));
           return [...filteredPrev, ...data];
         });
@@ -576,8 +632,9 @@ const DatabasePage = () => {
               try {
                 const res = await api.unlockDatabase();
                 alert(res.message);
-              } catch (err: any) {
-                alert(err.response?.data?.error || err.message || 'Failed to unlock database');
+              } catch (err) {
+                const e = err as LocalApiError;
+                alert(e.response?.data?.error || e.message || 'Failed to unlock database');
               }
             }} 
             title="Force Unlock Database"

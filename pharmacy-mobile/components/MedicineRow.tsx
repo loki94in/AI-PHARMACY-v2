@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, radius, spacing, typography } from '../lib/theme';
+import { stockLevel } from '../lib/stock';
 
 interface MedicineRowProps {
   name: string;
@@ -13,11 +14,12 @@ interface MedicineRowProps {
 }
 
 export default function MedicineRow({ name, batch, quantity, expiry, rack, onPress }: MedicineRowProps) {
-  const isLowStock = quantity < 5;
+  const level = stockLevel(quantity);
   const isExpiringSoon = expiry ? new Date(expiry) < new Date(Date.now() + 90 * 86400000) : false;
 
   return (
     <TouchableOpacity style={styles.row} onPress={onPress} activeOpacity={0.7}>
+      <View style={[styles.stockDot, { backgroundColor: level.color }]} />
       <View style={styles.left}>
         <Text style={styles.name} numberOfLines={1}>{name}</Text>
         <View style={styles.metaRow}>
@@ -26,8 +28,8 @@ export default function MedicineRow({ name, batch, quantity, expiry, rack, onPre
         </View>
       </View>
       <View style={styles.right}>
-        <View style={[styles.qtyBadge, isLowStock && styles.qtyLow]}>
-          <Text style={[styles.qtyText, isLowStock && styles.qtyTextLow]}>{quantity}</Text>
+        <View style={[styles.qtyBadge, { backgroundColor: level.color + '22' }]}>
+          <Text style={[styles.qtyText, { color: level.color }]}>{quantity}</Text>
         </View>
         {expiry ? (
           <Text style={[styles.expiry, isExpiringSoon && styles.expiryWarn]}>
@@ -52,19 +54,17 @@ const styles = StyleSheet.create({
     borderColor: colors.cardBorder,
   },
   left: { flex: 1, marginRight: spacing.md },
+  stockDot: { width: 8, height: 8, borderRadius: 8, marginRight: spacing.sm },
   name: { ...typography.body, fontWeight: '600' },
   metaRow: { flexDirection: 'row', gap: spacing.md, marginTop: 4 },
   meta: { ...typography.caption },
   right: { alignItems: 'flex-end' },
   qtyBadge: {
-    backgroundColor: 'rgba(34,197,94,0.15)',
     paddingHorizontal: 10,
     paddingVertical: 3,
     borderRadius: radius.sm,
   },
-  qtyLow: { backgroundColor: 'rgba(239,68,68,0.15)' },
-  qtyText: { ...typography.bodySmall, color: colors.success, fontWeight: '700' },
-  qtyTextLow: { color: colors.danger },
+  qtyText: { ...typography.bodySmall, fontWeight: '700' },
   expiry: { ...typography.caption, marginTop: 4 },
   expiryWarn: { color: colors.warning },
 });

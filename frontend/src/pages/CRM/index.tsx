@@ -603,6 +603,19 @@ const RefillsSection: React.FC = () => {
 
   // ── Medicine row search & inventory dropdown ──────────────────────────────
   const fetchSuggestions = async (idx: number, term: string) => {
+    // Dropdown must never appear unless the user has typed at least 2 characters.
+    const clean = term.trim();
+    if (clean.length < 2) {
+      setMedicineRows(prev => {
+        const updated = [...prev];
+        if (updated[idx]) {
+          updated[idx] = { ...updated[idx], suggestions: [], loadingSuggestions: false, isOpen: false };
+        }
+        return updated;
+      });
+      return;
+    }
+
     setMedicineRows(prev => {
       const updated = [...prev];
       if (updated[idx]) {
@@ -613,7 +626,6 @@ const RefillsSection: React.FC = () => {
 
     try {
       let suggestions: MedicineSuggestion[] = [];
-      const clean = term.trim();
       const compactCache = await api.getCompactInventory().catch(() => []);
       const stockMap = new Map<number, number>();
       for (const item of compactCache) {
@@ -622,9 +634,9 @@ const RefillsSection: React.FC = () => {
         stockMap.set(mId, cur + (item.stock_qty || item.quantity || 0) + (item.loose_quantity || 0));
       }
 
-      if (!clean) {
-        const res = await apiClient.get<any>('/medicines', { params: { limit: 15, sort: 'name_asc' } });
-        const list = Array.isArray(res.data?.medicines) ? res.data.medicines : (Array.isArray(res.data) ? res.data : []);
+      const res = await apiClient.get<any>('/medicines', { params: { search: clean, limit: 15 } });
+      const list = Array.isArray(res.data?.medicines) ? res.data.medicines : (Array.isArray(res.data) ? res.data : []);
+      if (list.length > 0) {
         suggestions = list.map((m: any) => ({
           id: m.id,
           name: m.name,
@@ -633,34 +645,22 @@ const RefillsSection: React.FC = () => {
           in_stock_qty: stockMap.get(m.id) || 0
         }));
       } else {
-        const res = await apiClient.get<any>('/medicines', { params: { search: clean, limit: 15 } });
-        const list = Array.isArray(res.data?.medicines) ? res.data.medicines : (Array.isArray(res.data) ? res.data : []);
-        if (list.length > 0) {
-          suggestions = list.map((m: any) => ({
-            id: m.id,
-            name: m.name,
-            manufacturer: m.manufacturer,
-            mrp: m.mrp || m.sell_price || m.last_purchase_mrp,
-            in_stock_qty: stockMap.get(m.id) || 0
-          }));
-        } else {
-          const lower = clean.toLowerCase();
-          const matched = compactCache.filter((c: any) => (c.name || c.medicine_name || '').toLowerCase().includes(lower));
-          const seen = new Map<number, MedicineSuggestion>();
-          for (const m of matched) {
-            const medId = m.medicine_id || m.id;
-            if (!seen.has(medId)) {
-              seen.set(medId, {
-                id: medId,
-                name: m.name || m.medicine_name,
-                manufacturer: m.manufacturer,
-                mrp: m.mrp,
-                in_stock_qty: stockMap.get(medId) || 0
-              });
-            }
+        const lower = clean.toLowerCase();
+        const matched = compactCache.filter((c: any) => (c.name || c.medicine_name || '').toLowerCase().includes(lower));
+        const seen = new Map<number, MedicineSuggestion>();
+        for (const m of matched) {
+          const medId = m.medicine_id || m.id;
+          if (!seen.has(medId)) {
+            seen.set(medId, {
+              id: medId,
+              name: m.name || m.medicine_name,
+              manufacturer: m.manufacturer,
+              mrp: m.mrp,
+              in_stock_qty: stockMap.get(medId) || 0
+            });
           }
-          suggestions = Array.from(seen.values()).slice(0, 15);
         }
+        suggestions = Array.from(seen.values()).slice(0, 15);
       }
 
       setMedicineRows(prev => {
@@ -691,7 +691,7 @@ const RefillsSection: React.FC = () => {
         searchTerm: term,
         medicineName: term,
         medicineId: null,
-        isOpen: true
+        isOpen: term.trim().length >= 2
       };
       return updated;
     });
@@ -1824,9 +1824,7 @@ const RefillsSection: React.FC = () => {
                               type="text"
                               value={row.searchTerm}
                               onFocus={() => {
-                                if (row.suggestions.length === 0) {
-                                  fetchSuggestions(idx, row.searchTerm);
-                                } else {
+                                if (row.searchTerm.trim().length >= 2 && row.suggestions.length > 0) {
                                   setMedicineRows(prev => {
                                     const updated = [...prev];
                                     updated[idx] = { ...updated[idx], isOpen: true };
@@ -1835,7 +1833,7 @@ const RefillsSection: React.FC = () => {
                                 }
                               }}
                               onChange={e => handleMedicineSearch(idx, e.target.value)}
-                              placeholder="Click or type to select from inventory stock…"
+                              placeholder="Type to search inventory stock…"
                               className="w-full pl-9 pr-8 py-2.5 bg-bg2 border border-border rounded-xl text-xs text-text focus:outline-none focus:border-primary"
                             />
                             <ChevronDown
@@ -1845,7 +1843,7 @@ const RefillsSection: React.FC = () => {
                           </div>
 
                           {/* Dropdown Suggestions List */}
-                          {row.isOpen && (
+                          {row.isOpen && row.searchTerm.trim().length >= 2 && (
                             <div className="absolute top-full left-0 right-0 z-30 mt-1 bg-bg2 border border-border rounded-xl shadow-2xl overflow-hidden max-h-56 overflow-y-auto">
                               {row.loadingSuggestions && (
                                 <div className="p-3 text-center text-xs text-muted flex items-center justify-center gap-2">

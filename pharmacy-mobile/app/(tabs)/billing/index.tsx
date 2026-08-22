@@ -16,6 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Notifications from 'expo-notifications';
 import { colors, spacing, typography, radius, shadows } from '../../../lib/theme';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   searchMedicine,
   createSale,
@@ -25,22 +26,25 @@ import {
   createSpecialOrder,
   CustomerData,
   getCachedInventory,
+  getInventory,
+  getOrders,
+  updateOrderStatus,
+  getOfflineOrderStatusQueue,
+  SpecialOrder,
   fetchRecentSales,
   RecentSale,
+  SalePayload,
+  getOfflineSalesQueue,
+  getDeviceIdentity,
 } from '../../../lib/api';
+import { useFocusEffect } from '@react-navigation/native';
 import UpwardSearchDropdown from '../../../components/UpwardSearchDropdown';
+import ProductListPanel from '../../../components/ProductListPanel';
+import SwipeToDelete from '../../../components/SwipeToDelete';
+import { sanitizePhoneInput } from '../../../lib/helpers';
 
-const sanitizePhoneInput = (val: string | null | undefined): string => {
-  if (!val) return '';
-  const digits = val.replace(/\D/g, '');
-  if (digits.length === 12 && digits.startsWith('91')) {
-    return digits.slice(2);
-  }
-  if (digits.length > 10 && digits.startsWith('91')) {
-    return digits.slice(2, 12);
-  }
-  return digits.slice(0, 10);
-};
+const CART_STATE_KEY = 'billing_cart_state';
+const PENDING_ORDERS_CACHE_KEY = 'cached_special_orders';
 
 export interface EnhancedCartEntry extends SearchMedicineResult {
   strip_qty: number;
@@ -52,6 +56,7 @@ export interface EnhancedCartEntry extends SearchMedicineResult {
 
 export default function BillingScreen() {
   const scrollViewRef = useRef<ScrollView>(null);
+  const hydratedRef = useRef(false);
 
   // Mode selection: DIRECT | CREDIT | SPECIAL
   const [saleMode, setSaleMode] = useState<'DIRECT' | 'CREDIT' | 'SPECIAL'>('DIRECT');
@@ -85,10 +90,20 @@ export default function BillingScreen() {
   const [cart, setCart] = useState<EnhancedCartEntry[]>([]);
   const [batchPickerItem, setBatchPickerItem] = useState<EnhancedCartEntry | null>(null);
 
+  // Product List panel state
+  const [showProductList, setShowProductList] = useState(false);
+  const [productCache, setProductCache] = useState<SearchMedicineResult[]>([]);
+  const [pendingOrders, setPendingOrders] = useState<SpecialOrder[]>([]);
+  const [refreshingPending, setRefreshingPending] = useState(false);
+  const [offlineStatusCount, setOfflineStatusCount] = useState(0);
+
   // Sales History Drawer state
   const [showSalesHistory, setShowSalesHistory] = useState(false);
   const [recentSales, setRecentSales] = useState<RecentSale[]>([]);
   const [loadingSalesHistory, setLoadingSalesHistory] = useState(false);
+  // This-device bill tracking
+  const [pendingBills, setPendingBills] = useState<SalePayload[]>([]);
+  const [deviceLabel, setDeviceLabel] = useState('');
 
   // Toast notification state
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -116,14 +131,130 @@ export default function BillingScreen() {
     setShowSalesHistory(true);
     setLoadingSalesHistory(true);
     try {
-      const sales = await fetchRecentSales(25);
+      const [sales, queue, identity] = await Promise.all([
+        fetchRecentSales(25),
+        getOfflineSalesQueue(),
+        getDeviceIdentity(),
+      ]);
       setRecentSales(sales);
+      setPendingBills(queue);
+      setDeviceLabel(identity.name);
     } catch {
       setRecentSales([]);
     } finally {
       setLoadingSalesHistory(false);
     }
   };
+
+  // ─── Mount Hydration (instant paint from local caches) ───────────────────
+
+  useEffect(() => {
+    (async () => {
+      // 1. Product list cache + silent server refresh
+      const cached = await getCachedInventory();
+      setProductCache(cached);
+      getInventory()
+        .then(() => getCachedInventory())
+        .then(fresh => {
+          if (fresh.length > 0) setProductCache(fresh);
+        })
+        .catch(() => {});
+
+      // 2. Pending special orders cache + silent refresh
+      try {
+        const cachedOrders = await AsyncStorage.getItem(PENDING_ORDERS_CACHE_KEY);
+        if (cachedOrders) setPendingOrders(JSON.parse(cachedOrders));
+      } catch {}
+      refreshPendingOrders().catch(() => {});
+
+      // 3. Offline status queue count
+      getOfflineOrderStatusQueue()
+        .then(q => setOfflineStatusCount(q.length))
+        .catch(() => {});
+
+      // 4. Restore persisted bill (survives app kill mid-sale)
+      try {
+        const savedCartState = await AsyncStorage.getItem(CART_STATE_KEY);
+        if (savedCartState) {
+          const parsed = JSON.parse(savedCartState);
+          if (Array.isArray(parsed.cart) && parsed.cart.length > 0) {
+            setCart(parsed.cart);
+            if (parsed.saleMode) setSaleMode(parsed.saleMode);
+            if (parsed.patientName) setPatientName(parsed.patientName);
+            if (parsed.patientPhone) setPatientPhone(parsed.patientPhone);
+            if (parsed.discountType) setDiscountType(parsed.discountType);
+            if (parsed.discountValue) setDiscountValue(parsed.discountValue);
+          }
+        }
+      } catch {}
+      hydratedRef.current = true;
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const refreshPendingOrders = async () => {
+    setRefreshingPending(true);
+    try {
+      const orders = await getOrders();
+      setPendingOrders(orders);
+      await AsyncStorage.setItem(PENDING_ORDERS_CACHE_KEY, JSON.stringify(orders));
+    } catch {
+      // keep cached orders on failure
+    } finally {
+      setRefreshingPending(false);
+    }
+  };
+
+  const handleMarkReady = async (order: SpecialOrder) => {
+    try {
+      const res = await updateOrderStatus(order.id, 'Ready');
+      if (res.isOffline) {
+        showToast('Marked Ready (Offline) — will sync & send message on reconnect');
+      } else if (res.whatsapp_queued) {
+        showToast(`✅ ${order.product || 'Order'} marked Ready — arrival WhatsApp queued`);
+      } else {
+        showToast(`${order.product || 'Order'} marked Ready`);
+      }
+      getOfflineOrderStatusQueue()
+        .then(q => setOfflineStatusCount(q.length))
+        .catch(() => {});
+      refreshPendingOrders();
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Failed to mark order Ready');
+    }
+  };
+
+  // ─── Cart Persistence (auto-save on every change) ────────────────────────
+
+  useEffect(() => {
+    if (!hydratedRef.current) return;
+    AsyncStorage.setItem(
+      CART_STATE_KEY,
+      JSON.stringify({ cart, saleMode, patientName, patientPhone, discountType, discountValue })
+    ).catch(() => {});
+  }, [cart, saleMode, patientName, patientPhone, discountType, discountValue]);
+
+  // ─── Refill "Sell Now" handoff: drain queued items when tab gains focus ──
+
+  useFocusEffect(
+    useCallback(() => {
+      (async () => {
+        try {
+          const queued = await AsyncStorage.getItem('billing_cart_add_queue');
+          if (!queued) return;
+          await AsyncStorage.removeItem('billing_cart_add_queue');
+          const items: SearchMedicineResult[] = JSON.parse(queued);
+          for (const item of items) {
+            await addToCart(item);
+          }
+          if (items.length > 0) {
+            showToast(`🧺 ${items.length} refill medicine${items.length !== 1 ? 's' : ''} added to bill`);
+            setSaleMode('DIRECT');
+          }
+        } catch {}
+      })();
+    }, [])
+  );
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -416,9 +547,15 @@ export default function BillingScreen() {
       return;
     }
 
-    if (saleMode === 'CREDIT' && !patientName.trim()) {
-      Alert.alert('Customer Required', 'Credit sales require a registered or entered customer name.');
-      return;
+    if (saleMode === 'CREDIT') {
+      if (!patientName.trim()) {
+        Alert.alert('Customer Required', 'Credit sales require a registered or entered customer name.');
+        return;
+      }
+      if (sanitizePhoneInput(patientPhone).length !== 10) {
+        Alert.alert('Phone Required', 'Credit sales require a valid 10-digit customer phone number.');
+        return;
+      }
     }
 
     for (const c of cart) {
@@ -611,15 +748,25 @@ export default function BillingScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* View Phone Bills Button */}
-        <TouchableOpacity
-          style={styles.salesHistoryHeaderBtn}
-          onPress={handleOpenSalesHistory}
-          activeOpacity={0.8}
-        >
-          <Ionicons name="receipt" size={14} color={colors.primary} />
-          <Text style={styles.salesHistoryHeaderText}>Phone Bills</Text>
-        </TouchableOpacity>
+        {/* View Phone Bills + Product List Buttons */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+          <TouchableOpacity
+            style={styles.salesHistoryHeaderBtn}
+            onPress={() => setShowProductList(true)}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="list" size={14} color={colors.primary} />
+            <Text style={styles.salesHistoryHeaderText}>Products</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.salesHistoryHeaderBtn}
+            onPress={handleOpenSalesHistory}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="receipt" size={14} color={colors.primary} />
+            <Text style={styles.salesHistoryHeaderText}>Phone Bills</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       <ScrollView
@@ -841,37 +988,45 @@ export default function BillingScreen() {
                   // Render COLLAPSED item strip for ultra high screen density
                   if (item.is_collapsed) {
                     return (
-                      <TouchableOpacity
+                      <SwipeToDelete
                         key={`cart-${item.inventory_id}-${index}`}
-                        style={styles.collapsedCartRow}
-                        onPress={() => toggleCartCollapse(item.inventory_id)}
-                        activeOpacity={0.8}
+                        onDelete={() => removeFromCart(item.inventory_id)}
                       >
-                        <View style={{ flex: 1, paddingRight: 6 }}>
-                          <Text style={styles.collapsedMedName} numberOfLines={1}>
-                            {item.medicine_name}
-                          </Text>
-                          <Text style={styles.collapsedQtyMeta}>
-                            📦 {item.strip_qty} strip{item.strip_qty !== 1 ? 's' : ''}
-                            {item.loose_qty > 0 ? ` + 💊 ${item.loose_qty} loose` : ''} | Batch: {item.selected_batch}
-                          </Text>
-                        </View>
-
-                        <Text style={styles.collapsedPriceText}>₹{itemTotal.toFixed(2)}</Text>
-
                         <TouchableOpacity
-                          onPress={() => removeFromCart(item.inventory_id)}
-                          style={{ paddingLeft: 8 }}
+                          style={styles.collapsedCartRow}
+                          onPress={() => toggleCartCollapse(item.inventory_id)}
+                          activeOpacity={0.8}
                         >
-                          <Ionicons name="trash-outline" size={16} color={colors.danger} />
+                          <View style={{ flex: 1, paddingRight: 6 }}>
+                            <Text style={styles.collapsedMedName} numberOfLines={1}>
+                              {item.medicine_name}
+                            </Text>
+                            <Text style={styles.collapsedQtyMeta}>
+                              📦 {item.strip_qty} strip{item.strip_qty !== 1 ? 's' : ''}
+                              {item.loose_qty > 0 ? ` + 💊 ${item.loose_qty} loose` : ''} | Batch: {item.selected_batch}
+                            </Text>
+                          </View>
+
+                          <Text style={styles.collapsedPriceText}>₹{itemTotal.toFixed(2)}</Text>
+
+                          <TouchableOpacity
+                            onPress={() => removeFromCart(item.inventory_id)}
+                            style={{ paddingHorizontal: 10, paddingVertical: 12 }}
+                          >
+                            <Ionicons name="trash-outline" size={16} color={colors.danger} />
+                          </TouchableOpacity>
                         </TouchableOpacity>
-                      </TouchableOpacity>
+                      </SwipeToDelete>
                     );
                   }
 
                   // Render EXPANDED item card for editing strips & loose dose quantities side-by-side
                   return (
-                    <View key={`cart-${item.inventory_id}-${index}`} style={styles.expandedCartCard}>
+                    <SwipeToDelete
+                      key={`cart-${item.inventory_id}-${index}`}
+                      onDelete={() => removeFromCart(item.inventory_id)}
+                    >
+                    <View style={styles.expandedCartCard}>
                       <View style={styles.cartCardHeader}>
                         <TouchableOpacity
                           style={{ flex: 1 }}
@@ -895,7 +1050,7 @@ export default function BillingScreen() {
 
                         <TouchableOpacity
                           onPress={() => removeFromCart(item.inventory_id)}
-                          style={{ paddingLeft: 8 }}
+                          style={{ paddingHorizontal: 10, paddingVertical: 12 }}
                         >
                           <Ionicons name="trash-outline" size={16} color={colors.danger} />
                         </TouchableOpacity>
@@ -911,7 +1066,7 @@ export default function BillingScreen() {
                               style={styles.stepperBtn}
                               onPress={() => updateCartStripQty(item.inventory_id, item.strip_qty - 1)}
                             >
-                              <Ionicons name="remove" size={14} color={colors.textPrimary} />
+                              <Ionicons name="remove" size={18} color={colors.textPrimary} />
                             </TouchableOpacity>
                             <TextInput
                               style={styles.stepperInputText}
@@ -923,7 +1078,7 @@ export default function BillingScreen() {
                               style={styles.stepperBtn}
                               onPress={() => updateCartStripQty(item.inventory_id, item.strip_qty + 1)}
                             >
-                              <Ionicons name="add" size={14} color={colors.textPrimary} />
+                              <Ionicons name="add" size={18} color={colors.textPrimary} />
                             </TouchableOpacity>
                           </View>
                         </View>
@@ -936,7 +1091,7 @@ export default function BillingScreen() {
                               style={styles.stepperBtn}
                               onPress={() => updateCartLooseQty(item.inventory_id, item.loose_qty - 1)}
                             >
-                              <Ionicons name="remove" size={14} color={colors.textPrimary} />
+                              <Ionicons name="remove" size={18} color={colors.textPrimary} />
                             </TouchableOpacity>
                             <TextInput
                               style={styles.stepperInputText}
@@ -948,7 +1103,7 @@ export default function BillingScreen() {
                               style={styles.stepperBtn}
                               onPress={() => updateCartLooseQty(item.inventory_id, item.loose_qty + 1)}
                             >
-                              <Ionicons name="add" size={14} color={colors.textPrimary} />
+                              <Ionicons name="add" size={18} color={colors.textPrimary} />
                             </TouchableOpacity>
                           </View>
                         </View>
@@ -960,6 +1115,7 @@ export default function BillingScreen() {
                         </View>
                       </View>
                     </View>
+                    </SwipeToDelete>
                   );
                 })
               )}
@@ -1086,6 +1242,22 @@ export default function BillingScreen() {
         )}
       </View>
 
+      {/* MODAL: PRODUCT LIST + PENDING SIDE PANEL */}
+      <ProductListPanel
+        visible={showProductList}
+        onClose={() => setShowProductList(false)}
+        products={productCache}
+        onAddProduct={item => {
+          addToCart(item);
+          setShowProductList(false);
+        }}
+        pendingOrders={pendingOrders}
+        offlinePendingCount={offlineStatusCount}
+        onMarkReady={handleMarkReady}
+        refreshingPending={refreshingPending}
+        onRefreshPending={refreshPendingOrders}
+      />
+
       {/* MODAL: SALES HISTORY DRAWER */}
       <Modal
         visible={showSalesHistory}
@@ -1104,6 +1276,39 @@ export default function BillingScreen() {
                 <Ionicons name="close" size={22} color={colors.textMuted} />
               </TouchableOpacity>
             </View>
+            {deviceLabel ? (
+              <Text style={styles.drawerDeviceNote}>
+                📱 Selling as <Text style={{ fontWeight: '800', color: colors.primary }}>{deviceLabel}</Text>
+              </Text>
+            ) : null}
+
+            {/* Pending sync bills saved on THIS phone */}
+            {pendingBills.length > 0 && (
+              <View style={styles.pendingSyncBlock}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 4 }}>
+                  <Ionicons name="cloud-upload-outline" size={12} color={colors.warning} />
+                  <Text style={styles.pendingSyncTitle}>
+                    PENDING SYNC ({pendingBills.length}) — saved on this phone
+                  </Text>
+                </View>
+                {pendingBills.map((b, i) => (
+                  <View key={`pend-${i}`} style={styles.pendingRow}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.pendingTitle} numberOfLines={1}>
+                        {b.patient_name || 'Walk-in'} · {b.items?.length || 0} item{(b.items?.length || 0) !== 1 ? 's' : ''}
+                      </Text>
+                      <Text style={styles.pendingMeta}>
+                        {b.sale_date ? new Date(b.sale_date).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''}
+                      </Text>
+                    </View>
+                    <View style={styles.pendingChip}>
+                      <Text style={styles.pendingChipText}>WAITING</Text>
+                    </View>
+                  </View>
+                ))}
+                <Text style={styles.pendingHint}>Auto-syncs to PC Phone Sales when WiFi reconnects</Text>
+              </View>
+            )}
 
             {loadingSalesHistory ? (
               <View style={{ padding: spacing.xl, alignItems: 'center' }}>
@@ -1458,17 +1663,21 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   stepperBtn: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
     backgroundColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 40,
   },
   stepperInputText: {
     flex: 1,
     textAlign: 'center',
-    fontSize: 13,
-    fontWeight: '700',
+    fontSize: 16,
+    fontWeight: '800',
     color: colors.textPrimary,
-    paddingVertical: 2,
+    paddingVertical: 4,
+    minWidth: 34,
   },
   itemTotalCol: { alignItems: 'flex-end', justifyContent: 'center' },
   itemTotalPriceText: { fontSize: 15, fontWeight: '900', color: colors.accent },
@@ -1654,6 +1863,38 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: colors.divider,
   },
+  drawerDeviceNote: {
+    fontSize: 11,
+    color: colors.textMuted,
+    marginBottom: spacing.xs,
+    paddingHorizontal: 2,
+  },
+  pendingSyncBlock: {
+    backgroundColor: colors.warning + '12',
+    borderColor: colors.warning + '44',
+    borderWidth: 1,
+    borderRadius: radius.sm,
+    padding: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  pendingSyncTitle: { fontSize: 10, fontWeight: '800', color: colors.warning, letterSpacing: 0.4 },
+  pendingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 5,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.divider,
+  },
+  pendingTitle: { fontSize: 12, fontWeight: '700', color: colors.textPrimary },
+  pendingMeta: { fontSize: 10, color: colors.textMuted, marginTop: 1 },
+  pendingChip: {
+    backgroundColor: colors.warning + '22',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: radius.sm,
+  },
+  pendingChipText: { fontSize: 8, fontWeight: '800', color: colors.warning, letterSpacing: 0.5 },
+  pendingHint: { fontSize: 9, color: colors.textMuted, marginTop: 4, fontStyle: 'italic' },
   historyInvoiceNo: { fontSize: 13, fontWeight: '700', color: colors.textPrimary },
   historyMeta: { fontSize: 11, color: colors.textMuted, marginTop: 1 },
   historyDate: { fontSize: 10, color: colors.textSecondary, marginTop: 1 },

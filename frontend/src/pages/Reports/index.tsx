@@ -24,16 +24,37 @@ import {
   X
 } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
-import { api, apiClient } from '../../services/api';
+import { api, apiClient, type NonMovingReportItem, type ProductTracePurchaseRow, type ProductTraceSaleRow } from '../../services/api';
 import { useApiQuery } from '../../hooks/useApiQuery';
 import { getTodayString, getNDaysAgoString, toDateInputValue } from '../../utils/date';
 import { exportToCSV, exportToPDF } from '../../utils/export';
 import { messageSendEvent } from '../../services/events';
+
+interface LocalReportSummary {
+  [key: string]: number | undefined;
+}
+
+interface LocalReportRow {
+  date?: string | null;
+  invoice_no?: string | null;
+  distributor?: string | null;
+  total_amount?: number | null;
+  medicine_name?: string | null;
+  batch_no?: string | null;
+  quantity?: number;
+  stock?: number;
+  cost_price?: number | null;
+  mrp?: number | null;
+  value?: number | null;
+  expiry_date?: string | null;
+}
+
+type LocalApiError = { response?: { data?: { error?: string; message?: string } }; message?: string };
 import { formatINR, formatCount } from '../../utils/currency';
 
 // Module-level cache for instant report hydration on tab switches / re-mounts
-const cachedReportsMap: Record<string, { summary: any; records: any[] }> = {};
-const cachedNonMovingMap: Record<number, any> = {};
+const cachedReportsMap: Record<string, { summary: LocalReportSummary; records: LocalReportRow[] }> = {};
+const cachedNonMovingMap: Record<number, { success: boolean; periodDays: number; count: number; items: NonMovingReportItem[] }> = {};
 
 const Reports = () => {
   const queryClient = useQueryClient();
@@ -86,7 +107,7 @@ const Reports = () => {
   // Product trace local query state
   const [traceQuery, setTraceQuery] = useState('');
   const [appliedTraceQuery, setAppliedTraceQuery] = useState('');
-  const [traceData, setTraceData] = useState<{ purchases: any[]; sales: any[] }>({ purchases: [], sales: [] });
+  const [traceData, setTraceData] = useState<{ purchases: ProductTracePurchaseRow[]; sales: ProductTraceSaleRow[] }>({ purchases: [], sales: [] });
   const [loadingTrace, setLoadingTrace] = useState(false);
 
   // WhatsApp & PDF Dispatch State
@@ -107,7 +128,7 @@ const Reports = () => {
         return;
       }
 
-      let exportData: any[] = [];
+      let exportData: LocalReportRow[] = [];
       let exportColumns: Array<{ key: string; label: string }> = [];
       let reportTitle = `${activeTab.toUpperCase()} Report`;
 
@@ -228,8 +249,9 @@ const Reports = () => {
       } else {
         alert(res.data?.message || 'Failed to send report');
       }
-    } catch (err: any) {
-      alert(err.response?.data?.message || 'Error sending report via WhatsApp');
+    } catch (err) {
+      const e = err as LocalApiError;
+      alert(e.response?.data?.message || 'Error sending report via WhatsApp');
     } finally {
       setSendingWhatsapp(false);
     }
@@ -261,8 +283,8 @@ const Reports = () => {
 
   // Main reports query (sales, purchases, inventory, expiry) - enabled by default so it auto-loads
   const { data: reportData = cachedReportsMap[cacheKeyStr], isLoading: loading, isError, refetch } = useApiQuery<{
-    summary: any;
-    records: any[];
+    summary: LocalReportSummary;
+    records: LocalReportRow[];
   }>(
     ['reports', activeTab, fromDate, toDate],
     async () => {
@@ -295,7 +317,7 @@ const Reports = () => {
     success: boolean;
     periodDays: number;
     count: number;
-    items: any[];
+    items: NonMovingReportItem[];
   }>(
     ['reports', 'nonMoving', nonMovingDays],
     async () => {
@@ -367,7 +389,7 @@ const Reports = () => {
   const stats = reportData?.summary ?? {};
   const records = reportData?.records ?? [];
 
-  const filteredNonMovingItems = (nonMovingData?.items ?? []).filter((item: any) => {
+  const filteredNonMovingItems = (nonMovingData?.items ?? []).filter((item) => {
     if (!nonMovingSearchQuery.trim()) return true;
     const q = nonMovingSearchQuery.toLowerCase().trim();
     return (item.medicineName && item.medicineName.toLowerCase().includes(q)) ||
@@ -378,9 +400,9 @@ const Reports = () => {
   const getStatsCards = () => {
     if (activeTab === 'nonMoving') {
       const deadItems = nonMovingData?.items ?? [];
-      const totalDeadValuation = deadItems.reduce((acc: number, item: any) => acc + (item.totalValue || 0), 0);
-      const totalDeadCostValuation = deadItems.reduce((acc: number, item: any) => acc + (item.totalCostValue || 0), 0);
-      const neverMovedCount = deadItems.filter((item: any) => item.daysSinceLastTransaction === 999).length;
+      const totalDeadValuation = deadItems.reduce((acc: number, item) => acc + (item.totalValue || 0), 0);
+      const totalDeadCostValuation = deadItems.reduce((acc: number, item) => acc + (item.totalCostValue || 0), 0);
+      const neverMovedCount = deadItems.filter((item) => item.daysSinceLastTransaction === 999).length;
 
       return [
         {
@@ -1229,7 +1251,7 @@ const Reports = () => {
                         </td>
                       </tr>
                     ) : (
-                      filteredNonMovingItems.map((row: any, idx: number) => (
+                      filteredNonMovingItems.map((row, idx) => (
                         <tr key={idx} className="hover:bg-bg2/40 transition-colors border-b border-glass-border/20">
                           <td className="p-3.5 pl-5 font-bold text-text">{row.medicineName || '—'}</td>
                           <td className="p-3.5 font-mono font-semibold text-muted">{row.batchNo || 'N/A'}</td>

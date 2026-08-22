@@ -709,13 +709,22 @@ router.get('/', async (req, res) => {
     const params: any[] = [];
     const conditions: string[] = [];
     
+    // Sargable pre-filters: let idx_purchases_date prune rows first (superset bounds,
+    // ±1 day covers any timezone shift of date(p.date,'localtime')); the exact
+    // expression filters below still decide the final result set.
     if (start && end) {
+      conditions.push("p.date >= datetime(?, '-1 day') AND p.date < datetime(?, '+2 days')");
+      params.push(start, end);
       conditions.push("date(p.date, 'localtime') BETWEEN date(?) AND date(?)");
       params.push(start, end);
     } else if (start) {
+      conditions.push("p.date >= datetime(?, '-1 day')");
+      params.push(start);
       conditions.push("date(p.date, 'localtime') >= date(?)");
       params.push(start);
     } else if (end) {
+      conditions.push("p.date <= datetime(?, '+2 days')");
+      params.push(end);
       conditions.push("date(p.date, 'localtime') <= date(?)");
       params.push(end);
     } else if (months > 0) {
@@ -980,6 +989,7 @@ router.post('/manual', async (req, res) => {
     const savedItems: any[] = [];
     const masterMedItems: any[] = []; // ponytail: collected for background upsert after COMMIT
     const reconcileNames: string[] = []; // ponytail: collected for background reconcile after COMMIT
+    const unresolvedMedicines: { name: string }[] = []; // strict verification: lines with no real master match
     for (const item of items) {
       const { medicine, medicine_id, original_name, batch_no, expiry_date, qty, free_qty, rate, mrp, discPer, discRs, additional_discount, cgst, sgst } = item;
       
@@ -1026,24 +1036,18 @@ router.post('/manual', async (req, res) => {
         if (resObj?.medicineId) {
           medId = resObj.medicineId;
         } else {
-          // Check OCR corrections mapping
+          // Check OCR corrections mapping (resolves to an existing master row only)
           const ocrRow = await db.get('SELECT correct FROM ocr_corrections WHERE LOWER(ocr) = LOWER(?)', [cleanName]).catch(() => null);
           if (ocrRow?.correct) {
             const targetMed = await db.get('SELECT id FROM medicines WHERE LOWER(name) = LOWER(?)', [ocrRow.correct.trim()]);
             if (targetMed?.id) medId = targetMed.id;
           }
-          // Auto-create new medicine if no existing match exists
-          if (!medId) {
-            const insMed = await db.run(
-              'INSERT INTO medicines (name, manufacturer, mrp, rate, sell_price, cgst_per, sgst_per, hsn_code, generic_name, packaging, category, marketed_by, schedule_type, pack_unit, pack_size, item_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-              [
-                cleanName, item.manufacturer || '', rawMrp || 0, rawRate || 0, rawSellPrice || null, rawCgst || 0, rawSgst || 0, item.hsn_code || '',
-                item.generic_name || null, item.packaging || null, item.category || null, item.marketed_by || null,
-                item.schedule_type || null, item.pack_unit || null, item.pack_size || null, item.item_type || null
-              ]
-            );
-            medId = insMed.lastID;
-          }
+        }
+        if (!medId) {
+          // Strict human-verification contract: never silently register a new medicine.
+          // The user must link this line to an existing medicine or register it via
+          // the Universal Medicine editor before the bill can be saved.
+          unresolvedMedicines.push({ name: cleanName });
         }
 
         // Register distributor alias; reconcile deferred to background (ponytail: non-critical before response)
@@ -1134,6 +1138,17 @@ router.post('/manual', async (req, res) => {
           si.sell_price = spMap.get(si.medicine_id) ?? null;
         }
       }
+    }
+
+    // Strict human-verification contract: block the save while any bill line could
+    // not be linked to a real master medicine. Nothing is committed until the user
+    // links or registers every product in Purchase Entry.
+    if (unresolvedMedicines.length > 0) {
+      await db.run('ROLLBACK');
+      return res.status(400).json({
+        error: `Unresolved medicines on this bill: ${unresolvedMedicines.map(u => `"${u.name}"`).join(', ')}. Link each line to an existing medicine or register it via "New Medicine" before saving.`,
+        unresolved_items: unresolvedMedicines
+      });
     }
 
     await db.run('COMMIT');
@@ -2897,24 +2912,37 @@ router.post('/reconciliation/reissue', async (req, res) => {
 
     // Process items & update inventory
     for (const item of parsedItems) {
-      let medId = null;
-      const aliasRow = await db.get('SELECT medicine_id FROM medicine_aliases WHERE alias_name = ?', [item.name]);
-      if (aliasRow) {
-        medId = aliasRow.medicine_id;
-      } else {
-        let med = await db.get('SELECT id FROM medicines WHERE LOWER(name) = LOWER(?) LIMIT 1', [item.name]);
-        if (!med) {
-          med = await db.get('SELECT id FROM medicines WHERE name LIKE ? LIMIT 1', [`${item.name}%`]);
-        }
-        if (!med) {
-          med = await db.get('SELECT id FROM medicines WHERE name LIKE ? LIMIT 1', [`%${item.name}%`]);
-        }
-        if (med) {
-          medId = med.id;
+      const inputName = String(item.name || '').trim();
+      let medId: number | null = null;
+
+      // 1) Human-verified selection always wins
+      const explicitId = Number((item as any).medicine_id || 0);
+      if (explicitId > 0) {
+        const dbMed = await db.get('SELECT id FROM medicines WHERE id = ?', [explicitId]);
+        if (dbMed?.id) medId = dbMed.id;
+      }
+
+      // 2) Multi-tier resolver + OCR corrections — resolve ONLY to existing master rows
+      if (!medId && inputName) {
+        const resObj = await medicineService.resolveMedicineNameMultiTier(db, inputName, distId);
+        if (resObj?.medicineId) {
+          medId = resObj.medicineId;
         } else {
-          const medResult = await db.run('INSERT INTO medicines (name) VALUES (?)', [item.name]);
-          medId = medResult.lastID;
+          const ocrRow = await db.get('SELECT correct FROM ocr_corrections WHERE LOWER(ocr) = LOWER(?)', [inputName]).catch(() => null);
+          if (ocrRow?.correct) {
+            const targetMed = await db.get('SELECT id FROM medicines WHERE LOWER(name) = LOWER(?)', [String(ocrRow.correct).trim()]);
+            if (targetMed?.id) medId = targetMed.id;
+          }
         }
+      }
+
+      if (!medId) {
+        // Strict human-verification contract: never bare-insert a name-only medicine.
+        await db.run('ROLLBACK');
+        return res.status(400).json({
+          error: `Unresolved medicine "${inputName || 'Item'}". Open this bill in Purchase Entry, link it to an existing medicine or register a new one, then reissue.`,
+          unresolved_items: [{ name: inputName }]
+        });
       }
       if (medId) {
         uniqueMedicineIds.add(medId);
@@ -3002,6 +3030,47 @@ router.post('/reconciliation/reissue', async (req, res) => {
     }
     console.error('Reissue email order error:', error);
     res.status(500).json({ error: 'Internal server error: ' + (error as Error).message });
+  }
+});
+
+// Batch medicine-name resolution for bill lines (single round-trip; used by
+// StagedReviewModal and Purchase save verification). NEVER creates medicines —
+// resolves only against existing master data (Strict Legitimate Data contract).
+router.post('/match-items', async (req, res) => {
+  try {
+    const { names, distributor_id } = req.body || {};
+    if (!Array.isArray(names) || names.length === 0) {
+      return res.json({ results: [] });
+    }
+    if (names.length > 200) {
+      return res.status(400).json({ error: 'Too many names in one batch (max 200).' });
+    }
+    const db = await dbManager.getConnection();
+    const distId = Number(distributor_id) || null;
+    const results = [];
+    for (const raw of names.slice(0, 200)) {
+      const name = String(raw || '').trim();
+      if (!name) {
+        results.push({ input: name, medicine_id: null, matched_name: null, confidence: 0, match_type: 'none' });
+        continue;
+      }
+      const r = await medicineService.resolveMedicineNameMultiTier(db, name, distId);
+      let matchedName: string | null = null;
+      if (r?.medicineId) {
+        const row = await db.get('SELECT name FROM medicines WHERE id = ?', [r.medicineId]);
+        matchedName = row?.name || null;
+      }
+      results.push({
+        input: name,
+        medicine_id: r?.medicineId ?? null,
+        matched_name: matchedName,
+        confidence: r?.confidence ?? 0,
+        match_type: r?.matchType ?? 'unmatched'
+      });
+    }
+    res.json({ results });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || 'match-items failed' });
   }
 });
 
@@ -3196,23 +3265,42 @@ router.post('/staged/:id/approve', async (req, res) => {
 
     // Save items and increment stock
     for (const item of itemsToProcess) {
-      let medId = null;
-      const aliasRow = await db.get('SELECT medicine_id FROM medicine_aliases WHERE alias_name = ?', [item.name]);
-      if (aliasRow) {
-        medId = aliasRow.medicine_id;
-      } else {
-        let med = await db.get('SELECT id FROM medicines WHERE name LIKE ? LIMIT 1', [`%${item.name}%`]);
-        if (med) {
-          medId = med.id;
+      const inputName = String(item.name || item.medicine_name || '').trim();
+      let medId: number | null = null;
+
+      // 1) Human-verified selection from StagedReviewModal always wins
+      const explicitId = Number(item.medicine_id || 0);
+      if (explicitId > 0) {
+        const dbMed = await db.get('SELECT id FROM medicines WHERE id = ?', [explicitId]);
+        if (dbMed?.id) medId = dbMed.id;
+      }
+
+      // 2) Multi-tier resolver + OCR corrections — both resolve ONLY to existing master rows
+      if (!medId && inputName) {
+        const resObj = await medicineService.resolveMedicineNameMultiTier(db, inputName, distId);
+        if (resObj?.medicineId) {
+          medId = resObj.medicineId;
         } else {
-          const medResult = await db.run('INSERT INTO medicines (name) VALUES (?)', [item.name]);
-          medId = medResult.lastID;
+          const ocrRow = await db.get('SELECT correct FROM ocr_corrections WHERE LOWER(ocr) = LOWER(?)', [inputName]).catch(() => null);
+          if (ocrRow?.correct) {
+            const targetMed = await db.get('SELECT id FROM medicines WHERE LOWER(name) = LOWER(?)', [String(ocrRow.correct).trim()]);
+            if (targetMed?.id) medId = targetMed.id;
+          }
         }
+      }
+
+      if (!medId) {
+        // Strict human-verification contract: never bare-insert a name-only medicine.
+        await db.run('ROLLBACK');
+        return res.status(400).json({
+          error: `Unresolved medicine "${inputName || `Item`}". Link it to an existing medicine or register a new one before approving.`,
+          unresolved_items: [{ name: inputName }]
+        });
       }
 
       // OCR Auto-Learning Feedback Loop: save raw alias/ocr correction rule if raw text was supplied
       const rawText = item.raw_name || item.original_name || item.raw_text;
-      if (rawText && rawText.trim() !== '' && rawText.trim().toLowerCase() !== item.name.trim().toLowerCase()) {
+      if (rawText && rawText.trim() !== '' && inputName && rawText.trim().toLowerCase() !== inputName.toLowerCase()) {
         try {
           await db.run('INSERT OR IGNORE INTO medicine_aliases (alias_name, medicine_id) VALUES (?, ?)', [rawText.trim(), medId]);
           await db.run(

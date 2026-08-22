@@ -23,7 +23,8 @@ import {
   ShieldCheck,
   Activity
 } from 'lucide-react';
-import { api, apiClient } from '../../services/api';
+import { api, apiClient, type PharmarackSentOrder } from '../../services/api';
+import type { Doctor } from '../../types/api';
 import { toastEvent } from '../../services/events';
 import {} from '../../services/keyboardShortcuts';
 import { useApiQuery } from '../../hooks/useApiQuery';
@@ -66,10 +67,32 @@ interface OcrCorrection {
   created_at: string;
 }
 
-let cachedDoctorsList: any[] = [];
+type LocalDoctorRow = Doctor & {
+  reg_number?: string | null;
+  specialty?: string | null;
+  speciality?: string | null;
+  clinic?: string | null;
+};
+
+type LocalProfileDetailRow = ProfileDetail & { file_mapping_rules?: string | null };
+
+interface LocalMappingTestResult {
+  success?: boolean;
+  mapped?: boolean;
+  medicine?: { name?: string; mrp?: number | string | null; rate?: number | string | null; packaging?: string | null };
+  error?: string;
+}
+
+interface LocalSentOrdersResponse {
+  orders?: PharmarackSentOrder[];
+}
+
+type LocalApiError = { response?: { data?: { error?: string } }; message?: string };
+
+let cachedDoctorsList: LocalDoctorRow[] = [];
 let cachedProfiles: LearningProfileSummary[] = [];
 let cachedOcrCorrections: OcrCorrection[] = [];
-const cachedProfileDetailsMap: Record<number, any> = {};
+const cachedProfileDetailsMap: Record<number, LocalProfileDetailRow> = {};
 
 const VALID_LEARNING_TABS = ['clinical', 'doctors', 'distributors'];
 
@@ -92,7 +115,7 @@ const Learning: React.FC = () => {
 
   // Sandbox state
   const [testBrandInput, setTestBrandInput] = useState('');
-  const [testResult, setTestResult] = useState<any>(null);
+  const [testResult, setTestResult] = useState<LocalMappingTestResult | null>(null);
   const [testingBrand, setTestingBrand] = useState(false);
 
   // Custom OCR Correction state
@@ -206,8 +229,9 @@ const Learning: React.FC = () => {
       delete cachedProfileDetailsMap[editingDistributor.id];
       await broadcastContactDataChanged();
       refetchProfiles();
-    } catch (err: any) {
-      toastEvent.trigger('Failed to update distributor: ' + (err.message || 'Server error'), 'error');
+    } catch (err) {
+      const e = err as LocalApiError;
+      toastEvent.trigger('Failed to update distributor: ' + (e.message || 'Server error'), 'error');
     } finally {
       setIsSavingDistributor(false);
     }
@@ -225,8 +249,9 @@ const Learning: React.FC = () => {
       toastEvent.trigger(`Distributor layout profile "${name}" deleted successfully!`, 'success');
       await broadcastContactDataChanged();
       refetchProfiles();
-    } catch (err: any) {
-      toastEvent.trigger('Failed to delete distributor layout: ' + (err.message || 'Server error'), 'error');
+    } catch (err) {
+      const e = err as LocalApiError;
+      toastEvent.trigger('Failed to delete distributor layout: ' + (e.message || 'Server error'), 'error');
     }
   };
 
@@ -262,8 +287,9 @@ const Learning: React.FC = () => {
       setNewDistAddress('');
       await broadcastContactDataChanged();
       refetchProfiles();
-    } catch (err: any) {
-      toastEvent.trigger('Failed to register distributor: ' + (err.message || 'Server error'), 'error');
+    } catch (err) {
+      const e = err as LocalApiError;
+      toastEvent.trigger('Failed to register distributor: ' + (e.message || 'Server error'), 'error');
     } finally {
       setIsCreatingDistributor(false);
     }
@@ -298,7 +324,7 @@ const Learning: React.FC = () => {
   }, []);
 
   // Doctors Query with module caching
-  const { data: doctorsList = cachedDoctorsList, isLoading: loadingDoctors, refetch: refetchDoctors } = useApiQuery<any[]>(
+  const { data: doctorsList = cachedDoctorsList, isLoading: loadingDoctors, refetch: refetchDoctors } = useApiQuery<LocalDoctorRow[]>(
     'crm-doctors',
     async () => {
       const res = await apiClient.get('/crm/doctors');
@@ -332,7 +358,7 @@ const Learning: React.FC = () => {
   );
 
   // Today's Pharmarack Sent Orders Query
-  const { data: todaySentOrdersData } = useApiQuery<any>(
+  const { data: todaySentOrdersData } = useApiQuery<LocalSentOrdersResponse>(
     'learning-today-pharmarack-sent-orders',
     async () => {
       const res = await apiClient.get('/pharmarack/sent-orders');
@@ -340,10 +366,10 @@ const Learning: React.FC = () => {
     },
     { enabled: isPageVisible && activeTab === 'distributors' }
   );
-  const todaySentOrdersList: any[] = todaySentOrdersData?.orders || [];
+  const todaySentOrdersList: PharmarackSentOrder[] = todaySentOrdersData?.orders || [];
 
   // Profiles Query with module caching
-  const { data: rawProfiles = cachedProfiles, isLoading: loadingProfiles, refetch: refetchProfiles } = useApiQuery<any>(
+  const { data: rawProfiles = cachedProfiles, isLoading: loadingProfiles, refetch: refetchProfiles } = useApiQuery<LearningProfileSummary[]>(
     'learning-profiles',
     async () => {
       const res = await apiClient.get('/learning/profiles');
@@ -406,14 +432,16 @@ const Learning: React.FC = () => {
       toastEvent.trigger(res.data?.message || 'AI Clinical Model retrained successfully!', 'success');
       await queryClient.invalidateQueries({ queryKey: ['learning-stats'] });
       refetchStats();
-    } catch (err: any) {
+    } catch (err) {
+      const e = err as LocalApiError;
       try {
         const res2 = await apiClient.post('/learning/refresh-model');
         toastEvent.trigger(res2.data?.message || 'AI Clinical Model refreshed successfully!', 'success');
         await queryClient.invalidateQueries({ queryKey: ['learning-stats'] });
         refetchStats();
-      } catch (err2: any) {
-        toastEvent.trigger('Retraining failed: ' + (err2.response?.data?.error || err2.message || err.message || 'Server error'), 'error');
+      } catch (err2) {
+        const e2 = err2 as LocalApiError;
+        toastEvent.trigger('Retraining failed: ' + (e2.response?.data?.error || e2.message || e.message || 'Server error'), 'error');
       }
     } finally {
       setRetraining(false);
@@ -429,8 +457,9 @@ const Learning: React.FC = () => {
     try {
       const data = await api.getLearnedMapping(testBrandInput.trim());
       setTestResult(data);
-    } catch (err: any) {
-      setTestResult({ success: false, error: err.message || 'No mapping found' });
+    } catch (err) {
+      const e = err as LocalApiError;
+      setTestResult({ success: false, error: e.message || 'No mapping found' });
     } finally {
       setTestingBrand(false);
     }
@@ -450,8 +479,9 @@ const Learning: React.FC = () => {
       setNewOcrCorrected('');
       refetchCorrections();
       refetchStats();
-    } catch (err: any) {
-      toastEvent.trigger('Failed to add OCR rule: ' + err.message, 'error');
+    } catch (err) {
+      const e = err as LocalApiError;
+      toastEvent.trigger('Failed to add OCR rule: ' + e.message, 'error');
     }
   };
 
@@ -462,8 +492,9 @@ const Learning: React.FC = () => {
       toastEvent.trigger('OCR rule deleted', 'success');
       refetchCorrections();
       refetchStats();
-    } catch (err: any) {
-      toastEvent.trigger('Failed to delete rule: ' + err.message, 'error');
+    } catch (err) {
+      const e = err as LocalApiError;
+      toastEvent.trigger('Failed to delete rule: ' + e.message, 'error');
     }
   };
 
@@ -492,8 +523,9 @@ const Learning: React.FC = () => {
       setDocSpecialty('');
       setDocClinic('');
       refetchDoctors();
-    } catch (err: any) {
-      toastEvent.trigger('Failed to register doctor: ' + err.message, 'error');
+    } catch (err) {
+      const e = err as LocalApiError;
+      toastEvent.trigger('Failed to register doctor: ' + e.message, 'error');
     }
   };
 
@@ -503,13 +535,14 @@ const Learning: React.FC = () => {
       await apiClient.delete(`/crm/doctors/${id}`);
       toastEvent.trigger('Doctor removed from directory', 'success');
       refetchDoctors();
-    } catch (err: any) {
-      toastEvent.trigger('Failed to remove doctor: ' + err.message, 'error');
+    } catch (err) {
+      const e = err as LocalApiError;
+      toastEvent.trigger('Failed to remove doctor: ' + e.message, 'error');
     }
   };
 
   // Edit Doctor Handlers
-  const handleOpenEditDoctor = (d: any) => {
+  const handleOpenEditDoctor = (d: LocalDoctorRow) => {
     setEditingDoctor({
       id: d.id,
       name: d.name || '',
@@ -545,8 +578,9 @@ const Learning: React.FC = () => {
       toastEvent.trigger('Doctor details updated successfully', 'success');
       setEditingDoctor(null);
       refetchDoctors();
-    } catch (err: any) {
-      toastEvent.trigger('Failed to update doctor: ' + (err.message || 'Server error'), 'error');
+    } catch (err) {
+      const e = err as LocalApiError;
+      toastEvent.trigger('Failed to update doctor: ' + (e.message || 'Server error'), 'error');
     } finally {
       setIsSavingDoctor(false);
     }
@@ -570,8 +604,9 @@ const Learning: React.FC = () => {
       setSecondaryMergeId(null);
       await broadcastContactDataChanged();
       refetchProfiles();
-    } catch (err: any) {
-      toastEvent.trigger('Merge failed: ' + (err.message || 'Server error'), 'error');
+    } catch (err) {
+      const e = err as LocalApiError;
+      toastEvent.trigger('Merge failed: ' + (e.message || 'Server error'), 'error');
     } finally {
       setIsMerging(false);
     }
@@ -582,7 +617,7 @@ const Learning: React.FC = () => {
   const profilesList = Array.isArray(rawProfiles) ? rawProfiles : [];
 
   // Filtered Doctors
-  const filteredDoctors = doctorsListArray.filter((d: any) => {
+  const filteredDoctors = doctorsListArray.filter((d) => {
     const q = (doctorSearch || globalSearch).toLowerCase().trim();
     if (!q) return true;
     return (
@@ -617,7 +652,7 @@ const Learning: React.FC = () => {
     if (!todaySentOrdersList || todaySentOrdersList.length === 0) return false;
     const pName = (p.distributor_name || '').toLowerCase().trim();
     const pMapped = (p.mapped_store_names || '').toLowerCase();
-    return todaySentOrdersList.some((o: any) => {
+    return todaySentOrdersList.some((o) => {
       if (o.store_id && o.store_id === p.distributor_id) return true;
       const sName = (o.store_name || '').toLowerCase().trim();
       if (!sName) return false;
@@ -1053,7 +1088,7 @@ const Learning: React.FC = () => {
                         </td>
                       </tr>
                     ) : (
-                      filteredDoctors.map((d: any) => (
+                      filteredDoctors.map((d) => (
                         <tr key={d.id} className="hover:bg-bg2/40 transition-colors">
                           <td className="py-3 px-4 font-bold text-text">
                             <div className="flex items-center gap-2">

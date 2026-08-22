@@ -666,30 +666,56 @@ router.post('/google/disconnect', async (_req, res) => {
 router.get('/registered-devices', async (_req, res) => {
   try {
     const db = await dbManager.getConnection();
+    // Dedupe by stable identity (uuid, falling back to token for legacy rows)
     const rows = await db.all(`
-      SELECT 
-        push_tokens.token, 
-        push_tokens.device_name, 
-        push_tokens.os, 
+      SELECT
+        push_tokens.token,
+        COALESCE(push_tokens.device_uuid, 'tok-' || push_tokens.token) as device_id,
+        push_tokens.device_name,
+        push_tokens.os,
         push_tokens.last_seen,
-        CASE 
-          WHEN (strftime('%s', 'now') - strftime('%s', push_tokens.last_seen)) <= 40 THEN 1 
-          ELSE 0 
+        COALESCE(push_tokens.is_blocked, 0) as is_blocked,
+        CASE
+          WHEN (strftime('%s', 'now') - strftime('%s', push_tokens.last_seen)) <= 40 THEN 1
+          ELSE 0
         END as is_online
       FROM push_tokens
-      INNER JOIN (
-        SELECT MAX(last_seen) as max_last_seen, device_name, os
-        FROM push_tokens
-        GROUP BY device_name, os
-      ) p2 ON p2.max_last_seen = push_tokens.last_seen 
-        AND p2.device_name = push_tokens.device_name 
-        AND p2.os = push_tokens.os
+      WHERE rowid IN (
+        SELECT rowid FROM push_tokens p2
+        WHERE COALESCE(p2.device_uuid, 'tok-' || p2.token) = COALESCE(push_tokens.device_uuid, 'tok-' || push_tokens.token)
+        ORDER BY last_seen DESC NULLS LAST
+        LIMIT 1
+      )
       ORDER BY is_online DESC, push_tokens.last_seen DESC
     `);
     res.json({ success: true, devices: rows || [] });
   } catch (err: any) {
     console.error('Failed to fetch registered devices:', err);
     res.json({ success: true, devices: [] });
+  }
+});
+
+// Revoke (unregister) a device — removes it from the registry and logs the removal
+router.delete('/registered-devices/:token', async (req, res) => {
+  const { token } = req.params;
+  if (!token) {
+    return res.status(400).json({ error: 'Token is required' });
+  }
+  try {
+    const db = await dbManager.getConnection();
+    const row = await db.get('SELECT device_name, os FROM push_tokens WHERE token = ?', [token]);
+    const result = await db.run('DELETE FROM push_tokens WHERE token = ?', [token]);
+    if (!result || result.changes === 0) {
+      return res.status(404).json({ error: 'Device not found' });
+    }
+    await db.run(
+      'INSERT INTO action_logs (action_type, description) VALUES (?, ?)',
+      ['DEVICE_REMOVED', `Mobile device "${row?.device_name || 'Unknown'}" (${row?.os || '?'}) was revoked from the registry`]
+    );
+    res.json({ success: true, message: 'Device removed successfully' });
+  } catch (err: any) {
+    console.error('Failed to remove registered device:', err);
+    res.status(500).json({ error: err.message || 'Failed to remove device' });
   }
 });
 

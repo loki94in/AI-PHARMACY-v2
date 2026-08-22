@@ -19,6 +19,17 @@ import { api } from '../../services/api';
 import { useQueryClient } from '@tanstack/react-query';
 import { invalidateAfterStockWrite } from '../../utils/cacheInvalidation';
 
+interface LocalExpiryAuditRow {
+  id: number;
+  action_type?: string;
+  created_at?: string;
+  description?: string;
+  metadata?: unknown;
+}
+
+type LocalApiError = { response?: { data?: { error?: string } }; message?: string };
+type LocalStatusFilter = 'pending' | 'approved' | 'rejected' | 'all';
+
 interface ExpiryReviewItem {
   id: number;
   inventory_id: number;
@@ -78,7 +89,7 @@ export const ExpiryReturnReview: React.FC<{ onPendingCountChange?: (count: numbe
 
   // Audit history modal
   const [showAuditModal, setShowAuditModal] = useState(false);
-  const [auditLogs, setAuditLogs] = useState<any[]>([]);
+  const [auditLogs, setAuditLogs] = useState<LocalExpiryAuditRow[]>([]);
   const [loadingAudit, setLoadingAudit] = useState(false);
 
   // Reject modal state
@@ -173,9 +184,10 @@ export const ExpiryReturnReview: React.FC<{ onPendingCountChange?: (count: numbe
       invalidateAfterStockWrite(queryClient);
       api.getCompactInventory().catch(() => {});
       await fetchReviews();
-    } catch (err: any) {
+    } catch (err) {
+      const e = err as LocalApiError;
       console.error('Failed to approve review:', err);
-      setApproveError(`Approval failed: ${err?.response?.data?.error || err.message}`);
+      setApproveError(`Approval failed: ${e?.response?.data?.error || e.message}`);
     } finally {
       setActionInProgressId(null);
     }
@@ -193,9 +205,10 @@ export const ExpiryReturnReview: React.FC<{ onPendingCountChange?: (count: numbe
       await api.rejectExpiryReview(rejectingItem.id, { notes: rejectNotes || 'Pharmacist rejected return proposal' });
       setRejectingItem(null);
       await fetchReviews();
-    } catch (err: any) {
+    } catch (err) {
+      const e = err as LocalApiError;
       console.error('Failed to reject review:', err);
-      alert(`Rejection failed: ${err?.response?.data?.error || err.message}`);
+      alert(`Rejection failed: ${e?.response?.data?.error || e.message}`);
     } finally {
       setActionInProgressId(null);
     }
@@ -242,9 +255,10 @@ export const ExpiryReturnReview: React.FC<{ onPendingCountChange?: (count: numbe
       invalidateAfterStockWrite(queryClient);
       api.getCompactInventory().catch(() => {});
       await fetchReviews();
-    } catch (err: any) {
+    } catch (err) {
+      const e = err as LocalApiError;
       console.error('Bulk approval failed:', err);
-      setBulkError(`Bulk approval error: ${err?.response?.data?.error || err.message}`);
+      setBulkError(`Bulk approval error: ${e?.response?.data?.error || e.message}`);
     } finally {
       setBulkApproving(false);
     }
@@ -356,7 +370,7 @@ export const ExpiryReturnReview: React.FC<{ onPendingCountChange?: (count: numbe
             ].map(tab => (
               <button
                 key={tab.id}
-                onClick={() => setStatusFilter(tab.id as any)}
+                onClick={() => setStatusFilter(tab.id as LocalStatusFilter)}
                 className={`px-3 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
                   statusFilter === tab.id
                     ? 'bg-bg2 text-primary shadow-sm border border-border font-extrabold ring-1 ring-primary/20'
@@ -936,7 +950,7 @@ export const ExpiryReturnReview: React.FC<{ onPendingCountChange?: (count: numbe
                   No expiry return audit entries recorded yet.
                 </div>
               ) : (
-                auditLogs.map((log: any) => (
+                auditLogs.map((log: LocalExpiryAuditRow) => (
                   <div
                     key={log.id}
                     className="p-3 rounded-xl bg-bg3/40 border border-border/60 flex flex-col gap-1 text-xs"
@@ -956,9 +970,9 @@ export const ExpiryReturnReview: React.FC<{ onPendingCountChange?: (count: numbe
                       </span>
                     </div>
                     <p className="text-text font-medium text-xs mt-0.5">{log.description}</p>
-                    {log.metadata && (
+                    {(log.metadata as React.ReactNode) && (
                       <pre className="text-[10px] font-mono text-muted bg-bg p-1.5 rounded-lg overflow-x-auto">
-                        {log.metadata}
+                        {log.metadata as React.ReactNode}
                       </pre>
                     )}
                   </div>

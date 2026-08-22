@@ -26,6 +26,7 @@ import {
   PackageSearch
 } from 'lucide-react';
 import { api } from '../../services/api';
+import type { InvestigationSearchParams } from '../../services/api';
 import { useQueryClient } from '@tanstack/react-query';
 import { usePersistedDateRange } from '../../hooks/usePersistedDateRange';
 import { useInfiniteScroll } from '../../hooks/useInfiniteScroll';
@@ -87,6 +88,98 @@ interface SelectedDetails {
   }>;
 }
 
+type LocalApiError = { response?: { data?: { error?: string } }; message?: string };
+
+interface LocalAuditLogRow {
+  id?: number;
+  action_type?: string;
+  created_at?: string;
+  description?: string;
+}
+
+interface LocalBillItem {
+  inventory_id?: number;
+  medicine_id?: number;
+  medicine_name?: string;
+  batch_no?: string;
+  expiry_date?: string;
+  quantity: number;
+  unit_price?: number | string | null;
+  loose_qty?: number;
+  cost_price?: number | string | null;
+  mrp?: number | string | null;
+  free_qty?: number;
+  cgst_per?: number | null;
+  sgst_per?: number | null;
+  cd_value?: number | null;
+  original_qty?: number;
+}
+
+interface LocalMedSearchRow {
+  medicine_id?: number;
+  inventory_id?: number;
+  medicine_name?: string;
+  batch_no?: string;
+  expiry_date?: string;
+  quantity?: number;
+  mrp?: number | string | null;
+  cost_price?: number | string | null;
+  cgst_per?: number | null;
+  sgst_per?: number | null;
+}
+
+interface LocalLedgerRow {
+  id?: number;
+  type: string;
+  date: string;
+  reference?: string;
+  party?: string;
+  return_type?: string;
+  invoice_id?: number;
+  purchase_id?: number;
+  inventory_id?: number;
+  discount?: number;
+  medicine_name?: string;
+  batch_no?: string;
+  opening_qty?: number;
+  opening_loose?: number;
+  purchase_qty?: number;
+  free_qty?: number;
+  sale_qty?: number;
+  sale_loose?: number;
+  purchase_return_qty?: number;
+  sales_return_qty?: number;
+  adj_qty?: number;
+  adj_loose?: number;
+  closing_qty?: number;
+  closing_loose?: number;
+  medicine_stock_qty?: number;
+  medicine_stock_loose?: number;
+}
+
+interface LocalSaleDetailItem {
+  inventory_id?: number;
+  medicine_name?: string;
+  batch_number?: string;
+  quantity?: number;
+  unit_price?: number | string | null;
+  loose_qty?: number;
+}
+
+interface LocalPurchaseDetailItem {
+  medicine_id?: number;
+  medicine_name?: string;
+  batch_no?: string;
+  expiry_date?: string;
+  quantity?: number;
+  cost_price?: number | string | null;
+  mrp?: number | string | null;
+  free_qty?: number | null;
+  cgst_per?: number | null;
+  sgst_per?: number | null;
+  cd_value?: number | null;
+}
+
 const InvestigationCenter = () => {
   const queryClient = useQueryClient();
   // Column-header inline filters (immediate UI state)
@@ -115,7 +208,7 @@ const InvestigationCenter = () => {
 
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [details, setDetails] = useState<SelectedDetails | null>(null);
-  const [auditLogs, setAuditLogs] = useState<any[]>([]);
+  const [auditLogs, setAuditLogs] = useState<LocalAuditLogRow[]>([]);
   const [, setDetailsLoading] = useState(false);
 
   // Column Visibility — persisted in localStorage
@@ -203,9 +296,9 @@ const InvestigationCenter = () => {
   // Target Bill Edit States
   const [editingBillId, setEditingBillId] = useState<number | null>(null);
   const [editingBillNo, setEditingBillNo] = useState<string>('');
-  const [billItems, setBillItems] = useState<any[]>([]);
+  const [billItems, setBillItems] = useState<LocalBillItem[]>([]);
   const [billDiscount, setBillDiscount] = useState<number>(0);
-  const [searchMedicineResults, setSearchMedicineResults] = useState<any[]>([]);
+  const [searchMedicineResults, setSearchMedicineResults] = useState<LocalMedSearchRow[]>([]);
   const [searchMedicineQuery, setSearchMedicineQuery] = useState('');
 
   // Notification Toast
@@ -228,7 +321,7 @@ const InvestigationCenter = () => {
     fetchNextPage,
     refetch,
     sentinelRef,
-  } = useInfiniteScroll<any>({
+  } = useInfiniteScroll<LocalLedgerRow>({
     queryKey: 'investigation-list',
     cacheKey: 'investigation-cache',
     serverFilters: {
@@ -242,7 +335,7 @@ const InvestigationCenter = () => {
       party: debouncedParty,
     },
     fetchPage: async (pageParam, filters) => {
-      const cleanFilters: any = {
+      const cleanFilters: InvestigationSearchParams = {
         page: pageParam,
         limit: 100,
       };
@@ -369,30 +462,31 @@ const InvestigationCenter = () => {
 
           // Refresh local POS inventory search cache
           api.getCompactInventory().catch(() => { });
-        } catch (err: any) {
-          showToast(err.response?.data?.error || 'Failed to update inventory', 'error');
+        } catch (err) {
+          const e = err as LocalApiError;
+          showToast(e.response?.data?.error || 'Failed to update inventory', 'error');
         }
       }
     });
   };
 
   // Edit Sales Bill logic
-  const handleStartSaleBillEdit = (item: any) => {
-    setEditingBillId(item.invoice_id);
-    setEditingBillNo(item.reference);
+  const handleStartSaleBillEdit = (item: LocalLedgerRow) => {
+    setEditingBillId(item.invoice_id!);
+    setEditingBillNo(item.reference!);
     setBillDiscount(item.discount || 0);
 
     setDetailsLoading(true);
-    api.getSale(item.invoice_id)
+    api.getSale(item.invoice_id!)
       .then(invoiceDetails => {
-        const mapped = invoiceDetails.items.map((it: any) => ({
+        const mapped = invoiceDetails.items.map((it: LocalSaleDetailItem) => ({
           inventory_id: it.inventory_id,
           medicine_name: it.medicine_name,
           batch_no: it.batch_number,
-          quantity: it.quantity,
+          quantity: it.quantity as number,
           unit_price: it.unit_price,
           loose_qty: it.loose_qty || 0,
-          original_qty: it.quantity
+          original_qty: it.quantity as number
         }));
         setBillItems(mapped);
         setEditingType('sale');
@@ -402,19 +496,19 @@ const InvestigationCenter = () => {
   };
 
   // Edit Purchase Bill logic
-  const handleStartPurchaseBillEdit = (item: any) => {
-    setEditingBillId(item.purchase_id);
-    setEditingBillNo(item.reference);
+  const handleStartPurchaseBillEdit = (item: LocalLedgerRow) => {
+    setEditingBillId(item.purchase_id!);
+    setEditingBillNo(item.reference!);
 
     setDetailsLoading(true);
-    api.getPurchase(item.purchase_id)
+    api.getPurchase(item.purchase_id!)
       .then(purchaseDetails => {
-        const mapped = purchaseDetails.items.map((it: any) => ({
+        const mapped = purchaseDetails.items.map((it: LocalPurchaseDetailItem) => ({
           medicine_id: it.medicine_id,
           medicine_name: it.medicine_name,
           batch_no: it.batch_no,
           expiry_date: it.expiry_date,
-          quantity: it.quantity,
+          quantity: it.quantity as number,
           cost_price: it.cost_price,
           mrp: it.mrp,
           free_qty: it.free_qty || 0,
@@ -433,13 +527,13 @@ const InvestigationCenter = () => {
   // Inline Recalculation Engine
   const calculateRecalculatedTotal = () => {
     if (editingType === 'sale') {
-      const subtotal = billItems.reduce((acc, it) => acc + (it.quantity * it.unit_price), 0);
+      const subtotal = billItems.reduce((acc, it) => acc + (it.quantity * (it.unit_price as number)), 0);
       const tax = subtotal * 0.05;
       return Math.round(subtotal + tax - billDiscount);
     }
     if (editingType === 'purchase') {
       return Math.round(billItems.reduce((acc, it) => {
-        const taxable = (it.quantity * it.cost_price) - (it.cd_value || 0);
+        const taxable = (it.quantity * (it.cost_price as number)) - (it.cd_value || 0);
         const gstPer = (it.cgst_per || 0) + (it.sgst_per || 0);
         return acc + taxable + (taxable * gstPer / 100);
       }, 0));
@@ -491,7 +585,7 @@ const InvestigationCenter = () => {
     } catch { }
   };
 
-  const handleAddMedicineToBill = (med: any) => {
+  const handleAddMedicineToBill = (med: LocalMedSearchRow) => {
     if (editingType === 'sale') {
       if (billItems.some(i => i.inventory_id === med.inventory_id)) {
         showToast('Medicine already present in list', 'error');
@@ -550,12 +644,12 @@ const InvestigationCenter = () => {
         try {
           if (editingType === 'sale') {
             await api.updateInvestigationSaleBill(editingBillId, {
-              items: billItems,
+              items: billItems as unknown as Record<string, unknown>[],
               discount: billDiscount
             });
           } else {
             await api.updateInvestigationPurchaseBill(editingBillId, {
-              items: billItems
+              items: billItems as unknown as Record<string, unknown>[]
             });
           }
           showToast(`${actionText} corrected successfully!`);
@@ -567,8 +661,9 @@ const InvestigationCenter = () => {
 
           // Refresh local POS inventory search cache
           api.getCompactInventory().catch(() => { });
-        } catch (err: any) {
-          showToast(err.response?.data?.error || 'Failed to save correction.', 'error');
+        } catch (err) {
+          const e = err as LocalApiError;
+          showToast(e.response?.data?.error || 'Failed to save correction.', 'error');
         }
       }
     });
@@ -580,9 +675,9 @@ const InvestigationCenter = () => {
   };
 
   // Formatting helpers for stock quantities
-  const formatOpeningStock = (qty: number, loose: number) => `${qty || 0}::${loose || 0}`;
-  const formatTxQty = (qty: number, loose: number) => {
-    if (loose > 0) return `${qty || 0}::${loose}`;
+  const formatOpeningStock = (qty?: number, loose?: number) => `${qty || 0}::${loose || 0}`;
+  const formatTxQty = (qty?: number, loose?: number) => {
+    if ((loose as number) > 0) return `${qty || 0}::${loose}`;
     return String(qty || 0);
   };
 
@@ -1223,7 +1318,7 @@ const InvestigationCenter = () => {
                                   }>
                                     {action.replace(/_/g, ' ')}
                                   </span>
-                                  <span className="font-mono text-muted/60">{formatDate(log.created_at)}</span>
+                                  <span className="font-mono text-muted/60">{formatDate(log.created_at!)}</span>
                                 </div>
                                 <p className="text-text font-medium leading-relaxed bg-bg3/40 border border-glass-border/30 rounded-xl p-2.5 mt-0.5 shadow-sm hover:border-glass-border/60 transition-colors">
                                   {log.description}
@@ -1357,7 +1452,7 @@ const InvestigationCenter = () => {
                                       <div className="flex items-center bg-bg2 border border-glass-border rounded-lg overflow-hidden h-8">
                                         <button
                                           type="button"
-                                          onClick={() => handleItemLooseQtyChange(index, Math.max(0, item.loose_qty - 1))}
+                                          onClick={() => handleItemLooseQtyChange(index, Math.max(0, (item.loose_qty as number) - 1))}
                                           className="px-2.5 hover:bg-bg3 text-muted hover:text-text transition-colors h-full flex items-center justify-center border-r border-glass-border/40 cursor-pointer"
                                         >
                                           <Minus size={11} />
@@ -1370,7 +1465,7 @@ const InvestigationCenter = () => {
                                         />
                                         <button
                                           type="button"
-                                          onClick={() => handleItemLooseQtyChange(index, item.loose_qty + 1)}
+                                          onClick={() => handleItemLooseQtyChange(index, (item.loose_qty as number) + 1)}
                                           className="px-2.5 hover:bg-bg3 text-muted hover:text-text transition-colors h-full flex items-center justify-center border-l border-glass-border/40 cursor-pointer"
                                         >
                                           <Plus size={11} />
@@ -1418,7 +1513,7 @@ const InvestigationCenter = () => {
                       <div className="flex justify-between items-center text-muted">
                         <span>Subtotal</span>
                         <span className="font-mono font-bold text-text">
-                          ₹{billItems.reduce((acc, it) => acc + (it.quantity * (editingType === 'sale' ? it.unit_price : it.cost_price)), 0).toFixed(2)}
+                          ₹{billItems.reduce((acc, it) => acc + (it.quantity * ((editingType === 'sale' ? it.unit_price : it.cost_price) as number)), 0).toFixed(2)}
                         </span>
                       </div>
 
@@ -1427,7 +1522,7 @@ const InvestigationCenter = () => {
                         <div className="flex justify-between items-center text-muted">
                           <span>GST / Taxes (5%)</span>
                           <span className="font-mono font-bold text-text">
-                            ₹{(billItems.reduce((acc, it) => acc + (it.quantity * it.unit_price), 0) * 0.05).toFixed(2)}
+                            ₹{(billItems.reduce((acc, it) => acc + (it.quantity * (it.unit_price as number)), 0) * 0.05).toFixed(2)}
                           </span>
                         </div>
                       )}
@@ -1437,7 +1532,7 @@ const InvestigationCenter = () => {
                           <span>GST / Taxes (CGST+SGST)</span>
                           <span className="font-mono font-bold text-text">
                             ₹{billItems.reduce((acc, it) => {
-                              const taxable = (it.quantity * it.cost_price) - (it.cd_value || 0);
+                              const taxable = (it.quantity * (it.cost_price as number)) - (it.cd_value || 0);
                               const gstPer = (it.cgst_per || 0) + (it.sgst_per || 0);
                               return acc + (taxable * gstPer / 100);
                             }, 0).toFixed(2)}
@@ -1684,7 +1779,7 @@ const InvestigationCenter = () => {
                           {col('openingStock') && (
                             <td className="p-2 border-r border-glass-border/15 w-32 shrink-0 text-center font-mono text-xs text-muted">
                               <span className="text-text font-bold">{item.opening_qty || 0}</span>
-                              {item.opening_loose > 0 && (
+                              {(item.opening_loose as number) > 0 && (
                                 <span className="text-[10px] text-muted font-normal ml-0.5">::{item.opening_loose}</span>
                               )}
                             </td>
@@ -1761,7 +1856,7 @@ const InvestigationCenter = () => {
                           {col('closingStock') && (
                             <td className="p-2 border-r border-glass-border/15 w-32 shrink-0 text-center font-mono text-xs">
                               <span className="font-bold text-text">{item.closing_qty || 0}</span>
-                              {item.closing_loose > 0 && (
+                              {(item.closing_loose as number) > 0 && (
                                 <span className="text-[10px] text-muted/70 font-semibold ml-0.5">::{item.closing_loose}</span>
                               )}
                             </td>
@@ -1770,7 +1865,7 @@ const InvestigationCenter = () => {
                           {col('medicineStock') && (
                             <td className="p-2 border-r border-glass-border/15 w-32 shrink-0 text-center font-mono text-xs">
                               <span className="font-bold text-text/80">{item.medicine_stock_qty || 0}</span>
-                              {item.medicine_stock_loose > 0 && (
+                              {(item.medicine_stock_loose as number) > 0 && (
                                 <span className="text-[10px] text-muted/70 font-semibold ml-0.5">::{item.medicine_stock_loose}</span>
                               )}
                             </td>
@@ -1782,7 +1877,7 @@ const InvestigationCenter = () => {
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  handleAdjustStock(item.inventory_id);
+                                  handleAdjustStock(item.inventory_id!);
                                 }}
                                 className="px-2.5 py-1 rounded-xl bg-amber-500/10 border border-amber-500/20 hover:bg-amber-500 hover:text-white hover:shadow-[0_0_10px_rgba(245,158,11,0.4)] text-amber-500 transition-all text-[10px] font-extrabold cursor-pointer flex items-center gap-1 mx-auto"
                                 title="Direct Stock Master Adjustment"

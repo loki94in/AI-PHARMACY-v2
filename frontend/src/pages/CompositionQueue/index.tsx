@@ -5,6 +5,8 @@ import { api } from '../../services/api';
 import { useFetchMode } from '../../hooks/useFetchMode';
 import { usePageActive } from '../../lib/keepAlive/PageActiveContext';
 
+type LocalApiError = { response?: { status?: number }; message?: string };
+
 interface EnrichmentStatus {
   total: number;
   enriched: number;
@@ -262,8 +264,9 @@ export default function CompositionQueue() {
     try {
       await api.startEnrichment();
       await loadStatus();
-    } catch (err: any) {
-      const httpStatus = err?.response?.status;
+    } catch (err) {
+      const e = err as LocalApiError;
+      const httpStatus = e?.response?.status;
       if (httpStatus === 409) {
         await loadStatus();
       } else {
@@ -288,7 +291,7 @@ export default function CompositionQueue() {
           loadQueue();
         }
       }, 2000);
-    } catch (err: any) {
+    } catch (err) {
       console.error('Failed to stop enrichment:', err);
       setStopping(false);
     }

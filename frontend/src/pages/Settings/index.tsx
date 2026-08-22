@@ -40,6 +40,8 @@ import { BackupCenterContent } from '../../components/BackupCenterModal';
 // TYPES & INTERFACES
 // ==========================================
 
+type LocalApiError = { response?: { data?: { error?: string } }; message?: string };
+
 interface StorageLocation {
   id: number;
   name: string;
@@ -241,8 +243,9 @@ function StoreProfileTab({ rawSettings, refetchSettings }: { rawSettings: Record
       updateSettingsCache(queryClient, payload);
       broadcastContactDataChanged(queryClient);
       refetchSettings();
-    } catch (err: any) {
-      toastEvent.trigger('Failed to save store profile: ' + (err.message || 'Unknown error'), 'error');
+    } catch (err) {
+      const e = err as LocalApiError;
+      toastEvent.trigger('Failed to save store profile: ' + (e.message || 'Unknown error'), 'error');
     } finally {
       setSaving(false);
     }
@@ -264,8 +267,9 @@ function StoreProfileTab({ rawSettings, refetchSettings }: { rawSettings: Record
       setStorageLocForm({ name: '', code: '', type: 'rack', description: '', is_default: false, is_active: true });
       setEditingLocId(null);
       fetchStorageLocations();
-    } catch (err: any) {
-      toastEvent.trigger(err.response?.data?.error || 'Failed to save storage location', 'error');
+    } catch (err) {
+      const e = err as LocalApiError;
+      toastEvent.trigger(e.response?.data?.error || 'Failed to save storage location', 'error');
     }
   };
 
@@ -274,8 +278,9 @@ function StoreProfileTab({ rawSettings, refetchSettings }: { rawSettings: Record
       await apiClient.delete(`/settings/storage-locations/${id}`);
       toastEvent.trigger('Storage location deleted', 'success');
       fetchStorageLocations();
-    } catch (err: any) {
-      toastEvent.trigger(err.response?.data?.error || 'Failed to delete storage location', 'error');
+    } catch (err) {
+      const e = err as LocalApiError;
+      toastEvent.trigger(e.response?.data?.error || 'Failed to delete storage location', 'error');
     }
   };
 
@@ -579,8 +584,9 @@ function StaffSecurityTab({ rawSettings, refetchSettings }: { rawSettings: Recor
       await apiClient.post('/security/admin/reset-device');
       toastEvent.trigger('Admin device authorization reset successfully', 'success');
       refetchSettings();
-    } catch (err: any) {
-      toastEvent.trigger('Failed to reset device authorization: ' + (err.message || 'Unknown error'), 'error');
+    } catch (err) {
+      const e = err as LocalApiError;
+      toastEvent.trigger('Failed to reset device authorization: ' + (e.message || 'Unknown error'), 'error');
     }
   };
 
@@ -600,8 +606,9 @@ function StaffSecurityTab({ rawSettings, refetchSettings }: { rawSettings: Recor
       toastEvent.trigger('Security parameters updated successfully', 'success');
       setNewAdminPassword('');
       refetchSettings();
-    } catch (err: any) {
-      toastEvent.trigger('Failed to save security settings: ' + err.message, 'error');
+    } catch (err) {
+      const e = err as LocalApiError;
+      toastEvent.trigger('Failed to save security settings: ' + e.message, 'error');
     } finally {
       setSaving(false);
     }
@@ -835,8 +842,9 @@ function IntegrationsCredentialsTab({ rawSettings, refetchSettings, isVisible }:
       updateSettingsCache(queryClient, payload);
       broadcastContactDataChanged(queryClient);
       refetchSettings();
-    } catch (err: any) {
-      toastEvent.trigger('Failed to save integration settings: ' + err.message, 'error');
+    } catch (err) {
+      const e = err as LocalApiError;
+      toastEvent.trigger('Failed to save integration settings: ' + e.message, 'error');
     } finally {
       setSaving(false);
     }
@@ -852,8 +860,9 @@ function IntegrationsCredentialsTab({ rawSettings, refetchSettings, isVisible }:
       } else {
         toastEvent.trigger(res.data?.message || 'Session expired. Click "Open Login Window" to complete authentication.', 'info');
       }
-    } catch (err: any) {
-      toastEvent.trigger('Pharmarack session refresh error: ' + err.message, 'error');
+    } catch (err) {
+      const e = err as LocalApiError;
+      toastEvent.trigger('Pharmarack session refresh error: ' + e.message, 'error');
     } finally {
       setPharmarackRefreshing(false);
     }
@@ -863,8 +872,9 @@ function IntegrationsCredentialsTab({ rawSettings, refetchSettings, isVisible }:
     try {
       toastEvent.trigger('Opening Pharmarack Login window in Chrome...', 'info');
       await api.launchPharmarackLoginWindow();
-    } catch (err: any) {
-      toastEvent.trigger(err?.response?.data?.error || 'Failed to launch login window', 'error');
+    } catch (err) {
+      const e = err as LocalApiError;
+      toastEvent.trigger(e?.response?.data?.error || 'Failed to launch login window', 'error');
     }
   };
 
@@ -874,8 +884,9 @@ function IntegrationsCredentialsTab({ rawSettings, refetchSettings, isVisible }:
       await apiClient.post('/settings', { key: 'pharmarack_reorder_window_months', value: months });
       toastEvent.trigger(`Reorder lookback window set to ${months} months`, 'success');
       refetchSettings();
-    } catch (err: any) {
-      toastEvent.trigger('Failed to save reorder window: ' + err.message, 'error');
+    } catch (err) {
+      const e = err as LocalApiError;
+      toastEvent.trigger('Failed to save reorder window: ' + e.message, 'error');
     }
   };
 
@@ -1204,8 +1215,9 @@ function DataBackupsTab({ rawSettings, refetchSettings }: { rawSettings: Record<
       await apiClient.post('/settings/save', { backup_frequency: backupFrequency });
       toastEvent.trigger('Backup schedule updated', 'success');
       refetchSettings();
-    } catch (err: any) {
-      toastEvent.trigger('Failed to update backup schedule: ' + err.message, 'error');
+    } catch (err) {
+      const e = err as LocalApiError;
+      toastEvent.trigger('Failed to update backup schedule: ' + e.message, 'error');
     } finally {
       setSavingFreq(false);
     }
@@ -1216,8 +1228,9 @@ function DataBackupsTab({ rawSettings, refetchSettings }: { rawSettings: Record<
       queryClient.clear();
       invalidateAfterStockWrite(queryClient);
       toastEvent.trigger('Local inventory & search cache cleared successfully', 'success');
-    } catch (err: any) {
-      toastEvent.trigger('Failed to clear cache: ' + err.message, 'error');
+    } catch (err) {
+      const e = err as LocalApiError;
+      toastEvent.trigger('Failed to clear cache: ' + e.message, 'error');
     }
   };
 
@@ -1423,8 +1436,9 @@ function ResetDataModal({ initialMode = 'data', onClose, refetchSettings }: Rese
       setTimeout(() => {
         window.location.reload();
       }, 500);
-    } catch (err: any) {
-      toastEvent.trigger('System reset failed: ' + (err.response?.data?.error || err.message || 'Unknown error'), 'error');
+    } catch (err) {
+      const e = err as LocalApiError;
+      toastEvent.trigger('System reset failed: ' + (e.response?.data?.error || e.message || 'Unknown error'), 'error');
     } finally {
       setResetting(false);
     }

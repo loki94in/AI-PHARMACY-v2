@@ -8,10 +8,31 @@ This directory contains the Express.js server logic, database interactions, rout
 - **Integrations**: WhatsApp (`src/whatsappClient.ts`) and Telegram (`src/telegramBot.ts`).
 - **Services**: Business logic modules in `src/services/` (e.g. `backupService.ts`, `emailService.ts`).
 
+## CRM /patients Enrichment Contract (added 2026-08)
+- `GET /api/crm/patients` rows additionally carry `purchase_count`, `last_sale_date`, and `active_refill` (chunked ≤500-id indexed queries against `sales_invoices` / `patient_refills`). Enrichment failures degrade silently to unenriched rows — never drop the patient list. POS consumes these for the 🔁 Refill chip and returning-patient labels.
+
+## Strict Purchase Medicine Resolution (added 2026-08)
+No purchase ingestion route may silently create `medicines` master rows. Master registration is user-driven only (POST `/medicines` via the Universal editor); inventory is created solely inside verified purchase transactions.
+
+- **`POST /purchases/manual`**: per line, resolution order is explicit `medicine_id` → `resolveMedicineNameMultiTier` → `ocr_corrections`. If still unresolved, the line is collected and the whole transaction ROLLBACKs with `400 { unresolved_items: [{name}] }`. The former silent full-record auto-INSERT was removed. Do not reintroduce it.
+- **`POST /staged/:id/approve`** and **`POST /reconciliation/reissue`**: same strict chain; the old alias → `%LIKE%` containment → bare `INSERT INTO medicines (name)` fallback was removed. Unresolved lines abort with ROLLBACK + `400 {unresolved_items}`. A client-supplied `item.medicine_id` always wins when it exists.
+- **`POST /purchases/match-items`**: read-only batch resolver (`{names[], distributor_id}` → `{input, medicine_id, matched_name, confidence, match_type}`) used by StagedReviewModal and Purchase save verification. One round-trip, max 200 names, NEVER creates records. Use it instead of N per-line autocomplete calls.
+- Email/telegram/mobile-sync ingestion only ever writes pending `staged_purchases`; approval remains a human-only UI action. Keep it that way.
+
 ## Rules & Constraints
 - Keep database operations secure, avoiding direct raw query concatenation.
 - All new dependencies must be scanned using `scan_dependencies` before import.
 - Run `node scripts/quick-update.mjs` after any updates to backend files.
+
+## Hot-Path Query Performance Contracts (added 2026-08)
+
+Page-switch latency rules — verified against the live DB (251 MB, 37k inventory rows) with EXPLAIN QUERY PLAN. Do not regress these:
+
+- **GET /refills/panel** (`routes/refills.ts`): two-pass design — cheap `patient_refills×medicines×customers` base query first (two plain LEFT JOINs for language, never an OR-join), then ONE chunked (≤500 ids) window-function pass over `inventory_master` restricted to `medicine_id IN (...)`. NEVER reintroduce whole-table GROUP BY + ROW_NUMBER subqueries over `inventory_master`; they cost 170-250ms/request vs ~4ms now.
+- **GET /api/inventory** (`routes/inventory.ts`): `COUNT(*)` over the joined set (~380ms/request) is served from a filter-keyed module cache (`INVENTORY_COUNT_TTL_MS` = 60 s). `invalidateInventoryCountCache()` is called by the write interceptor in `database/connection.ts` on any `inventory_master` write — keep that wiring when touching either file.
+- **Indexes** (`database.ts`, fast-boot block): `idx_dispatch_orders_created (created_at DESC)` and `idx_special_orders_date (date DESC)` back bare-ORDER-BY list endpoints; new list endpoints must get a matching index or a status-prefixed composite that the actual ORDER BY can use.
+- **Purchases date filters** (`routes/purchases.ts` GET `/`): exact `date(p.date,'localtime') BETWEEN ...` expressions are ALWAYS paired with sargable superset bounds (`p.date >= datetime(?,'-1 day')` / `< datetime(?,'+2 days')`) so `idx_purchases_date_dist` prunes first. Preserve both when editing filters.
+- Axios GET transient-error retry (frontend `services/api.ts`) uses short exponential backoff (300/600/1200 ms); do not restore long flat waits.
 
 ## Self-Healing Crash Recovery (added 2026-06)
 
@@ -98,6 +119,9 @@ outes/orders.ts) call whatsappQueueWorker.forceNext() after enqueue so dispatch 
 ## Queue & Worker Consolidation (2026-08 refactor)
 
 - `src/services/whatsappQueue.ts` is now a thin compatibility facade over `whatsappQueueWorker`. Its duplicate ungated 30s setInterval (which double-drained `whatsapp_send_queue`) was removed; do NOT reintroduce a second processor for that table. The canonical worker self-gates: `isWhatsAppExplicitlyDisabled()` per tick, 10 s active / 30 s offline / 15 min when `activityTracker.isIdle()`.
+- WhatsApp init/restore lifecycle (added 2026-08): every `launchClientInstance()` exit path MUST settle the init promise — `auth_failure` rejects, and the three QR exits (unsolicited-QR suppression, 120 s QR timeout, 5-QR max refresh) now reject too. Never add an early-return that leaves `initPromise` pending; a pending initPromise deadlocks sendMessage/boot auto-init/Settings connect until app restart. The queue worker treats `!isReady` as offline regardless of `initializing` (dispatching mid-restore burns retries toward `failed_perm`), and self-heals a transiently-failed boot restore via a 60 s-cooldown silent `initClient()` retry when `hasSavedSession()` is true.
+- Background WhatsApp senders MUST be boot-window safe (added 2026-08): anything that can fire automatically at/near boot (emailService mail-arrival + distributor-invoice alerts) must `await waitForWhatsAppReady()` (whatsappClient.ts, bounded 90 s single-flight-aware wait) before a direct `sendMessage()` call. User-clicked routes keep immediate lazy-init semantics. Frontend failure toasts for queue/recent items carry a 15-minute freshness guard in Layout.tsx — do not remove it or persisted failure rows will re-toast every UI session.
+- Pharmarack live-cart loading: GET `/api/pharmarack/cart` and the boot warm-up share one loader, `loadLiveCartCore()` in `src/routes/pharmarack.ts`. The boot warm-up (`warmupStartupCart`, wired in server.ts via `tokenRefreshScheduler.onFirstRefreshComplete()` + T+50s fallback) populates `serverCartCache` and resolves `startupSyncCoordinator` from real data — success marks loaded; no token configured marks loaded immediately; genuine session/network failure deliberately leaves sync pending so the UI startup toast stays truthful. Do not bypass the coordinator or re-add route-local cart parsing.
 - Gated background loops (idle-skip added 2026-08): `distributorDispatchReminderWorker` (5 min) and `doctorReportingService` (hourly, internal daily dedupe guard prevents lost runs). Keep new workers following this P3 pattern.
 - `src/middleware/validation.ts` was deleted (zero importers). Do not recreate validation middleware without wiring it into routes.
 - `src/utils/whatsappTemplateBuilder.ts` `resolveActiveDeliveryBoy` is the contract-mandated resolver and reads the `delivery_boys.whatsapp_number` column (NOT `phone`, which does not exist on that table). Existing hand-rolled resolution sites in notificationService/pharmarackDailyDispatchService intentionally remain as-is (multi-boy lists, phone-splitting semantics); changing them requires explicit regression testing of WhatsApp order notifications.

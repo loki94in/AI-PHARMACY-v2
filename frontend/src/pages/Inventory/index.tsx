@@ -4,7 +4,7 @@ import {} from '../../hooks/useDeferredEffect';
 import { useApiQuery } from '../../hooks/useApiQuery';
 import { useQueryClient } from '@tanstack/react-query';
 import { PackageSearch, Plus, Minus, RefreshCw, X, AlertTriangle, ShieldAlert, BookOpen, Factory, Edit, Save, Loader2, Columns3, Check, Download, ShoppingCart } from 'lucide-react';
-import { api, type InventoryItem } from '../../services/api';
+import { api, type InventoryItem, type SpecialOrder } from '../../services/api';
 import { toastEvent } from '../../services/events';
 import { parsePackSizeFromPackaging } from '../../components/UniversalMedicineEditModal';
 // import { UniversalMedicineEditModal } from '../../components/UniversalMedicineEditModal';
@@ -20,6 +20,45 @@ import { useRef } from 'react';
 import { exportToCSV, exportToPDF } from '../../utils/export';
 
 const UniversalMedicineEditModal = lazy(() => import('../../components/UniversalMedicineEditModal').then(m => ({ default: m.UniversalMedicineEditModal })));
+
+type LocalSellSourceItem = InventoryItem & { inventory_id?: number; batch_no?: string };
+
+interface LocalPrefillMedicine {
+  medicineId: number;
+  medicineName?: string;
+  inventory_id?: number;
+  batch_no?: string;
+  expiry_date?: string;
+  mrp?: number;
+  sell_price?: number | string | null;
+  quantity?: number;
+  loose_qty?: number;
+  unit_price?: number;
+  discount?: number;
+  packaging?: string;
+  pack_size?: number;
+}
+
+interface LocalPosPrefill {
+  medicineId: number;
+  medicineName?: string;
+  quantity: number;
+  looseQty?: number;
+  patientName?: string;
+  patientPhone?: string;
+  selectedCustomerId?: number | null;
+  doctorName?: string;
+  medicines: LocalPrefillMedicine[];
+}
+
+interface LocalEnrichmentData {
+  activeIngredients?: string[];
+  indications?: string;
+  warnings?: string;
+  sideEffects?: string;
+  manufacturer?: string;
+  enrichmentSource?: string;
+}
 
 const ModalSkeleton = () => (
   <div className="fixed inset-0 z-global-modal flex items-center justify-center p-4 sm:p-6 fade-in">
@@ -138,13 +177,13 @@ const Inventory = () => {
   };
 
   // Close col menu on outside click
-  const handleSellItem = async (item: any) => {
+  const handleSellItem = async (item: LocalSellSourceItem) => {
     try {
       const medId = item.medicine_id || item.id;
       const refillInfo = await api.getMedicineRefillInfo(medId);
       const lastSale = refillInfo?.last_sale;
 
-      const prefillPayload: any = {
+      const prefillPayload: LocalPosPrefill = {
         medicineId: medId,
         medicineName: item.name || item.medicine_name,
         quantity: lastSale?.quantity || 1,
@@ -197,7 +236,7 @@ const Inventory = () => {
 
       setPanelOpen(false);
       navigate('/pos', { state: { prefill: prefillPayload } });
-    } catch (_err: any) {
+    } catch (_err) {
       const prefillPayload = {
         medicineId: item.medicine_id || item.id,
         medicineName: item.name || item.medicine_name,
@@ -231,7 +270,7 @@ const Inventory = () => {
 
   // Enriched Details Drawer states
   const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null);
-  const [enrichedData, setEnrichedData] = useState<any>(null);
+  const [enrichedData, setEnrichedData] = useState<LocalEnrichmentData | null>(null);
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
 
@@ -241,7 +280,7 @@ const Inventory = () => {
   
   const [universalEditMedicineId, setUniversalEditMedicineId] = useState<number | null>(null);
 
-  const { data: specialOrders = [] } = useApiQuery<any[]>(
+  const { data: specialOrders = [] } = useApiQuery<SpecialOrder[]>(
     'pos-special-orders',
     () => api.getOrders().then(data => Array.isArray(data) ? data.filter(o => o.status === 'Pending' || o.status === 'Ordered') : [])
   );
@@ -801,7 +840,7 @@ const Inventory = () => {
                         Edit Batch
                       </button>
                       <button
-                        onClick={() => { setPanelOpen(false); setUniversalEditMedicineId(selectedItem.medicine_id || (selectedItem as any).id); }}
+                        onClick={() => { setPanelOpen(false); setUniversalEditMedicineId(selectedItem.medicine_id || selectedItem.id); }}
                         className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-sky/10 border border-sky/30 hover:bg-sky/20 text-sky text-[12px] font-bold transition-all"
                         title="Edit globally across the app"
                       >

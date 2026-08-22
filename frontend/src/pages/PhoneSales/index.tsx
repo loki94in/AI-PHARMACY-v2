@@ -37,6 +37,8 @@ interface StagedSale {
   items_json: string;
   items?: StagedSaleItem[];
   status: 'pending' | 'approved' | 'rejected';
+  sold_from_device?: string;
+  device_uuid?: string;
 }
 
 interface Device {
@@ -94,9 +96,10 @@ export default function PhoneSales() {
       const list = Array.isArray(data) ? data : [];
       cachedPhoneSales = list;
       setSales(list);
-    } catch (err: any) {
+    } catch (err) {
+      const e = err as { message?: string };
       console.error('Failed to fetch staged sales:', err);
-      setError(err.message || 'Failed to load staged sales transactions.');
+      setError(e.message || 'Failed to load staged sales transactions.');
     } finally {
       setLoading(false);
     }
@@ -176,14 +179,14 @@ export default function PhoneSales() {
     setEditingItems(parsedItems);
   };
 
-  const handleUpdateItemField = (index: number, field: keyof StagedSaleItem, value: any) => {
+  const handleUpdateItemField = (index: number, field: keyof StagedSaleItem, value: string) => {
     const updated = [...editingItems];
     if (field === 'quantity') {
       updated[index][field] = parseInt(value) || 0;
     } else if (field === 'unit_price') {
       updated[index][field] = parseFloat(value) || 0;
     } else {
-      (updated[index] as any)[field] = value;
+      (updated[index] as unknown as Record<string, unknown>)[field] = value;
     }
     setEditingItems(updated);
   };
@@ -211,9 +214,10 @@ export default function PhoneSales() {
       if (window.refreshStagedCounts) {
         window.refreshStagedCounts();
       }
-    } catch (err: any) {
+    } catch (err) {
+      const e = err as { response?: { data?: { error?: string } }; message?: string };
       console.error(err);
-      toastEvent.trigger(err.response?.data?.error || err.message || 'Failed to approve sale', 'error');
+      toastEvent.trigger(e.response?.data?.error || e.message || 'Failed to approve sale', 'error');
     } finally {
       setSaving(false);
     }
@@ -231,9 +235,10 @@ export default function PhoneSales() {
       if (window.refreshStagedCounts) {
         window.refreshStagedCounts();
       }
-    } catch (err: any) {
+    } catch (err) {
+      const e = err as { message?: string };
       console.error(err);
-      toastEvent.trigger(err.message || 'Failed to reject sale', 'error');
+      toastEvent.trigger(e.message || 'Failed to reject sale', 'error');
     } finally {
       setRejecting(false);
     }
@@ -340,7 +345,7 @@ export default function PhoneSales() {
           {/* Status filter selection */}
           <select
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as any)}
+            onChange={(e) => setStatusFilter(e.target.value as 'all' | 'pending' | 'approved' | 'rejected')}
             className="premium-input px-3 py-1.5 text-xs bg-bg border border-border rounded-xl text-text focus:outline-none"
           >
             <option value="all">All Statuses</option>
@@ -440,6 +445,13 @@ export default function PhoneSales() {
 
                       {/* Item summary list */}
                       <p className="text-[10px] text-muted line-clamp-1 mb-2.5">{itemSummary || 'No medicines in draft'}</p>
+
+                      {sale.sold_from_device && (
+                        <span className="inline-flex items-center gap-1 text-[9px] font-semibold text-primary bg-primary/10 border border-primary/20 rounded px-1.5 py-0.5 mb-2">
+                          <Smartphone size={9} />
+                          From: {sale.sold_from_device}
+                        </span>
+                      )}
 
                       {/* Footer */}
                       <div className="flex justify-between items-center">

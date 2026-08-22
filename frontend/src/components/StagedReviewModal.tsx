@@ -1,14 +1,22 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { X, Check, Trash2, AlertTriangle, RefreshCw, Receipt, ShoppingCart, Calendar } from 'lucide-react';
+import { X, Check, Trash2, AlertTriangle, RefreshCw, Receipt, ShoppingCart, Calendar, Search, Plus, Link2, CheckCircle2 } from 'lucide-react';
 import { api } from '../services/api';
 import { stagedQueueService } from '../services/stagedQueueService';
 import { isValidDistributorName } from '../utils/distributorValidator';
+import { UniversalMedicineEditModal } from './UniversalMedicineEditModal';
 
 interface Props {
   onClose: () => void;
   onActionComplete: () => void;
+}
+
+interface MatchSuggestion {
+  medicine_id: number | null;
+  matched_name: string | null;
+  confidence: number;
+  match_type: string;
 }
 
 const isUnresolvedDistributor = (name: string | null | undefined): boolean => {
@@ -34,6 +42,17 @@ export const StagedReviewModal: React.FC<Props> = ({ onClose, onActionComplete }
   const [patientPhone, setPatientPhone] = useState('');
   const [discount, setDiscount] = useState<number>(0);
   const [saving, setSaving] = useState(false);
+
+  // Strict per-line medicine resolution (human verification contract)
+  const [matchPreview, setMatchPreview] = useState<Record<number, MatchSuggestion>>({});
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [lineSearchTerms, setLineSearchTerms] = useState<Record<number, string>>({});
+  const [lineSearchResults, setLineSearchResults] = useState<Record<number, any[]>>({});
+  const [medEditorIndex, setMedEditorIndex] = useState<number | null>(null);
+  const [medEditorInitialData, setMedEditorInitialData] = useState<any>(null);
+  const [medEditorOcrData, setMedEditorOcrData] = useState<any>(null);
+
+  const itemNameOf = (it: any): string => String(it?.name || it?.medicine_name || '').trim();
 
   const loadStagedData = async () => {
     setLoading(true);
@@ -71,17 +90,40 @@ export const StagedReviewModal: React.FC<Props> = ({ onClose, onActionComplete }
 
   const handleSelectTx = (tx: any, type: 'sales' | 'purchases') => {
     setSelectedTx({ ...tx, type });
+    let parsedItems: any[] = [];
     try {
-      const items = typeof tx.items_json === 'string' ? JSON.parse(tx.items_json) : tx.items_json;
-      setEditingItems(Array.isArray(items) ? items : []);
+      const raw = typeof tx.items_json === 'string' ? JSON.parse(tx.items_json) : tx.items_json;
+      parsedItems = Array.isArray(raw) ? raw : [];
     } catch (_e) {
-      setEditingItems([]);
+      parsedItems = [];
     }
+    setEditingItems(parsedItems);
 
     if (type === 'purchases') {
       setDistributorName(tx.distributor_name || '');
       setInvoiceNo(tx.invoice_no || '');
       setInvoiceDate(tx.date ? tx.date.split('T')[0] : '');
+      // One batched server call on explicit Review click (no mount saturation).
+      setMatchPreview({});
+      setLineSearchTerms({});
+      setLineSearchResults({});
+      if (parsedItems.length > 0) {
+        const needsPreview = parsedItems.some((it: any) => !it.medicine_id && itemNameOf(it));
+        if (needsPreview) {
+          const names = parsedItems.map((it: any) => itemNameOf(it));
+          setPreviewLoading(true);
+          api.matchPurchaseItems(names, null)
+            .then((res: any) => {
+              const map: Record<number, MatchSuggestion> = {};
+              (res?.results || []).forEach((r: MatchSuggestion, i: number) => {
+                if (r?.medicine_id && !parsedItems[i]?.medicine_id) map[i] = r;
+              });
+              setMatchPreview(map);
+            })
+            .catch(() => {})
+            .finally(() => setPreviewLoading(false));
+        }
+      }
     } else {
       setPatientName(tx.patient_name || '');
       setPatientPhone(tx.patient_phone || '');
@@ -127,6 +169,68 @@ export const StagedReviewModal: React.FC<Props> = ({ onClose, onActionComplete }
     setEditingItems(updated);
   };
 
+  // --- Strict medicine resolution helpers (search-or-create per line) ---
+
+  const setItemMedicine = (index: number, patch: any) => {
+    setEditingItems(prev => {
+      const updated = [...prev];
+      updated[index] = { ...updated[index], ...patch };
+      return updated;
+    });
+    setMatchPreview(prev => {
+      const next = { ...prev };
+      delete next[index];
+      return next;
+    });
+  };
+
+  const handleLinkSuggestion = (index: number) => {
+    const sugg = matchPreview[index];
+    if (!sugg?.medicine_id) return;
+    setItemMedicine(index, { medicine_id: sugg.medicine_id });
+  };
+
+  const handleLineSearch = async (index: number, term: string) => {
+    setLineSearchTerms(prev => ({ ...prev, [index]: term }));
+    if (term.trim().length < 3) {
+      setLineSearchResults(prev => ({ ...prev, [index]: [] }));
+      return;
+    }
+    try {
+      const res = await api.catalogSearch(term.trim());
+      setLineSearchResults(prev => ({ ...prev, [index]: Array.isArray(res) ? res.slice(0, 8) : [] }));
+    } catch (_e) {
+      setLineSearchResults(prev => ({ ...prev, [index]: [] }));
+    }
+  };
+
+  const openNewMedicineEditor = (index: number) => {
+    const it = editingItems[index];
+    if (!it) return;
+    setMedEditorIndex(index);
+    setMedEditorInitialData(null);
+    setMedEditorOcrData({
+      potentialName: itemNameOf(it),
+      manufacturer: it.manufacturer || '',
+      mrp: Number(it.mrp) > 0 ? Number(it.mrp) : undefined,
+      rate: Number(it.rate ?? it.cost_price) > 0 ? Number(it.rate ?? it.cost_price) : undefined,
+      batchNumber: it.batch_no || '',
+      expiryDate: it.expiry_date || ''
+    });
+  };
+
+  const handlePickSearchResult = (index: number, med: any) => {
+    setItemMedicine(index, { medicine_id: med.id, name: med.name });
+    setLineSearchTerms(prev => ({ ...prev, [index]: '' }));
+    setLineSearchResults(prev => ({ ...prev, [index]: [] }));
+  };
+
+  const closeMedEditor = () => {
+    setMedEditorIndex(null);
+    setMedEditorInitialData(null);
+    setMedEditorOcrData(null);
+  };
+
   const handleApprove = async () => {
     if (!selectedTx) return;
     setSaving(true);
@@ -149,6 +253,19 @@ export const StagedReviewModal: React.FC<Props> = ({ onClose, onActionComplete }
         const cleanDate = (invoiceDate || '').trim();
         if (!cleanDate) {
           setError('Invoice date is required. Please enter or verify the actual invoice date before approving.');
+          setSaving(false);
+          return;
+        }
+
+        // Strict verification: every purchase line must be linked to a master medicine
+        const unresolvedLines = editingItems
+          .map((it, i) => ({ it, i }))
+          .filter(x => x.it && !x.it.medicine_id);
+        if (unresolvedLines.length > 0) {
+          setError(
+            `${unresolvedLines.length} line(s) not linked to a master medicine. Use search or ➕ New Medicine on each: ` +
+            unresolvedLines.map(x => `"${itemNameOf(x.it) || 'Item ' + (x.i + 1)}"`).join(', ')
+          );
           setSaving(false);
           return;
         }
@@ -218,6 +335,7 @@ export const StagedReviewModal: React.FC<Props> = ({ onClose, onActionComplete }
   const activeList = activeTab === 'sales' ? sales : purchases;
 
   return createPortal(
+    <>
     <div className="fixed inset-0 z-submodal flex items-center justify-center p-4 sm:p-6 fade-in">
       {/* Backdrop */}
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
@@ -526,6 +644,76 @@ export const StagedReviewModal: React.FC<Props> = ({ onClose, onActionComplete }
                           </button>
                         </div>
 
+                        {/* Strict medicine-resolution strip (purchases only) */}
+                        {selectedTx.type === 'purchases' && (
+                          <div className="mb-3">
+                            {item.medicine_id ? (
+                              <div className="flex items-center gap-1.5 text-[11px] font-bold text-emerald-400 px-2 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/30 w-fit">
+                                <CheckCircle2 size={13} />
+                                Linked to master #{item.medicine_id}
+                              </div>
+                            ) : previewLoading && !matchPreview[index] ? (
+                              <div className="flex items-center gap-1.5 text-[11px] text-muted px-2 py-1">
+                                <RefreshCw size={12} className="animate-spin" />
+                                Checking master database...
+                              </div>
+                            ) : matchPreview[index]?.medicine_id ? (
+                              <div className="flex flex-wrap items-center gap-2 text-[11px] px-2 py-1 rounded-lg bg-primary/10 border border-primary/30 w-fit">
+                                <Link2 size={13} className="text-primary shrink-0" />
+                                <span>Similar match: <b>{matchPreview[index].matched_name}</b> ({Math.round((matchPreview[index].confidence || 0) * 100)}%)</span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleLinkSuggestion(index)}
+                                  className="px-2 py-0.5 rounded bg-primary text-white font-bold hover:bg-primary/90 transition-colors"
+                                >
+                                  Link
+                                </button>
+                              </div>
+                            ) : null}
+
+                            {!item.medicine_id && (
+                              <div className="mt-2 relative">
+                                <div className="flex gap-2">
+                                  <div className="relative flex-1">
+                                    <Search size={13} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted" />
+                                    <input
+                                      type="text"
+                                      placeholder="Search master to link (type ≥ 3 chars)..."
+                                      value={lineSearchTerms[index] || ''}
+                                      onChange={(e) => handleLineSearch(index, e.target.value)}
+                                      className="w-full pl-7 pr-2 py-1.5 bg-bg border border-border rounded-lg text-xs focus:border-primary focus:outline-none"
+                                    />
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => openNewMedicineEditor(index)}
+                                    className="px-2.5 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/40 text-emerald-500 hover:bg-emerald-500/20 transition-colors flex items-center gap-1 text-xs font-bold whitespace-nowrap"
+                                  >
+                                    <Plus size={13} /> New Medicine
+                                  </button>
+                                </div>
+                                {(lineSearchResults[index]?.length || 0) > 0 && (
+                                  <div className="absolute z-dropdown left-0 right-20 mt-1 bg-bg border border-glass-border rounded-xl shadow-xl max-h-52 overflow-y-auto scrollbar-custom">
+                                    {(lineSearchResults[index] || []).map((med) => (
+                                      <button
+                                        key={med.id}
+                                        type="button"
+                                        onMouseDown={() => handlePickSearchResult(index, med)}
+                                        className="w-full text-left px-3 py-2 hover:bg-bg3 transition-colors border-b border-border last:border-0"
+                                      >
+                                        <div className="text-xs font-bold truncate">{med.name}</div>
+                                        <div className="text-[10px] text-muted truncate">
+                                          {med.manufacturer || ''}{med.mrp ? ` • MRP ₹${med.mrp}` : ''}
+                                        </div>
+                                      </button>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
                         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                           <div>
                             <label className="block text-[10px] text-muted mb-1">Quantity</label>
@@ -664,7 +852,28 @@ export const StagedReviewModal: React.FC<Props> = ({ onClose, onActionComplete }
 
         </div>
       </div>
-    </div>,
+    </div>
+
+      {/* Universal create-medicine editor (opens above this review modal; z-modal > z-submodal) */}
+      {medEditorIndex !== null && (
+        <UniversalMedicineEditModal
+          mode="create"
+          medicineId={null}
+          initialData={medEditorInitialData}
+          ocrData={medEditorOcrData}
+          onClose={closeMedEditor}
+          onSave={(saved) => {
+            if (saved?.id && medEditorIndex !== null) {
+              setItemMedicine(medEditorIndex, {
+                medicine_id: saved.id,
+                name: saved.name || itemNameOf(editingItems[medEditorIndex])
+              });
+            }
+            closeMedEditor();
+          }}
+        />
+      )}
+    </>,
     document.body
   );
 };

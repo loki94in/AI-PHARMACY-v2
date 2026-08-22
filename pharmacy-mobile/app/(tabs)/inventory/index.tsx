@@ -17,6 +17,7 @@ export default function InventoryScreen() {
   
   // Admin stock edit state
   const [isAdmin, setIsAdmin] = useState(false);
+  const [lowOnly, setLowOnly] = useState(false);
   const [editItem, setEditItem] = useState<any | null>(null);
   const [editQty, setEditQty] = useState('');
   const [editReason, setEditReason] = useState('');
@@ -49,7 +50,10 @@ export default function InventoryScreen() {
     return () => clearTimeout(timer);
   }, [search, fetchData]);
 
-  const filtered = items;
+  const filtered = useMemo(
+    () => (lowOnly ? items.filter(i => Number(i.quantity) < 10) : items),
+    [items, lowOnly]
+  );
 
   const handlePeek = async (item: InventoryItem) => {
     setPeekName(item.medicine_name);
@@ -108,6 +112,17 @@ export default function InventoryScreen() {
         placeholder="Search medicine, batch, rack..."
         style={{ marginHorizontal: spacing.md, marginTop: spacing.md }}
       />
+
+      <View style={styles.filterRow}>
+        <TouchableOpacity
+          style={[styles.filterChip, lowOnly && styles.filterChipActive]}
+          onPress={() => setLowOnly(!lowOnly)}
+          activeOpacity={0.8}
+        >
+          <Ionicons name="alert-circle" size={12} color={lowOnly ? '#fff' : colors.warning} />
+          <Text style={[styles.filterChipText, lowOnly && styles.filterChipTextActive]}>Low Stock (&lt;10)</Text>
+        </TouchableOpacity>
+      </View>
 
       <Text style={styles.countText}>{filtered.length} items</Text>
 
@@ -234,6 +249,21 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl },
   countText: { ...typography.caption, marginHorizontal: spacing.md, marginTop: spacing.sm },
+  filterRow: { flexDirection: 'row', gap: 6, marginHorizontal: spacing.md, marginTop: spacing.sm },
+  filterChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: radius.full,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+  },
+  filterChipActive: { backgroundColor: colors.warning, borderColor: colors.warning },
+  filterChipText: { fontSize: 11, fontWeight: '700', color: colors.textSecondary },
+  filterChipTextActive: { color: '#fff' },
   modalOverlay: { flex: 1, backgroundColor: colors.overlay, justifyContent: 'flex-end' },
   modalCard: { borderBottomLeftRadius: 0, borderBottomRightRadius: 0, padding: spacing.lg, maxHeight: '60%' },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.md },

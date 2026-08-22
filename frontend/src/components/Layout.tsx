@@ -1065,7 +1065,10 @@ const Topbar = ({
 
         if (Array.isArray(qData.recentItems)) {
           qData.recentItems.forEach((item: any) => {
-            if ((item.status === 'failed_perm' || (item.status === 'failed_offline' && item.retry_count >= 3)) && !notifiedFailedQueueIdsRef.current.has(item.id)) {
+            // Freshness guard: only surface failures from the last 15 minutes so
+            // persisted historical rows don't re-toast on every new UI session.
+            const isRecent = !item.created_at || (Date.now() - Number(item.created_at)) < 15 * 60 * 1000;
+            if ((item.status === 'failed_perm' || (item.status === 'failed_offline' && item.retry_count >= 3)) && isRecent && !notifiedFailedQueueIdsRef.current.has(item.id)) {
               notifiedFailedQueueIdsRef.current.add(item.id);
               const target = item.target_name || (item.number ? `+${item.number}` : 'Recipient');
               toastEvent.trigger(`❌ WhatsApp message to ${target} failed: ${item.error_message || 'Permanent send failure'}`, 'error');
@@ -1404,21 +1407,27 @@ const Topbar = ({
     fetchDevices();
   }, [fetchDevices]);
 
-  // 1-time startup check for Pharmarack cart sync status after initial window
+  // 1-time startup check for Pharmarack cart sync status after initial window.
+  // Two windows: 46s (original) plus a 110s re-check giving the backend boot cart
+  // warm-up time to resolve the coordinator after a slow headless session refresh.
   useEffect(() => {
-    const timer = setTimeout(async () => {
+    let toasted = false;
+    const checkSyncStatus = async () => {
       try {
         const syncStatus = await api.getStartupSyncStatus();
-        if (syncStatus.timedOut && !syncStatus.cartLoaded) {
+        if (syncStatus.timedOut && !syncStatus.cartLoaded && !toasted) {
+          toasted = true;
           toastEvent.trigger(
             '⚠️ Pharmarack cart sync pending — Session may need refresh from Learning page.',
             'info'
           );
         }
       } catch (_) {}
-    }, 46000);
+    };
+    const timer1 = setTimeout(checkSyncStatus, 46000);
+    const timer2 = setTimeout(checkSyncStatus, 110000);
 
-    return () => clearTimeout(timer);
+    return () => { clearTimeout(timer1); clearTimeout(timer2); };
   }, []);
 
   useEffect(() => {

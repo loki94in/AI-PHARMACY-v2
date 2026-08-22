@@ -89,14 +89,17 @@ apiClient.interceptors.response.use(
       }
     }
 
-    // Retry safe GET requests up to 3 times on transient network error/timeout
+    // Retry safe GET requests up to 3 times on transient network error/timeout.
+    // Short exponential backoff (300ms/600ms/1200ms): a flat 1.5s wait here was the
+    // main "page switch feels frozen for seconds" symptom on any transient hiccup.
     const isGet = config && config.method && config.method.toLowerCase() === 'get';
     const isNetworkError = !error.response || error.code === 'ECONNABORTED' || error.message === 'Network Error';
     if (isGet && isNetworkError) {
       if (config && (!config._retryCount || config._retryCount < 3)) {
         config._retryCount = (config._retryCount || 0) + 1;
-        console.warn(`[API] Transient network error on GET. Retrying ${config.url} (Attempt ${config._retryCount}/3)...`);
-        await new Promise((resolve) => setTimeout(resolve, 1500));
+        const delay = 300 * Math.pow(2, config._retryCount - 1);
+        console.warn(`[API] Transient network error on GET. Retrying ${config.url} (Attempt ${config._retryCount}/3) in ${delay}ms...`);
+        await new Promise((resolve) => setTimeout(resolve, delay));
         return apiClient(config);
       }
     }

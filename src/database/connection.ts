@@ -229,6 +229,9 @@ class DatabaseManager {
           import('../worker/stockCalculatorWorker.js')
             .then(m => m.triggerPreCalculatedStockRebuildDebounced(inventoryIds))
             .catch(err => console.error('Failed to trigger precalculated stock rebuild:', err));
+          import('../routes/inventory.js')
+            .then(m => m.invalidateInventoryCountCache())
+            .catch(() => {});
         }
       }
       return originalRun(sql, ...params);

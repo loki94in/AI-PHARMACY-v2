@@ -8,6 +8,8 @@ import { clearServerUrl, getServerUrl, disconnectGoogleAuthServer } from '../../
 import * as WebBrowser from 'expo-web-browser';
 
 const menuItems = [
+  { icon: 'phone-portrait-outline', label: 'Devices', desc: 'See connected phones, rename this device', route: '/devices', color: colors.primary },
+  { icon: 'receipt-outline', label: 'Purchases', desc: 'History + scan paper bills with OCR', route: '/(tabs)/purchases', color: colors.warning },
   { icon: 'camera-outline', label: 'AI Camera', desc: 'Scan medicine packaging', route: '/camera', color: '#F59E0B' },
   { icon: 'search-outline', label: 'Product Trace', desc: 'Find product across purchases & sales', route: '/product-search', color: colors.accent },
   { icon: 'cloud-upload-outline', label: 'Backup & Safety', desc: 'Create backup, restore data', route: '/backup', color: colors.info },

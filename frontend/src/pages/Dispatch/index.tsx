@@ -26,7 +26,7 @@ import {
   Zap,
   ShoppingCart,
   } from 'lucide-react';
-import { api, apiClient } from '../../services/api';
+import { api, apiClient, type DistributorDispatchReminder } from '../../services/api';
 import { whatsappQueueEvent, toastEvent, messageSendEvent } from '../../services/events';
 import {
   getDispatchDeliveryBoysCache,
@@ -71,6 +71,32 @@ const statusStyles: Record<string, string> = {
 
 const emptyForm = { patient_name: '', patient_phone: '', address: '', items: '', notes: '', delivery_boy_id: '', invoice_no: '' };
 
+interface LocalWhatsAppSentMessage {
+  id: number;
+  created_at?: string;
+  recipient_phone?: string;
+  recipient_name?: string;
+  status?: string;
+  message?: string;
+}
+
+interface LocalDistributorOrderEntry {
+  id?: number;
+  order_time?: string;
+  items_count?: number;
+  items_preview?: string[];
+}
+
+type LocalReminderRow = Omit<DistributorDispatchReminder, 'status'> & {
+  status: string;
+  orders_list?: LocalDistributorOrderEntry[];
+  order_count?: number;
+  latest_notif_status?: string;
+  latest_notif_error?: string | null;
+};
+
+type LocalApiError = { response?: { data?: { error?: string } }; message?: string };
+
 type TabType = 'all' | 'queue' | 'reminders' | 'staff' | 'logs';
 
 const Dispatch = () => {
@@ -105,11 +131,11 @@ const Dispatch = () => {
   // Delivery Boy Sent Message History states
   const [messageDates, setMessageDates] = useState<string[]>([]);
   const [selectedDate, setSelectedDate] = useState<string>('');
-  const [sentMessages, setSentMessages] = useState<any[]>([]);
+  const [sentMessages, setSentMessages] = useState<LocalWhatsAppSentMessage[]>([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
 
   // Distributor Dispatch Reminders state
-  const [distributorReminders, setDistributorReminders] = useState<any[]>([]);
+  const [distributorReminders, setDistributorReminders] = useState<LocalReminderRow[]>([]);
   const [autoDispatchEnabled, setAutoDispatchEnabled] = useState(true);
   const [distributorSearch, setDistributorSearch] = useState('');
   const [distributorTodayOnly, setDistributorTodayOnly] = useState<boolean>(true);
@@ -153,8 +179,9 @@ const Dispatch = () => {
         setManualDeliveryBoyId(null);
         fetchDistributorReminders();
       }
-    } catch (err: any) {
-      showNotif(err?.message || 'Failed to add manual phone call order', 'error');
+    } catch (err) {
+      const e = err as LocalApiError;
+      showNotif(e?.message || 'Failed to add manual phone call order', 'error');
     } finally {
       setSavingManualOrder(false);
     }
@@ -305,14 +332,15 @@ const Dispatch = () => {
       } else {
         showNotif(res?.message || 'Failed to send afternoon dispatch', 'error');
       }
-    } catch (err: any) {
-      showNotif(err?.response?.data?.error || err.message || 'Failed to send afternoon dispatch', 'error');
+    } catch (err) {
+      const e = err as LocalApiError;
+      showNotif(e?.response?.data?.error || e.message || 'Failed to send afternoon dispatch', 'error');
     } finally {
       setIsSendingAfternoonDispatch(false);
     }
   };
 
-  const handleUpdateDistributorStatus = async (id: number, status: string, deliveryBoyId?: number | null, itemMeta?: any) => {
+  const handleUpdateDistributorStatus = async (id: number, status: string, deliveryBoyId?: number | null, itemMeta?: LocalReminderRow) => {
     try {
       const targetItem = itemMeta || distributorReminders.find(r => r.id === id);
       const res = await api.updateDistributorReminderStatus(id, {
@@ -355,8 +383,9 @@ const Dispatch = () => {
 
       await api.sendDistributorReminderNow(targetId, msgToSend);
       await fetchDistributorReminders(true);
-    } catch (err: any) {
-      showNotif(err.message || 'Failed to send WhatsApp reminder', 'error');
+    } catch (err) {
+      const e = err as LocalApiError;
+      showNotif(e.message || 'Failed to send WhatsApp reminder', 'error');
     } finally {
       setSendingReminderId(null);
     }
@@ -379,7 +408,7 @@ const Dispatch = () => {
       await api.saveDistributorReminderTemplate(globalTemplate);
       showNotif('Default message template saved successfully!');
       setShowTemplateModal(false);
-    } catch (_err: any) {
+    } catch (_err) {
       showNotif('Failed to save template', 'error');
     } finally {
       setSavingTemplate(false);
@@ -391,12 +420,12 @@ const Dispatch = () => {
   const [distPhoneInput, setDistPhoneInput] = useState<string>('');
   const [isSavingDistPhone, setIsSavingDistPhone] = useState<boolean>(false);
 
-  const handleStartEditDistPhone = (item: any) => {
+  const handleStartEditDistPhone = (item: LocalReminderRow) => {
     setEditingDistPhoneId(item.id);
     setDistPhoneInput(item.distributor_phone || '');
   };
 
-  const handleSaveDistributorPhone = async (item: any) => {
+  const handleSaveDistributorPhone = async (item: LocalReminderRow) => {
     const cleanPhone = distPhoneInput.replace(/\D/g, '');
     if (cleanPhone && cleanPhone.length !== 10 && !(cleanPhone.length === 12 && cleanPhone.startsWith('91'))) {
       showNotif('Please enter a valid 10-digit phone number', 'error');
@@ -419,8 +448,9 @@ const Dispatch = () => {
       showNotif(`Phone number updated for ${item.distributor_name}`);
       setEditingDistPhoneId(null);
       await fetchDistributorReminders(true);
-    } catch (err: any) {
-      showNotif(err?.message || 'Failed to save distributor phone', 'error');
+    } catch (err) {
+      const e = err as LocalApiError;
+      showNotif(e?.message || 'Failed to save distributor phone', 'error');
     } finally {
       setIsSavingDistPhone(false);
     }
@@ -501,8 +531,9 @@ const Dispatch = () => {
       setNewBoyPhone('');
       await broadcastContactDataChanged();
       fetchAll();
-    } catch (err: any) {
-      showNotif(err?.response?.data?.error || 'Failed to add delivery boy', 'error');
+    } catch (err) {
+      const e = err as LocalApiError;
+      showNotif(e?.response?.data?.error || 'Failed to add delivery boy', 'error');
     } finally { setAddingBoy(false); }
   };
 
@@ -518,8 +549,9 @@ const Dispatch = () => {
       setEditingBoyId(null);
       await broadcastContactDataChanged();
       fetchAll();
-    } catch (err: any) {
-      showNotif(err?.response?.data?.error || 'Failed to update delivery boy', 'error');
+    } catch (err) {
+      const e = err as LocalApiError;
+      showNotif(e?.response?.data?.error || 'Failed to update delivery boy', 'error');
     } finally { setSavingBoyEdit(false); }
   };
 
@@ -530,8 +562,9 @@ const Dispatch = () => {
       showNotif(`Delivery boy "${boy.name}" ${newActive ? 'activated' : 'deactivated'}`);
       await broadcastContactDataChanged();
       fetchAll();
-    } catch (err: any) {
-      showNotif(err?.response?.data?.error || 'Failed to update status', 'error');
+    } catch (err) {
+      const e = err as LocalApiError;
+      showNotif(e?.response?.data?.error || 'Failed to update status', 'error');
     }
   };
 
@@ -542,8 +575,9 @@ const Dispatch = () => {
       showNotif(`Delivery boy "${name}" deleted`);
       await broadcastContactDataChanged();
       fetchAll();
-    } catch (err: any) {
-      showNotif(err?.response?.data?.error || 'Failed to delete delivery boy', 'error');
+    } catch (err) {
+      const e = err as LocalApiError;
+      showNotif(e?.response?.data?.error || 'Failed to delete delivery boy', 'error');
     }
   };
 
@@ -567,7 +601,7 @@ const Dispatch = () => {
   const handleStatusChange = async (id: number, status: string) => {
     try {
       await api.updateDispatchOrder(id, { status });
-      setOrders(prev => prev.map(o => o.id === id ? { ...o, status: status as any } : o));
+      setOrders(prev => prev.map(o => o.id === id ? { ...o, status: status as DispatchOrder['status'] } : o));
       showNotif(`Status updated to "${status}"`);
     } catch { showNotif('Failed to update status', 'error'); }
   };
@@ -1406,7 +1440,7 @@ const Dispatch = () => {
 
                                 {item.orders_list && item.orders_list.length > 0 ? (
                                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                                    {item.orders_list.map((ord: any, oIdx: number) => (
+                                    {item.orders_list.map((ord: LocalDistributorOrderEntry, oIdx: number) => (
                                       <div key={ord.id || oIdx} className="p-3 rounded-xl bg-bg border border-glass-border/70 space-y-2">
                                         <div className="flex items-center justify-between text-[11px] font-bold">
                                           <span className="px-2 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30">

@@ -81,12 +81,18 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="refills/index"
+        options={{
+          title: 'Refills',
+          tabBarIcon: ({ color, size, focused }) => (
+            <Ionicons name={focused ? 'repeat' : 'repeat-outline'} size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="purchases/index"
         options={{
-          title: 'Purchases',
-          tabBarIcon: ({ color, size, focused }) => (
-            <Ionicons name={focused ? 'receipt' : 'receipt-outline'} size={size} color={color} />
-          ),
+          href: null, // hidden from tab bar — reachable from More hub
         }}
       />
       <Tabs.Screen

@@ -514,37 +514,16 @@ router.get('/panel', async (req, res) => {
 
     // Optional upcoming_days query parameter (if omitted, returns all patient refills for CRM management)
     const upcomingDays = req.query.upcoming_days ? parseInt(req.query.upcoming_days as string, 10) : null;
-    let query = `SELECT pr.*, m.name as medicine_name, m.packaging, m.pack_size, m.sell_price, 
-               COALESCE(pr.language, c.language, 'en') as language, 
-               COALESCE(inv.in_stock_qty, 0) as in_stock_qty,
-               best_inv.inventory_id, best_inv.batch_no, best_inv.expiry_date,
-               COALESCE(best_inv.mrp, m.mrp, 0) as mrp,
-               COALESCE(best_inv.unit_price, m.sell_price, m.mrp, 0) as unit_price,
-               best_inv.batch_quantity, best_inv.batch_loose_quantity
-       FROM patient_refills pr
-       JOIN medicines m ON pr.medicine_id = m.id
-       LEFT JOIN (
-         SELECT id, phone, language, name 
-         FROM customers 
-         WHERE phone IS NOT NULL AND phone != '' 
-         GROUP BY phone
-       ) c ON (pr.customer_id IS NOT NULL AND pr.customer_id = c.id) OR (pr.customer_id IS NULL AND pr.patient_phone = c.phone)
-       LEFT JOIN (
-         SELECT medicine_id, (SUM(quantity) + COALESCE(SUM(loose_quantity), 0)) as in_stock_qty 
-         FROM inventory_master 
-         WHERE (COALESCE(is_active, 1) = 1 AND (quantity > 0 OR COALESCE(loose_quantity, 0) > 0))
-         GROUP BY medicine_id
-       ) inv ON inv.medicine_id = pr.medicine_id
-       LEFT JOIN (
-         SELECT im.medicine_id, im.id as inventory_id, im.batch_no, im.expiry_date, im.mrp, im.unit_price,
-                im.quantity as batch_quantity, im.loose_quantity as batch_loose_quantity,
-                ROW_NUMBER() OVER (
-                  PARTITION BY im.medicine_id 
-                  ORDER BY (CASE WHEN im.expiry_date IS NOT NULL AND im.expiry_date != '' THEN im.expiry_date ELSE '9999-12-31' END) ASC, im.id ASC
-                ) as rn
-         FROM inventory_master im
-         WHERE (COALESCE(im.is_active, 1) = 1 AND (im.quantity > 0 OR COALESCE(im.loose_quantity, 0) > 0))
-       ) best_inv ON best_inv.medicine_id = pr.medicine_id AND best_inv.rn = 1`;
+
+    // Perf: base refill rows first (cheap: patient_refills is small). Stock lookups are
+    // resolved in a SECOND pass restricted to only the medicines on this page — the old
+    // query aggregated + window-sorted the ENTIRE inventory_master twice per request.
+    let query = `SELECT pr.*, m.name as medicine_name, m.packaging, m.pack_size, m.sell_price, m.mrp as medicine_mrp,
+                COALESCE(pr.language, cc.language, cp.language, 'en') as language
+        FROM patient_refills pr
+        JOIN medicines m ON pr.medicine_id = m.id
+        LEFT JOIN customers cc ON cc.id = pr.customer_id AND cc.phone IS NOT NULL AND cc.phone != ''
+        LEFT JOIN customers cp ON pr.customer_id IS NULL AND cp.phone = pr.patient_phone AND cp.phone IS NOT NULL AND cp.phone != ''`;
     const params: any[] = [];
     if (upcomingDays && !isNaN(upcomingDays) && upcomingDays > 0) {
       query += ` WHERE pr.next_refill_date <= date('now', '+' || ? || ' days')`;
@@ -552,7 +531,41 @@ router.get('/panel', async (req, res) => {
     }
     query += ` ORDER BY pr.next_refill_date ASC LIMIT 1000`;
 
-    const rows = await db.all(query, params);
+    const rows: any[] = await db.all(query, params);
+
+    // Second pass: one indexed scan over ONLY this page's medicines for stock totals +
+    // soonest-expiry batch (single window pass instead of two full inventory scans).
+    const medIds = Array.from(new Set(rows.map(r => Number(r.medicine_id)).filter(Boolean)));
+    const stockByMedicine = new Map<number, any>();
+    for (let i = 0; i < medIds.length; i += 500) {
+      const chunk = medIds.slice(i, i + 500);
+      const placeholders = chunk.map(() => '?').join(',');
+      const stockRows = await db.all(`
+        SELECT w.medicine_id,
+               SUM(w.qty) + COALESCE(SUM(w.lqty), 0) AS in_stock_qty,
+               MAX(CASE WHEN w.rn = 1 THEN w.iid END) AS inventory_id,
+               MAX(CASE WHEN w.rn = 1 THEN w.batch_no END) AS batch_no,
+               MAX(CASE WHEN w.rn = 1 THEN w.expiry_date END) AS expiry_date,
+               MAX(CASE WHEN w.rn = 1 THEN w.mrp END) AS mrp,
+               MAX(CASE WHEN w.rn = 1 THEN w.unit_price END) AS unit_price,
+               MAX(CASE WHEN w.rn = 1 THEN w.bqty END) AS batch_quantity,
+               MAX(CASE WHEN w.rn = 1 THEN w.blqty END) AS batch_loose_quantity
+        FROM (
+          SELECT im.medicine_id, im.quantity AS qty, COALESCE(im.loose_quantity, 0) AS lqty,
+                 im.id AS iid, im.batch_no, im.expiry_date, im.mrp, im.unit_price,
+                 im.quantity AS bqty, im.loose_quantity AS blqty,
+                 ROW_NUMBER() OVER (
+                   PARTITION BY im.medicine_id
+                   ORDER BY (CASE WHEN im.expiry_date IS NOT NULL AND im.expiry_date != '' THEN im.expiry_date ELSE '9999-12-31' END) ASC, im.id ASC
+                 ) AS rn
+          FROM inventory_master im
+          WHERE im.medicine_id IN (${placeholders})
+            AND COALESCE(im.is_active, 1) = 1
+            AND (im.quantity > 0 OR COALESCE(im.loose_quantity, 0) > 0)
+        ) w
+        GROUP BY w.medicine_id`, chunk);
+      for (const sr of stockRows) stockByMedicine.set(Number(sr.medicine_id), sr);
+    }
 
     const patientGroups: Record<string, any> = {};
     for (const row of rows) {
@@ -577,13 +590,14 @@ router.get('/panel', async (req, res) => {
       
       // Deduplicate medicine rows within group to prevent duplicate cards
       if (!patientGroups[phone].medicines.some((m: any) => m.id === row.id)) {
+        const stock = stockByMedicine.get(Number(row.medicine_id));
         patientGroups[phone].medicines.push({
           id: row.id,
           medicine_id: row.medicine_id,
           medicine_name: row.medicine_name,
           quantity_needed: (row.quantity_needed !== undefined && row.quantity_needed !== null) ? row.quantity_needed : 3, // default refill quantity: 3
           refill_interval_days: row.refill_interval_days || 30,
-          in_stock_qty: row.in_stock_qty || 0,
+          in_stock_qty: stock?.in_stock_qty || 0,
           stock_verified_override: row.stock_verified_override || 0,
           acknowledged: row.acknowledged || 0,
           hold_for_stock: row.hold_for_stock || 0,
@@ -595,16 +609,16 @@ router.get('/panel', async (req, res) => {
           reminder_sent_at: row.reminder_sent_at || null,
           reminder_job_id: row.reminder_job_id || null,
           reminder_occurrence_date: row.reminder_occurrence_date || null,
-          inventory_id: row.inventory_id || null,
-          batch_no: row.batch_no || null,
-          expiry_date: row.expiry_date || null,
-          mrp: row.mrp || 0,
+          inventory_id: stock?.inventory_id || null,
+          batch_no: stock?.batch_no || null,
+          expiry_date: stock?.expiry_date || null,
+          mrp: stock?.mrp ?? row.medicine_mrp ?? 0,
           sell_price: row.sell_price || null,
-          unit_price: row.unit_price || 0,
+          unit_price: stock?.unit_price ?? row.sell_price ?? row.medicine_mrp ?? 0,
           packaging: row.packaging || null,
           pack_size: row.pack_size || 1,
-          batch_quantity: row.batch_quantity || 0,
-          batch_loose_quantity: row.batch_loose_quantity || 0
+          batch_quantity: stock?.batch_quantity || 0,
+          batch_loose_quantity: stock?.batch_loose_quantity || 0
         });
       }
     }

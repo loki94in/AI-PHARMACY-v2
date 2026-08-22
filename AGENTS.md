@@ -270,6 +270,7 @@ To prevent daily session expiration and repetitive OTP prompts:
 1. **Background Refresh Scheduler**: Automatically checks and navigates to the Pharmarack dashboard headlessly every 20 minutes to keep the session rolling and capture refreshed API authorization tokens.
 2. **Profile Lock Resolution**: Chrome profile lock files (`SingletonLock`, `lockfile`, etc.) are cleaned dynamically before launching Puppeteer to avoid lock crashes.
 3. **Session Cookie Preservation**: When background refreshes or cart fallbacks copy the profile directory to a temporary path, the updated session data and rolling cookies must be copied back to the main profile (`data/pharmarack_profile`) on exit, ensuring the primary profile remains authenticated.
+4. **Boot Live-Cart Warm-up** (added 2026-08): after the first boot token refresh settles, the backend proactively loads the live cart via `warmupStartupCart()` (chained on `tokenRefreshScheduler.onFirstRefreshComplete()` with a T+50s fallback) so `startupSyncCoordinator` reflects real sync state instead of waiting for a UI visit — no false "cart sync pending" toast on first boot; genuine session expiry still surfaces the toast truthfully.
 
 ---
 
@@ -282,15 +283,22 @@ To prevent sluggish page switching, high network/CPU utilization, and laggy auto
    * On component mount, the page must immediately hydrate its state from the module cache to render instantly without layout shifts or loading spinners.
    * Network requests to refresh data must run silently in the background and update the cache without disrupting the user's focus.
 
-2. **No Mount-Time Request Saturation:**
+2. **Keep-Alive Is Real (implemented 2026-08):**
+   * `KeepAliveOutlet` (frontend/src/lib/keepAlive/KeepAliveOutlet.tsx) now genuinely renders every visited page simultaneously, hiding inactive ones with `display:none`. Pages are mounted ONCE per session; navigation never remounts them.
+   * `usePageActive()` returns true ONLY for the currently visible page — background polls/focus-refetches in hidden pages MUST gate on it (Dispatch, CRM, Settings, Mail, etc. already do).
+   * Navigation-with-state hand-offs (e.g. Quick Assist → `/pos` `state.prefill`, Sells → editSale) keep working because POS hydration effects depend on `location.state`, not remount. Do NOT convert such effects to mount-only.
+   * Freshness for kept-alive pages comes from the global SSE listener + react-query invalidation, not from remount refetches. Any new page must map its query keys into `SSE_QUERY_MAP` instead of relying on `refetchOnMount`.
+
+
+3. **No Mount-Time Request Saturation:**
    * Never trigger multiple individual, concurrent API requests for separate items on page mount (e.g., querying recommendations for 12 items individually).
    * Design and implement batched endpoints (e.g., `/api/sales/recommend-quantity/batch`) to consolidate multiple lookups into a single network round-trip and a single database query.
 
-3. **Asynchronous External Integrations:**
+4. **Asynchronous External Integrations:**
    * Autocomplete dropdown inputs must never combine local database lookups and external network calls (such as Pharmarack) into a single blocking `Promise.all`.
    * Local search results must resolve and render instantly (within $<30\text{ms}$). Third-party search queries must run in parallel and stream/append their results asynchronously when they arrive.
 
-4. **Search Database Optimizations:**
+5. **Search Database Optimizations:**
    * Local medicine search endpoints must prioritize fast index range scans (`LIKE 'term%'`) on the medicine name using the index `idx_medicines_name`.
    * If a prefix match yields sufficient results (e.g., $\ge 15$), the endpoint should return immediately. Fall back to middle-word matches (`LIKE '%term%'`) only if necessary.
    * Avoid casting numeric columns (like MRP) to text dynamically in SQL clauses unless the query contains numeric characters. Doing so forces SQLite to run full table scans on every keystroke, causing severe UI lag.

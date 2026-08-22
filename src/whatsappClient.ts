@@ -122,6 +122,34 @@ export async function getWhatsAppStatus() {
   };
 }
 
+/**
+ * Bounded wait for the personal WhatsApp client to become ready — used by background
+ * alert senders (email arrival, distributor invoice alerts) that can fire during the
+ * boot session-restore window. Reuses the single-flight init when a saved session
+ * exists instead of failing immediately with "session is not connected".
+ * Returns true once ready; false on timeout, disabled WhatsApp, missing saved session,
+ * or when routing goes through the Business API (personal readiness irrelevant there).
+ */
+export async function waitForWhatsAppReady(timeoutMs: number = 90_000): Promise<boolean> {
+  if (await shouldRouteToBusiness()) return true;
+  const deadline = Date.now() + timeoutMs;
+  let lastKick = 0;
+  while (Date.now() < deadline) {
+    if (isReady && clientInstance) return true;
+    if (await isWhatsAppExplicitlyDisabled()) return false;
+    if (!hasSavedSession()) return false;
+    const now = Date.now();
+    // Re-kick a failed/silent init at most every 20s within our own budget —
+    // never tight-loop Chrome launches.
+    if (!initializing && !initPromise && now - lastKick > 20_000) {
+      lastKick = now;
+      initClient().catch(() => {});
+    }
+    await new Promise(r => setTimeout(r, 1_000));
+  }
+  return !!(isReady && clientInstance);
+}
+
 /** Helper to check whether we should route messages to WhatsApp Business Cloud API */
 export async function shouldRouteToBusiness(): Promise<boolean> {
   const db = await dbManager.getConnection();
@@ -401,6 +429,9 @@ function launchClientInstance(forceQr: boolean): Promise<WAClient> {
         isReady = false;
         activeClient = null;
         client.destroy().catch(() => {});
+        // Settle the init promise — otherwise every caller (sendMessage, boot auto-init,
+        // Settings connect) awaits a promise that never resolves and WA stays dead until restart.
+        reject(new Error('WhatsApp connection requires a manual QR scan (no saved session). Connect from Settings or the Learning page.'));
         return;
       }
 
@@ -420,6 +451,8 @@ function launchClientInstance(forceQr: boolean): Promise<WAClient> {
             activeClient = null;
           }
           clientInstance = null;
+          // Settle the init promise so awaiting callers fail fast instead of hanging forever.
+          reject(new Error('WhatsApp QR scan timed out (2 minutes). Click Reconnect / Open Live Chrome Window to try again.'));
         }, 120_000);
       }
 
@@ -431,6 +464,8 @@ function launchClientInstance(forceQr: boolean): Promise<WAClient> {
         isReady = false;
         activeClient = null;
         client.destroy().catch(() => {});
+        // Settle the init promise so awaiting callers fail fast instead of hanging forever.
+        reject(new Error('WhatsApp QR expired 5 times without being scanned. Reconnect from Settings to try again.'));
       }
     });
 

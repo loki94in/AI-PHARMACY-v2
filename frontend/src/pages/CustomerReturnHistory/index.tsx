@@ -11,6 +11,17 @@ import { InfiniteScrollStatus } from '../../components/InfiniteScrollStatus';
 import { exportToCSV, exportToPDF } from '../../utils/export';
 import { formatDisplayDate, toDateInputValue } from '../../utils/date';
 
+interface LocalReturnItem { quantity: number; total_price: number; medicine_name: string; batch_no: string; }
+interface LocalCustomerReturnRow {
+  id: number;
+  return_no: string;
+  date: string;
+  total_amount: number;
+  original_invoice_no: string | null;
+  reason?: string;
+  items: LocalReturnItem[];
+}
+
 export default function CustomerReturnHistory() {
   const [_, setSearchParams] = useSearchParams();
   const [searchQuery, setSearchQuery] = useState('');
@@ -29,7 +40,7 @@ export default function CustomerReturnHistory() {
     hasNextPage,
     fetchNextPage,
     sentinelRef,
-  } = useInfiniteScroll<any>({
+  } = useInfiniteScroll<LocalCustomerReturnRow>({
     queryKey: 'customer-returns-history-list',
     cacheKey: 'customer-returns-history-cache',
     serverFilters: {
@@ -83,7 +94,7 @@ export default function CustomerReturnHistory() {
     const formattedData = items.map(row => ({
       ...row,
       date_formatted: formatDisplayDate(row.date, true),
-      items_formatted: (row.items || []).map((i: any) => `${i.quantity}x ${i.medicine_name}`).join('; '),
+      items_formatted: (row.items || []).map((i: LocalReturnItem) => `${i.quantity}x ${i.medicine_name}`).join('; '),
       refund_formatted: `₹${(row.total_amount || 0).toFixed(2)}`,
     }));
 
@@ -228,7 +239,7 @@ export default function CustomerReturnHistory() {
                       <td className="w-36 shrink-0 p-4 text-sky">{row.original_invoice_no}</td>
                       <td className="flex-1 min-w-[250px] p-4">
                         <div className="text-xs space-y-1">
-                          {row.items?.map((i: any, idx: number) => (
+                          {row.items?.map((i: LocalReturnItem, idx: number) => (
                             <div key={idx} className="text-muted truncate">
                               {i.quantity}x {i.medicine_name}
                             </div>

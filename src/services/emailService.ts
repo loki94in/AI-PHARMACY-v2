@@ -6,7 +6,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { ensureSchema } from '../database.js';
-import { sendMessage } from '../whatsappClient.js';
+import { sendMessage, waitForWhatsAppReady } from '../whatsappClient.js';
 import { telegramBotService } from '../telegramBot.js';
 import { notificationManager } from '../utils/notifications.js';
 import { extractDateFromText } from '../utils/dateExtractor.js';
@@ -1551,6 +1551,9 @@ export class EmailService {
           }
 
           try {
+            // Boot-window resilience: background alerts can fire while the WhatsApp
+            // session is still restoring — wait (bounded) instead of failing instantly.
+            await waitForWhatsAppReady();
             await sendMessage(phone, undefined, message);
             console.log(`[MailArrival] WhatsApp alert sent to ${phone} for ${refId}`);
             await db.run(
@@ -1653,6 +1656,8 @@ export class EmailService {
       for (const phone of targetPhones) {
         const phoneRefId = `${logRefId}_${phone}`;
         try {
+          // Boot-window resilience: same bounded wait as the mail-arrival alert above.
+          await waitForWhatsAppReady();
           await sendMessage(phone, undefined, message);
           console.log(`Distributor WhatsApp alert sent to: ${phone}`);
           

@@ -16,6 +16,19 @@ interface SellPriceRow {
   warning?: string | null;
 }
 
+interface LocalPriceConfigItem {
+  medicine_id?: number;
+  id?: number;
+  medicine_name?: string;
+  name?: string;
+  rate?: number;
+  cost_price?: number;
+  mrp?: number;
+  sell_price?: number | string | null;
+  reorder_level?: number | string | null;
+  max_stock_level?: number | string | null;
+}
+
 export default function SellPriceConfig() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -28,7 +41,7 @@ export default function SellPriceConfig() {
   const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
 
-  const stateData = location.state as { invoiceNo?: string; isEdit?: boolean; items?: any[]; saved_items?: any[]; saved_medicines?: any[] } | undefined;
+  const stateData = location.state as { invoiceNo?: string; isEdit?: boolean; items?: LocalPriceConfigItem[]; saved_items?: LocalPriceConfigItem[]; saved_medicines?: LocalPriceConfigItem[] } | undefined;
   const isEdit = !!stateData?.isEdit;
 
   useEffect(() => {
@@ -67,7 +80,7 @@ export default function SellPriceConfig() {
         .then(res => {
           const fetchedItems = res.saved_medicines || res.saved_items || [];
           if (Array.isArray(fetchedItems) && fetchedItems.length > 0) {
-            const mappedRows: SellPriceRow[] = fetchedItems.map((item: any) => ({
+            const mappedRows: SellPriceRow[] = fetchedItems.map((item: LocalPriceConfigItem) => ({
               medicine_id: item.medicine_id || item.id || 0,
               medicine_name: item.medicine_name || item.name || 'Unknown Item',
               rate: Number(item.rate || item.cost_price || 0),
@@ -191,8 +204,9 @@ export default function SellPriceConfig() {
       setTimeout(() => {
         navigate('/purchases');
       }, 1000);
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to save sell prices');
+    } catch (err) {
+      const e = err as { message?: string };
+      setErrorMsg(e.message || 'Failed to save sell prices');
     } finally {
       setSaving(false);
     }

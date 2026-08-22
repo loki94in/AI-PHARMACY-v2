@@ -10,8 +10,9 @@ import Constants from 'expo-constants';
 import { Ionicons } from '@expo/vector-icons';
 import { useFonts } from 'expo-font';
 import 'react-native-reanimated';
+import NetInfo from '@react-native-community/netinfo';
 import { colors } from '../lib/theme';
-import { getServerUrl, testConnection, getOfflineSalesQueue, getOfflinePurchasesQueue, getOfflineStockQueue, syncOfflineSalesAndRefresh, registerPushToken, saveNotification, getMobileAutomationTasks, retryMobileFallbackTask, autoDiscoverServer } from '../lib/api';
+import { getServerUrl, testConnection, getOfflineSalesQueue, getOfflinePurchasesQueue, getOfflineStockQueue, getOfflineSpecialOrdersQueue, getOfflineOrderStatusQueue, syncOfflineSalesAndRefresh, registerPushToken, saveNotification, getMobileAutomationTasks, retryMobileFallbackTask, autoDiscoverServer } from '../lib/api';
 import ServerSetup from '../components/ServerSetup';
 import AppLock from '../components/AppLock';
 
@@ -140,10 +141,14 @@ export default function RootLayout() {
       setIsServerOnline(online);
 
       // Check current offline queues size
-      const salesQueue = await getOfflineSalesQueue();
-      const purchasesQueue = await getOfflinePurchasesQueue();
-      const stockQueue = await getOfflineStockQueue();
-      const totalPending = salesQueue.length + purchasesQueue.length + stockQueue.length;
+      const [salesQueue, purchasesQueue, stockQueue, specialOrdersQueue, statusQueue] = await Promise.all([
+        getOfflineSalesQueue(),
+        getOfflinePurchasesQueue(),
+        getOfflineStockQueue(),
+        getOfflineSpecialOrdersQueue(),
+        getOfflineOrderStatusQueue(),
+      ]);
+      const totalPending = salesQueue.length + purchasesQueue.length + stockQueue.length + specialOrdersQueue.length + statusQueue.length;
       setPendingSyncCount(totalPending);
 
       if (online && totalPending > 0 && !syncingRef) {
@@ -152,10 +157,17 @@ export default function RootLayout() {
         try {
           const res = await syncOfflineSalesAndRefresh();
           console.log(`Synced ${res.syncedCount} offline item(s) successfully.`);
-          const updatedSales = await getOfflineSalesQueue();
-          const updatedPurchases = await getOfflinePurchasesQueue();
-          const updatedStock = await getOfflineStockQueue();
-          setPendingSyncCount(updatedSales.length + updatedPurchases.length + updatedStock.length);
+          if (res.warnings?.length) {
+            showToast('Sync Warnings', res.warnings.slice(0, 2).join(' | '));
+          }
+          const [uS, uP, uSt, uSo, uSq] = await Promise.all([
+            getOfflineSalesQueue(),
+            getOfflinePurchasesQueue(),
+            getOfflineStockQueue(),
+            getOfflineSpecialOrdersQueue(),
+            getOfflineOrderStatusQueue(),
+          ]);
+          setPendingSyncCount(uS.length + uP.length + uSt.length + uSo.length + uSq.length);
         } catch (syncErr) {
           console.warn('Background sync failed:', syncErr);
         } finally {
@@ -187,7 +199,8 @@ export default function RootLayout() {
             token = await SecureStore.getItemAsync('admin_device_uuid');
           }
           if (token) {
-            await registerPushToken(token, deviceNameRef.current, deviceOsRef.current);
+            const uuid = await SecureStore.getItemAsync('admin_device_uuid');
+            await registerPushToken(token, deviceNameRef.current, deviceOsRef.current, uuid);
           }
         } catch (pingErr) {
           console.warn('Background status ping failed:', pingErr);
@@ -198,7 +211,18 @@ export default function RootLayout() {
     checkConnectionAndSync();
     const intervalId = setInterval(checkConnectionAndSync, 15000);
 
-    return () => clearInterval(intervalId);
+    // Instant drain on WiFi/network reconnect — don't wait for the next poll tick.
+    // Covers "PC switched back on while phone is on same WiFi" auto-sync.
+    const netUnsubscribe = NetInfo.addEventListener(state => {
+      if (state.isConnected) {
+        checkConnectionAndSync();
+      }
+    });
+
+    return () => {
+      clearInterval(intervalId);
+      netUnsubscribe();
+    };
   }, []); // stable — no reactive deps needed
 
   useEffect(() => {
@@ -273,7 +297,8 @@ export default function RootLayout() {
           deviceNameRef.current = deviceName;
           deviceOsRef.current = os;
 
-          await registerPushToken(token, deviceName, os);
+          const stableUuid = await SecureStore.getItemAsync('admin_device_uuid');
+          await registerPushToken(token, deviceName, os, stableUuid);
           console.log('Device status registered successfully. ID:', token);
         } catch (tokenErr) {
           console.log('Failed to register device connection status:', tokenErr);
@@ -306,6 +331,26 @@ export default function RootLayout() {
                       },
                       trigger: null,
                     });
+                  } else if (json.type === 'device_block_change') {
+                    const p = json.payload || {};
+                    const name = p.device_name || 'A device';
+                    const msg = p.blocked
+                      ? `🚫 ${name} was blocked from connecting`
+                      : `✅ ${name} was unblocked — can connect again`;
+                    showToast(p.blocked ? `🚫 ${name} blocked` : `✅ ${name} unblocked`, p.blocked ? 'Refused at connection until unblocked' : 'Allowed on next ping');
+                    saveNotification(msg, '').catch(() => {});
+                  } else if (json.type === 'device_status_change') {
+                    // Multi-device awareness: any phone/tablet connecting or dropping off WiFi
+                    const p = json.payload || {};
+                    const name = p.device_name || 'A device';
+                    const osLabel = p.os === 'ios' ? 'Apple' : p.os === 'android' ? 'Android' : p.os || '';
+                    if (p.status === 'connected') {
+                      showToast(`📱 ${name} connected`, `${osLabel} device is now online`.trim());
+                      saveNotification(`📱 ${name} connected`, `${osLabel} device is now online`.trim()).catch(() => {});
+                    } else if (p.status === 'disconnected') {
+                      showToast(`⚠️ ${name} disconnected`, `${osLabel} device went offline`.trim());
+                      saveNotification(`⚠️ ${name} disconnected`, `${osLabel} device went offline`.trim()).catch(() => {});
+                    }
                   }
                 } catch (e) {
                   // Ignore parse errors on partial chunks
@@ -369,6 +414,7 @@ export default function RootLayout() {
         <Stack.Screen name="product-search/index" options={{ title: 'Product Trace', headerStyle: { backgroundColor: colors.surface }, headerTintColor: colors.textPrimary }} />
         <Stack.Screen name="backup/index" options={{ title: 'Backup & Safety', headerStyle: { backgroundColor: colors.surface }, headerTintColor: colors.textPrimary }} />
         <Stack.Screen name="notifications/index" options={{ title: 'System Alerts', headerStyle: { backgroundColor: colors.surface }, headerTintColor: colors.textPrimary }} />
+        <Stack.Screen name="devices/index" options={{ title: 'Devices', headerStyle: { backgroundColor: colors.surface }, headerTintColor: colors.textPrimary }} />
       </Stack>
 
       {/* Global Left-Aligned Toast Alert */}

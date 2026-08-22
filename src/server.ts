@@ -621,6 +621,22 @@ server.on('error', (err: any) => {
             }
           }).catch(err => console.error('[Boot:Phase4] WhatsApp client module load failed:', err));
         }, 45_000);
+
+        // Startup live-cart warm-up: resolves startupSyncCoordinator from real data at boot
+        // instead of waiting for the first UI visit to GET /api/pharmarack/cart.
+        // Primary path chains onto the first token refresh so it uses a fresh Pharmarack
+        // token without racing the headless Chrome login; the T+50s timer is the safety net
+        // for scheduler-disabled setups and skipped refreshes.
+        import('./services/tokenRefreshScheduler.js').then(m => {
+          m.tokenRefreshScheduler.onFirstRefreshComplete(() => {
+            import('./routes/pharmarack.js').then(mod => mod.warmupStartupCart()).catch((err: any) => console.warn('[Boot] Cart warm-up failed:', err?.message || err));
+          });
+        }).catch(err => console.warn('[Boot] Token-refresh warm-up hook failed:', err));
+
+        setTimeout(() => {
+          if (process.env.DISABLE_BACKGROUND_WORKERS !== 'false') return;
+          import('./routes/pharmarack.js').then(mod => mod.warmupStartupCart()).catch(err => console.warn('[Boot:Phase4] Cart warm-up fallback failed:', err?.message || err));
+        }, 50_000);
       });
 
       // Register crons

@@ -27,6 +27,7 @@ interface AuditReport {
   blockingCount: number; status: 'PROJECT READY' | 'PROJECT NOT READY';
 }
 interface AuditHistoryRow { id: number; storedAt: string; description: string; status: string; blockingCount: number; }
+type LocalApiError = { response?: { data?: { error?: string } }; message?: string };
 
 const CATEGORY_ORDER = [
   'POS', 'Inventory', 'Purchases', 'Purchase History', 'Sales',
@@ -171,8 +172,9 @@ export default function AuditCenter() {
         setViewingHistoryId(null);
         toastEvent.trigger(`Audit complete — ${data.status}`, data.status === 'PROJECT READY' ? 'success' : 'error');
       },
-      onError: (err: any) => {
-        toastEvent.trigger('Audit run failed: ' + (err?.response?.data?.error || err?.message || 'Server error'), 'error');
+      onError: (err: unknown) => {
+        const e = err as LocalApiError;
+        toastEvent.trigger('Audit run failed: ' + (e?.response?.data?.error || e?.message || 'Server error'), 'error');
       },
     }
   );

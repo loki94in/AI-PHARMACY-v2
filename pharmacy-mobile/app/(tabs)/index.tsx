@@ -463,15 +463,16 @@ export default function AssistantScreen() {
 
   const handleSaveStagedSale = async () => {
     try {
-      // Map to SalePayload format
+      // Map to SalePayload format — no phone is fabricated; WhatsApp simply won't fire
       const payload = {
-        items: prescriptionForm.medicines.map(m => ({
-          inventory_id: m.inventory_id,
-          quantity: m.quantity,
-          unit_price: m.unit_price
-        })),
+        items: prescriptionForm.medicines
+          .filter(m => m.inventory_id != null)
+          .map(m => ({
+            inventory_id: m.inventory_id as number,
+            quantity: m.quantity,
+            unit_price: m.unit_price
+          })),
         patient_name: prescriptionForm.patient_name,
-        patient_phone: '9876543210',
         discount: 0,
         payment_medium: 'CASH',
         payment_status: 'PAID'
@@ -482,11 +483,12 @@ export default function AssistantScreen() {
 
       setShowPrescriptionModal(false);
       Alert.alert('Success', 'Prescription details verified and staged sale created. Stamped invoice sent on WhatsApp.');
-      
+
+      const itemCount = prescriptionForm.medicines.length;
       const assistMsg: Message = {
         id: Math.random().toString(),
         sender: 'assistant',
-        text: `✅ Staged Sale successfully created for Patient: *${prescriptionForm.patient_name}*.\n- Doctor: *${prescriptionForm.doctor_name}*\n- Items: ONDEM MD 4 (x2), CROCIN 650 (x10)\n\nChecked in to PC review queue!`,
+        text: `✅ Staged Sale successfully created for Patient: *${prescriptionForm.patient_name}*.\n- Doctor: *${prescriptionForm.doctor_name}*\n- Items: ${itemCount}\n\nChecked in to PC review queue!`,
         timestamp: new Date()
       };
       setMessages(prev => [...prev, assistMsg]);
