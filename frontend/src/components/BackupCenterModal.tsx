@@ -18,6 +18,11 @@ import {
 import { apiClient } from '../services/api';
 import { toastEvent } from '../services/events';
 
+interface LocalApiErrorShape {
+  response?: { data?: { error?: string } };
+  message?: string;
+}
+
 interface Archive {
   filename: string;
   date: string;
@@ -80,8 +85,9 @@ export const BackupCenterContent: React.FC<BackupCenterContentProps> = ({
         setStatusError(msg);
         toastEvent.trigger(msg, 'error');
       }
-    } catch (err: any) {
-      const msg = err.response?.data?.error || err.message || 'Failed to retrieve backup system status';
+    } catch (err: unknown) {
+      const apiErr = err as LocalApiErrorShape;
+      const msg = apiErr.response?.data?.error || apiErr.message || 'Failed to retrieve backup system status';
       console.error('Failed to load backup status:', err);
       setStatusError(msg);
       toastEvent.trigger(msg, 'error');
@@ -105,8 +111,9 @@ export const BackupCenterContent: React.FC<BackupCenterContentProps> = ({
         setLastBackupError(null);
         fetchStatus();
       }
-    } catch (err: any) {
-      const msg = err.response?.data?.error || err.message || 'Manual backup failed';
+    } catch (err: unknown) {
+      const apiErr = err as LocalApiErrorShape;
+      const msg = apiErr.response?.data?.error || apiErr.message || 'Manual backup failed';
       setLastBackupError(msg);
       toastEvent.trigger(msg, 'error');
     } finally {
@@ -126,8 +133,8 @@ export const BackupCenterContent: React.FC<BackupCenterContentProps> = ({
           window.location.reload();
         }, 1500);
       }
-    } catch (err: any) {
-      toastEvent.trigger(err.response?.data?.error || 'Restore failed', 'error');
+    } catch (err: unknown) {
+      toastEvent.trigger((err as LocalApiErrorShape).response?.data?.error || 'Restore failed', 'error');
     } finally {
       setActionLoading(false);
     }
@@ -142,8 +149,8 @@ export const BackupCenterContent: React.FC<BackupCenterContentProps> = ({
         setConfirmDelete(null);
         fetchStatus();
       }
-    } catch (err: any) {
-      toastEvent.trigger(err.response?.data?.error || 'Delete failed', 'error');
+    } catch (err: unknown) {
+      toastEvent.trigger((err as LocalApiErrorShape).response?.data?.error || 'Delete failed', 'error');
     } finally {
       setActionLoading(false);
     }
@@ -157,8 +164,8 @@ export const BackupCenterContent: React.FC<BackupCenterContentProps> = ({
         toastEvent.trigger(data.message, 'success');
         fetchStatus();
       }
-    } catch (err: any) {
-      toastEvent.trigger(err.response?.data?.error || 'Failed to toggle pause status', 'error');
+    } catch (err: unknown) {
+      toastEvent.trigger((err as LocalApiErrorShape).response?.data?.error || 'Failed to toggle pause status', 'error');
     } finally {
       setActionLoading(false);
     }
@@ -172,7 +179,7 @@ export const BackupCenterContent: React.FC<BackupCenterContentProps> = ({
         toastEvent.trigger('Fresh installation initialized.', 'success');
         if (onClose) onClose();
       }
-    } catch (_err: any) {
+    } catch {
       toastEvent.trigger('Failed to initialize fresh install', 'error');
     } finally {
       setActionLoading(false);

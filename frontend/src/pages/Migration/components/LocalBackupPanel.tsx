@@ -17,6 +17,8 @@ interface LocalBackupPanelProps {
   onRunMigration: (backup: LocalBackup) => void;
 }
 
+type LocalApiError = { response?: { data?: { error?: string } }; message?: string };
+
 export const LocalBackupPanel: React.FC<LocalBackupPanelProps> = ({ onRunMigration }) => {
   const [backups, setBackups] = useState<LocalBackup[]>([]);
   const [loading, setLoading] = useState(true);
@@ -33,8 +35,9 @@ export const LocalBackupPanel: React.FC<LocalBackupPanelProps> = ({ onRunMigrati
       } else {
         setError(res.error || 'Failed to scan local backup folders');
       }
-    } catch (err: any) {
-      setError(err.message || 'Error connecting to local backup scanner');
+    } catch (err) {
+      const e = err as LocalApiError;
+      setError(e.message || 'Error connecting to local backup scanner');
     } finally {
       setLoading(false);
     }
@@ -72,8 +75,9 @@ export const LocalBackupPanel: React.FC<LocalBackupPanelProps> = ({ onRunMigrati
     try {
       await api.runLocalBackupMigration(backup.fullPath, backup.name);
       onRunMigration(backup);
-    } catch (err: any) {
-      setError(err.message || 'Failed to start local backup migration');
+    } catch (err) {
+      const e = err as LocalApiError;
+      setError(e.message || 'Failed to start local backup migration');
     } finally {
       setStartingPath(null);
     }

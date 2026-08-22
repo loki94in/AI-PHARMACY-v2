@@ -65,6 +65,7 @@ import { StagedReviewModal } from './StagedReviewModal';
 import { MobileConnectionModal } from './MobileConnectionModal';
 import { ConnectedDevicesFooterBar } from './ConnectedDevicesFooterBar';
 import { api, apiClient, isCompactInventoryCacheReady, setCompactInventoryCache } from '../services/api';
+import type { SpecialOrder, Refill, AutomationNotification } from '../services/api';
 import { useOnClickOutside } from '../hooks/useOnClickOutside';
 import { useApiQuery } from '../hooks/useApiQuery';
 import { pageImports } from '../lib/pageImports';
@@ -99,6 +100,18 @@ export interface AppNotification {
   link?: string;
   distributor?: string;
   qty?: string | number;
+}
+
+interface LocalActionLogRow {
+  id: number;
+  action_type?: string | null;
+  description?: string | null;
+  created_at?: string;
+}
+
+interface LocalApiErrorShape {
+  response?: { status?: number; data?: { error?: string } };
+  message?: string;
 }
 
 // ──────────────────────────────────────────────
@@ -410,7 +423,7 @@ const NotificationPanel = ({
   const navigate = useNavigate();
   const panelRef = useRef<HTMLDivElement>(null);
   const [activeFilter, setActiveFilter] = useState<'all' | 'unread' | 'alerts'>('all');
-  const [actionLogs, setActionLogs] = useState<any[]>([]);
+  const [actionLogs, setActionLogs] = useState<LocalActionLogRow[]>([]);
   const [] = useState(false);
 
   // Close on outside click
@@ -946,18 +959,20 @@ const Topbar = ({
   }, []);
 
   useEffect(() => {
-    const handleBackupStatus = (e: any) => {
-      if (e?.detail) {
-        setBackupStatus({ active: !!e.detail.active, label: e.detail.label || 'Database Backup in progress...' });
+    const handleBackupStatus = (e: Event) => {
+      const detail = (e as CustomEvent<{ active?: boolean; label?: string }>).detail;
+      if (detail) {
+        setBackupStatus({ active: !!detail.active, label: detail.label || 'Database Backup in progress...' });
       }
     };
-    const handleOcrStatus = (e: any) => {
-      if (e?.detail) {
+    const handleOcrStatus = (e: Event) => {
+      const detail = (e as CustomEvent<{ active?: boolean; label?: string; progress?: number; reviewNeeded?: boolean }>).detail;
+      if (detail) {
         setOcrStatus({
-          active: !!e.detail.active,
-          label: e.detail.label || 'Scanning Distributor Invoice...',
-          progress: e.detail.progress !== undefined ? e.detail.progress : 65,
-          reviewNeeded: !!e.detail.reviewNeeded
+          active: !!detail.active,
+          label: detail.label || 'Scanning Distributor Invoice...',
+          progress: detail.progress !== undefined ? detail.progress : 65,
+          reviewNeeded: !!detail.reviewNeeded
         });
       }
     };
@@ -1064,7 +1079,7 @@ const Topbar = ({
         setIsQueueActive(active);
 
         if (Array.isArray(qData.recentItems)) {
-          qData.recentItems.forEach((item: any) => {
+          qData.recentItems.forEach((item) => {
             // Freshness guard: only surface failures from the last 15 minutes so
             // persisted historical rows don't re-toast on every new UI session.
             const isRecent = !item.created_at || (Date.now() - Number(item.created_at)) < 15 * 60 * 1000;
@@ -1148,7 +1163,7 @@ const Topbar = ({
   } | null>(null);
 
   useEffect(() => {
-    let timer: any = null;
+    let timer: ReturnType<typeof setInterval> | undefined = undefined;
     const unsubSend = messageSendEvent.subscribeSendProgress((detail) => {
       const durationSec = detail.durationSec || 10;
       const totalSteps = durationSec * 10; // 100ms ticks
@@ -1374,8 +1389,8 @@ const Topbar = ({
             await api.runTriggerNow(trig.id);
             toastEvent.trigger(`✓ ${trig.name} completed successfully`, 'success');
             fetchUpcomingTriggers();
-          } catch (err: any) {
-            toastEvent.trigger(`❌ Trigger failed: ${err?.message || 'Error'}`, 'error');
+          } catch (err: unknown) {
+            toastEvent.trigger(`❌ Trigger failed: ${(err as LocalApiErrorShape)?.message || 'Error'}`, 'error');
           }
         },
         actionLabel: '▶ Run Now',
@@ -1922,9 +1937,9 @@ const QuickAssistSidebar = ({
 }: {
   expanded: boolean;
   setExpanded: (val: boolean) => void;
-  refills: any[];
-  notifications: any[];
-  specialOrders?: any[];
+  refills: Refill[];
+  notifications: AutomationNotification[];
+  specialOrders?: SpecialOrder[];
   onActionComplete: () => void;
 }) => {
   const queryClient = useQueryClient();
@@ -1990,9 +2005,10 @@ const QuickAssistSidebar = ({
       }
       refillEvent.triggerRefresh();
       onActionComplete();
-    } catch (e: any) {
+    } catch (e: unknown) {
+      const apiErr = e as LocalApiErrorShape;
       console.error('Failed to send refill group reminder:', e);
-      toastEvent.trigger(e?.response?.data?.error || 'Failed to send refill reminder', 'error');
+      toastEvent.trigger(apiErr?.response?.data?.error || 'Failed to send refill reminder', 'error');
     }
   };
 
@@ -2027,7 +2043,7 @@ const QuickAssistSidebar = ({
       specialOrdersEvent.triggerUpdated();
       window.dispatchEvent(new CustomEvent('refresh-special-orders'));
       onActionComplete();
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error('Failed to send group special order:', e);
       toastEvent.trigger('Failed to update special request status', 'error');
     } finally {
@@ -2066,8 +2082,8 @@ const QuickAssistSidebar = ({
       if (newStatus === 'Completed' || newStatus === 'Fulfilled') {
         toastEvent.trigger(`Marked ${group.items.length} request(s) for "${group.requester}" as Completed!`, 'success');
         if (opts?.navigateToPos) {
-          const sourceOrders = (Array.isArray(specialOrders) ? specialOrders : []).filter((s: any) => itemIds.includes(s.id));
-          const totalAdvance = sourceOrders.reduce((sum: number, s: any) => sum + (Number(s.advance_payment) || 0), 0);
+          const sourceOrders = (Array.isArray(specialOrders) ? specialOrders : []).filter((s) => itemIds.includes(s.id));
+          const totalAdvance = sourceOrders.reduce((sum: number, s) => sum + (Number(s.advance_payment) || 0), 0);
           toastEvent.trigger(`Opening POS to bill "${group.requester}"...`, 'info', '/pos');
           navigate('/pos', {
             state: {
@@ -2094,7 +2110,7 @@ const QuickAssistSidebar = ({
       specialOrdersEvent.triggerUpdated();
       window.dispatchEvent(new CustomEvent('refresh-special-orders'));
       onActionComplete();
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(`Failed to update group status to ${newStatus}:`, err);
       toastEvent.trigger('Failed to update request status', 'error');
       setOptimisticHiddenOrderIds(prev => {
@@ -2156,7 +2172,7 @@ const QuickAssistSidebar = ({
       toastEvent.trigger(`Consolidated WhatsApp message sent to ${group.recipient_name}!`, 'success');
       refillEvent.triggerRefresh();
       onActionComplete();
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to send staged message group:', err);
       toastEvent.trigger('Failed to send WhatsApp message', 'error');
     } finally {
@@ -2190,7 +2206,7 @@ const QuickAssistSidebar = ({
       );
 
       // Await referenced patient_refills status updates so background sync does not re-stage them
-      const refIdPromises: Promise<any>[] = [];
+      const refIdPromises: Promise<unknown>[] = [];
       for (const m of group.messages) {
         if (m.reference_id) {
           const refIds = String(m.reference_id).split(',').map(s => Number(s.trim())).filter(Boolean);
@@ -2235,9 +2251,10 @@ const QuickAssistSidebar = ({
       } else {
         throw new Error(res?.data?.error || 'Failed to complete refills');
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const apiErr = err as LocalApiErrorShape;
       console.error('Failed to complete refills:', err);
-      const errMsg = err?.response?.data?.error || err?.message || 'Failed to complete refills';
+      const errMsg = apiErr?.response?.data?.error || apiErr?.message || 'Failed to complete refills';
       toastEvent.trigger(errMsg, 'error');
       setOptimisticHiddenRefillIds(prev => {
         const next = new Set(prev);
@@ -2390,7 +2407,7 @@ const QuickAssistSidebar = ({
       key: string;
       requester: string;
       phone: string;
-      overallStatus: 'Pending' | 'Ordered' | 'Ready' | 'Other';
+      overallStatus: string;
       items: Array<{
         id: number;
         product: string;
@@ -3005,7 +3022,7 @@ export const Layout = ({
       const stored = localStorage.getItem('app_notifications');
       if (stored) {
         const parsed = JSON.parse(stored);
-        return parsed.map((n: any) => ({ ...n, time: new Date(n.time) }));
+        return (parsed as AppNotification[]).map((n) => ({ ...n, time: new Date(n.time) }));
       }
     } catch (e) {
       console.warn('Failed to load notifications from localStorage:', e);
@@ -3017,7 +3034,7 @@ export const Layout = ({
       const stored = localStorage.getItem('app_notifications');
       if (stored) {
         const parsed = JSON.parse(stored);
-        return parsed.some((n: any) => !n.read);
+        return (parsed as AppNotification[]).some((n) => !n.read);
       }
     } catch { }
     return false;
@@ -3054,7 +3071,7 @@ export const Layout = ({
     });
   }, []);
 
-  const [stagedNotifications, setStagedNotifications] = useState<any[]>([]);
+  const [stagedNotifications, setStagedNotifications] = useState<AutomationNotification[]>([]);
   const [compactCacheLoaded, setCompactCacheLoaded] = useState(() => isCompactInventoryCacheReady());
   const [isSystemReady, setIsSystemReady] = useState(true);
 
@@ -3066,8 +3083,8 @@ export const Layout = ({
         if (mounted) {
           setIsSystemReady(res.data?.ready !== false);
         }
-      } catch (err: any) {
-        if (mounted && err?.response?.status === 503) {
+      } catch (err: unknown) {
+        if (mounted && (err as LocalApiErrorShape)?.response?.status === 503) {
           setIsSystemReady(false);
         }
       }
@@ -3101,7 +3118,7 @@ export const Layout = ({
     return () => { cancelled = true; };
   }, [compactCacheLoaded]);
 
-  const { data: specialOrdersList = [], refetch: refetchSpecialOrders } = useApiQuery<any[]>(
+  const { data: specialOrdersList = [], refetch: refetchSpecialOrders } = useApiQuery<SpecialOrder[]>(
     'orders',
     async () => {
       const data = await api.getOrders();
@@ -3110,7 +3127,7 @@ export const Layout = ({
     { staleTime: 30000, enabled: compactCacheLoaded }
   );
 
-  const { data: refillsList = [], refetch: refetchRefills } = useApiQuery<any[]>(
+  const { data: refillsList = [], refetch: refetchRefills } = useApiQuery<Refill[]>(
     'refills',
     async () => {
       const data = await api.getRefills();

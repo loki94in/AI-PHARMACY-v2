@@ -12,6 +12,8 @@ interface DeviceItem {
   offline_seconds?: number;
 }
 
+type LocalApiError = { response?: { data?: { error?: string } }; message?: string };
+
 interface Props {
   onClose: () => void;
 }
@@ -46,9 +48,10 @@ export const MobileConnectionModal: React.FC<Props> = ({ onClose }) => {
       if (devData && Array.isArray(devData.devices)) {
         setDevices(devData.devices);
       }
-    } catch (err: any) {
+    } catch (err) {
+      const e = err as LocalApiError;
       console.error(err);
-      setError(err?.response?.data?.error || err.message || 'Failed to fetch connection details.');
+      setError(e.response?.data?.error || e.message || 'Failed to fetch connection details.');
     } finally {
       setLoading(false);
     }

@@ -25,6 +25,8 @@ interface SaveBillSpecialPriceModalProps {
   onSaveComplete?: () => void;
 }
 
+type LocalApiError = { response?: { data?: { error?: string } }; message?: string };
+
 interface PriceRow {
   medicine_id: number;
   medicine_name: string;
@@ -182,9 +184,10 @@ export const SaveBillSpecialPriceModal: React.FC<SaveBillSpecialPriceModalProps>
 
       if (onSaveComplete) onSaveComplete();
       onClose();
-    } catch (err: any) {
+    } catch (err) {
+      const e = err as LocalApiError;
       console.error('Failed to save special offer prices:', err);
-      toastEvent.trigger(err.message || 'Failed to save special offer prices', 'error');
+      toastEvent.trigger(e.message || 'Failed to save special offer prices', 'error');
     } finally {
       setSaving(false);
     }

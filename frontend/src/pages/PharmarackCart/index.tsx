@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { RotateCw, RotateCcw, ExternalLink, ShoppingCart, Package, AlertCircle, Truck, Clock, Send, Building2, MessageSquare, Phone, Search, Edit2, X, Plus, Check, Calendar, TrendingUp, Layers, Trash2, ArrowLeftRight, ArrowRight } from 'lucide-react';
 import { formatDisplayDate } from '../../utils/date';
-import { api, apiClient, type SpecialOrder, type Refill } from '../../services/api';
+import { api, apiClient, type SpecialOrder, type Refill, type ReorderSuggestion, type BatchLastPurchaseResult } from '../../services/api';
 import { toastEvent, liveCartAddEvent, specialOrdersEvent, whatsappQueueEvent, messageSendEvent } from '../../services/events';
 import { findBestCartMatchForOrder } from '../../utils/orderFuzzyMatcher';
 
@@ -39,16 +39,133 @@ interface Distributor {
   items: CartLineItem[];
 }
 
+interface LocalPriceHistoryRow {
+  date?: string;
+  invoice_date?: string;
+  invoice_no?: string;
+  distributor_name?: string;
+  batch_no?: string | null;
+  expiry_date?: string | null;
+  rate: number;
+  mrp: number;
+  quantity?: number;
+  free_qty?: number;
+  cd_rs: number;
+  cd_per?: number;
+  net_rate: number;
+}
+
+interface LocalDistributorRecord {
+  id?: number;
+  name?: string;
+  phone?: string;
+  mobile?: string;
+  whatsapp?: string;
+  contact?: string;
+}
+
+interface LocalSentOrderItem {
+  productCode?: string;
+  productId?: number | null;
+  productName?: string;
+  product?: string;
+  name?: string;
+  qty?: number;
+  quantity?: number;
+  rate?: number;
+  ptr?: number;
+  mrp?: number;
+  company?: string;
+  packaging?: string;
+  Packing?: string;
+  storeId?: number;
+  storeName?: string;
+  amount?: number;
+  placedAt?: number;
+}
+
+interface LocalSentOrder {
+  id: number;
+  order_date?: string;
+  store_id?: number;
+  store_name?: string;
+  items: LocalSentOrderItem[];
+  placed_at?: number;
+  batch_sent?: boolean;
+  batch_sent_at?: number | null;
+}
+
+type LocalSentMapEntry = { storeId: number | null; storeName: string; placedAt: number; items: LocalSentOrderItem[] };
+
+interface LocalSwitchCatalogItem {
+  productId?: number;
+  productCode?: string;
+  productName?: string;
+  name?: string;
+  storeId: string | number;
+  storeName: string;
+  company?: string;
+  packaging?: string;
+  rate?: number;
+  mrp?: number;
+  scheme?: string;
+  mapped?: boolean;
+  stock?: string;
+}
+
+interface LocalReorderSameCard {
+  medicineName: string;
+  medicineId?: number;
+  company?: string;
+  mrp?: number;
+  packaging?: string;
+  ptr?: number;
+  currentStock: number;
+  minStock: number;
+  suggestedQty: number;
+  hasPreviousPurchase?: boolean;
+  previousPurchase?: {
+    supplierName?: string;
+    quantity?: number;
+    price?: number;
+    mrp?: number;
+    purchaseDate?: string;
+  };
+}
+
+interface LocalRefillPanelPatient {
+  patient_name: string;
+  patient_phone: string;
+  next_refill_date: string;
+  medicines?: Array<{
+    id: number;
+    medicine_id?: number;
+    medicine_name?: string;
+    status?: string;
+    is_active?: number;
+    quantity_needed?: number | string;
+    in_stock_qty?: number | string;
+    hold_for_stock?: number;
+    refill_interval_days?: number;
+    reminder_status?: Refill['reminder_status'];
+    reminder_sent_at?: string | null;
+  }>;
+}
+
+type LocalDeliveryBoyRow = { id?: number; name: string; whatsapp_number: string; is_active?: number };
+
+type LocalApiError = { response?: { data?: { error?: string } }; message?: string };
+
 const CART_CACHE_STORAGE_KEY = 'pharmarack_cart_cache_v1';
 const MAX_PRICE_HISTORY_CACHE_ENTRIES = 200;
 
 interface PersistedCartCache {
   distributors: Distributor[];
-  priceHistory: Record<string, any[]>;
+  priceHistory: Record<string, LocalPriceHistoryRow[]>;
   savedAt: number;
 }
 
-const loadPersistedCartCache = (): { distributors: Distributor[]; priceHistory: Record<string, any[]> } => {
+const loadPersistedCartCache = (): { distributors: Distributor[]; priceHistory: Record<string, LocalPriceHistoryRow[]> } => {
   try {
     const raw = localStorage.getItem(CART_CACHE_STORAGE_KEY);
     if (raw) {
@@ -64,10 +181,10 @@ const loadPersistedCartCache = (): { distributors: Distributor[]; priceHistory: 
   return { distributors: [], priceHistory: {} };
 };
 
-const persistCartCache = (distributors: Distributor[], priceHistory: Record<string, any[]>) => {
+const persistCartCache = (distributors: Distributor[], priceHistory: Record<string, LocalPriceHistoryRow[]>) => {
   try {
     const keys = Object.keys(priceHistory);
-    const trimmedHistory: Record<string, any[]> = {};
+    const trimmedHistory: Record<string, LocalPriceHistoryRow[]> = {};
     const keysToKeep = keys.slice(-MAX_PRICE_HISTORY_CACHE_ENTRIES);
     for (const k of keysToKeep) {
       trimmedHistory[k] = priceHistory[k];
@@ -170,11 +287,11 @@ const initialPersistedCache = loadPersistedCartCache();
 let cachedDistributors: Distributor[] = initialPersistedCache.distributors;
 let cachedPendingOrders: SpecialOrder[] = [];
 let cachedPendingRefills: Refill[] = [];
-let cachedPriceHistory: Record<string, any[]> = initialPersistedCache.priceHistory;
+let cachedPriceHistory: Record<string, LocalPriceHistoryRow[]> = initialPersistedCache.priceHistory;
 let cachedLastFetched: Date | null = initialPersistedCache.distributors.length > 0 ? new Date() : null;
 let cachedSentDates: string[] = [];
 let cachedSelectedSentDate: string = '';
-const cachedSentOrdersMap: Record<string, any[]> = {};
+const cachedSentOrdersMap: Record<string, LocalSentOrder[]> = {};
 
 const USER_CHECK_STORAGE_KEY = 'pharmacart_user_check_overrides_v1';
 const getTodayDateKey = () => new Date().toISOString().slice(0, 10);
@@ -279,14 +396,14 @@ export default function PharmarackCart() {
   const [error, setError] = useState<string | null>(null);
   const [lastFetched, setLastFetched] = useState<Date | null>(() => cachedLastFetched);
   const [updatingItemId, setUpdatingItemId] = useState<string | null>(null);
-  const [priceHistoryCache, setPriceHistoryCache] = useState<Record<string, any[]>>(() => cachedPriceHistory);
+  const [priceHistoryCache, setPriceHistoryCache] = useState<Record<string, LocalPriceHistoryRow[]>>(() => cachedPriceHistory);
   const [sendingNotifId, setSendingNotifId] = useState<number | null>(null);
   const [pendingOrders, setPendingOrders] = useState<SpecialOrder[]>(() => cachedPendingOrders);
 const [pendingRefills, setPendingRefills] = useState<Refill[]>(() => cachedPendingRefills);
 const [showAddedItems] = useState<boolean>(false);
   const [reorderBannerCollapsed, setReorderBannerCollapsed] = useState<boolean>(false);
 
-  const [reorderSuggestions, setReorderSuggestions] = useState<any[]>([]);
+  const [reorderSuggestions, setReorderSuggestions] = useState<ReorderSuggestion[]>([]);
   const [, setSuggestionsLoading] = useState<boolean>(false);
   const [reorderRecentItems, setReorderRecentItems] = useState<{ medicineName: string; lastOrderedDate: string; lastQty: number; lastDistributorName: string }[]>([]);
   const [reorderWindowMonths, setReorderWindowMonths] = useState<number>(2);
@@ -318,7 +435,7 @@ const [showAddedItems] = useState<boolean>(false);
 
   const [sentDates, setSentDates] = useState<string[]>(() => cachedSentDates);
   const [selectedSentDate, setSelectedSentDate] = useState<string>(() => cachedSelectedSentDate || (cachedSentDates[0] || ''));
-  const [sentOrders, setSentOrders] = useState<any[]>(() => {
+  const [sentOrders, setSentOrders] = useState<LocalSentOrder[]>(() => {
     const initDate = cachedSelectedSentDate || cachedSentDates[0];
     return (initDate && cachedSentOrdersMap[initDate]) ? cachedSentOrdersMap[initDate] : [];
   });
@@ -327,34 +444,34 @@ const [showAddedItems] = useState<boolean>(false);
 
   // Switch Supplier Modal State
   const [switchModalTarget, setSwitchModalTarget] = useState<{ item: CartLineItem; dist: Distributor } | null>(null);
-  const [switchCatalogResults, setSwitchCatalogResults] = useState<any[]>([]);
+  const [switchCatalogResults, setSwitchCatalogResults] = useState<LocalSwitchCatalogItem[]>([]);
   const [switchSearching, setSwitchSearching] = useState<boolean>(false);
   const [switchingDistributor, setSwitchingDistributor] = useState<boolean>(false);
   const [switchSearchQuery, setSwitchSearchQuery] = useState<string>('');
 
   // Batch Last Purchase Intelligence Map
-  const [lastPurchaseMap, setLastPurchaseMap] = useState<Record<string, any>>({});
+  const [lastPurchaseMap, setLastPurchaseMap] = useState<Record<string, BatchLastPurchaseResult>>({});
   const [, setLastPurchaseLoading] = useState<boolean>(false);
 
   // Reorder Same Medicine Confirmation Modal State
-  const [reorderSameModalTarget, setReorderSameModalTarget] = useState<any | null>(null);
+  const [reorderSameModalTarget, setReorderSameModalTarget] = useState<LocalReorderSameCard | null>(null);
   const [reorderModalQty, setReorderModalQty] = useState<number>(1);
   const [reorderModalSupplierId, setReorderModalSupplierId] = useState<number | null>(null);
 
   // Purchase History Modal State
-  const [purchaseHistoryModalTarget, setPurchaseHistoryModalTarget] = useState<{ medicineName: string; loading: boolean; history: any[] } | null>(null);
+  const [purchaseHistoryModalTarget, setPurchaseHistoryModalTarget] = useState<{ medicineName: string; loading: boolean; history: LocalPriceHistoryRow[] } | null>(null);
 
   // Shortages Hub Subtab State
   const [shortagesSubTab, setShortagesSubTab] = useState<'requests' | 'refills' | 'sales_suggestions' | 'ordered_recently'>('requests');
 
   // Latest sent order history map by store ID / store name
-  const [latestSentMap, setLatestSentMap] = useState<Record<string, { storeId: number | null; storeName: string; placedAt: number; items: any[] }>>({});
+  const [latestSentMap, setLatestSentMap] = useState<Record<string, LocalSentMapEntry>>({});
 
   const fetchLatestSentMap = async () => {
     try {
       const res = await api.getPharmarackLatestSentMap();
       if (res && res.success && res.sentMap) {
-        setLatestSentMap(res.sentMap);
+        setLatestSentMap(res.sentMap as unknown as Record<string, LocalSentMapEntry>);
       }
     } catch (err) {
       console.warn('Failed to load latest sent map:', err);
@@ -386,10 +503,10 @@ const [showAddedItems] = useState<boolean>(false);
       return { isPastOrdered: false, placedAt: 0, placedDateStr: '', isToday: false, isYesterday: false };
     }
 
-    let matchedSentItem: any = null;
+    let matchedSentItem: LocalSentOrderItem | null | undefined = null;
     if (Array.isArray(sentInfo.items) && sentInfo.items.length > 0) {
       const normItemName = item.productName.toLowerCase().replace(/[^a-z0-9]/g, '');
-      matchedSentItem = sentInfo.items.find((sentItem: any) => {
+      matchedSentItem = sentInfo.items.find((sentItem) => {
         if (item.productCode && sentItem.productCode && item.productCode === sentItem.productCode) {
           return true;
         }
@@ -460,7 +577,7 @@ const [showAddedItems] = useState<boolean>(false);
     return true; // Fresh medicine, never sent — included by default
   };
 
-  const handleToggleItemCheck = (storeId: number, itemOrKey: any, isChecked: boolean) => {
+  const handleToggleItemCheck = (storeId: number, itemOrKey: CartLineItem | string, isChecked: boolean) => {
     let key = '';
     if (typeof itemOrKey === 'object' && itemOrKey !== null) {
       key = getItemCheckKey(storeId, itemOrKey);
@@ -583,8 +700,9 @@ const [showAddedItems] = useState<boolean>(false);
     try {
       const res = await api.getPharmarackSentOrders(dateStr);
       if (res && res.success && Array.isArray(res.orders)) {
-        setSentOrders(res.orders);
-        cachedSentOrdersMap[dateStr] = res.orders;
+        const orders = res.orders as unknown as LocalSentOrder[];
+        setSentOrders(orders);
+        cachedSentOrdersMap[dateStr] = orders;
       }
     } catch (err) {
       console.error('Failed to load sent orders for date:', err);
@@ -658,7 +776,7 @@ const [showAddedItems] = useState<boolean>(false);
           const cleanPhone = toWaDigits(phoneNum);
 
           const distName = (dist.storeName || '').toLowerCase().trim();
-          const matchingItem = recentItems.find((item: any) => {
+          const matchingItem = recentItems.find((item) => {
             const itemPhone = (item.number || '').replace(/\D/g, '');
             const matchPhone = itemPhone.length >= 7 && cleanPhone.length >= 7
               && (itemPhone.endsWith(cleanPhone.slice(-10)) || cleanPhone.endsWith(itemPhone.slice(-10)));
@@ -745,7 +863,7 @@ const [showAddedItems] = useState<boolean>(false);
   });
 
   const [deliveryBoysList, setDeliveryBoysList] = useState<{ id?: number; name: string; whatsapp_number: string; is_active?: number }[]>([]);
-  const [savedDistributorsList, setSavedDistributorsList] = useState<any[]>([]);
+  const [savedDistributorsList, setSavedDistributorsList] = useState<LocalDistributorRecord[]>([]);
   const [distributorMappings, setDistributorMappings] = useState<Record<string, { distributorId: number | null; phone: string }>>({});
 
   const fetchSavedDistributors = async () => {
@@ -764,7 +882,7 @@ const [showAddedItems] = useState<boolean>(false);
       const res = await apiClient.get('/pharmarack/distributor-mappings');
       if (res.data && Array.isArray(res.data.mappings)) {
         const mapObj: Record<string, { distributorId: number | null; phone: string }> = {};
-        res.data.mappings.forEach((m: any) => {
+        res.data.mappings.forEach((m: { store_name?: string; distributor_id?: number | null; distributor_phone?: string; phone?: string }) => {
           if (m.store_name) {
             mapObj[m.store_name.toLowerCase().trim()] = {
               distributorId: m.distributor_id || null,
@@ -783,7 +901,7 @@ const [showAddedItems] = useState<boolean>(false);
     try {
       const res = await apiClient.get('/dispatch/delivery-boys');
       if (Array.isArray(res.data)) {
-        const active = res.data.filter((b: any) => b.is_active !== 0);
+        const active = res.data.filter((b: LocalDeliveryBoyRow) => b.is_active !== 0);
         setDeliveryBoysList(active);
         return active as { id?: number; name: string; whatsapp_number: string; is_active?: number }[];
       }
@@ -956,13 +1074,13 @@ const [showAddedItems] = useState<boolean>(false);
     const rawCartNorm = distName.toLowerCase().replace(/[^a-z0-9]/g, '');
     if (!normCart && !rawCartNorm) return null;
 
-    const getPhone = (d: any) => {
+    const getPhone = (d: LocalDistributorRecord) => {
       const p = d.phone || d.mobile || d.whatsapp || d.contact || '';
       return p.trim();
     };
 
     // 1. Highest Priority: EXACT match WITH a non-empty phone number
-    const exactWithPhone = savedDistributorsList.find((d: any) => {
+    const exactWithPhone = savedDistributorsList.find((d) => {
       if (!d || !d.name || !getPhone(d)) return false;
       const normSaved = normalizeDistName(d.name);
       const rawSavedNorm = d.name.toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -971,7 +1089,7 @@ const [showAddedItems] = useState<boolean>(false);
     if (exactWithPhone) return exactWithPhone;
 
     // 2. Second Priority: EXACT match ANY record (even if phone not yet set)
-    const exactAny = savedDistributorsList.find((d: any) => {
+    const exactAny = savedDistributorsList.find((d) => {
       if (!d || !d.name) return false;
       const normSaved = normalizeDistName(d.name);
       const rawSavedNorm = d.name.toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -980,7 +1098,7 @@ const [showAddedItems] = useState<boolean>(false);
     if (exactAny) return exactAny;
 
     // 3. Third Priority: Fuzzy substring match WITH a non-empty phone number
-    const fuzzyWithPhone = savedDistributorsList.find((d: any) => {
+    const fuzzyWithPhone = savedDistributorsList.find((d) => {
       if (!d || !d.name || !getPhone(d)) return false;
       const normSaved = normalizeDistName(d.name);
       const rawSavedNorm = d.name.toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -992,7 +1110,7 @@ const [showAddedItems] = useState<boolean>(false);
     if (fuzzyWithPhone) return fuzzyWithPhone;
 
     // 4. Fourth Priority: Any fuzzy match fallback
-    return savedDistributorsList.find((d: any) => {
+    return savedDistributorsList.find((d) => {
       if (!d || !d.name) return false;
       const normSaved = normalizeDistName(d.name);
       const rawSavedNorm = d.name.toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -1025,7 +1143,7 @@ const [showAddedItems] = useState<boolean>(false);
 
     if (mapping) {
       if (mapping.distributorId) {
-        const found = savedDistributorsList.find((d: any) => d.id === mapping.distributorId);
+        const found = savedDistributorsList.find((d) => d.id === mapping.distributorId);
         const latestPhone = found?.phone || found?.mobile || found?.whatsapp || found?.contact || '';
         if (latestPhone && latestPhone.trim().length > 0) {
           return latestPhone.trim();
@@ -1056,7 +1174,7 @@ const [showAddedItems] = useState<boolean>(false);
     return distributors.filter(d => !isDistributorMapped(d));
   }, [distributors, customDistributorPhones, savedDistributorsList, distributorMappings]);
 
-  const getCartItemAmount = (item: any): number => {
+  const getCartItemAmount = (item: { amount?: number; ptr?: number; rate?: number; qty?: number; quantity?: number }): number => {
     if (typeof item.amount === 'number' && item.amount > 0) return item.amount;
     const rate = item.ptr || item.rate || 0;
     const qty = item.qty || item.quantity || 1;
@@ -1164,10 +1282,10 @@ const [showAddedItems] = useState<boolean>(false);
         const refillList: Refill[] = [];
         const today = new Date();
 
-        res.data.forEach((patient: any) => {
+        res.data.forEach((patient: LocalRefillPanelPatient) => {
           if (!patient.medicines || !Array.isArray(patient.medicines)) return;
 
-          patient.medicines.forEach((m: any) => {
+          patient.medicines.forEach((m) => {
             if (m.status === 'canceled' || m.is_active === 0) return;
 
             const dueDate = new Date(patient.next_refill_date);
@@ -1290,9 +1408,10 @@ const [showAddedItems] = useState<boolean>(false);
       } else {
         toastEvent.trigger(res?.error || 'Failed to send delivery boy notification.', 'error');
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const apiErr = err as LocalApiError;
       console.error('Failed to send delivery boy notification:', err);
-      toastEvent.trigger(err?.response?.data?.error || 'Failed to send delivery boy notification.', 'error');
+      toastEvent.trigger(apiErr?.response?.data?.error || 'Failed to send delivery boy notification.', 'error');
     } finally {
       setSendingDeliveryBoyNotifId(null);
     }
@@ -1315,9 +1434,10 @@ const [showAddedItems] = useState<boolean>(false);
       } else {
         toastEvent.trigger(res?.error || 'Failed to send notifications.', 'error');
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const apiErr = err as LocalApiError;
       console.error('Failed to send notifications:', err);
-      toastEvent.trigger(err?.response?.data?.error || 'Failed to send notifications.', 'error');
+      toastEvent.trigger(apiErr?.response?.data?.error || 'Failed to send notifications.', 'error');
     } finally {
       setSendingNotifId(null);
     }
@@ -1509,7 +1629,7 @@ const [showAddedItems] = useState<boolean>(false);
       } catch (logErr) {
         console.warn('Could not log placed order:', logErr);
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.warn('Silent WhatsApp send fallback to Web tab:', err);
 
       // Copy order message to clipboard for instant manual paste if needed
@@ -1598,7 +1718,7 @@ const [showAddedItems] = useState<boolean>(false);
         try {
           const freshRes = await apiClient.get('/dispatch/delivery-boys');
           if (Array.isArray(freshRes.data)) {
-            liveBoys = freshRes.data.filter((b: any) => b.is_active !== 0);
+            liveBoys = freshRes.data.filter((b: LocalDeliveryBoyRow) => b.is_active !== 0);
             setDeliveryBoysList(liveBoys);
           }
         } catch (_) {}
@@ -1607,7 +1727,7 @@ const [showAddedItems] = useState<boolean>(false);
       const deliveryBoyPhone = primaryBoy?.whatsapp_number || storeInfo.deliveryBoyPhone || storeInfo.adminPhone || '';
       const deliveryBoyName = primaryBoy?.name || 'Delivery Staff';
 
-      const ordersPayload: { storeName: string; storeId: number; phone: string; message: string; lineTotal?: number; items: any[] }[] = [];
+      const ordersPayload: { storeName: string; storeId: number; phone: string; message: string; lineTotal?: number; items: CartLineItem[] }[] = [];
 
       for (const dist of mapped) {
         const itemsForBatch = dist.items.filter(item => isItemIncludedInDispatch(item, dist));
@@ -1681,9 +1801,10 @@ const [showAddedItems] = useState<boolean>(false);
       if (unmapped.length > 0) {
         toastEvent.trigger(`${unmapped.length} distributor(s) missing WhatsApp numbers. Please add phone numbers.`, 'info');
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const apiErr = err as LocalApiError;
       console.warn('Batch WhatsApp send error:', err);
-      toastEvent.trigger(err?.message || 'Failed to send WhatsApp orders automatically.', 'error');
+      toastEvent.trigger(apiErr?.message || 'Failed to send WhatsApp orders automatically.', 'error');
 
       // Fallback: If background queue or backend service is unavailable, offer browser WhatsApp Web tabs for mapped distributors
       try {
@@ -1730,7 +1851,7 @@ const [showAddedItems] = useState<boolean>(false);
         setSelectedSavedDistId(matched?.id || null);
       } else if (matched?.phone || matched?.mobile || matched?.whatsapp) {
         setModalPhoneInput(matched.phone || matched.mobile || matched.whatsapp || '');
-        setSelectedSavedDistId(matched.id);
+        setSelectedSavedDistId(matched.id as number | null);
       } else {
         setModalPhoneInput('');
         setSelectedSavedDistId(null);
@@ -1779,7 +1900,7 @@ const [showAddedItems] = useState<boolean>(false);
         }
       } else if (selectedSavedDistId) {
         // Updating an existing selected distributor from directory
-        const foundSaved = savedDistributorsList.find((d: any) => d.id === selectedSavedDistId);
+        const foundSaved = savedDistributorsList.find((d) => d.id === selectedSavedDistId);
         try {
           const updateRes = await apiClient.put(`/distributors/${selectedSavedDistId}`, {
             name: foundSaved?.name || distName,
@@ -1828,7 +1949,7 @@ const [showAddedItems] = useState<boolean>(false);
       } catch (_) {}
 
       await broadcastContactDataChanged();
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.warn('Background save distributor contact error:', err);
     } finally {
       setIsSavingContact(false);
@@ -1848,7 +1969,7 @@ const [showAddedItems] = useState<boolean>(false);
         // piling them up on Node's single thread stalls the whole app, not just this page.
         // Throttle to a small concurrency window instead of Promise.all-ing everything.
         const CONCURRENCY = 4;
-        const results: Array<{ name: string; data: any[] }> = [];
+        const results: Array<{ name: string; data: LocalPriceHistoryRow[] }> = [];
         let nextIndex = 0;
         const worker = async () => {
           while (nextIndex < namesToFetch.length) {
@@ -1963,7 +2084,7 @@ const [showAddedItems] = useState<boolean>(false);
     });
   };
 
-  const cartSyncTimerRef = useRef<any>(null);
+  const cartSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const scheduleCartSync = (delayMs = 1500) => {
     if (cartSyncTimerRef.current) {
@@ -1974,7 +2095,7 @@ const [showAddedItems] = useState<boolean>(false);
     }, delayMs);
   };
 
-  const fetchCart = async (forceFresh?: boolean | any) => {
+  const fetchCart = async (forceFresh?: unknown) => {
     const isFresh = forceFresh === true;
     // Only show loading spinner on cold cache (first visit)
     if (cachedDistributors.length === 0) {
@@ -1999,9 +2120,10 @@ const [showAddedItems] = useState<boolean>(false);
       } else {
         setError('Failed to retrieve cart details.');
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const apiErr = err as LocalApiError;
       console.error('Failed to fetch Pharmarack cart:', err);
-      setError(err?.response?.data?.error || 'Failed to fetch cart. Please check server logs or verify your session.');
+      setError(apiErr?.response?.data?.error || 'Failed to fetch cart. Please check server logs or verify your session.');
     } finally {
       setLoading(false);
     }
@@ -2097,9 +2219,10 @@ const [showAddedItems] = useState<boolean>(false);
         toastEvent.trigger(res?.error || 'Failed to update quantity on Pharmarack', 'error');
         scheduleCartSync(500);
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const apiErr = err as LocalApiError;
       console.error('Failed to update quantity:', err);
-      toastEvent.trigger(err?.response?.data?.error || 'Failed to update quantity', 'error');
+      toastEvent.trigger(apiErr?.response?.data?.error || 'Failed to update quantity', 'error');
       scheduleCartSync(500);
     } finally {
       setUpdatingItemId(null);
@@ -2157,16 +2280,17 @@ const [showAddedItems] = useState<boolean>(false);
         toastEvent.trigger(res?.error || 'Failed to delete item from live cart', 'error');
         scheduleCartSync(500);
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const apiErr = err as LocalApiError;
       console.error('Failed to delete Pharmarack cart item:', err);
-      toastEvent.trigger(err?.response?.data?.error || 'Failed to delete item from live cart', 'error');
+      toastEvent.trigger(apiErr?.response?.data?.error || 'Failed to delete item from live cart', 'error');
       scheduleCartSync(500);
     } finally {
       setUpdatingItemId(null);
     }
   };
 
-  const handleReaddSingleSentItem = async (item: any, storeId?: number, storeName?: string) => {
+  const handleReaddSingleSentItem = async (item: LocalSentOrderItem, storeId?: number, storeName?: string) => {
     const medName = item.productName || item.product || item.name || '';
     const qty = item.qty || item.quantity || 1;
 
@@ -2230,7 +2354,7 @@ const [showAddedItems] = useState<boolean>(false);
       } else {
         throw new Error(res?.error || 'Failed to add to cart');
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.warn('Direct cart add failed, opening Live Cart search modal:', err);
       toastEvent.trigger(`Opening Live Cart search for "${medName}"...`, 'info');
       liveCartAddEvent.triggerOpen(medName, qty);
@@ -2250,7 +2374,7 @@ const [showAddedItems] = useState<boolean>(false);
         setSwitchCatalogResults(res.products);
       }
       if (!priceHistoryCache[item.productName]) {
-        fetchPriceHistories([{ items: [item] } as any]);
+        fetchPriceHistories([{ items: [item] } as Distributor]);
       }
     } catch (err) {
       console.warn('Failed to search suppliers for switch:', err);
@@ -2275,7 +2399,7 @@ const [showAddedItems] = useState<boolean>(false);
     }
   };
 
-  const handleConfirmSwitchSupplier = async (targetSupplier: any) => {
+  const handleConfirmSwitchSupplier = async (targetSupplier: LocalSwitchCatalogItem) => {
     if (!switchModalTarget) return;
     const { item, dist: currentDist } = switchModalTarget;
     setSwitchingDistributor(true);
@@ -2299,7 +2423,7 @@ const [showAddedItems] = useState<boolean>(false);
         if (targetSupplier.storeId) {
           setSentWaStatusMap(prev => {
             const next = { ...prev };
-            delete next[targetSupplier.storeId];
+            delete next[targetSupplier.storeId as number];
             return next;
           });
         }
@@ -2311,7 +2435,7 @@ const [showAddedItems] = useState<boolean>(false);
         setDistributors(prev => {
           const updated = mergeItemIntoDistributors(prev, {
             productId: targetSupplier.productId || 0,
-            storeId: targetSupplier.storeId,
+            storeId: targetSupplier.storeId as number,
             qty: item.qty || 1,
             ptr: targetSupplier.rate !== undefined ? targetSupplier.rate : undefined,
             mrp: targetSupplier.mrp !== undefined ? targetSupplier.mrp : undefined,
@@ -2333,8 +2457,9 @@ const [showAddedItems] = useState<boolean>(false);
       } else {
         toastEvent.trigger(addRes?.error || 'Failed to switch supplier', 'error');
       }
-    } catch (err: any) {
-      toastEvent.trigger(err?.message || 'Error switching supplier', 'error');
+    } catch (err: unknown) {
+      const apiErr = err as LocalApiError;
+      toastEvent.trigger(apiErr?.message || 'Error switching supplier', 'error');
     } finally {
       setSwitchingDistributor(false);
     }
@@ -2419,7 +2544,7 @@ const [showAddedItems] = useState<boolean>(false);
       ...reorderSuggestions.map(s => s.medicineName),
       ...pendingOrders.map(o => o.product),
       ...pendingRefills.map(r => r.medicine_name)
-    ].filter(Boolean);
+    ].filter(Boolean) as string[];
 
     if (candidateNames.length > 0) {
       fetchBatchLastPurchases(candidateNames);
@@ -2483,8 +2608,9 @@ const [showAddedItems] = useState<boolean>(false);
         liveCartAddEvent.triggerOpen(card.medicineName, reorderModalQty);
         setReorderSameModalTarget(null);
       }
-    } catch (err: any) {
-      toastEvent.trigger(err?.message || 'Failed to add reorder item', 'error');
+    } catch (err: unknown) {
+      const apiErr = err as LocalApiError;
+      toastEvent.trigger(apiErr?.message || 'Failed to add reorder item', 'error');
     }
   };
 
@@ -2645,7 +2771,7 @@ const [showAddedItems] = useState<boolean>(false);
                 </div>
               ) : (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                  {sentOrders.map((order: any) => (
+                  {sentOrders.map((order) => (
                     <div key={order.id} className="p-4 rounded-2xl border border-glass-border/60 bg-bg/40 flex flex-col justify-between gap-3 shadow-md hover:border-glass-border transition-all">
                       <div>
                         <div className="flex items-center justify-between pb-2 border-b border-glass-border/30">
@@ -2659,7 +2785,7 @@ const [showAddedItems] = useState<boolean>(false);
 
                         {/* Items List */}
                         <div className="space-y-2 mt-3">
-                          {Array.isArray(order.items) && order.items.map((item: any, idx: number) => {
+                          {Array.isArray(order.items) && order.items.map((item, idx: number) => {
                             const medName = item.productName || item.product || item.name;
                             const itemQty = item.qty || item.quantity || 1;
 
@@ -3106,8 +3232,8 @@ const [showAddedItems] = useState<boolean>(false);
                           try {
                             toastEvent.trigger('Opening Pharmarack Login window...', 'info');
                             await api.launchPharmarackLoginWindow();
-                          } catch (err: any) {
-                            toastEvent.trigger(err?.response?.data?.error || 'Failed to launch login window', 'error');
+                          } catch (err: unknown) {
+                            toastEvent.trigger((err as LocalApiError)?.response?.data?.error || 'Failed to launch login window', 'error');
                           }
                         }}
                         className="w-full flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold transition-all shadow-[0_4px_12px_rgba(16,185,129,0.2)]"
@@ -4003,7 +4129,7 @@ const [showAddedItems] = useState<boolean>(false);
                       const val = e.target.value ? Number(e.target.value) : null;
                       setSelectedSavedDistId(val);
                       if (val) {
-                        const found = savedDistributorsList.find((d: any) => d.id === val);
+                        const found = savedDistributorsList.find((d) => d.id === val);
                         if (found && (found.phone || found.mobile || found.whatsapp)) {
                           setModalPhoneInput(found.phone || found.mobile || found.whatsapp || '');
                         }
@@ -4012,7 +4138,7 @@ const [showAddedItems] = useState<boolean>(false);
                     className="w-full bg-bg border border-glass-border rounded-xl px-3 py-2 text-xs text-text focus:outline-none focus:border-emerald-500 font-medium"
                   >
                     <option value="">-- Direct Mobile Number Only --</option>
-                    {savedDistributorsList.map((d: any) => (
+                    {savedDistributorsList.map((d) => (
                       <option key={d.id} value={d.id}>
                         {d.name} {d.phone ? `(${d.phone})` : ''}
                       </option>

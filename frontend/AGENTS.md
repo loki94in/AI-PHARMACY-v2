@@ -31,6 +31,7 @@ This directory contains the Single Page Application (SPA) built using Vite, Reac
 
 - Phase-1 rule categories (unused-vars, prefer-const, no-useless-assignment, no-useless-escape, no-empty) are **zero-tolerance**: `eslint.config.js` allows `allowEmptyCatch` and `^_`-prefixed ignored bindings by convention; never reintroduce raw violations. New code must not add `any` types (Phase-2 target) and must follow the Single Global SSE Connection + react-query-first fetch rules above (Phase-4 migration target).
 - Phase-2 status (2026-08): `services/api.ts`, `types/api.ts`, `stagedQueueService.ts`, and the `useApiQuery`/`useInfiniteScroll`/`useFetchMode`/`useGlobalSseInvalidation` hooks are **zero-`any`**. Backend row/payload shapes are named exports co-located in `services/api.ts` (`CompactInventoryItem`, `WhatsAppQueueStatus`, `ExpiryReviewRecord`, `DistributorDispatchReminder`, `InfiniteScrollFilters` in the hooks, etc.) — reuse or extend those instead of reintroducing `any` or inventing parallel shapes; genuinely free-form JSON stays `unknown`/`Record<string, unknown>`.
+- Phase-2 extension (2026-08-22): `pages/PharmarackCart/index.tsx`, `components/Layout.tsx`, `components/LiveCartAddModal.tsx`, `components/BackupCenterModal.tsx`, and the remaining cart/layout modals are **zero-`any`** too; per-file shapes live as local `Local*` interfaces fed from backend route responses, catch blocks use `catch (err: unknown)` + `as LocalApiError(Shape)` casts — keep this pattern for any new code.
 
 ## POS Cart-First Keyboard Flow & Doctor-Rx Suggestions (added 2026-08)
 
@@ -52,6 +53,18 @@ This directory contains the Single Page Application (SPA) built using Vite, Reac
 - Backend double-enforces: `/purchases/manual` returns `400 {unresolved_items}` — the catch handler surfaces those names; never bypass with silent retries.
 - StagedReviewModal purchase lines carry a resolution strip: green "Linked" chip, blue similarity suggestion with Link button, or search input (≥3-char gating rule) + "➕ New Medicine" opening `UniversalMedicineEditModal` (z-modal renders above z-submodal). Approve & Save is blocked until EVERY purchase line has `medicine_id`. Preview comes from one batched match-items request on explicit Review click (no mount saturation).
 - Never auto-create medicines client-side or re-add name-only fallback inserts; master creation flows exclusively through the Universal editor (POST /medicines).
+
+## Universal Editor History Prefill Strip (added 2026-08)
+
+- `UniversalMedicineEditModal` create mode fires ONE debounced (300 ms) `api.historyPrefill(name)` once the typed base name reaches ≥3 chars (gating rule respected — never on focus/click). The read-only backend endpoint is `GET /purchases/history-prefill`.
+- A "Found in past bills" confirm strip renders above the footer with HSN/GST/MRP/rate + provenance (distributor, invoice, date; pending-email matches are labeled). Filling fields happens ONLY via the user-clicked **Apply** button — never silent autofill. Dismiss hides it until a new match arrives.
+- Do not widen this into auto-filling or add extra prefetch calls per keystroke; one debounced request per settled name.
+
+## Purchases Page Batch & GST Autofill Contract (added 2026-08)
+
+- Typing a batch number on a purchase line fires ONE debounced (300 ms) `api.getLastPurchase(name, medicine_id, distributor_id, batch_no)` — the backend narrows to the newest line of that SAME batch (`batch_no` COLLATE NOCASE). It patches rate, MRP and expiry (same batch ⇒ same values) and cgst/sgst ONLY when `item.gstTouched !== true`. Quantity/free_qty are NEVER auto-filled.
+- `BillItem.gstTouched` is set when the user manually edits SGST/CGST on a row (mirroring keeps both sides equal); it resets to false only on a fresh medicine selection. History lookups (medicine-select and batch-driven alike) must respect this flag — manual GST always wins over stored GST.
+- Do not reintroduce per-keystroke batch-info calls or unconditional GST overwrites; one settled lookup per row edit.
 
 ## Single Global SSE Connection Rule (added 2026-08)
 

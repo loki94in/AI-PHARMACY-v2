@@ -3,8 +3,30 @@ import { createPortal } from 'react-dom';
 import { Camera, X, ScanLine, Loader2 } from 'lucide-react';
 import { apiClient } from '../services/api';
 
+interface LocalScanMedicineInfo {
+  potentialName?: string;
+  batchNumber?: string;
+  expiryDate?: string;
+  mrp?: number;
+  packaging?: string;
+  dosageForm?: string;
+  strength?: string;
+  manufacturer?: string;
+  apiName?: string;
+  genericName?: string;
+}
+
+interface LocalScanResult {
+  text?: string;
+  confidence?: number;
+  capturedImage?: string;
+  medicineInfo?: LocalScanMedicineInfo;
+}
+
+type LocalApiError = { response?: { data?: { error?: string } }; message?: string };
+
 interface AICameraProps {
-  onScanResult: (result: any) => void;
+  onScanResult: (result: LocalScanResult) => void;
   onClose: () => void;
 }
 
@@ -29,7 +51,7 @@ const AICamera: React.FC<AICameraProps> = ({ onScanResult, onClose }) => {
       if (videoRef.current) {
         videoRef.current.srcObject = mediaStream;
       }
-    } catch (err: any) {
+    } catch (err) {
       setError('Could not access camera. Please allow permissions.');
       console.error(err);
     }
@@ -65,8 +87,9 @@ const AICamera: React.FC<AICameraProps> = ({ onScanResult, onClose }) => {
       if (response.data) {
         onScanResult({ ...response.data, capturedImage: base64Image });
       }
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to process image');
+    } catch (err) {
+      const e = err as LocalApiError;
+      setError(e.response?.data?.error || 'Failed to process image');
     } finally {
       setProcessing(false);
     }

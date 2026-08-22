@@ -64,7 +64,7 @@ export const PriceIntelPanel: React.FC<PriceIntelPanelProps> = ({
       const res = await api.getMedicinePriceHistory(medicineName);
       const data: PriceRecord[] = res?.data || [];
       setRecords(data);
-    } catch (_err: any) {
+    } catch (_err) {
       setError('Could not load price history.');
     } finally {
       setLoading(false);

@@ -12,7 +12,7 @@ interface SuggestionMedicine {
   fullName?: string;
   isPharmarack?: boolean;
   distributor?: string;
-  rate?: number;
+  rate?: number | null;
   mapped?: boolean;
   packaging?: string;
   stock?: string;
@@ -22,7 +22,70 @@ interface SuggestionMedicine {
   storeId?: string | number;
   productCode?: string;
   company?: string;
-  mrp?: number;
+  mrp?: number | null;
+}
+
+type LocalApiError = { response?: { data?: { error?: string; details?: string } }; message?: string };
+
+type LocalPrSearchFallback = { isError: boolean; message: string };
+type LocalPrSearchOutcome = LocalPharmarackSearchItem[] | LocalPrSearchFallback;
+
+interface LocalPharmarackSearchItem {
+  name: string;
+  shortName?: string;
+  fullName?: string;
+  packaging?: string;
+  distributor?: string;
+  rate?: number | null;
+  mrp?: number | null;
+  mapped?: boolean;
+  stock?: string;
+  scheme?: string;
+  productId?: string | number;
+  storeId?: string | number;
+  productCode?: string;
+  company?: string;
+}
+
+interface LocalReconOrder {
+  id?: number | string;
+  email_uid?: string;
+  uid?: string;
+  medicine_names?: string[];
+  subject?: string;
+  status?: string;
+  extracted_distributor?: string | null;
+  is_saved?: number | boolean;
+}
+
+interface LocalAutoRefillItem {
+  medicine_id: number;
+  medicine_name: string;
+  manufacturer: string;
+  packaging: string;
+  current_stock: number;
+  sales_30d: number;
+  reorder_level: number;
+  recommended_qty: number;
+}
+
+interface LocalRefillPatient {
+  patient_name: string;
+  patient_phone: string;
+  next_refill_date: string;
+  medicines?: Array<{
+    id: number;
+    medicine_id?: number;
+    medicine_name?: string;
+    status?: string;
+    is_active?: number;
+    quantity_needed?: number | string;
+    in_stock_qty?: number | string;
+    refill_interval_days?: number;
+    hold_for_stock?: number;
+    reminder_status?: Refill['reminder_status'];
+    reminder_sent_at?: string | null;
+  }>;
 }
 
 // Distributor style — colored left border only, neutral background
@@ -206,8 +269,8 @@ const saveSkippedKeys = (keys: Set<string>) => {
 let cachedCartDistributors: Distributor[] = [];
 let cachedPendingOrders: SpecialOrder[] = [];
 let cachedPendingRefills: Refill[] = [];
-let cachedReconOrders: any[] = [];
-let cachedAutoRefillItems: any[] = [];
+let cachedReconOrders: LocalReconOrder[] = [];
+let cachedAutoRefillItems: LocalAutoRefillItem[] = [];
 let cachedIgnoredWords: Array<{ id: number; word: string; source: string; created_at: string }> = [];
 let cachedSkippedItemKeys: Set<string> = loadInitialSkippedKeys();
 let cachedPrMode: 'Live' | 'Unknown' = 'Live';
@@ -409,11 +472,10 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
   const [] = useState<number | null>(null);
 
   // Reconcile Orders (unreconciled distributor email orders)
-  const [reconOrders, setReconOrders] = useState<any[]>(cachedReconOrders);
+  const [reconOrders, setReconOrders] = useState<LocalReconOrder[]>(cachedReconOrders);
   const [] = useState<number | null>(null);
   const [] = useState<string>('');
-  const [addedReconMedicines] = useState<Record<number, string[]>>({});
-
+    const [addedReconMedicines] = useState<Record<number | string, string[]>>({});
   // Permanently Ignored Words State
   const [ignoredWords, setIgnoredWords] = useState<Array<{ id: number; word: string; source: string; created_at: string }>>(cachedIgnoredWords);
   const [showIgnoredList, setShowIgnoredList] = useState(false);
@@ -490,16 +552,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
   };
 
   // High-Frequency Low Stock Auto-Refills State
-  const [autoRefillItems, setAutoRefillItems] = useState<Array<{
-    medicine_id: number;
-    medicine_name: string;
-    manufacturer: string;
-    packaging: string;
-    current_stock: number;
-    sales_30d: number;
-    reorder_level: number;
-    recommended_qty: number;
-  }>>(cachedAutoRefillItems);
+  const [autoRefillItems, setAutoRefillItems] = useState<LocalAutoRefillItem[]>(cachedAutoRefillItems);
   const [] = useState<number | null>(null);
   const [] = useState<number | null>(null);
   const [] = useState<string | null>(null);
@@ -541,9 +594,10 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
       setNewReqNotes('');
       setShowNewRequestForm(false);
       await fetchPendingOrders();
-    } catch (err: any) {
+    } catch (err) {
+      const e = err as LocalApiError;
       console.error('Failed to create special request:', err);
-      toastEvent.trigger(err?.response?.data?.error || 'Failed to create special request', 'error');
+      toastEvent.trigger(e.response?.data?.error || 'Failed to create special request', 'error');
     } finally {
       setIsSavingNewReq(false);
     }
@@ -572,10 +626,10 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
         const refillList: Refill[] = [];
         const today = new Date();
 
-        data.forEach((patient: any) => {
+        data.forEach((patient: LocalRefillPatient) => {
           if (!patient.medicines || !Array.isArray(patient.medicines)) return;
 
-          patient.medicines.forEach((m: any) => {
+          patient.medicines.forEach((m) => {
             if (m.status === 'canceled' || m.is_active === 0) return;
             if (isMedicineIgnored(m.medicine_name, cachedIgnoredWords)) return;
 
@@ -637,12 +691,12 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
       if (Array.isArray(data)) {
         // Only show unresolved / missing reconcile items and filter ignored words
         const filtered = data
-          .filter((r: any) => !r.is_saved && r.status !== 'Matched')
-          .map((r: any) => ({
+          .filter((r: LocalReconOrder) => !r.is_saved && r.status !== 'Matched')
+          .map((r: LocalReconOrder) => ({
             ...r,
             medicine_names: r.medicine_names ? r.medicine_names.filter((m: string) => !isMedicineIgnored(m, cachedIgnoredWords)) : []
           }))
-          .filter((r: any) => r.medicine_names && r.medicine_names.length > 0);
+          .filter((r: LocalReconOrder) => r.medicine_names && r.medicine_names.length > 0);
         cachedReconOrders = filtered;
         setReconOrders(filtered);
       }
@@ -689,7 +743,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
   }, [suggestions, qty]);
 
   // fetchCart logic
-  const fetchCart = async (silent?: boolean | any) => {
+  const fetchCart = async (silent?: boolean) => {
     const isSilent = typeof silent === 'boolean' ? silent : false;
     if (!isSilent) {
       setCartLoading(true);
@@ -705,17 +759,18 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
           setCartError(data?.error || 'Failed to retrieve cart details.');
         }
       }
-    } catch (err: any) {
+    } catch (err) {
+      const e = err as LocalApiError;
       console.error('Failed to fetch Pharmarack cart in modal:', err);
       if (cachedCartDistributors.length === 0) {
-        setCartError(err?.response?.data?.error || err?.message || 'Error fetching cart');
+        setCartError(e.response?.data?.error || e.message || 'Error fetching cart');
       }
     } finally {
       setCartLoading(false);
     }
   };
 
-  const fetchLiveCartSummary = async (silent?: boolean | any) => {
+  const fetchLiveCartSummary = async (silent?: boolean) => {
     const isSilent = typeof silent === 'boolean' ? silent : false;
     if (!isSilent && cachedCartDistributors.length === 0) {
       setCartLoading(true);
@@ -731,19 +786,19 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
         }
 
         if (Array.isArray(summary.orders)) {
-          const filteredOrders = summary.orders.filter((o: any) => !isMedicineIgnored(o.product, cachedIgnoredWords));
+          const filteredOrders = summary.orders.filter((o: SpecialOrder) => !isMedicineIgnored(o.product, cachedIgnoredWords));
           cachedPendingOrders = filteredOrders;
           setPendingOrders(filteredOrders);
         }
         if (Array.isArray(summary.autoRefills)) {
-          const filteredRefills = summary.autoRefills.filter((a: any) => !isMedicineIgnored(a.medicine_name, cachedIgnoredWords));
+          const filteredRefills = summary.autoRefills.filter((a: LocalAutoRefillItem) => !isMedicineIgnored(a.medicine_name, cachedIgnoredWords));
           cachedAutoRefillItems = filteredRefills;
           setAutoRefillItems(filteredRefills);
         }
       } else {
         await fetchCart(true);
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.warn('Live cart summary fetch error, falling back to fetchCart:', err);
       await fetchCart(true);
     } finally {
@@ -760,7 +815,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
         fetchReconOrders()
       ]);
       toastEvent.trigger('Cart & pending lists refreshed!', 'success');
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to refresh modal cart:', err);
       toastEvent.trigger('Failed to refresh cart data', 'error');
     } finally {
@@ -873,15 +928,16 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
 
       try {
         // Search Pharmarack catalog only (no local inventory cross-check)
-        const prData = await api.searchPharmarack(cleanQuery).catch((err: any) => {
-          const errMsg = err?.response?.data?.error || 'Connection error, please check internet or reconnect';
+        const prData = await api.searchPharmarack(cleanQuery).catch((err: unknown): LocalPrSearchOutcome => {
+          const apiErr = err as LocalApiError;
+          const errMsg = apiErr?.response?.data?.error || 'Connection error, please check internet or reconnect';
           return { isError: true, message: errMsg };
-        });
+        }) as LocalPrSearchOutcome;
 
         const mergedList: SuggestionMedicine[] = [];
 
-        if (prData && !(prData as any).isError && Array.isArray(prData) && prData.length > 0) {
-          prData.forEach((item: any) => {
+        if (prData && !(prData as LocalPrSearchFallback).isError && Array.isArray(prData) && prData.length > 0) {
+          prData.forEach((item) => {
             const displayName = item.shortName || item.name;
             mergedList.push({
               medicine_name: displayName,
@@ -914,9 +970,9 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
               return 0;
             });
           }
-        } else if (prData && (prData as any).isError) {
+        } else if (prData && (prData as LocalPrSearchFallback).isError) {
           mergedList.push({
-            medicine_name: `⚠️ ${(prData as any).message}`,
+            medicine_name: `⚠️ ${(prData as LocalPrSearchFallback).message}`,
             isPharmarack: true,
             isErrorMessage: true
           });
@@ -1136,9 +1192,10 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
       
       // Refresh any active cart indicators in the header/sidebar
       window.dispatchEvent(new CustomEvent('refresh-pharmarack-cart'));
-    } catch (cartErr: any) {
+    } catch (cartErr: unknown) {
       console.error('Failed to add live cart item:', cartErr);
-      const detailedError = cartErr?.response?.data?.details || cartErr?.response?.data?.error || cartErr?.message || 'Unknown error';
+      const apiErr = cartErr as LocalApiError;
+      const detailedError = apiErr?.response?.data?.details || apiErr?.response?.data?.error || apiErr?.message || 'Unknown error';
       toastEvent.trigger(`Live addition failed: ${detailedError}`, 'error');
     } finally {
       setIsSubmitting(false);

@@ -35,10 +35,10 @@ interface SuggestionMedicine {
   medicine_name: string;
   batch_no?: string;
   quantity?: number;
-  mrp?: number;
+  mrp?: number | null;
   isPharmarack?: boolean;
   distributor?: string;
-  rate?: number;
+  rate?: number | null;
   mapped?: boolean;
   packaging?: string;
   stock?: string;
@@ -48,11 +48,46 @@ interface SuggestionMedicine {
   storeId?: string | number;
   productCode?: string;
   company?: string;
+  manufacturer?: string;
 }
 
 interface SchemeInfo {
   buy: number;
   free: number;
+}
+
+type LocalApiError = { response?: { data?: { error?: string; details?: string } }; message?: string };
+
+interface LocalStagedOrderItem {
+  product: string;
+  qty: number;
+  distributor?: string;
+  rate?: number;
+  mrp?: number;
+  mapped?: boolean;
+  scheme?: string;
+  productId?: string | number;
+  storeId?: string | number;
+  productCode?: string;
+  company?: string;
+  packaging?: string;
+}
+
+interface LocalPharmarackSearchItem {
+  name: string;
+  shortName?: string;
+  fullName?: string;
+  packaging?: string;
+  distributor?: string;
+  rate?: number | null;
+  mrp?: number | null;
+  mapped?: boolean;
+  stock?: string;
+  scheme?: string;
+  productId?: string | number;
+  storeId?: string | number;
+  productCode?: string;
+  company?: string;
 }
 
 const parseScheme = (schemeStr: string | undefined): SchemeInfo | null => {
@@ -87,7 +122,7 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
   };
   
   // Staged Cart List
-  const [cart, setCart] = useState<any[]>([]);
+  const [cart, setCart] = useState<LocalStagedOrderItem[]>([]);
 
   // Form State
   const [product, setProduct] = useState('');
@@ -120,9 +155,9 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
   const [prMode, setPrMode] = useState<'Live' | 'Unknown'>('Live');
 
   // Duplicate check states
-  const [duplicateMatch, setDuplicateMatch] = useState<any | null>(null);
+  const [duplicateMatch, setDuplicateMatch] = useState<LocalStagedOrderItem | null>(null);
   const [duplicateMatchIndex, setDuplicateMatchIndex] = useState<number>(-1);
-  const [pendingItemToAdd, setPendingItemToAdd] = useState<any | null>(null);
+  const [pendingItemToAdd, setPendingItemToAdd] = useState<LocalStagedOrderItem | null>(null);
 
   const resetInputsAndFocus = () => {
     setProduct('');
@@ -143,7 +178,7 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
     setTimeout(() => productInputRef.current?.focus(), 50);
   };
 
-  const insertItemToCart = (item: any) => {
+  const insertItemToCart = (item: LocalStagedOrderItem) => {
     setCart(prev => [...prev, item]);
     resetInputsAndFocus();
   };
@@ -311,7 +346,7 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
       if (isSelectingRef.current) return;
       setSearchLoading(true);
       try {
-        const prData = await api.searchPharmarack(query).catch((err: any) => {
+        const prData = await api.searchPharmarack(query).catch((err: LocalApiError) => {
           const errMsg = err?.response?.data?.error || 'Connection error, please check internet or reconnect';
           return { isError: true, message: errMsg };
         });
@@ -319,14 +354,14 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
         if (!active || isSelectingRef.current) return;
 
         const prSuggestions: SuggestionMedicine[] = [];
-        if (prData && (prData as any).isError) {
+        if (prData && prData.isError) {
           prSuggestions.push({
-            medicine_name: `⚠️ ${(prData as any).message}`,
+            medicine_name: `⚠️ ${prData.message}`,
             isPharmarack: true,
             isErrorMessage: true
           });
         } else if (Array.isArray(prData)) {
-          const hasMapped = prData.some((item: any) => item.mapped);
+          const hasMapped = prData.some((item: LocalPharmarackSearchItem) => item.mapped);
           if (prData.length === 0 || !hasMapped) {
             if (query.length >= 3 && query !== lastToastedQueryRef.current) {
               toastEvent.trigger('No mapped distributor has product', 'info');
@@ -334,7 +369,7 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
             }
           }
 
-          prData.forEach((item: any) => {
+          prData.forEach((item: LocalPharmarackSearchItem) => {
             prSuggestions.push({
               medicine_name: item.name,
               mrp: item.mrp,
@@ -453,7 +488,7 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
 
   // Submit Order Form
   const processSubmissionQueue = async (
-    items: any[],
+    items: LocalStagedOrderItem[],
     customerName: string,
     customerPhone: string,
     orderPriority: 'Low' | 'Normal' | 'High',
@@ -500,14 +535,16 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
         } else {
           toastEvent.trigger(`Requests logged, cart notice: ${res?.error || 'Manual cart add required'}`, 'info');
         }
-      } catch (cartErr: any) {
+      } catch (cartErr) {
+        const e = cartErr as LocalApiError;
         console.warn('Failed to add batch items to actual Pharmarack cart:', cartErr);
-        const detailedError = cartErr?.response?.data?.details || cartErr?.response?.data?.error || cartErr?.message || 'Sync issue';
+        const detailedError = e.response?.data?.details || e.response?.data?.error || e.message || 'Sync issue';
         toastEvent.trigger(`Requests logged, Pharmarack cart notice: ${detailedError}`, 'info');
       }
-    } catch (err: any) {
+    } catch (err) {
+      const e = err as LocalApiError;
       console.error('Failed to log batch request:', err);
-      toastEvent.trigger(`Failed to log order request: ${err?.response?.data?.error || err?.message || 'Error'}`, 'error');
+      toastEvent.trigger(`Failed to log order request: ${e.response?.data?.error || e.message || 'Error'}`, 'error');
     }
   };
 
@@ -670,9 +707,9 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
                                 <span className={`font-semibold flex items-center gap-1 ${ med.isPharmarack ? (med.mapped ? 'text-sky-400' : 'text-purple-400') : 'text-muted' }`}>
                                   <Store size={11} /> {med.isPharmarack ? (med.distributor || 'No Distributor') : 'Local Inventory'}
                                 </span>
-                                {(med.company || (med as any).manufacturer) && (
+                                {(med.company || med.manufacturer) && (
                                   <span className="text-[10px] text-muted/70 font-semibold uppercase tracking-wider">
-                                    • {med.company || (med as any).manufacturer}
+                                    • {med.company || med.manufacturer}
                                   </span>
                                 )}
                               </div>
@@ -706,7 +743,7 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
                                   </>
                                 ) : (
                                   med.mrp !== undefined && (
-                                    <span className="font-bold text-emerald-400 font-mono">MRP: ₹{Math.round(med.mrp)}</span>
+                                    <span className="font-bold text-emerald-400 font-mono">MRP: ₹{Math.round(med.mrp as number)}</span>
                                   )
                                 )}
                               </div>

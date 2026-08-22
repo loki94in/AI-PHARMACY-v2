@@ -13,7 +13,7 @@ interface FileEntry {
   originalName: string;
   ext: string;
   headers: string[];
-  samples: any[];
+  samples: unknown[];
   totalRows?: number;
   detected: { type: string; confidence: number };
   userSelectedType: string;
@@ -63,6 +63,31 @@ interface StagingAudit {
   created_at?: string;
 }
 
+type LocalApiError = { response?: { data?: { error?: string } }; message?: string };
+
+interface LocalValidationError {
+  row: number;
+  column: string;
+  value: unknown;
+  message: string;
+}
+
+interface LocalValidationState {
+  errors: LocalValidationError[];
+  requiredFieldsMapped: boolean;
+  missingRequired: string[];
+}
+
+interface LocalMigrationStatus {
+  isStagingReady?: boolean;
+  message?: string;
+  progress?: number;
+  active?: boolean;
+  errorCount: number;
+}
+
+type LocalImportedRow = { quantity?: number };
+
 export const ReviewModal: React.FC<ReviewModalProps> = ({
   isOpen,
   onClose,
@@ -74,14 +99,14 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const [mappings, setMappings] = useState<Record<string, string>>({});
-  const [validation, setValidation] = useState<any>({
+  const [validation, setValidation] = useState<LocalValidationState>({
     errors: [],
     requiredFieldsMapped: false,
     missingRequired: []
   });
   const [validating, setValidating] = useState(false);
 
-  const [status, setStatus] = useState<any>(null);
+  const [status, setStatus] = useState<LocalMigrationStatus | null>(null);
   const [stagingConflicts, setStagingConflicts] = useState<StagingConflict[]>([]);
   const [stagingErrors, setStagingErrors] = useState<StagingError[]>([]);
   const [stagingAudits, setStagingAudits] = useState<StagingAudit[]>([]);
@@ -213,7 +238,7 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
           missingRequired: result.validation?.missingRequired || []
         });
       }
-    } catch (err: any) {
+    } catch (err) {
       console.error('Validation error:', err);
     } finally {
       setValidating(false);
@@ -237,9 +262,10 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
         0,
         0
       );
-    } catch (err: any) {
+    } catch (err) {
+      const e = err as LocalApiError;
       setPhase('error');
-      setErrorMessage(err.message || 'Failed to start import');
+      setErrorMessage(e.message || 'Failed to start import');
     }
   };
 
@@ -248,8 +274,9 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
     try {
       await api.resolveStagingConflict(conflictId, resolution);
       await loadStagingData();
-    } catch (err: any) {
-      setErrorMessage(err.message || 'Failed to resolve conflict');
+    } catch (err) {
+      const e = err as LocalApiError;
+      setErrorMessage(e.message || 'Failed to resolve conflict');
     } finally {
       setResolvingConflictId(null);
     }
@@ -260,8 +287,9 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
       await api.rollbackMigration();
       setPhase('review');
       setErrorMessage(null);
-    } catch (err: any) {
-      setErrorMessage(err.message || 'Failed to discard staging');
+    } catch (err) {
+      const e = err as LocalApiError;
+      setErrorMessage(e.message || 'Failed to discard staging');
     }
   };
 
@@ -289,9 +317,10 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
         setPhase('error');
         setErrorMessage(res.error || 'Failed to finalize database import');
       }
-    } catch (err: any) {
+    } catch (err) {
+      const e = err as LocalApiError;
       setPhase('error');
-      setErrorMessage(err.message || 'Database finalize error');
+      setErrorMessage(e.message || 'Database finalize error');
     }
   };
 
@@ -315,13 +344,7 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
       }
     };
 
-    const applyLiveStatus = async (liveStatus: {
-      isStagingReady?: boolean;
-      message?: string;
-      progress?: number;
-      active?: boolean;
-      errorCount?: number;
-    } | null | undefined) => {
+    const applyLiveStatus = async (liveStatus: LocalMigrationStatus | null | undefined) => {
       if (!liveStatus) return;
       setStatus(liveStatus);
 
@@ -342,7 +365,7 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
     const checkStatus = async () => {
       try {
         await applyLiveStatus(await api.getMigrationStatus());
-      } catch (err: any) {
+      } catch (err) {
         console.error('Status polling error:', err);
       }
     };
@@ -655,7 +678,7 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
                     </div>
                     <div className="divide-y divide-glass-border/30 max-h-48 overflow-y-auto">
                       {stagingConflicts.map(c => {
-                        let imported: any = {};
+                        let imported: LocalImportedRow = {};
                         try { imported = JSON.parse(c.raw_imported_data); } catch (_) {}
                         return (
                           <div key={c.id} className="px-4 py-3 flex items-center justify-between gap-3 text-sm">

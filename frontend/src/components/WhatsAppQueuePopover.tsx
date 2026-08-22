@@ -4,21 +4,10 @@ import {
   X, RefreshCw, Send, AlertTriangle, CheckCircle2, Clock, 
   WifiOff, Edit3, Play, Pause, ShieldAlert, ChevronDown, ChevronUp, Zap, Truck, Building2, MessageSquare, Calendar, Trash2, CheckCheck
 } from 'lucide-react';
-import { api, apiClient, peekWhatsAppQueueStatusCache } from '../services/api';
+import { api, apiClient, peekWhatsAppQueueStatusCache, type WhatsAppQueueItem, type WhatsAppQueueStatus } from '../services/api';
 import { toastEvent, whatsappQueueEvent, messageSendEvent } from '../services/events';
 
-interface QueueItem {
-  id: number;
-  number: string;
-  message: string;
-  type: string;
-  status: 'pending' | 'sending' | 'sent' | 'failed_offline' | 'failed_perm';
-  retry_count: number;
-  created_at: number;
-  sent_at: number | null;
-  error_message?: string;
-  target_name?: string;
-}
+type QueueItem = WhatsAppQueueItem;
 
 function getFormattedFailureReason(errorMsg?: string, status?: string): string {
   if (!errorMsg && status === 'failed_offline') {
@@ -49,14 +38,32 @@ interface WhatsAppQueuePopoverProps {
 
 type TabType = 'all' | 'customer' | 'delivery' | 'purchase' | 'special' | 'pending' | 'sent' | 'failed';
 
+type LocalApiError = { response?: { data?: { error?: string } }; message?: string };
+
+type LocalQueueCounts = WhatsAppQueueStatus['counts'] & {
+  total?: number;
+  waiting?: number;
+  failed?: number;
+  remaining?: number;
+};
+
+interface LocalQueueState extends Omit<WhatsAppQueueStatus, 'counts'> {
+  counts: LocalQueueCounts;
+  nextDispatchCountdownSeconds?: number;
+  currentItem?: QueueItem | null;
+  nextItem?: QueueItem | null;
+  isCompleted?: boolean;
+  progressPercent?: number;
+}
+
 // Module-level persistent cache for zero-latency instant rendering (<1ms)
-let cachedQueueState: any | null = null;
+let cachedQueueState: LocalQueueState | null = null;
 let cachedDelayCreditBill = 0;
 let cachedDelayDistributor = 0;
 let cachedDelayDeliveryBoy = 0;
 
 export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onClose }) => {
-  const [queueState, setQueueState] = useState<any | null>(() => cachedQueueState);
+  const [queueState, setQueueState] = useState<LocalQueueState | null>(() => cachedQueueState);
   const [loading, setLoading] = useState(() => !cachedQueueState);
   const [activeTab, setActiveTab] = useState<TabType>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -111,7 +118,7 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
   // P1 "events, not timers": poll ONLY while the queue is actively sending;
   // otherwise refresh via queue events + SSE push — no 2s polling of an idle queue.
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const syncPollTimer = (data: any) => {
+  const syncPollTimer = (data: LocalQueueState | null) => {
     const active = !!data && (
       (data.counts?.pending || 0) > 0 ||
       (data.counts?.sending || 0) > 0 ||
@@ -220,8 +227,9 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
       const res = await api.resendWhatsAppQueueItem(id);
       toastEvent.trigger(res.message || 'Message resent for immediate delivery', 'success');
       await fetchStatus();
-    } catch (err: any) {
-      toastEvent.trigger(err?.response?.data?.error || err?.message || 'Failed to resend message', 'error');
+    } catch (err) {
+      const e = err as LocalApiError;
+      toastEvent.trigger(e.response?.data?.error || e.message || 'Failed to resend message', 'error');
     } finally {
       setResendingId(null);
     }
@@ -234,8 +242,9 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
       await api.deleteWhatsAppQueueItem(id);
       toastEvent.trigger('Notification removed permanently', 'success');
       await fetchStatus();
-    } catch (err: any) {
-      toastEvent.trigger(err?.message || 'Failed to remove notification', 'error');
+    } catch (err) {
+      const e = err as LocalApiError;
+      toastEvent.trigger(e.message || 'Failed to remove notification', 'error');
     } finally {
       setDeletingId(null);
     }
@@ -247,8 +256,9 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
       const res = await api.clearFailedWhatsAppQueue();
       toastEvent.trigger(res.message || 'Cleared failed notifications permanently', 'success');
       await fetchStatus();
-    } catch (err: any) {
-      toastEvent.trigger(err?.message || 'Failed to clear failed notifications', 'error');
+    } catch (err) {
+      const e = err as LocalApiError;
+      toastEvent.trigger(e.message || 'Failed to clear failed notifications', 'error');
     } finally {
       setClearingFailed(false);
     }
@@ -685,7 +695,7 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
               <div className="flex items-center gap-2">
                 <span className="text-text">Queue Dispatch Progress:</span>
                 <span className="text-sky font-mono">
-                  {queueState?.counts?.total > 0 ? `${queueState.counts.sent} / ${queueState.counts.total}` : `${todaySentCount} / ${todayAllCount}`}
+                  {(queueState?.counts?.total as number) > 0 ? `${queueState!.counts.sent} / ${queueState!.counts.total}` : `${todaySentCount} / ${todayAllCount}`}
                 </span>
               </div>
               <span className="text-sky font-mono font-extrabold text-sm">
@@ -713,7 +723,7 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
               </span>
               {(queueState?.counts?.sending || 0) > 0 && (
                 <span className="px-2 py-0.5 rounded-lg bg-sky-500/15 border border-sky-500/30 text-sky font-bold flex items-center gap-1 animate-pulse">
-                  <RefreshCw size={10} className="animate-spin" /> Sending: {queueState.counts.sending}
+                  <RefreshCw size={10} className="animate-spin" /> Sending: {queueState!.counts.sending}
                 </span>
               )}
               {((queueState?.nextDispatchCountdownSeconds || 0) > 0 && queueState?.isProcessing) && (
@@ -767,9 +777,9 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
                     <span className="text-[10px] uppercase font-bold text-amber-300 flex items-center gap-1">
                       <Clock size={11} /> Next in Queue
                     </span>
-                    {queueState?.nextDispatchCountdownSeconds > 0 ? (
+                    {(queueState?.nextDispatchCountdownSeconds as number) > 0 ? (
                       <span className="text-[10px] font-mono font-extrabold text-amber-300 bg-amber-500/20 px-1.5 py-0.2 rounded border border-amber-500/30 animate-pulse">
-                        Wait: {queueState.nextDispatchCountdownSeconds}s
+                        Wait: {queueState!.nextDispatchCountdownSeconds}s
                       </span>
                     ) : (
                       <span className="text-[10px] font-mono text-muted">Ready</span>

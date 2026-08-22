@@ -2,9 +2,9 @@ import React, { useState, useEffect, memo } from 'react';
 import { createPortal } from 'react-dom';
 import { 
   X, Save, RefreshCw, AlertTriangle, Pill, Barcode, Tag, Database, Eye, Shield, 
-  Percent, Settings, Trash2
+  Percent, Settings, Trash2, History
 } from 'lucide-react';
-import { api } from '../services/api';
+import { api, type HistoryPrefillResult } from '../services/api';
 import { useQueryClient } from '@tanstack/react-query';
 import { invalidateAfterStockWrite } from '../utils/cacheInvalidation';
 import { toastEvent } from '../services/events';
@@ -31,7 +31,7 @@ export const updateMedicineNameWithPackSize = (currentName: string, newPackaging
   const newNum = pkgParts ? pkgParts[1] : trimmedNewPkg;
   const newUnit = pkgParts ? pkgParts[2].trim() : '';
 
-  const packPatternRegex = /\b(\d+(?:x\d+)?)\s*([a-zA-Z'’]+)?\s*$/i;
+  const packPatternRegex = /\b(\d+(?:x\d+)?)\s*([a-zA-Z'â€™]+)?\s*$/i;
   const match = trimmedName.match(packPatternRegex);
 
   const STRENGTH_FORM_UNITS = /^(mg|mcg|g|ml|l|kg|%|iu|inj|syp|susp|gel|cream|lotion|drops|pf|md|spray|ointment|respu?l|caplet|liq|liquid|drop)$/i;
@@ -87,7 +87,7 @@ const splitMedicineName = (name: string, packaging: string) => {
   if (trimmedPkg && trimmedName.toLowerCase().endsWith(trimmedPkg.toLowerCase())) {
     nameWithoutPkg = trimmedName.substring(0, trimmedName.toLowerCase().lastIndexOf(trimmedPkg.toLowerCase())).trim();
   } else {
-    const packPatternRegex = /\b(\d+(?:x\d+)?)\s*([a-zA-Z'’]+)?\s*$/i;
+    const packPatternRegex = /\b(\d+(?:x\d+)?)\s*([a-zA-Z'â€™]+)?\s*$/i;
     const match = trimmedName.match(packPatternRegex);
     if (match) {
       nameWithoutPkg = trimmedName.substring(0, trimmedName.lastIndexOf(match[0])).trim();
@@ -184,10 +184,138 @@ const THERAPEUTIC_CLASSES = [
   'Other / Unclassified'
 ];
 
+type LocalApiError = { response?: { data?: { error?: string } }; message?: string };
+
+interface LocalUniversalMedicineSeed {
+  name?: string;
+  packaging?: string;
+  mrp?: number | string | null;
+  rate?: number | string | null;
+  sell_price?: number | string | null;
+  item_type?: string;
+  category?: string;
+  pack_unit?: string;
+  pack_size?: number | null;
+  therapeutic?: string;
+  sub_therapeutic?: string;
+  schedule_type?: string;
+  generic_name?: string;
+  manufacturer?: string;
+  marketed_by?: string;
+  item_code?: string;
+  short_code?: string;
+  ucode?: string;
+  hsn_code?: string;
+  cgst_per?: number | null;
+  sgst_per?: number | null;
+  igst_per?: number | null;
+  api_reference?: string;
+  quantity?: number | null;
+  reorder_level?: number | null;
+  max_stock_level?: number | null;
+  rack_location?: string;
+  rack?: string;
+  is_loose?: boolean | number | null;
+  allow_loose_sale?: boolean | number | null;
+  disable_auto_barcode?: boolean | number | null;
+  tb_medicine?: boolean | number | null;
+}
+
+interface LocalUniversalMedicineForm {
+  name: string;
+  item_type: string;
+  category: string;
+  pack_unit: string;
+  packaging: string;
+  pack_size: number;
+  therapeutic: string;
+  sub_therapeutic: string;
+  schedule_type: string;
+  generic_name: string;
+  manufacturer: string;
+  marketed_by: string;
+  item_code: string;
+  short_code: string;
+  ucode: string;
+  hsn_code: string;
+  cgst_per: number;
+  sgst_per: number;
+  igst_per: number;
+  api_reference: string;
+  mrp: number | string;
+  rate: number | string;
+  sell_price: number | string;
+  quantity: number;
+  reorder_level: number;
+  max_stock_level: number;
+  rack_location: string;
+  is_loose: boolean;
+  allow_loose_sale: number;
+  disable_auto_barcode: boolean;
+  tb_medicine: boolean;
+}
+
+interface LocalQuickEditResponse {
+  medicine: {
+    name?: string;
+    packaging?: string;
+    metadata?: string | Record<string, unknown>;
+    item_type?: string;
+    category?: string;
+    pack_unit?: string;
+    pack_size?: number | null;
+    therapeutic?: string;
+    sub_therapeutic?: string;
+    schedule_type?: string;
+    generic_name?: string;
+    manufacturer?: string;
+    marketed_by?: string;
+    item_code?: string;
+    short_code?: string;
+    ucode?: string;
+    hsn_code?: string;
+    cgst_per?: number | null;
+    sgst_per?: number | null;
+    igst_per?: number | null;
+    api_reference?: string;
+    mrp?: number | null;
+    rate?: number | null;
+    sell_price?: number | null;
+    max_stock_level?: number | null;
+    rack?: string;
+    allow_loose_sale?: number | boolean | null;
+    disable_auto_barcode?: boolean | number | null;
+    tb_medicine?: boolean | number | null;
+  };
+  inventory?: {
+    inventory_id?: number;
+    quantity?: number | null;
+    reorder_level?: number | null;
+    rack_location?: string;
+  } | null;
+  total_stock?: number;
+}
+
+interface LocalSavedMedicine {
+  id?: number;
+  name: string;
+  generic_name: string;
+  manufacturer: string;
+  pack_unit: string;
+  pack_size: number | string;
+  hsn_code?: string;
+  strength?: string;
+  cgst_per?: number;
+  sgst_per?: number;
+  sell_price?: number | string | null;
+  mrp: number & string;
+  rate: number & string;
+}
+
 export interface UniversalMedicineEditModalProps {
   medicineId?: number | null;
   mode?: 'create' | 'edit';
-  initialData?: any;
+  initialData?: LocalUniversalMedicineSeed | null;
   ocrData?: {
     potentialName?: string;
     genericName?: string;
@@ -203,9 +331,9 @@ export interface UniversalMedicineEditModalProps {
     hsn_code?: string;
     cgst_per?: number;
     sgst_per?: number;
-  };
+  } | null;
   onClose: () => void;
-  onSave?: (savedMedicine?: any) => void;
+  onSave?: (savedMedicine?: LocalSavedMedicine) => void;
   onDelete?: (deletedMedicineId: number) => void;
 }
 
@@ -229,8 +357,10 @@ const UniversalMedicineEditModalInner: React.FC<UniversalMedicineEditModalProps>
   const [deleting, setDeleting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [historyPrefill, setHistoryPrefill] = useState<HistoryPrefillResult | null>(null);
+  const [prefillDismissed, setPrefillDismissed] = useState(false);
 
-  const [form, setForm] = useState<any>(() => {
+  const [form, setForm] = useState<LocalUniversalMedicineForm>(() => {
     const nameVal = initialData?.name || '';
     const packagingVal = initialData?.packaging || (isCreateMode ? '10 TAB' : '');
     const mrpVal = ocrData?.mrp ?? initialData?.mrp ?? '';
@@ -299,7 +429,7 @@ const UniversalMedicineEditModalInner: React.FC<UniversalMedicineEditModalProps>
   const [isManualName, setIsManualName] = useState(false);
 
   const handleMfgChange = async (val: string) => {
-    setForm((prev: any) => ({ ...prev, manufacturer: val }));
+    setForm(prev => ({ ...prev, manufacturer: val }));
     try {
       const res = await api.getManufacturers(val);
       setMfgSuggestions(res || []);
@@ -320,7 +450,7 @@ const UniversalMedicineEditModalInner: React.FC<UniversalMedicineEditModalProps>
   };
 
   const handleMrkChange = async (val: string) => {
-    setForm((prev: any) => ({ ...prev, marketed_by: val }));
+    setForm(prev => ({ ...prev, marketed_by: val }));
     try {
       const res = await api.getMarketedBy(val);
       setMrkSuggestions(res || []);
@@ -349,7 +479,7 @@ const UniversalMedicineEditModalInner: React.FC<UniversalMedicineEditModalProps>
       setLoading(true);
     }
     api.getQuickEditMedicine(medicineId)
-      .then((data: any) => {
+      .then((data: LocalQuickEditResponse) => {
         if (data && data.medicine) {
           const med = data.medicine;
           const nameVal = med.name || '';
@@ -439,7 +569,7 @@ const UniversalMedicineEditModalInner: React.FC<UniversalMedicineEditModalProps>
     if (loading) return;
     const packagingStr = getPackagingString(packQtyUnit, packType, customPackaging);
     
-    setForm((prev: any) => {
+    setForm(prev => {
       const updated = { 
         ...prev, 
         packaging: packagingStr,
@@ -455,10 +585,42 @@ const UniversalMedicineEditModalInner: React.FC<UniversalMedicineEditModalProps>
     });
   }, [baseName, packType, packQtyUnit, customPackaging, isManualName, loading]);
 
+  // History prefill (create mode): debounced lookup once the typed base name is >=3 chars.
+  useEffect(() => {
+    if (!isCreateMode || loading) return;
+    const term = baseName.trim();
+    if (term.length < 3) {
+      setHistoryPrefill(null);
+      return;
+    }
+    const t = setTimeout(() => {
+      api.historyPrefill(term)
+        .then((r) => {
+          setHistoryPrefill(r?.found ? r : null);
+          setPrefillDismissed(false);
+        })
+        .catch(() => setHistoryPrefill(null));
+    }, 300);
+    return () => clearTimeout(t);
+  }, [baseName, isCreateMode, loading]);
+
+  const applyHistoryPrefill = () => {
+    if (!historyPrefill) return;
+    setForm(prev => ({
+      ...prev,
+      hsn_code: historyPrefill.hsn_code ?? prev.hsn_code,
+      cgst_per: historyPrefill.cgst_per ?? prev.cgst_per,
+      sgst_per: historyPrefill.sgst_per ?? prev.sgst_per,
+      mrp: historyPrefill.mrp ?? prev.mrp,
+      rate: historyPrefill.rate ?? prev.rate
+    }));
+    setPrefillDismissed(true);
+  };
+
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
-    const { name, value, type } = e.target as any;
+    const { name, value, type } = e.target;
     const val = type === 'checkbox' ? (e.target as HTMLInputElement).checked : value;
-    setForm((prev: any) => ({
+    setForm(prev => ({
       ...prev,
       [name]: name === 'quantity' || name === 'reorder_level' || name === 'max_stock_level'
         ? (parseInt(value, 10) || 0)
@@ -482,16 +644,16 @@ const UniversalMedicineEditModalInner: React.FC<UniversalMedicineEditModalProps>
       };
 
       const parsedSellPrice = form.sell_price !== '' && form.sell_price !== null && form.sell_price !== undefined && !isNaN(Number(form.sell_price))
-        ? parseFloat(form.sell_price)
+        ? parseFloat(form.sell_price as string)
         : null;
       const parsedMrp = form.mrp !== '' && form.mrp !== null && form.mrp !== undefined && !isNaN(Number(form.mrp))
-        ? parseFloat(form.mrp)
+        ? parseFloat(form.mrp as string)
         : 0;
       const parsedRate = form.rate !== '' && form.rate !== null && form.rate !== undefined && !isNaN(Number(form.rate))
-        ? parseFloat(form.rate)
+        ? parseFloat(form.rate as string)
         : 0;
 
-      let savedResult: any = null;
+      let savedResult: LocalSavedMedicine | undefined;
 
       if (isCreateMode) {
         const response = await api.createMedicine({
@@ -514,7 +676,7 @@ const UniversalMedicineEditModalInner: React.FC<UniversalMedicineEditModalProps>
           inventory_id: inventoryId,
           metadata: JSON.stringify(metadataObj)
         });
-        savedResult = { id: medicineId, ...form, mrp: parsedMrp, rate: parsedRate, sell_price: parsedSellPrice };
+        savedResult = { id: medicineId!, ...form, mrp: parsedMrp, rate: parsedRate, sell_price: parsedSellPrice } as unknown as LocalSavedMedicine;
         toastEvent.trigger(`Medicine "${form.name}" updated successfully across 26 fields!`, 'success');
       }
 
@@ -524,9 +686,10 @@ const UniversalMedicineEditModalInner: React.FC<UniversalMedicineEditModalProps>
       setSaving(false);
       if (onSave) onSave(savedResult);
       onClose();
-    } catch (err: any) {
+    } catch (err) {
+      const e = err as LocalApiError;
       console.error(err);
-      const errMsg = err?.response?.data?.error || err.message || (isCreateMode ? "Failed to create medicine." : "Failed to save 26-field medicine updates.");
+      const errMsg = e.response?.data?.error || e.message || (isCreateMode ? "Failed to create medicine." : "Failed to save 26-field medicine updates.");
       setError(errMsg);
       setSaving(false);
     }
@@ -544,9 +707,10 @@ const UniversalMedicineEditModalInner: React.FC<UniversalMedicineEditModalProps>
       if (onDelete) onDelete(medicineId);
       setShowDeleteConfirm(false);
       onClose();
-    } catch (err: any) {
+    } catch (err) {
+      const e = err as LocalApiError;
       console.error('Failed to delete medicine:', err);
-      const errMsg = err?.response?.data?.error || err.message || 'Cannot delete medicine. It has associated sales, purchases, or ledger transactions.';
+      const errMsg = e.response?.data?.error || e.message || 'Cannot delete medicine. It has associated sales, purchases, or ledger transactions.';
       setError(errMsg);
       setDeleting(false);
       setShowDeleteConfirm(false);
@@ -587,7 +751,7 @@ const UniversalMedicineEditModalInner: React.FC<UniversalMedicineEditModalProps>
               <p className="text-xs text-muted mt-0.5">
                 {isCreateMode 
                   ? 'Form-Aware Packaging, Tax & Regulatory Compliance Master Profile'
-                  : `Medicine ID #${medicineId} • Form-Aware Packaging & Regulatory Compliance`}
+                  : `Medicine ID #${medicineId} â€¢ Form-Aware Packaging & Regulatory Compliance`}
               </p>
             </div>
           </div>
@@ -605,7 +769,7 @@ const UniversalMedicineEditModalInner: React.FC<UniversalMedicineEditModalProps>
             <div className="flex items-center justify-between gap-2 mb-1.5">
               <div className="flex items-center gap-2">
                 <Eye size={14} className="text-emerald-400" />
-                <span className="text-[10px] font-extrabold uppercase tracking-widest text-emerald-400">Live Preview — Compiled Medicine Name</span>
+                <span className="text-[10px] font-extrabold uppercase tracking-widest text-emerald-400">Live Preview â€” Compiled Medicine Name</span>
               </div>
               {isManualName ? (
                 <button
@@ -613,7 +777,7 @@ const UniversalMedicineEditModalInner: React.FC<UniversalMedicineEditModalProps>
                   onClick={() => setIsManualName(false)}
                   className="text-[10px] text-amber-400 hover:underline flex items-center gap-1 font-bold"
                 >
-                  ✏ Manual Override (Click to Re-sync)
+                  âœ Manual Override (Click to Re-sync)
                 </button>
               ) : (
                 <span className="text-[10px] text-emerald-400/80 font-medium">Auto-sync active</span>
@@ -737,7 +901,7 @@ const UniversalMedicineEditModalInner: React.FC<UniversalMedicineEditModalProps>
                         onChange={(e) => setPackQtyUnit(e.target.value)}
                         className="w-full px-4 py-2.5 bg-bg3 border border-glass-border rounded-xl text-sm text-text font-medium focus:border-primary focus:outline-none"
                       >
-                        <optgroup label="── Tablet / Capsule Strips">
+                        <optgroup label="â”€â”€ Tablet / Capsule Strips">
                           <option value="10_TAB">STRIP OF 10 TAB</option>
                           <option value="15_TAB">STRIP OF 15 TAB</option>
                           <option value="4_TAB">STRIP OF 4 TAB</option>
@@ -746,13 +910,13 @@ const UniversalMedicineEditModalInner: React.FC<UniversalMedicineEditModalProps>
                           <option value="10_CAP">STRIP OF 10 CAP</option>
                           <option value="15_CAP">STRIP OF 15 CAP</option>
                         </optgroup>
-                        <optgroup label="── Liquids & Syrups">
+                        <optgroup label="â”€â”€ Liquids & Syrups">
                           <option value="30_ML">BOTTLE OF 30ML</option>
                           <option value="60_ML">BOTTLE OF 60ML</option>
                           <option value="100_ML">BOTTLE OF 100ML</option>
                           <option value="200_ML">BOTTLE OF 200ML</option>
                         </optgroup>
-                        <optgroup label="── Injections & Topicals">
+                        <optgroup label="â”€â”€ Injections & Topicals">
                           <option value="1_VIAL">1 VIAL</option>
                           <option value="1_AMP">1 AMP</option>
                           <option value="1_TUBE">1 TUBE</option>
@@ -899,7 +1063,7 @@ const UniversalMedicineEditModalInner: React.FC<UniversalMedicineEditModalProps>
                             <button
                               key={idx}
                               type="button"
-                              onClick={() => setForm((prev: any) => ({ ...prev, manufacturer: mfgName }))}
+                              onClick={() => setForm((prev) => ({ ...prev, manufacturer: mfgName }))}
                               className="w-full text-left px-3 py-2 hover:bg-primary/20 text-text border-b border-glass-border/10 text-xs font-medium"
                             >
                               {mfgName}
@@ -927,7 +1091,7 @@ const UniversalMedicineEditModalInner: React.FC<UniversalMedicineEditModalProps>
                             <button
                               key={idx}
                               type="button"
-                              onClick={() => setForm((prev: any) => ({ ...prev, marketed_by: mrkName }))}
+                              onClick={() => setForm((prev) => ({ ...prev, marketed_by: mrkName }))}
                               className="w-full text-left px-3 py-2 hover:bg-primary/20 text-text border-b border-glass-border/10 text-xs font-medium"
                             >
                               {mrkName}
@@ -1036,7 +1200,7 @@ const UniversalMedicineEditModalInner: React.FC<UniversalMedicineEditModalProps>
                     </div>
                     <button
                       type="button"
-                      onClick={() => setForm((prev: any) => ({ ...prev, hsn_code: '30049099', cgst_per: 6, sgst_per: 6, igst_per: 12 }))}
+                      onClick={() => setForm((prev) => ({ ...prev, hsn_code: '30049099', cgst_per: 6, sgst_per: 6, igst_per: 12 }))}
                       className="px-3 py-1.5 rounded-lg bg-primary/15 text-primary text-xs font-bold border border-primary/30 hover:bg-primary/25 transition-colors"
                     >
                       Reset Standard 12% Pharma HSN
@@ -1047,7 +1211,7 @@ const UniversalMedicineEditModalInner: React.FC<UniversalMedicineEditModalProps>
                     <h4 className="text-xs font-bold uppercase text-muted tracking-wider">Pricing & Sell Price (Special Rates)</h4>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       <div>
-                        <label className="block text-xs font-semibold text-muted mb-1.5">Cost Price / Rate (₹)</label>
+                        <label className="block text-xs font-semibold text-muted mb-1.5">Cost Price / Rate (â‚¹)</label>
                         <input 
                           type="number" 
                           step="0.01"
@@ -1059,7 +1223,7 @@ const UniversalMedicineEditModalInner: React.FC<UniversalMedicineEditModalProps>
                       </div>
 
                       <div>
-                        <label className="block text-xs font-semibold text-muted mb-1.5">MRP (₹)</label>
+                        <label className="block text-xs font-semibold text-muted mb-1.5">MRP (â‚¹)</label>
                         <input 
                           type="number" 
                           step="0.01"
@@ -1071,7 +1235,7 @@ const UniversalMedicineEditModalInner: React.FC<UniversalMedicineEditModalProps>
                       </div>
 
                       <div>
-                        <label className="block text-xs font-semibold text-muted mb-1.5">Sell Price / Special Rate (₹)</label>
+                        <label className="block text-xs font-semibold text-muted mb-1.5">Sell Price / Special Rate (â‚¹)</label>
                         <input 
                           type="number" 
                           step="0.01"
@@ -1081,10 +1245,10 @@ const UniversalMedicineEditModalInner: React.FC<UniversalMedicineEditModalProps>
                           onChange={(e) => {
                             const val = e.target.value;
                             const numVal = parseFloat(val);
-                            if (!isNaN(numVal) && form.mrp > 0 && numVal <= form.mrp) {
-                              setForm((prev: any) => ({ ...prev, sell_price: val }));
+                            if (!isNaN(numVal) && (form.mrp as number) > 0 && numVal <= (form.mrp as number)) {
+                              setForm((prev) => ({ ...prev, sell_price: val }));
                             } else if (val === '') {
-                              setForm((prev: any) => ({ ...prev, sell_price: '' }));
+                              setForm((prev) => ({ ...prev, sell_price: '' }));
                             }
                           }}
                           className="w-full px-4 py-2.5 bg-bg3 border border-glass-border rounded-xl text-sm text-emerald-400 font-mono font-bold focus:border-emerald-500 focus:outline-none"
@@ -1097,10 +1261,10 @@ const UniversalMedicineEditModalInner: React.FC<UniversalMedicineEditModalProps>
                         <span className="text-xs font-bold text-amber-400 flex items-center gap-1.5">
                           <Tag size={14} /> Special Offer Discount
                         </span>
-                        {form.mrp > 0 && form.sell_price !== '' && Number(form.sell_price) > 0 && Number(form.sell_price) < form.mrp ? (
+                        {(form.mrp as number) > 0 && form.sell_price !== '' && Number(form.sell_price) > 0 && Number(form.sell_price) < (form.mrp as number) ? (
                           <button
                             type="button"
-                            onClick={() => setForm((prev: any) => ({ ...prev, sell_price: '' }))}
+                            onClick={() => setForm((prev) => ({ ...prev, sell_price: '' }))}
                             className="text-[11px] font-semibold text-muted hover:text-text underline"
                           >
                             Reset to Full MRP
@@ -1119,17 +1283,17 @@ const UniversalMedicineEditModalInner: React.FC<UniversalMedicineEditModalProps>
                               step="0.1"
                               placeholder="0"
                               value={
-                                form.mrp > 0 && form.sell_price !== '' && Number(form.sell_price) > 0 && Number(form.sell_price) < form.mrp
-                                  ? (((form.mrp - Number(form.sell_price)) / form.mrp) * 100).toFixed(2)
+                                (form.mrp as number) > 0 && form.sell_price !== '' && Number(form.sell_price) > 0 && Number(form.sell_price) < (form.mrp as number)
+                                  ? ((((form.mrp as number) - Number(form.sell_price)) / (form.mrp as number)) * 100).toFixed(2)
                                   : ''
                               }
                               onChange={(e) => {
                                 const disc = parseFloat(e.target.value);
-                                if (!isNaN(disc) && disc >= 0 && disc <= 100 && form.mrp > 0) {
-                                  const sp = Math.round((form.mrp * (1 - disc / 100)) * 100) / 100;
-                                  setForm((prev: any) => ({ ...prev, sell_price: disc > 0 ? String(sp) : '' }));
+                                if (!isNaN(disc) && disc >= 0 && disc <= 100 && (form.mrp as number) > 0) {
+                                  const sp = Math.round(((form.mrp as number) * (1 - disc / 100)) * 100) / 100;
+                                  setForm((prev) => ({ ...prev, sell_price: disc > 0 ? String(sp) : '' }));
                                 } else if (e.target.value === '') {
-                                  setForm((prev: any) => ({ ...prev, sell_price: '' }));
+                                  setForm((prev) => ({ ...prev, sell_price: '' }));
                                 }
                               }}
                               className="w-full px-3 py-1.5 text-xs bg-bg3 border border-glass-border rounded-lg text-amber-400 font-bold focus:border-amber-500 focus:outline-none pr-6"
@@ -1141,8 +1305,8 @@ const UniversalMedicineEditModalInner: React.FC<UniversalMedicineEditModalProps>
                         <div>
                           <p className="text-[11px] text-muted">POS Billing Effect:</p>
                           <p className="text-xs font-semibold text-text">
-                            {form.mrp > 0 && form.sell_price !== '' && Number(form.sell_price) > 0 && Number(form.sell_price) < form.mrp
-                              ? `POS auto-applies ${(((form.mrp - Number(form.sell_price)) / form.mrp) * 100).toFixed(1)}% discount (₹${Number(form.sell_price).toFixed(2)} instead of ₹${Number(form.mrp).toFixed(2)})`
+                            {(form.mrp as number) > 0 && form.sell_price !== '' && Number(form.sell_price) > 0 && Number(form.sell_price) < (form.mrp as number)
+                              ? `POS auto-applies ${((((form.mrp as number) - Number(form.sell_price)) / (form.mrp as number)) * 100).toFixed(1)}% discount (à¤¹${Number(form.sell_price).toFixed(2)} instead of à¤¹${Number(form.mrp).toFixed(2)})`
                               : 'No special discount active. POS defaults to full MRP.'}
                           </p>
                         </div>
@@ -1213,7 +1377,7 @@ const UniversalMedicineEditModalInner: React.FC<UniversalMedicineEditModalProps>
                         type="checkbox" 
                         name="allow_loose_sale" 
                         checked={form.allow_loose_sale !== undefined ? !!form.allow_loose_sale : !!form.is_loose} 
-                        onChange={(e) => setForm((prev: any) => ({ ...prev, allow_loose_sale: e.target.checked ? 1 : 0, is_loose: e.target.checked }))}
+                        onChange={(e) => setForm((prev) => ({ ...prev, allow_loose_sale: e.target.checked ? 1 : 0, is_loose: e.target.checked }))}
                         className="sr-only peer" 
                       />
                       <div className="w-11 h-6 bg-bg2 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>
@@ -1275,6 +1439,45 @@ const UniversalMedicineEditModalInner: React.FC<UniversalMedicineEditModalProps>
                 </div>
               )}
 
+              {isCreateMode && historyPrefill && !prefillDismissed && (
+                <div className="flex items-center justify-between gap-3 p-3 rounded-xl border border-primary/30 bg-primary/5">
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold text-text flex items-center gap-1.5">
+                      <History size={13} className="text-primary shrink-0" />
+                      Found in past bills
+                      {historyPrefill.source === 'pending_email' && (
+                        <span className="text-[10px] font-semibold text-muted">(from a pending email invoice)</span>
+                      )}
+                    </p>
+                    <p className="text-[11px] text-muted truncate mt-0.5">
+                      {[
+                        historyPrefill.hsn_code ? `HSN ${historyPrefill.hsn_code}` : '',
+                        historyPrefill.cgst_per != null && Number(historyPrefill.cgst_per) > 0 ? `GST ${historyPrefill.cgst_per}%` : '',
+                        historyPrefill.mrp != null && Number(historyPrefill.mrp) > 0 ? `MRP ₹${historyPrefill.mrp}` : '',
+                        historyPrefill.rate != null && Number(historyPrefill.rate) > 0 ? `Rate ₹${historyPrefill.rate}` : ''
+                      ].filter(Boolean).join(' · ') || 'Historical match found'}
+                      {historyPrefill.matched_name ? ` — matched "${historyPrefill.matched_name}"` : ''}
+                      {historyPrefill.provenance ? ` · ${historyPrefill.provenance}` : ''}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setPrefillDismissed(true)}
+                      className="px-3 py-1.5 rounded-lg border border-glass-border text-muted hover:text-text text-[11px] font-semibold transition-colors"
+                    >
+                      Dismiss
+                    </button>
+                    <button
+                      type="button"
+                      onClick={applyHistoryPrefill}
+                      className="px-3 py-1.5 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground text-[11px] font-bold transition-colors"
+                    >
+                      Apply
+                    </button>
+                  </div>
+                </div>
+              )}
             </form>
           )}
         </div>
@@ -1330,7 +1533,7 @@ const UniversalMedicineEditModalInner: React.FC<UniversalMedicineEditModalProps>
               </div>
               <div>
                 <h4 className="font-bold text-text text-base">Permanently Delete Medicine?</h4>
-                <p className="text-xs text-muted">ID #{medicineId} • {form.name}</p>
+                <p className="text-xs text-muted">ID #{medicineId} â€¢ {form.name}</p>
               </div>
             </div>
             <p className="text-xs text-muted leading-relaxed">

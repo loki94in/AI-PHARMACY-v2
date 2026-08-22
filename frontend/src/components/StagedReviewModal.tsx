@@ -5,11 +5,56 @@ import { X, Check, Trash2, AlertTriangle, RefreshCw, Receipt, ShoppingCart, Cale
 import { api } from '../services/api';
 import { stagedQueueService } from '../services/stagedQueueService';
 import { isValidDistributorName } from '../utils/distributorValidator';
-import { UniversalMedicineEditModal } from './UniversalMedicineEditModal';
+import { UniversalMedicineEditModal, type UniversalMedicineEditModalProps } from './UniversalMedicineEditModal';
 
 interface Props {
   onClose: () => void;
   onActionComplete: () => void;
+}
+
+type LocalApiError = { response?: { data?: { error?: string } }; message?: string };
+
+interface LocalStagedTx {
+  id: number;
+  items_json?: string | unknown[];
+  distributor_name?: string;
+  invoice_no?: string;
+  date?: string;
+  sale_date?: string;
+  patient_name?: string;
+  patient_phone?: string;
+  doctor_name?: string;
+  discount?: number;
+  payment_medium?: string;
+  total_amount?: number;
+}
+
+interface LocalStagedItem {
+  medicine_id?: number | null;
+  name?: string;
+  medicine_name?: string;
+  manufacturer?: string | null;
+  mrp?: number | string | null;
+  rate?: number;
+  cost_price?: number | null;
+  unit_price?: number;
+  batch_no?: string | null;
+  expiry_date?: string | null;
+  quantity: number;
+  free_qty?: number | null;
+}
+
+interface LocalCatalogHit {
+  id: number;
+  name: string;
+  manufacturer?: string | null;
+  mrp?: number | string | null;
+}
+
+interface LocalDistributorRow {
+  id: number;
+  name?: string | null;
+  distributor_name?: string | null;
 }
 
 interface MatchSuggestion {
@@ -26,15 +71,15 @@ const isUnresolvedDistributor = (name: string | null | undefined): boolean => {
 export const StagedReviewModal: React.FC<Props> = ({ onClose, onActionComplete }) => {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<'sales' | 'purchases'>('sales');
-  const [sales, setSales] = useState<any[]>([]);
-  const [purchases, setPurchases] = useState<any[]>([]);
-  const [registeredDistributors, setRegisteredDistributors] = useState<any[]>([]);
+  const [sales, setSales] = useState<LocalStagedTx[]>([]);
+  const [purchases, setPurchases] = useState<LocalStagedTx[]>([]);
+  const [registeredDistributors, setRegisteredDistributors] = useState<LocalDistributorRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   // Editing transaction state
-  const [selectedTx, setSelectedTx] = useState<any | null>(null);
-  const [editingItems, setEditingItems] = useState<any[]>([]);
+  const [selectedTx, setSelectedTx] = useState<(LocalStagedTx & { type: 'sales' | 'purchases' }) | null>(null);
+  const [editingItems, setEditingItems] = useState<LocalStagedItem[]>([]);
   const [distributorName, setDistributorName] = useState('');
   const [invoiceNo, setInvoiceNo] = useState('');
   const [invoiceDate, setInvoiceDate] = useState('');
@@ -47,12 +92,12 @@ export const StagedReviewModal: React.FC<Props> = ({ onClose, onActionComplete }
   const [matchPreview, setMatchPreview] = useState<Record<number, MatchSuggestion>>({});
   const [previewLoading, setPreviewLoading] = useState(false);
   const [lineSearchTerms, setLineSearchTerms] = useState<Record<number, string>>({});
-  const [lineSearchResults, setLineSearchResults] = useState<Record<number, any[]>>({});
+  const [lineSearchResults, setLineSearchResults] = useState<Record<number, LocalCatalogHit[]>>({});
   const [medEditorIndex, setMedEditorIndex] = useState<number | null>(null);
-  const [medEditorInitialData, setMedEditorInitialData] = useState<any>(null);
-  const [medEditorOcrData, setMedEditorOcrData] = useState<any>(null);
+  const [medEditorInitialData, setMedEditorInitialData] = useState<UniversalMedicineEditModalProps['initialData']>(null);
+  const [medEditorOcrData, setMedEditorOcrData] = useState<UniversalMedicineEditModalProps['ocrData'] | null>(null);
 
-  const itemNameOf = (it: any): string => String(it?.name || it?.medicine_name || '').trim();
+  const itemNameOf = (it: LocalStagedItem): string => String(it?.name || it?.medicine_name || '').trim();
 
   const loadStagedData = async () => {
     setLoading(true);
@@ -66,9 +111,10 @@ export const StagedReviewModal: React.FC<Props> = ({ onClose, onActionComplete }
       setSales(stagedSales || []);
       setPurchases(stagedPurchases || []);
       setRegisteredDistributors(Array.isArray(distList) ? distList : []);
-    } catch (err: any) {
+    } catch (err) {
+      const e = err as LocalApiError;
       console.error('Failed to load staged transactions:', err);
-      setError(err.message || 'Failed to load staged transactions');
+      setError(e.message || 'Failed to load staged transactions');
     } finally {
       setLoading(false);
     }
@@ -88,9 +134,9 @@ export const StagedReviewModal: React.FC<Props> = ({ onClose, onActionComplete }
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [onClose]);
 
-  const handleSelectTx = (tx: any, type: 'sales' | 'purchases') => {
+  const handleSelectTx = (tx: LocalStagedTx, type: 'sales' | 'purchases') => {
     setSelectedTx({ ...tx, type });
-    let parsedItems: any[] = [];
+    let parsedItems: LocalStagedItem[] = [];
     try {
       const raw = typeof tx.items_json === 'string' ? JSON.parse(tx.items_json) : tx.items_json;
       parsedItems = Array.isArray(raw) ? raw : [];
@@ -108,12 +154,12 @@ export const StagedReviewModal: React.FC<Props> = ({ onClose, onActionComplete }
       setLineSearchTerms({});
       setLineSearchResults({});
       if (parsedItems.length > 0) {
-        const needsPreview = parsedItems.some((it: any) => !it.medicine_id && itemNameOf(it));
+        const needsPreview = parsedItems.some((it) => !it.medicine_id && itemNameOf(it));
         if (needsPreview) {
-          const names = parsedItems.map((it: any) => itemNameOf(it));
+          const names = parsedItems.map((it) => itemNameOf(it));
           setPreviewLoading(true);
           api.matchPurchaseItems(names, null)
-            .then((res: any) => {
+            .then((res) => {
               const map: Record<number, MatchSuggestion> = {};
               (res?.results || []).forEach((r: MatchSuggestion, i: number) => {
                 if (r?.medicine_id && !parsedItems[i]?.medicine_id) map[i] = r;
@@ -151,7 +197,11 @@ export const StagedReviewModal: React.FC<Props> = ({ onClose, onActionComplete }
     }
   };
 
-  const handleUpdateItemField = (index: number, field: string, value: any) => {
+  const handleUpdateItemField = (
+    index: number,
+    field: 'quantity' | 'free_qty' | 'rate' | 'mrp' | 'unit_price' | 'batch_no' | 'expiry_date',
+    value: string
+  ) => {
     const updated = [...editingItems];
     if (field === 'quantity' || field === 'free_qty') {
       updated[index][field] = parseInt(value) || 0;
@@ -171,7 +221,7 @@ export const StagedReviewModal: React.FC<Props> = ({ onClose, onActionComplete }
 
   // --- Strict medicine resolution helpers (search-or-create per line) ---
 
-  const setItemMedicine = (index: number, patch: any) => {
+  const setItemMedicine = (index: number, patch: Partial<LocalStagedItem>) => {
     setEditingItems(prev => {
       const updated = [...prev];
       updated[index] = { ...updated[index], ...patch };
@@ -219,7 +269,7 @@ export const StagedReviewModal: React.FC<Props> = ({ onClose, onActionComplete }
     });
   };
 
-  const handlePickSearchResult = (index: number, med: any) => {
+  const handlePickSearchResult = (index: number, med: LocalCatalogHit) => {
     setItemMedicine(index, { medicine_id: med.id, name: med.name });
     setLineSearchTerms(prev => ({ ...prev, [index]: '' }));
     setLineSearchResults(prev => ({ ...prev, [index]: [] }));
@@ -294,9 +344,10 @@ export const StagedReviewModal: React.FC<Props> = ({ onClose, onActionComplete }
       setSelectedTx(null);
       await loadStagedData();
       onActionComplete();
-    } catch (err: any) {
+    } catch (err) {
+      const e = err as LocalApiError;
       console.error(err);
-      setError(err.response?.data?.error || err.message || 'Failed to approve transaction');
+      setError(e.response?.data?.error || e.message || 'Failed to approve transaction');
     } finally {
       setSaving(false);
     }
@@ -315,9 +366,10 @@ export const StagedReviewModal: React.FC<Props> = ({ onClose, onActionComplete }
       setSelectedTx(null);
       await loadStagedData();
       onActionComplete();
-    } catch (err: any) {
+    } catch (err) {
+      const e = err as LocalApiError;
       console.error(err);
-      setError(err.message || 'Failed to reject transaction');
+      setError(e.message || 'Failed to reject transaction');
     } finally {
       setLoading(false);
     }
@@ -410,9 +462,9 @@ export const StagedReviewModal: React.FC<Props> = ({ onClose, onActionComplete }
             ) : (
               <div className="space-y-3">
                 {activeList.map((tx, index) => {
-                  let items: any[] = [];
+                  let items: LocalStagedItem[] = [];
                   try {
-                    items = typeof tx.items_json === 'string' ? JSON.parse(tx.items_json) : tx.items_json;
+                    items = typeof tx.items_json === 'string' ? JSON.parse(tx.items_json) : (tx.items_json as LocalStagedItem[]);
                   } catch (_e) {}
 
                   const itemSummary = Array.isArray(items) 
@@ -445,7 +497,7 @@ export const StagedReviewModal: React.FC<Props> = ({ onClose, onActionComplete }
                         <div className="text-xs text-muted flex items-center gap-1">
                           <Calendar size={12} />
                           {activeTab === 'sales'
-                            ? formatDate(tx.sale_date || tx.date)
+                            ? formatDate((tx.sale_date || tx.date) as string)
                             : (tx.date ? formatDate(tx.date) : <span className="text-amber-500 font-bold text-[10px]">⚠️ Missing Date</span>)
                           }
                         </div>
@@ -553,8 +605,8 @@ export const StagedReviewModal: React.FC<Props> = ({ onClose, onActionComplete }
                           }`}
                         />
                         <datalist id="registered-distributors-list">
-                          {registeredDistributors.map((d: any) => (
-                            <option key={d.id} value={d.name || d.distributor_name} />
+                          {registeredDistributors.map((d) => (
+                            <option key={d.id} value={(d.name || d.distributor_name) as string} />
                           ))}
                         </datalist>
                       </div>

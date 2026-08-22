@@ -19,7 +19,7 @@ export function InfiniteTable({
 }: InfiniteTableProps) {
   return (
     <div
-      ref={containerRef as any}
+      ref={containerRef}
       className={`flex-1 overflow-auto bg-black/20 relative w-full scrollbar-thin ${className}`}
     >
       <table className="w-full min-w-max text-left border-collapse flex flex-col">

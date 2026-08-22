@@ -4,6 +4,13 @@ import { ColumnMapper } from './ColumnMapper';
 import { ErrorRows } from './ErrorRows';
 import { motion, AnimatePresence } from 'motion/react';
 
+interface LocalValidationError {
+  row: number;
+  column: string;
+  value: unknown;
+  message: string;
+}
+
 interface ModuleSectionProps {
   dataType: string;
   label: string;
@@ -11,10 +18,10 @@ interface ModuleSectionProps {
   headers: string[];
   mapping: Record<string, string>;
   onMappingChange: (header: string, targetCol: string) => void;
-  validationErrors: any[];
+  validationErrors: LocalValidationError[];
   requiredFields: string[];
   missingRequired: string[];
-  samples: any[];
+  samples: unknown[];
 }
 
 const tableVariants = {
@@ -127,7 +134,8 @@ export const ModuleSection: React.FC<ModuleSectionProps> = ({
                   >
                     {headers.map((header) => {
                       const mappedField = mapping[header] || '';
-                      const sampleValue = samples[0]?.[header];
+                      const firstSample = samples[0] as Record<string, unknown> | undefined;
+                      const sampleValue = firstSample?.[header];
                       const isRequired = requiredFields.includes(mappedField);
                       const isFieldMissing = missingRequired.includes(mappedField);
 
