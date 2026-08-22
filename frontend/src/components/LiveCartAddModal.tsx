@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Search, Plus, Minus, Sparkles, Loader2, ShoppingCart, RefreshCw, Clock, AlertCircle, EyeOff, Ban, Package, CheckCircle2, RotateCcw } from 'lucide-react';
+import { X, Search, Plus, Minus, Sparkles, Loader2, ShoppingCart, RefreshCw, AlertCircle, EyeOff, Ban, Package, CheckCircle2, RotateCcw } from 'lucide-react';
 import { api, type SpecialOrder, type Refill } from '../services/api';
-import { toastEvent, liveCartAddEvent } from '../services/events';
+import { toastEvent } from '../services/events';
 
 import { findBestCartMatchForOrder } from '../utils/orderFuzzyMatcher';
 
@@ -113,34 +113,6 @@ export const isValidDistributorName = (name: string | null | undefined): boolean
   return true;
 };
 
-const getStockStyle = (stockStr: string | undefined): string => {
-  if (!stockStr) return 'bg-bg3 text-muted border border-border';
-  const stock = stockStr.trim();
-  
-  if (stock.toLowerCase() === 'high') {
-    return 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20';
-  }
-  if (stock.toLowerCase() === 'medium') {
-    return 'bg-blue-500/10 text-blue-400 border border-blue-500/20';
-  }
-  if (stock.toLowerCase() === 'low' || stock.toLowerCase() === 'out of stock' || stock.toLowerCase() === 'no stock' || stock === '0') {
-    return 'bg-red-500/10 text-red border border-red-500/20';
-  }
-  
-  const num = parseInt(stock);
-  if (!isNaN(num)) {
-    if (num >= 50) {
-      return 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20';
-    } else if (num >= 15) {
-      return 'bg-blue-500/10 text-blue-400 border border-blue-500/20';
-    } else {
-      return 'bg-red-500/10 text-red border border-red-500/20';
-    }
-  }
-  
-  return 'bg-bg3 text-muted border border-border';
-};
-
 interface CartLineItem {
   productId: number | null;
   storeId: number;
@@ -193,12 +165,6 @@ const getEffectiveRate = (rate: number, schemeStr: string | undefined, qty: numb
   const freeItems = Math.floor(qty / scheme.buy) * scheme.free;
   const totalItems = qty + freeItems;
   return (qty * rate) / totalItems;
-};
-
-const toTitleCase = (str: string): string => {
-  if (!str) return '';
-  if (/[a-z]/.test(str) && /[A-Z]/.test(str)) return str;
-  return str.toLowerCase().replace(/(?:^|\s|-|\/|\()\S/g, (match) => match.toUpperCase());
 };
 
 // Helper to check if a medicine name is permanently ignored
@@ -329,67 +295,6 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
   // Directly add to Pharmarack Live Cart with the supplied default qty.
   // Falls back to onFallback() when backend enrichment cannot resolve the product.
   // onFallback opens the distributor picker for the item instead of the medicine search box.
-  const handleDirectLiveCartAdd = async (
-    medName: string,
-    targetQty: number = 1,
-    srcOrderId?: number,
-    srcRefillId?: number,
-    loadingKey?: string,
-    onFallback?: () => void
-  ) => {
-    if (!medName.trim()) return;
-    const qtyToAdd = Math.max(1, Number(targetQty) || 1);
-    if (loadingKey) setDirectAddingKey(loadingKey);
-
-    try {
-      const res = await api.addPharmarackCart([{
-        productId: 0,
-        storeId: 0,
-        qty: qtyToAdd,
-        productName: medName.trim()
-      }]);
-
-      if (res && res.success) {
-        toastEvent.trigger(`Added ${qtyToAdd} unit(s) of "${medName}" to Pharmarack Live Cart!`, 'success');
-
-        if (srcOrderId) {
-          try {
-            await api.updateOrder(srcOrderId, { status: 'Ordered', cart_add_error: null });
-            await fetchPendingOrders();
-          } catch (e) {
-            console.warn('Failed to update source order status after live cart add:', e);
-          }
-        }
-        if (srcRefillId) {
-          await fetchPendingRefills();
-        }
-
-        await fetchCart();
-        window.dispatchEvent(new CustomEvent('refresh-pharmarack-cart'));
-        return;
-      }
-
-      // Backend could not auto-resolve the product — open distributor picker instead of search box
-      if (onFallback) {
-        onFallback();
-        toastEvent.trigger(res?.error || `Pick a distributor for "${medName}"`, 'info');
-      } else {
-        handleTransferToSearch(medName, qtyToAdd, srcOrderId, srcRefillId);
-        toastEvent.trigger(res?.error || `Opened search for "${medName}" — pick a distributor`, 'info');
-      }
-    } catch (err: any) {
-      console.warn('Direct live cart add failed, opening distributor picker:', err);
-      if (onFallback) {
-        onFallback();
-        toastEvent.trigger(`Pick a distributor for "${medName}"`, 'info');
-      } else {
-        handleTransferToSearch(medName, qtyToAdd, srcOrderId, srcRefillId);
-        toastEvent.trigger(`Opening Live Cart search for "${medName}"...`, 'info');
-      }
-    } finally {
-      if (loadingKey) setDirectAddingKey(null);
-    }
-  };
 
   // Overstock & Duplicate Check State
   const [overstockInfo, setOverstockInfo] = useState<{
@@ -406,7 +311,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
     lowestPurchasePTR?: number | null;
     warningMessage: string | null;
   } | null>(null);
-  const [checkingOverstock, setCheckingOverstock] = useState(false);
+  const [, setCheckingOverstock] = useState(false);
 
   const triggerOverstockCheck = async (name: string, requestedQuantity: number) => {
     if (!name || name.trim().length < 2) {
@@ -446,7 +351,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
 
   // Suggestions Search
   const [suggestions, setSuggestions] = useState<SuggestionMedicine[]>([]);
-  const [candidateOptions, setCandidateOptions] = useState<SuggestionMedicine[]>([]);
+  const [, setCandidateOptions] = useState<SuggestionMedicine[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(-1);
   const [searchLoading, setSearchLoading] = useState(false);
@@ -462,7 +367,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
 
   // Pending Orders States and Functions
   const [pendingOrders, setPendingOrders] = useState<SpecialOrder[]>(cachedPendingOrders);
-  const [addingOrderId, setAddingOrderId] = useState<number | null>(null);
+  const [] = useState<number | null>(null);
 
   // Pending Filter Tab State
   const [pendingFilterTab, setPendingFilterTab] = useState<'all' | 'bounced' | 'orders' | 'minstock' | 'skipped'>('all');
@@ -501,13 +406,13 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
 
   // Pending Refills States and Functions
   const [pendingRefills, setPendingRefills] = useState<Refill[]>(cachedPendingRefills);
-  const [addingRefillId, setAddingRefillId] = useState<number | null>(null);
+  const [] = useState<number | null>(null);
 
   // Reconcile Orders (unreconciled distributor email orders)
   const [reconOrders, setReconOrders] = useState<any[]>(cachedReconOrders);
-  const [distributorPickerReconIdx, setDistributorPickerReconIdx] = useState<number | null>(null);
-  const [distributorPickerReconMedicine, setDistributorPickerReconMedicine] = useState<string>('');
-  const [addedReconMedicines, setAddedReconMedicines] = useState<Record<number, string[]>>({});
+  const [] = useState<number | null>(null);
+  const [] = useState<string>('');
+  const [addedReconMedicines] = useState<Record<number, string[]>>({});
 
   // Permanently Ignored Words State
   const [ignoredWords, setIgnoredWords] = useState<Array<{ id: number; word: string; source: string; created_at: string }>>(cachedIgnoredWords);
@@ -595,98 +500,15 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
     reorder_level: number;
     recommended_qty: number;
   }>>(cachedAutoRefillItems);
-  const [distributorPickerAutoRefillId, setDistributorPickerAutoRefillId] = useState<number | null>(null);
-  const [addingAutoRefillId, setAddingAutoRefillId] = useState<number | null>(null);
-  const [directAddingKey, setDirectAddingKey] = useState<string | null>(null);
-
-  const fetchAutoRefillItems = async () => {
-    try {
-      const data = await api.getPharmarackAutoRefillSuggestions();
-      if (data && data.success && Array.isArray(data.suggestions)) {
-        cachedAutoRefillItems = data.suggestions;
-        setAutoRefillItems(data.suggestions);
-      }
-    } catch (err) {
-      console.error('Failed to fetch auto refill suggestions:', err);
-    }
-  };
-
-  const handleSearchDistributorsForAutoRefill = async (item: any) => {
-    setDistributorPickerAutoRefillId(item.medicine_id);
-    setDistributorPickerResults([]);
-    setDistributorPickerLoading(true);
-    try {
-      const searchResults = await api.searchPharmarack(item.medicine_name);
-      if (!searchResults || searchResults.length === 0) {
-        toastEvent.trigger(`No Pharmarack matches found for "${item.medicine_name}"`, 'error');
-        setDistributorPickerAutoRefillId(null);
-        return;
-      }
-      const mapped: SuggestionMedicine[] = (searchResults as any[]).map((resItem) => ({
-        medicine_name: resItem.name,
-        mrp: resItem.mrp,
-        isPharmarack: true,
-        distributor: resItem.distributor,
-        rate: resItem.rate,
-        mapped: resItem.mapped,
-        packaging: resItem.packaging,
-        stock: resItem.stock,
-        scheme: resItem.scheme,
-        productId: resItem.productId,
-        storeId: resItem.storeId,
-        productCode: resItem.productCode,
-        company: resItem.company
-      }));
-      setDistributorPickerResults(mapped);
-    } catch (err: any) {
-      console.error('Failed to search distributors for auto refill:', err);
-      toastEvent.trigger(err?.response?.data?.error || 'Failed to search distributors', 'error');
-      setDistributorPickerAutoRefillId(null);
-    } finally {
-      setDistributorPickerLoading(false);
-    }
-  };
-
-  const handleConfirmAutoRefillDistributor = async (item: any, picked: SuggestionMedicine) => {
-    setAddingAutoRefillId(item.medicine_id);
-    try {
-      const payload = [{
-        productId: picked.productId!,
-        storeId: picked.storeId!,
-        qty: item.recommended_qty || 1,
-        rate: picked.rate || undefined,
-        scheme: picked.scheme || undefined,
-        productCode: picked.productCode,
-        company: picked.company,
-        productName: `${picked.medicine_name} (${picked.packaging})`,
-        storeName: picked.distributor,
-        packaging: picked.packaging,
-        mapped: picked.mapped === false ? false : true
-      }];
-
-      const res = await api.addPharmarackCart(payload);
-      if (res && res.success) {
-        toastEvent.trigger(`Added "${picked.medicine_name}" (${item.recommended_qty} units) to Pharmarack cart!`, 'success');
-        setDistributorPickerAutoRefillId(null);
-        setDistributorPickerResults([]);
-        await fetchCart();
-        await fetchAutoRefillItems();
-      } else {
-        toastEvent.trigger(res?.error || 'Failed to add item to cart', 'error');
-      }
-    } catch (err: any) {
-      console.error('Failed to confirm auto refill distributor:', err);
-      toastEvent.trigger(err?.response?.data?.error || 'Failed to add item to cart', 'error');
-    } finally {
-      setAddingAutoRefillId(null);
-    }
-  };
+  const [] = useState<number | null>(null);
+  const [] = useState<number | null>(null);
+  const [] = useState<string | null>(null);
 
   // Distributor Picker States (for Orders & Refills)
-  const [distributorPickerOrderId, setDistributorPickerOrderId] = useState<number | null>(null);
-  const [distributorPickerRefillId, setDistributorPickerRefillId] = useState<number | null>(null);
-  const [distributorPickerResults, setDistributorPickerResults] = useState<SuggestionMedicine[]>([]);
-  const [distributorPickerLoading, setDistributorPickerLoading] = useState(false);
+  const [] = useState<number | null>(null);
+  const [] = useState<number | null>(null);
+  const [] = useState<SuggestionMedicine[]>([]);
+  const [] = useState(false);
 
   // New Special Request inline form states
   const [showNewRequestForm, setShowNewRequestForm] = useState(false);
@@ -839,78 +661,6 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
     return null;
   };
 
-  const handleSearchDistributorsForRefill = async (refill: Refill) => {
-    setDistributorPickerRefillId(refill.id);
-    setDistributorPickerResults([]);
-    setDistributorPickerLoading(true);
-    try {
-      const medName = refill.medicine_name || `Medicine ${refill.medicine_id}`;
-      const searchResults = await api.searchPharmarack(medName);
-      if (!searchResults || searchResults.length === 0) {
-        toastEvent.trigger(`No Pharmarack matches found for "${medName}"`, 'error');
-        setDistributorPickerRefillId(null);
-        return;
-      }
-      const mapped: SuggestionMedicine[] = (searchResults as any[]).map((item) => ({
-        medicine_name: item.name,
-        mrp: item.mrp,
-        isPharmarack: true,
-        distributor: item.distributor,
-        rate: item.rate,
-        mapped: item.mapped,
-        packaging: item.packaging,
-        stock: item.stock,
-        scheme: item.scheme,
-        productId: item.productId,
-        storeId: item.storeId,
-        productCode: item.productCode,
-        company: item.company
-      }));
-      setDistributorPickerResults(mapped);
-    } catch (err: any) {
-      console.error('Failed to search distributors for refill:', err);
-      toastEvent.trigger(err?.response?.data?.error || 'Failed to search distributors', 'error');
-      setDistributorPickerRefillId(null);
-    } finally {
-      setDistributorPickerLoading(false);
-    }
-  };
-
-  const handleConfirmRefillDistributor = async (refill: Refill, picked: SuggestionMedicine) => {
-    setAddingRefillId(refill.id);
-    try {
-      const payload = [{
-        productId: picked.productId!,
-        storeId: picked.storeId!,
-        qty: Math.max(1, Number(refill.quantity_needed) || 1),
-        productCode: picked.productCode,
-        productName: picked.medicine_name,
-        company: picked.company,
-        packaging: picked.packaging,
-        rate: picked.rate || 0,
-        mrp: picked.mrp || 0,
-        storeName: picked.distributor,
-        mapped: picked.mapped
-      }];
-      const res = await api.addPharmarackCart(payload);
-      if (res && res.success) {
-        toastEvent.trigger(`Added "${refill.medicine_name}" to Pharmarack cart!`, 'success');
-        setDistributorPickerRefillId(null);
-        setDistributorPickerResults([]);
-        await fetchCart();
-        await fetchPendingRefills();
-        window.dispatchEvent(new CustomEvent('refresh-pharmarack-cart'));
-      } else {
-        toastEvent.trigger(res?.error || 'Failed to add item to cart', 'error');
-      }
-    } catch (err: any) {
-      console.error('Failed to add refill to cart:', err);
-      toastEvent.trigger(err?.response?.data?.error || 'Failed to add item to cart', 'error');
-    } finally {
-      setAddingRefillId(null);
-    }
-  };
-
   const getOrderCartMatch = (order: SpecialOrder) => {
     const { matchedItem, result } = findBestCartMatchForOrder(order, cartDistributors);
     if (result && result.isMatch) {
@@ -919,199 +669,6 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
     return null;
   };
 
-  const getOrderItemInCart = (order: SpecialOrder) => {
-    const match = getOrderCartMatch(order);
-    return match ? match.item : null;
-  };
-
-  const handleSearchDistributorsForOrder = async (order: SpecialOrder) => {
-    setDistributorPickerOrderId(order.id);
-    setDistributorPickerResults([]);
-    setDistributorPickerLoading(true);
-    try {
-      const searchResults = await api.searchPharmarack(order.product);
-      if (!searchResults || searchResults.length === 0) {
-        const reason = `No Pharmarack matches found for "${order.product}"`;
-        toastEvent.trigger(reason, 'error');
-        try {
-          await api.updateOrder(order.id, { cart_add_error: reason });
-          window.dispatchEvent(new CustomEvent('refresh-special-orders'));
-        } catch (persistErr) {
-          console.error('Failed to persist cart_add_error on order:', persistErr);
-        }
-        setDistributorPickerOrderId(null);
-        return;
-      }
-      const mapped: SuggestionMedicine[] = (searchResults as any[]).map((item) => ({
-        medicine_name: item.name,
-        mrp: item.mrp,
-        isPharmarack: true,
-        distributor: item.distributor,
-        rate: item.rate,
-        mapped: item.mapped,
-        packaging: item.packaging,
-        stock: item.stock,
-        scheme: item.scheme,
-        productId: item.productId,
-        storeId: item.storeId,
-        productCode: item.productCode,
-        company: item.company
-      }));
-      setDistributorPickerResults(mapped);
-    } catch (err: any) {
-      console.error('Failed to search distributors for order:', err);
-      const reason = err?.response?.data?.error || 'Failed to search distributors';
-      toastEvent.trigger(reason, 'error');
-      try {
-        await api.updateOrder(order.id, { cart_add_error: `Search failed: ${reason}` });
-        window.dispatchEvent(new CustomEvent('refresh-special-orders'));
-      } catch (persistErr) {
-        console.error('Failed to persist cart_add_error on order:', persistErr);
-      }
-      setDistributorPickerOrderId(null);
-    } finally {
-      setDistributorPickerLoading(false);
-    }
-  };
-
-  const handleConfirmOrderDistributor = async (order: SpecialOrder, picked: SuggestionMedicine) => {
-    setAddingOrderId(order.id);
-    try {
-      const payload = [{
-        productId: picked.productId!,
-        storeId: picked.storeId!,
-        qty: order.qty,
-        productCode: picked.productCode,
-        productName: picked.medicine_name,
-        company: picked.company,
-        packaging: picked.packaging,
-        rate: order.pharmarack_rate || picked.rate || 0,
-        mrp: order.pharmarack_mrp || picked.mrp || 0,
-        storeName: picked.distributor,
-        mapped: picked.mapped
-      }];
-      const res = await api.addPharmarackCart(payload);
-      if (res && res.success) {
-        toastEvent.trigger(`Added "${order.product}" to Pharmarack cart!`, 'success');
-        await api.updateOrder(order.id, { status: 'Ordered', cart_add_error: null });
-        setDistributorPickerOrderId(null);
-        setDistributorPickerResults([]);
-        await fetchCart();
-        await fetchPendingOrders();
-        window.dispatchEvent(new CustomEvent('refresh-pharmarack-cart'));
-      } else {
-        const reason = res?.error || 'Failed to add item to cart';
-        toastEvent.trigger(reason, 'error');
-        try {
-          await api.updateOrder(order.id, { cart_add_error: reason });
-          window.dispatchEvent(new CustomEvent('refresh-special-orders'));
-        } catch (persistErr) {
-          console.error('Failed to persist cart_add_error on order:', persistErr);
-        }
-      }
-    } catch (err: any) {
-      console.error('Failed to add pending order to cart:', err);
-      const reason = err?.response?.data?.error || 'Failed to add item to cart';
-      toastEvent.trigger(reason, 'error');
-      try {
-        await api.updateOrder(order.id, { cart_add_error: reason });
-        window.dispatchEvent(new CustomEvent('refresh-special-orders'));
-      } catch (persistErr) {
-        console.error('Failed to persist cart_add_error on order:', persistErr);
-      }
-    } finally {
-      setAddingOrderId(null);
-    }
-  };
-
-  const getReconAgeStyle = (dateStr: string): string => {
-    if (!dateStr) return '';
-    const reconDate = new Date(dateStr);
-    const now = new Date();
-    const hoursDiff = (now.getTime() - reconDate.getTime()) / (1000 * 60 * 60);
-    
-    if (hoursDiff > 30) return 'bg-red-500/10 border-l-2 border-l-red-500'; // Urgent
-    if (hoursDiff > 24) return 'bg-amber-500/10 border-l-2 border-l-amber-500'; // Warning
-    return ''; // Normal
-  };
-
-  const handleReconMedicineSelect = async (recon: any, medName: string) => {
-    setDistributorPickerReconMedicine(medName);
-    setDistributorPickerLoading(true);
-    setDistributorPickerResults([]);
-    try {
-      const searchResults = await api.searchPharmarack(medName);
-      if (!searchResults || searchResults.length === 0) {
-        toastEvent.trigger(`No Pharmarack matches found for "${medName}"`, 'error');
-        setDistributorPickerReconMedicine('');
-        return;
-      }
-      const mapped: SuggestionMedicine[] = (searchResults as any[]).map((item) => ({
-        medicine_name: item.name,
-        mrp: item.mrp,
-        isPharmarack: true,
-        distributor: item.distributor,
-        rate: item.rate,
-        mapped: item.mapped,
-        packaging: item.packaging,
-        stock: item.stock,
-        scheme: item.scheme,
-        productId: item.productId,
-        storeId: item.storeId,
-        productCode: item.productCode,
-        company: item.company
-      }));
-      setDistributorPickerResults(mapped);
-    } catch (err: any) {
-      console.error('Failed to search distributors for recon medicine:', err);
-      toastEvent.trigger(err?.response?.data?.error || 'Failed to search distributors', 'error');
-      setDistributorPickerReconMedicine('');
-    } finally {
-      setDistributorPickerLoading(false);
-    }
-  };
-
-  const handleConfirmReconDistributor = async (recon: any, medName: string, picked: SuggestionMedicine) => {
-    const reconUid = recon.uid || recon.email_uid || recon.id || 'recon';
-    setAddingOrderId(reconUid); // Re-use addingOrderId as generic loading state
-    try {
-      const payload = [{
-        productId: picked.productId!,
-        storeId: picked.storeId!,
-        qty: 1,
-        productCode: picked.productCode,
-        productName: picked.medicine_name,
-        company: picked.company,
-        packaging: picked.packaging,
-        rate: picked.rate || 0,
-        mrp: picked.mrp || 0,
-        storeName: picked.distributor,
-        mapped: picked.mapped
-      }];
-      const res = await api.addPharmarackCart(payload);
-      if (res && res.success) {
-        toastEvent.trigger(`Added "${medName}" to Pharmarack cart!`, 'success');
-        
-        // Track added medicine in session
-        setAddedReconMedicines(prev => ({
-          ...prev,
-          [reconUid]: [...(prev[reconUid] || []), medName]
-        }));
-        
-        setDistributorPickerReconMedicine('');
-        setDistributorPickerResults([]);
-        await fetchCart();
-        window.dispatchEvent(new CustomEvent('refresh-pharmarack-cart'));
-      } else {
-        toastEvent.trigger(res?.error || 'Failed to add item to cart', 'error');
-      }
-    } catch (err: any) {
-      console.error('Failed to add recon medicine to cart:', err);
-      toastEvent.trigger(err?.response?.data?.error || 'Failed to add item to cart', 'error');
-    } finally {
-      setAddingOrderId(null);
-    }
-  };
   const autocompleteRef = useRef<HTMLDivElement>(null);
   const productInputRef = useRef<HTMLInputElement>(null);
   const qtyInputRef = useRef<HTMLInputElement>(null);
@@ -1476,7 +1033,6 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
     let storeIdToUse = selectedStoreId;
     let productIdToUse = selectedProductId;
     let rateToUse = selectedRate;
-    let mrpToUse = selectedMrp;
     let mappedToUse = selectedMapped;
     let schemeToUse = selectedScheme;
     let productCodeToUse = selectedProductCode;
@@ -1492,7 +1048,6 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
         storeIdToUse = topValid.storeId || '';
         productIdToUse = topValid.productId || '';
         rateToUse = topValid.rate !== undefined && topValid.rate !== null ? topValid.rate : '';
-        mrpToUse = topValid.mrp !== undefined && topValid.mrp !== null ? topValid.mrp : '';
         mappedToUse = topValid.mapped !== undefined ? topValid.mapped : null;
         schemeToUse = topValid.scheme || '';
         productCodeToUse = topValid.productCode || '';
