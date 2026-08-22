@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useRef, lazy, Suspense, useMemo, useCallback } from 'react';
+import { useState, useEffect, useRef, lazy, Suspense, useMemo, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useDeferredEffect } from '../../hooks/useDeferredEffect';
 import { useOnClickOutside } from '../../hooks/useOnClickOutside';
@@ -115,7 +115,7 @@ let cachedSpecialOrders: any[] | null = null;
 const GROUP_BATCHES_MAX_DEPTH = 3;
 
 // Per-call memoization: keyed by medicine id, but only reused when the exact
-// same input array reference is seen again (so results never go stale) â€”
+// same input array reference is seen again (so results never go stale) —
 // avoids recomputing the same medicine's alternatives subtree repeatedly
 // within a single groupBatches() invocation/render cycle.
 const groupBatchesInternal = (
@@ -152,7 +152,7 @@ const groupBatchesInternal = (
       const copy = {
         ...item,
         quantity: stripQty, // running total across batches (display only)
-        batch_quantity: stripQty, // stock of the chosen batch â€” what the sale can actually use
+        batch_quantity: stripQty, // stock of the chosen batch — what the sale can actually use
         loose_quantity: item.loose_quantity || 0,
         __fefoRank: fefoRank(stripQty, item.expiry_date)
       };
@@ -1059,7 +1059,7 @@ const POS = () => {
   // render pass between them. Their trigger conditions are mutually exclusive
   // (the "cart totally empty" branch only fires when there are zero non-empty
   // rows, the "append" branch only fires when the last row IS a filled/non-empty
-  // row) so combining them into one effect â€” in the same original order â€”
+  // row) so combining them into one effect — in the same original order —
   // produces the exact same state transitions with a single effect pass.
   useEffect(() => {
     // 1) Auto-initialize with an empty row if the cart is completely empty
@@ -1387,7 +1387,7 @@ const POS = () => {
 
   // E2/E11: shared memoized inventory mapping. This full-array map/copy only
   // reruns when the compact inventory cache actually changes (cacheVersion),
-  // not on every keystroke â€” both search dropdowns below consume this same
+  // not on every keystroke — both search dropdowns below consume this same
   // reference instead of each doing their own `.map()` per render.
   const mappedInventory = useMemo(() => {
     const compactInventory = getCompactInventoryCache();
@@ -1982,7 +1982,7 @@ const POS = () => {
     );
     if (pendingMatches.length > 0) {
       toastEvent.trigger(
-        `Pending request: ${pendingMatches[0].requester} asked for ${pendingMatches[0].qty} Ã— ${med.name}`,
+        `Pending request: ${pendingMatches[0].requester} asked for ${pendingMatches[0].qty} × ${med.name}`,
         'info'
       );
     }
@@ -2001,7 +2001,7 @@ const POS = () => {
 
     updateCart(prevCart => {
       const cleanPrev = prevCart.filter(item => !item.isEmptyRow);
-      // ponytail: POS sell cart always adds 1 strip â€” recommended/default qty is Live Cart only
+      // ponytail: POS sell cart always adds 1 strip — recommended/default qty is Live Cart only
       const incQty = 1;
       const incLooseQty = 0;
       
@@ -2483,7 +2483,7 @@ const POS = () => {
     });
   };
   
-  // Calculations â€” memoized so math only runs when cart contents or bill-level discount change,
+  // Calculations — memoized so math only runs when cart contents or bill-level discount change,
   // not on every unrelated re-render (keystrokes in search, modal state updates, etc.)
   const { subtotal, discountAmount, grandTotal, totalCost } = useMemo(() => {
     let sub = 0;
@@ -2519,13 +2519,13 @@ const POS = () => {
 
   const handleCompleteSale = async (overridePhone?: string, isDirectSave: boolean = false) => {
     if (!hasValidItems) {
-      alert('âš ï¸ CANNOT SAVE BILL:\n\nPlease add at least one valid medicine to the cart before saving the bill.');
+      alert('⚠️ CANNOT SAVE BILL:\n\nPlease add at least one valid medicine to the cart before saving the bill.');
       return;
     }
     const phoneToUse = sanitizePhoneInput(overridePhone !== undefined ? overridePhone : patientPhone);
 
     if (isLoss) {
-      alert(`âŒ CANNOT SAVE BILL:\n\nTransaction results in a Net Loss (Grand Total â‚¹${grandTotal} is less than Cost Price â‚¹${Math.round(totalCost)}).\nPlease adjust overall discount or items MRP to proceed.`);
+      alert(`❌ CANNOT SAVE BILL:\n\nTransaction results in a Net Loss (Grand Total ₹${grandTotal} is less than Cost Price ₹${Math.round(totalCost)}).\nPlease adjust overall discount or items MRP to proceed.`);
       return;
     }
 
@@ -2554,7 +2554,7 @@ const POS = () => {
           expDate = new Date(expiryStr);
         }
         if (expDate < new Date()) {
-          alert(`âŒ CRITICAL SAFETY BLOCK:\n\nCart contains EXPIRED product: ${item.name} (${expiryStr}).\nCannot proceed with checkout.`);
+          alert(`❌ CRITICAL SAFETY BLOCK:\n\nCart contains EXPIRED product: ${item.name} (${expiryStr}).\nCannot proceed with checkout.`);
           return;
         }
       }
@@ -2580,7 +2580,7 @@ const POS = () => {
         const availTotalUnits = availQty * packSize + availLoose;
         
         if (availTotalUnits < reqTotalUnits) {
-          alert(`âŒ INSUFFICIENT STOCK:\n\nMedicine: ${item.name || 'Medicine'}\nRequested: ${reqQty} strips & ${reqLoose} loose (${reqTotalUnits} units)\nAvailable: ${availQty} strips & ${availLoose} loose (${availTotalUnits} units)\n\nPlease reduce the quantity to match available stock before proceeding.`);
+          alert(`❌ INSUFFICIENT STOCK:\n\nMedicine: ${item.name || 'Medicine'}\nRequested: ${reqQty} strips & ${reqLoose} loose (${reqTotalUnits} units)\nAvailable: ${availQty} strips & ${availLoose} loose (${availTotalUnits} units)\n\nPlease reduce the quantity to match available stock before proceeding.`);
           return;
         }
       }
@@ -2596,11 +2596,11 @@ const POS = () => {
       const inventoryId = item.inventory_id || (typeof item.id === 'number' && item.id < 1000000 ? item.id : undefined);
 
       if (!inventoryId || !batch.trim()) {
-        alert(`âŒ Missing Inventory Batch:\n\n"${name}" is not linked to verified inventory stock. Please select an in-stock batch or record a purchase first.`);
+        alert(`❌ Missing Inventory Batch:\n\n"${name}" is not linked to verified inventory stock. Please select an in-stock batch or record a purchase first.`);
         return;
       }
       if (unitPrice <= 0) {
-        alert(`âŒ Invalid Price:\n\n"${name}" must have a selling price greater than â‚¹0.`);
+        alert(`❌ Invalid Price:\n\n"${name}" must have a selling price greater than ₹0.`);
         return;
       }
     }
@@ -2661,13 +2661,13 @@ const POS = () => {
       try {
         const validation = await api.validateBill(payload);
         if (!validation.success) {
-          alert(`âŒ Save Blocked by Verification Layer:\n\nStep: ${validation.layer}\nReason: ${validation.message}`);
+          alert(`❌ Save Blocked by Verification Layer:\n\nStep: ${validation.layer}\nReason: ${validation.message}`);
           return;
         }
       } catch (err: any) {
         const serverError = err.response?.data?.message || err.response?.data?.error || err.message;
         const layer = err.response?.data?.layer || 'Validation';
-        alert(`âŒ Verification Layer Pre-Save Failure:\n\nStep: ${layer}\nReason: ${serverError}`);
+        alert(`❌ Verification Layer Pre-Save Failure:\n\nStep: ${layer}\nReason: ${serverError}`);
         return;
       }
 
@@ -2810,7 +2810,7 @@ const POS = () => {
           clinic_name: newDoctorClinic,
           reg_no: newDoctorRegNo
         });
-        toastEvent.trigger(`âœ… Doctor details updated for ${docName}`, 'success');
+        toastEvent.trigger(`✅ Doctor details updated for ${docName}`, 'success');
       } else {
         res = await api.addDoctor({
           name: docName,
@@ -2819,7 +2819,7 @@ const POS = () => {
           clinic_name: newDoctorClinic,
           reg_no: newDoctorRegNo
         });
-        toastEvent.trigger(`âœ… New Doctor registered: ${docName}`, 'success');
+        toastEvent.trigger(`✅ New Doctor registered: ${docName}`, 'success');
       }
 
       try {
@@ -2899,7 +2899,7 @@ const POS = () => {
       return t;
     }));
 
-    toastEvent.trigger(`âš¡ Loaded staged order for ${stagedItem.patient_name || 'Customer'} into POS`, 'success');
+    toastEvent.trigger(`⚡ Loaded staged order for ${stagedItem.patient_name || 'Customer'} into POS`, 'success');
   };
 
   useEffect(() => {
@@ -2912,10 +2912,10 @@ const POS = () => {
   return (
     <div className="h-full flex flex-col fade-in overflow-hidden bg-bg text-text">
 
-      {/* Main Container: Stacked â€” Cart workspace on top, Checkout bar at bottom */}
+      {/* Main Container: Stacked — Cart workspace on top, Checkout bar at bottom */}
       <div className="flex-1 flex flex-col gap-0 overflow-hidden min-h-0">
 
-        {/* â”€â”€ TOP WORKSPACE (full width) â”€â”€ */}
+        {/* ── TOP WORKSPACE (full width) ── */}
         <div className="flex-1 flex flex-col gap-2.5 min-h-0 min-w-0 overflow-hidden p-3">
 
           {/* Editing Bill Banner */}
@@ -2959,7 +2959,7 @@ const POS = () => {
                         <strong className="text-violet-300">{matchedRefill.medicine_name} (Qty: {matchedRefill.quantity || 1})</strong>
                       )
                     }
-                    {matchedRefill.doctor_name ? ` Â· Dr. ${matchedRefill.doctor_name}` : ''}
+                    {matchedRefill.doctor_name ? ` · Dr. ${matchedRefill.doctor_name}` : ''}
                   </span>
                 </div>
                 <div className="flex gap-1.5 shrink-0">
@@ -3037,7 +3037,7 @@ const POS = () => {
                     <div ref={patientSuggestionsRef} className="absolute left-0 right-0 top-full z-[100] mt-1 bg-bg2 border border-border rounded-xl overflow-hidden max-h-44 overflow-y-auto shadow-2xl">
                       {isPatientFuzzyMatch && (
                         <div className="px-3 py-1.5 bg-amber-500/10 text-amber-400 text-[11px] font-bold border-b border-amber-500/20 flex items-center gap-1.5">
-                          <span>ðŸ”</span> No exact match. Did you mean:
+                          <span>🔍</span> No exact match. Did you mean:
                         </div>
                       )}
                       {patientSuggestions.map((c, idx) => {
@@ -3069,7 +3069,7 @@ const POS = () => {
                               <span className="font-semibold truncate">{c.name}</span>
                               {hasCreditDue && (
                                 <span className="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-amber-500 text-[9px] font-bold">
-                                  Credit â‚¹{Number(c.credit_balance || 0).toFixed(0)}
+                                  Credit ₹{Number(c.credit_balance || 0).toFixed(0)}
                                 </span>
                               )}
                             </div>
@@ -3270,7 +3270,7 @@ const POS = () => {
             {!inventoryIndexReady && (
               <div className="flex items-center gap-2 px-3 py-1 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-500 text-xs font-semibold">
                 <Loader2 size={13} className="animate-spin shrink-0" />
-                <span>Preparing indexâ€¦</span>
+                <span>Preparing index…</span>
               </div>
             )}
             
@@ -3413,7 +3413,7 @@ const POS = () => {
                       </div>
                     )}
                     <div className="p-3 border-b border-border/30 text-[13px] font-bold text-muted uppercase tracking-wider bg-bg3/55">
-                      âš ï¸ No matching inventory found
+                      ⚠️ No matching inventory found
                     </div>
                     <div className="flex flex-col">
                       <button
@@ -3437,7 +3437,7 @@ const POS = () => {
                       >
                         <div className="flex flex-col gap-1">
                           <span className="font-semibold text-text group-hover:text-primary transition-all">Add "{searchTerm.trim()}" directly to cart (Quick Add)</span>
-                          <span className="text-[13px] text-muted font-normal">Added as custom entry â€” please input real rate, batch, and expiry</span>
+                          <span className="text-[13px] text-muted font-normal">Added as custom entry — please input real rate, batch, and expiry</span>
                         </div>
                         <span className="text-[14px] bg-primary/10 border border-primary/20 text-primary py-1.5 px-3 rounded-lg font-bold group-hover:bg-primary group-hover:text-text transition-all">+ Add</span>
                       </button>
@@ -3452,7 +3452,7 @@ const POS = () => {
                       {onlineResults.length > 0 && (
                         <>
                           <div className="p-3 bg-bg3/55 border-t border-border/30 text-[13px] font-bold text-sky uppercase tracking-wider">
-                            ðŸŒ Internet Suggestion (Auto-Enrich to Database)
+                            🌐 Internet Suggestion (Auto-Enrich to Database)
                           </div>
                           {onlineResults.map((sug, sidx) => (
                             <button
@@ -3463,10 +3463,10 @@ const POS = () => {
                             >
                               <div className="flex flex-col gap-1">
                                 <span className="font-semibold text-text group-hover:text-sky transition-all">{sug.name}</span>
-                                <span className="text-[13px] text-muted font-normal">Active Salts: <strong className="text-text">{sug.api_reference || 'â€”'}</strong></span>
+                                <span className="text-[13px] text-muted font-normal">Active Salts: <strong className="text-text">{sug.api_reference || '—'}</strong></span>
                                 {sug.manufacturer && <span className="text-[13px] text-muted font-normal">Mfr: {sug.manufacturer}</span>}
                               </div>
-                              <span className="text-[14px] bg-sky/10 border border-sky/20 text-sky py-1.5 px-3 rounded-lg font-bold group-hover:bg-sky group-hover:text-text transition-all">âœ¨ Import & Add</span>
+                              <span className="text-[14px] bg-sky/10 border border-sky/20 text-sky py-1.5 px-3 rounded-lg font-bold group-hover:bg-sky group-hover:text-text transition-all">✨ Import & Add</span>
                             </button>
                           ))}
                         </>
@@ -3536,7 +3536,7 @@ const POS = () => {
                                   return;
                                 }
                                 if (remainingUnits <= 0) {
-                                  toastEvent.trigger(`Cannot add more ${item.medicine_name} â€” maximum available stock (${totalUnits} units) is already in cart!`, 'error');
+                                  toastEvent.trigger(`Cannot add more ${item.medicine_name} — maximum available stock (${totalUnits} units) is already in cart!`, 'error');
                                   return;
                                 }
                                 fetchDetailsAndAddToCart(item);
@@ -3558,12 +3558,12 @@ const POS = () => {
                                   <span className="font-semibold text-text group-hover:text-primary transition-all">{item.medicine_name}</span>
                                   {isLowStockAlert && (
                                     <span className="text-[10px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30 px-1.5 py-0.5 rounded flex items-center gap-1 uppercase tracking-wider">
-                                      âš ï¸ Low Stock ({remainingPacks} Left â€¢ Refill Needed)
+                                      ⚠️ Low Stock ({remainingPacks} Left • Refill Needed)
                                     </span>
                                   )}
                                 </div>
                                 <span className="text-[13px] text-muted">
-                                  Company: <span className="text-text font-semibold">{item.manufacturer || 'â€”'}</span>
+                                  Company: <span className="text-text font-semibold">{item.manufacturer || '—'}</span>
                                   {item.quantity !== undefined && (() => {
                                     const remainingLoose = remainingUnits % packSize;
                                     const hasLoose = (item.loose_quantity !== undefined && item.loose_quantity > 0) || remainingLoose > 0;
@@ -3588,13 +3588,13 @@ const POS = () => {
                                     }}
                                     className="text-[13px] text-violet-400 hover:text-violet-300 font-bold underline cursor-pointer w-fit mt-0.5"
                                   >
-                                    Verify composition â†—
+                                    Verify composition ↗
                                   </span>
                                 )}
                               </div>
                               <div className="flex items-center gap-4">
                                 <div className="text-right">
-                                  <div className="font-mono text-green font-bold">MRP: â‚¹{Math.round(item.mrp)}</div>
+                                  <div className="font-mono text-green font-bold">MRP: ₹{Math.round(item.mrp)}</div>
                                 </div>
                                 <div className="flex items-center gap-2">
                                   <button
@@ -3651,7 +3651,7 @@ const POS = () => {
                             {med.alternatives && med.alternatives.length > 0 && (
                               <div className="flex flex-col border-l-2 border-sky/30 ml-2 bg-bg3/30">
                                 <div className="px-6 py-1.5 bg-sky/5 text-[13px] text-sky font-bold uppercase tracking-wider flex items-center gap-1">
-                                  <span className="rotate-90">â†±</span> Substitutes Available:
+                                  <span className="rotate-90">↳</span> Substitutes Available:
                                 </div>
                                 {med.alternatives.map((alt: any) => renderMedicineItem(alt, true))}
                               </div>
@@ -3670,7 +3670,7 @@ const POS = () => {
                       {onlineResults.length > 0 && (
                         <>
                           <div className="p-3 border-t border-border/30 bg-bg3/55 text-[13px] font-bold text-sky uppercase tracking-wider">
-                            ðŸŒ Internet Suggestion (Auto-Enrich to Database):
+                            🌐 Internet Suggestion (Auto-Enrich to Database):
                           </div>
                           {onlineResults.map((sug, sidx) => (
                             <button
@@ -3681,10 +3681,10 @@ const POS = () => {
                             >
                               <div className="flex flex-col gap-1">
                                 <span className="font-semibold text-text group-hover:text-sky transition-all">{sug.name}</span>
-                                <span className="text-[13px] text-muted font-normal">Active Salts: <strong className="text-text">{sug.api_reference || 'â€”'}</strong></span>
+                                <span className="text-[13px] text-muted font-normal">Active Salts: <strong className="text-text">{sug.api_reference || '—'}</strong></span>
                                 {sug.manufacturer && <span className="text-[13px] text-muted font-normal">Mfr: {sug.manufacturer}</span>}
                               </div>
-                              <span className="text-[14px] bg-sky/10 border border-sky/20 text-sky py-1.5 px-3 rounded-lg font-bold group-hover:bg-sky group-hover:text-text transition-all">âœ¨ Import & Add</span>
+                              <span className="text-[14px] bg-sky/10 border border-sky/20 text-sky py-1.5 px-3 rounded-lg font-bold group-hover:bg-sky group-hover:text-text transition-all">✨ Import & Add</span>
                             </button>
                           ))}
                         </>
@@ -3935,13 +3935,13 @@ const POS = () => {
                                           <span className="font-semibold text-text">{med.medicine_name}</span>
                                           {rowHasPending && (
                                             <span className="inline-flex items-center gap-1 bg-amber-500/10 border border-amber-500/30 text-amber-500 px-1.5 py-0.5 rounded text-[11px] font-bold animate-pulse">
-                                              âš ï¸ {rowPendingMatches[0].requester} ({rowPendingMatches[0].qty})
+                                              ⚠️ {rowPendingMatches[0].requester} ({rowPendingMatches[0].qty})
                                             </span>
                                           )}
                                         </div>
                                         <span className="text-[11px] text-muted font-mono mt-0.5">Batch: {med.batch_no} | Exp: {med.expiry_date}</span>
                                         <span className="text-[11px] text-green font-bold font-mono mt-0.5">
-                                          MRP: â‚¹{Math.round(med.mrp)} | Stock: {(() => {
+                                          MRP: ₹{Math.round(med.mrp)} | Stock: {(() => {
                                             const packSize = med.pack_size || 1;
                                             const totalUnits = (med.quantity || 0) * packSize + (med.loose_quantity || med.loose_qty || 0);
                                             const cartUnits = cart.reduce((sum, c) => {
@@ -4054,7 +4054,7 @@ const POS = () => {
                                       className={`w-full text-left px-2.5 py-1.5 hover:bg-sky/15 border-b border-border/10 text-xs font-mono transition-all block ${b.batch_no === item.batch ? 'bg-sky/10 text-sky' : 'text-text'}`}
                                     >
                                       <span className="font-bold block">{b.batch_no}</span>
-                                      <span className="text-muted block text-[11px]">Exp: {b.expiry_date} | Stock: {liveStock} Str {b.loose_quantity !== undefined && b.loose_quantity > 0 && `/ ${b.loose_quantity} Tab`} | MRP: â‚¹{b.mrp}</span>
+                                      <span className="text-muted block text-[11px]">Exp: {b.expiry_date} | Stock: {liveStock} Str {b.loose_quantity !== undefined && b.loose_quantity > 0 && `/ ${b.loose_quantity} Tab`} | MRP: ₹{b.mrp}</span>
                                     </button>
                                   );
                                 })}
@@ -4071,7 +4071,7 @@ const POS = () => {
                         </td>
 
                         {/* Qty & Stock */}
-                        {/* Strip Qty â€” own column */}
+                        {/* Strip Qty — own column */}
                         <td className="py-1 px-2.5 text-center">
                           {(() => {
                             if (item.isEmptyRow) {
@@ -4141,7 +4141,7 @@ const POS = () => {
                           })()}
                         </td>
 
-                        {/* Loose Qty â€” own column */}
+                        {/* Loose Qty — own column */}
                         <td className="py-1 px-2.5 text-center">
                           {(() => {
                             if (item.isEmptyRow) {
@@ -4208,7 +4208,7 @@ const POS = () => {
                                     className="text-[11px] p-0.5 opacity-60 hover:opacity-100 transition-opacity"
                                     title={isLooseAllowed ? "Loose sale allowed (Click to lock to Full Pack Only)" : "Full Pack Only (Click to allow loose tablet sales)"}
                                   >
-                                    {isLooseAllowed ? 'ðŸ”“' : 'ðŸ”’'}
+                                    {isLooseAllowed ? '🔓' : '🔒'}
                                   </button>
                                 </div>
                               </div>
@@ -4216,7 +4216,7 @@ const POS = () => {
                           })()}
                         </td>
 
-                        {/* Live Stock â€” own column */}
+                        {/* Live Stock — own column */}
                         <td className="py-1 px-2.5 text-center">
                           {(() => {
                             if (item.isEmptyRow) {
@@ -4318,7 +4318,7 @@ const POS = () => {
                                 min="0"
                                 max="100"
                                 disabled={item.isEmptyRow}
-                                title="Item Discount Percentage (%) â€” modify manually"
+                                title="Item Discount Percentage (%) — modify manually"
                                 onKeyDown={e => {
                                   if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
                                     handlePosRowInputKeyDown(e, cart.indexOf(item), 'discount');
@@ -4443,7 +4443,7 @@ const POS = () => {
                         {/* Total */}
                         <td className="py-1 px-2.5 text-right">
                           <div className="font-mono text-xs font-bold text-green pr-1">
-                            {item.isEmptyRow ? '-' : `â‚¹${Math.round(itemTotal)}`}
+                            {item.isEmptyRow ? '-' : `₹${Math.round(itemTotal)}`}
                           </div>
                         </td>
 
@@ -4480,7 +4480,7 @@ const POS = () => {
           
         </div>
 
-        {/* â”€â”€ BOTTOM CHECKOUT BAR (full width horizontal strip) â”€â”€ */}
+        {/* ── BOTTOM CHECKOUT BAR (full width horizontal strip) ── */}
         <div className="shrink-0 w-full flex flex-row items-center gap-2 px-3 py-1.5 bg-bg2/95 border-t border-glass-border/50 shadow-[0_-4px_16px_rgba(0,0,0,0.14)] overflow-x-auto">
 
           {/* Section 1: Customer (single line) */}
@@ -4489,9 +4489,9 @@ const POS = () => {
             <div className="flex flex-col leading-tight">
               <span className="text-[10px] font-bold text-text truncate max-w-[110px]">{patientName || 'Walk-in'}</span>
               <span className="text-[9px] text-muted font-mono truncate">
-                {patientPhone || 'â€”'}
-                {patientPhone && <span className="ml-1 text-green font-bold">Â· WA</span>}
-                {selectedCustomerId && <span className="ml-1 text-primary font-bold">Â· Reg</span>}
+                {patientPhone || '—'}
+                {patientPhone && <span className="ml-1 text-green font-bold">· WA</span>}
+                {selectedCustomerId && <span className="ml-1 text-primary font-bold">· Reg</span>}
               </span>
             </div>
           </div>
@@ -4500,7 +4500,7 @@ const POS = () => {
           <div className="flex items-center gap-2 min-w-[200px] border-r border-glass-border/30 pr-2.5 shrink-0">
             <FileText size={11} className="text-muted shrink-0" />
             <span className="text-[9px] text-muted">Sub:</span>
-            <span className="font-mono font-bold text-text text-[10px]">â‚¹{Math.round(subtotal)}</span>
+            <span className="font-mono font-bold text-text text-[10px]">₹{Math.round(subtotal)}</span>
             <span className="text-[9px] text-muted ml-1">Disc%</span>
             <input
               type="number"
@@ -4510,16 +4510,16 @@ const POS = () => {
               className="w-10 bg-bg border border-glass-border rounded px-1 py-0 font-mono font-bold text-center text-text text-[10px] focus:outline-none focus:border-primary/50 h-5"
             />
             {discountAmount > 0 && (
-              <span className="font-mono font-bold text-amber-500 text-[10px]">-â‚¹{Math.round(discountAmount)}</span>
+              <span className="font-mono font-bold text-amber-500 text-[10px]">-₹{Math.round(discountAmount)}</span>
             )}
           </div>
 
           {/* Section 3: Payment Method (single row) */}
           <div className="flex items-center gap-1 border-r border-glass-border/30 pr-2.5 shrink-0">
             {[
-              { id: 'CASH', label: 'ðŸ’µ Cash', activeClass: 'bg-green/15 text-green border-green/40' },
-              { id: 'UPI', label: 'ðŸ“± UPI', activeClass: 'bg-primary/15 text-primary border-primary/40' },
-              { id: 'CREDIT', label: 'ðŸ“œ Credit', activeClass: 'bg-amber-500/15 text-amber-500 border-amber-500/40' }
+              { id: 'CASH', label: '💵 Cash', activeClass: 'bg-green/15 text-green border-green/40' },
+              { id: 'UPI', label: '📱 UPI', activeClass: 'bg-primary/15 text-primary border-primary/40' },
+              { id: 'CREDIT', label: '📜 Credit', activeClass: 'bg-amber-500/15 text-amber-500 border-amber-500/40' }
             ].map(pm => (
               <button
                 key={pm.id}
@@ -4539,7 +4539,7 @@ const POS = () => {
           {/* Section 4: Net Payable (compact) */}
           <div className="flex items-baseline gap-1.5 px-2.5 py-1 rounded-lg bg-primary/5 border border-primary/20 shrink-0">
             <span className="text-[9px] font-black text-primary uppercase tracking-widest">Total</span>
-            <span className="text-lg font-black font-mono text-primary leading-none">â‚¹{grandTotal.toLocaleString()}</span>
+            <span className="text-lg font-black font-mono text-primary leading-none">₹{grandTotal.toLocaleString()}</span>
           </div>
 
           {/* Section 5: Action Buttons */}
@@ -4722,7 +4722,7 @@ const POS = () => {
                 <div className="flex justify-between items-center">
                   <div className="space-y-0.5">
                     <span className="text-xs font-bold text-text uppercase tracking-wider flex items-center gap-1.5">
-                      ðŸ”„ Auto-Refill Reminders
+                      🔄 Auto-Refill Reminders
                     </span>
                     <p className="text-[10px] text-muted">Generate recurring WhatsApp stock notifications</p>
                   </div>
@@ -4928,7 +4928,7 @@ const POS = () => {
               )}
               <div className="flex justify-between items-center text-xs pt-2 border-t border-border/40">
                 <span className="text-muted font-medium">Total Amount:</span>
-                <span className="font-mono font-black text-primary text-sm">â‚¹{lastSavedGrandTotal}</span>
+                <span className="font-mono font-black text-primary text-sm">₹{lastSavedGrandTotal}</span>
               </div>
             </div>
 
@@ -4967,7 +4967,7 @@ const POS = () => {
                 </tbody>
               </table>
               <div style={{ borderTop: '2px solid #000', paddingTop: '8px', textAlign: 'right', fontSize: '14px', fontWeight: 'bold', color: '#000' }}>
-                Grand Total: â‚¹{Number(lastSavedGrandTotal).toFixed(2)}
+                Grand Total: ₹{Number(lastSavedGrandTotal).toFixed(2)}
               </div>
               <div style={{ textAlign: 'center', marginTop: '20px', fontSize: '11px', color: '#777' }}>
                 Thank you for your visit! &middot; Get Well Soon
@@ -4980,11 +4980,11 @@ const POS = () => {
               <div className="flex-1 min-w-0">
                 {lastSavedPaymentMedium === 'CREDIT' ? (
                   <p className="font-semibold text-amber-500 text-[11px] leading-tight">
-                    âš¡ Credit Sale: Instant SMS/WhatsApp message sent automatically
+                    ⚡ Credit Sale: Instant SMS/WhatsApp message sent automatically
                   </p>
                 ) : lastSavedWasWhatsAppSent ? (
                   <p className="font-semibold text-green text-[11px] leading-tight">
-                    âœ… SMS/WhatsApp message sent to customer
+                    ✅ SMS/WhatsApp message sent to customer
                   </p>
                 ) : lastSavedPatientPhone ? (
                   <p className="text-muted text-[11px] leading-tight">
@@ -5002,7 +5002,7 @@ const POS = () => {
                     try {
                       const res = await api.sendWhatsappMessage(
                         lastSavedPatientPhone,
-                        `Dear ${lastSavedPatientName},\n\nðŸ“„ *Sale Invoice: #${lastSavedInvoiceNo}*\nAmount Paid: â‚¹${lastSavedGrandTotal}\nThank you for your purchase!\nâ€” AI Pharmacy OS`
+                        `Dear ${lastSavedPatientName},\n\n📄 *Sale Invoice: #${lastSavedInvoiceNo}*\nAmount Paid: ₹${lastSavedGrandTotal}\nThank you for your purchase!\n— AI Pharmacy OS`
                       );
                       if (res && res.success !== false) {
                         setLastSavedWasWhatsAppSent(true);
