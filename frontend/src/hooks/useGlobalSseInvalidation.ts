@@ -46,6 +46,7 @@ const SSE_CUSTOM_EVENTS: Record<string, string[]> = {
   catalog_job_progress: ['sse-catalog-job'],
   catalog_job_update: ['sse-catalog-job'],
   catalog_review_updated: ['sse-catalog-review'],
+  migration_update: ['sse-migration-update'],
   google_verification_required: ['sse-google-verification'],
   google_verification_solved: ['sse-google-verification'],
 };

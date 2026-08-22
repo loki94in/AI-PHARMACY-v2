@@ -295,12 +295,18 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
     }
   };
 
-  // Poll migration worker status during import. Polls pause while the tab is
-  // hidden — the import keeps running server-side and polling resumes on return.
+  // Live import status via the global SSE stream (backend broadcasts
+  // migration_update on every migrationStatus write; mapped to
+  // sse-migration-update in useGlobalSseInvalidation — P1 "events, not timers").
+  // The interval below is only a 10s safety net for missed frames; both paths
+  // pause while the tab is hidden — the import keeps running server-side and
+  // polling resumes on return.
   useEffect(() => {
     if (phase !== 'importing') return;
 
     let pollInterval: ReturnType<typeof setInterval> | null = null;
+    let lastPushAt = 0;
+    let transitioning = false;
 
     const stopPolling = () => {
       if (pollInterval) {
@@ -309,41 +315,74 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
       }
     };
 
+    const applyLiveStatus = async (liveStatus: {
+      isStagingReady?: boolean;
+      message?: string;
+      progress?: number;
+      active?: boolean;
+      errorCount?: number;
+    } | null | undefined) => {
+      if (!liveStatus) return;
+      setStatus(liveStatus);
+
+      if (transitioning) return;
+      if (liveStatus.isStagingReady) {
+        transitioning = true;
+        stopPolling();
+        await loadStagingData();
+        setPhase('staging');
+      } else if (liveStatus.message && liveStatus.message.toLowerCase().includes('failed')) {
+        transitioning = true;
+        stopPolling();
+        setPhase('error');
+        setErrorMessage(liveStatus.message);
+      }
+    };
+
     const checkStatus = async () => {
       try {
-        const liveStatus = await api.getMigrationStatus();
-        setStatus(liveStatus);
-
-        if (liveStatus.isStagingReady) {
-          stopPolling();
-          await loadStagingData();
-          setPhase('staging');
-        } else if (liveStatus.message && liveStatus.message.toLowerCase().includes('failed')) {
-          stopPolling();
-          setPhase('error');
-          setErrorMessage(liveStatus.message);
-        }
+        await applyLiveStatus(await api.getMigrationStatus());
       } catch (err: any) {
         console.error('Status polling error:', err);
       }
     };
 
+    // Primary path: push frames from the single global EventSource.
+    // Throttle non-terminal frames so bulk-import passes don't thrash renders;
+    // terminal transitions (staging ready / failed) always apply immediately.
+    const onSseUpdate = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (!detail) return;
+      const now = Date.now();
+      const terminal = detail.isStagingReady ||
+        (typeof detail.message === 'string' && detail.message.toLowerCase().includes('failed'));
+      if (!terminal && now - lastPushAt < 500) return;
+      lastPushAt = now;
+      applyLiveStatus(detail);
+    };
+    window.addEventListener('sse-migration-update', onSseUpdate);
+
     const startPolling = () => {
       if (pollInterval) return;
-      pollInterval = setInterval(checkStatus, 1500);
-      checkStatus();
+      pollInterval = setInterval(checkStatus, 10000);
     };
 
     const onVisibility = () => {
-      if (document.visibilityState === 'visible') startPolling();
-      else stopPolling();
+      if (document.visibilityState === 'visible') {
+        startPolling();
+        checkStatus();
+      } else {
+        stopPolling();
+      }
     };
     document.addEventListener('visibilitychange', onVisibility);
 
-    if (document.visibilityState === 'visible') startPolling();
+    startPolling();
+    checkStatus();
 
     return () => {
       stopPolling();
+      window.removeEventListener('sse-migration-update', onSseUpdate);
       document.removeEventListener('visibilitychange', onVisibility);
     };
   }, [phase, loadStagingData]);

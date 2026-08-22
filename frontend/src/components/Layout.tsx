@@ -3202,27 +3202,29 @@ export const Layout = ({
   useEffect(() => {
     if (!compactCacheLoaded) return;
     fetchStagedNotifications();
-    const unsubRefill = refillEvent.subscribeRefresh(() => {
-      fetchStagedNotifications();
-      refetchSpecialOrders();
-      refetchRefills();
-    });
-
-    const handleDataRefresh = () => {
+    // focus + visibilitychange + app-purchases-updated can all fire within the
+    // same tab-switch — one leading-edge throttled refresh instead of 2-3
+    // identical fetch bursts (same pattern as useGlobalSseInvalidation dedupe)
+    let lastRefreshAt = 0;
+    const refreshAll = () => {
+      const now = Date.now();
+      if (now - lastRefreshAt < 3000) return;
+      lastRefreshAt = now;
       fetchStagedNotifications();
       refetchSpecialOrders();
       refetchRefills();
     };
+    const unsubRefill = refillEvent.subscribeRefresh(refreshAll);
 
-    window.addEventListener('focus', handleDataRefresh);
-    document.addEventListener('visibilitychange', handleDataRefresh);
-    window.addEventListener('app-purchases-updated', handleDataRefresh);
+    window.addEventListener('focus', refreshAll);
+    document.addEventListener('visibilitychange', refreshAll);
+    window.addEventListener('app-purchases-updated', refreshAll);
 
     return () => {
       unsubRefill();
-      window.removeEventListener('focus', handleDataRefresh);
-      document.removeEventListener('visibilitychange', handleDataRefresh);
-      window.removeEventListener('app-purchases-updated', handleDataRefresh);
+      window.removeEventListener('focus', refreshAll);
+      document.removeEventListener('visibilitychange', refreshAll);
+      window.removeEventListener('app-purchases-updated', refreshAll);
     };
   }, [compactCacheLoaded, fetchStagedNotifications, refetchSpecialOrders, refetchRefills]);
 
