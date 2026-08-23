@@ -16,6 +16,7 @@ import { stagedQueueService, type StagedItem } from '../../services/stagedQueueS
 import { sanitizePhoneInput, isValid10DigitPhone } from '../../utils/phone';
 import { PhoneInputWithBadge } from '../../components/PhoneInputWithBadge';
 import { isExpiredDate, toDateInputValue } from '../../utils/date';
+import { printCurrentBill } from '../../utils/printBill';
 import { useDraftStore } from '../../lib/cache/useDraftStore';
 
 const getLocalDateString = (d: Date = new Date()) => {
@@ -856,6 +857,7 @@ const POS = () => {
   const [lastSavedPatientPhone, setLastSavedPatientPhone] = useState('');
   const [lastSavedGrandTotal, setLastSavedGrandTotal] = useState(0);
   const [lastSavedPaymentMedium, setLastSavedPaymentMedium] = useState('CASH');
+  const [lastSavedDoctorName, setLastSavedDoctorName] = useState('');
   const [lastSavedWasWhatsAppSent, setLastSavedWasWhatsAppSent] = useState(false);
   const [editingInvoiceId, setEditingInvoiceId] = useState<number | null>(() => Number(editSaleFromState?.id) || null);
   const [editingInvoiceNo, setEditingInvoiceNo] = useState<string | null>(() => editSaleFromState?.invoice_no || editSaleFromState?.id || null);
@@ -2743,6 +2745,7 @@ const POS = () => {
       setLastSavedPatientPhone(phoneToUse);
       setLastSavedGrandTotal(grandTotal);
       setLastSavedPaymentMedium(paymentMedium);
+      setLastSavedDoctorName(doctor || '');
       setLastSavedWasWhatsAppSent(isWaSent);
       setLastSavedItems(cart.filter(item => !item.isEmptyRow).map(item => ({
         name: item.name || item.medicine_name,
@@ -4980,6 +4983,52 @@ const POS = () => {
         document.body
       )}
 
+      {/* Hidden printable bill container for window.print() */}
+      {showBarcodeModal && createPortal(
+        <div id="printable-bill" data-print-root className="hidden">
+          <div style={{ textAlign: 'center', marginBottom: '15px' }}>
+            <h2 style={{ fontSize: '18px', fontWeight: 'bold', margin: '0 0 4px 0', color: '#000' }}>AI PHARMACY OS</h2>
+            <p style={{ fontSize: '12px', color: '#555', margin: '0' }}>Tax Invoice / Retail Counter Receipt</p>
+            <div style={{ borderBottom: '1px solid #ddd', margin: '10px 0' }}></div>
+          </div>
+          <div style={{ fontSize: '12px', marginBottom: '12px', display: 'flex', justifyContent: 'space-between', color: '#000' }}>
+            <div>
+              <p style={{ margin: '2px 0' }}><strong>Invoice No:</strong> #{lastSavedInvoiceNo}</p>
+              <p style={{ margin: '2px 0' }}><strong>Customer:</strong> {lastSavedPatientName}</p>
+              {lastSavedPatientPhone && <p style={{ margin: '2px 0' }}><strong>Phone:</strong> {lastSavedPatientPhone}</p>}
+              {lastSavedDoctorName && <p style={{ margin: '2px 0' }}><strong>Doctor:</strong> {lastSavedDoctorName}</p>}
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <p style={{ margin: '2px 0' }}><strong>Date:</strong> {new Date().toLocaleDateString()}</p>
+              <p style={{ margin: '2px 0' }}><strong>Payment:</strong> {lastSavedPaymentMedium}</p>
+            </div>
+          </div>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', marginBottom: '15px', color: '#000' }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid #000', textTransform: 'uppercase' }}>
+                <th style={{ textAlign: 'left', padding: '6px 0' }}>Item Name</th>
+                <th style={{ textAlign: 'left', padding: '6px 0' }}>Batch</th>
+              </tr>
+            </thead>
+            <tbody>
+              {lastSavedItems.map((item: any, idx: number) => (
+                <tr key={idx} style={{ borderBottom: '1px dotted #ccc' }}>
+                  <td style={{ padding: '6px 0' }}>{item.name}</td>
+                  <td style={{ padding: '6px 0' }}>{item.batch}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div style={{ borderTop: '2px solid #000', paddingTop: '8px', textAlign: 'right', fontSize: '14px', fontWeight: 'bold', color: '#000' }}>
+            Grand Total: ₹{Number(lastSavedGrandTotal).toFixed(2)}
+          </div>
+          <div style={{ textAlign: 'center', marginTop: '20px', fontSize: '11px', color: '#777' }}>
+            Thank you for your visit! &middot; Get Well Soon
+          </div>
+        </div>,
+        document.body
+      )}
+
       {/* Post-Sale Saved Bill Confirmation Modal */}
       {showBarcodeModal && createPortal(
         <div className="fixed inset-0 z-modal flex items-center justify-center bg-black/70 backdrop-blur-md fade-in">
@@ -5006,48 +5055,6 @@ const POS = () => {
               <div className="flex justify-between items-center text-xs pt-2 border-t border-border/40">
                 <span className="text-muted font-medium">Total Amount:</span>
                 <span className="font-mono font-black text-primary text-sm">₹{lastSavedGrandTotal}</span>
-              </div>
-            </div>
-
-            {/* Hidden printable bill container for window.print() */}
-            <div id="printable-bill" className="hidden">
-              <div style={{ textAlign: 'center', marginBottom: '15px' }}>
-                <h2 style={{ fontSize: '18px', fontWeight: 'bold', margin: '0 0 4px 0', color: '#000' }}>AI PHARMACY OS</h2>
-                <p style={{ fontSize: '12px', color: '#555', margin: '0' }}>Tax Invoice / Retail Counter Receipt</p>
-                <div style={{ borderBottom: '1px solid #ddd', margin: '10px 0' }}></div>
-              </div>
-              <div style={{ fontSize: '12px', marginBottom: '12px', display: 'flex', justifyContent: 'space-between', color: '#000' }}>
-                <div>
-                  <p style={{ margin: '2px 0' }}><strong>Invoice No:</strong> #{lastSavedInvoiceNo}</p>
-                  <p style={{ margin: '2px 0' }}><strong>Customer:</strong> {lastSavedPatientName}</p>
-                  {lastSavedPatientPhone && <p style={{ margin: '2px 0' }}><strong>Phone:</strong> {lastSavedPatientPhone}</p>}
-                </div>
-                <div style={{ textAlign: 'right' }}>
-                  <p style={{ margin: '2px 0' }}><strong>Date:</strong> {new Date().toLocaleDateString()}</p>
-                  <p style={{ margin: '2px 0' }}><strong>Payment:</strong> {lastSavedPaymentMedium}</p>
-                </div>
-              </div>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', marginBottom: '15px', color: '#000' }}>
-                <thead>
-                  <tr style={{ borderBottom: '1px solid #000', textTransform: 'uppercase' }}>
-                    <th style={{ textAlign: 'left', padding: '6px 0' }}>Item Name</th>
-                    <th style={{ textAlign: 'left', padding: '6px 0' }}>Batch</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {lastSavedItems.map((item: any, idx: number) => (
-                    <tr key={idx} style={{ borderBottom: '1px border-dotted #ccc' }}>
-                      <td style={{ padding: '6px 0' }}>{item.name}</td>
-                      <td style={{ padding: '6px 0' }}>{item.batch}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              <div style={{ borderTop: '2px solid #000', paddingTop: '8px', textAlign: 'right', fontSize: '14px', fontWeight: 'bold', color: '#000' }}>
-                Grand Total: ₹{Number(lastSavedGrandTotal).toFixed(2)}
-              </div>
-              <div style={{ textAlign: 'center', marginTop: '20px', fontSize: '11px', color: '#777' }}>
-                Thank you for your visit! &middot; Get Well Soon
               </div>
             </div>
 
@@ -5101,9 +5108,7 @@ const POS = () => {
 
             <div className="grid grid-cols-2 gap-2.5 pt-1">
               <button
-                onClick={() => {
-                  window.print();
-                }}
+                onClick={() => printCurrentBill(`Invoice-${lastSavedInvoiceNo}-${lastSavedPatientName || 'Walk-in'}`)}
                 className="w-full py-2.5 px-4 rounded-xl text-xs font-bold uppercase tracking-wider bg-primary text-white hover:bg-primary/90 transition-all shadow-[0_4px_12px_rgba(59,130,246,0.2)] flex items-center justify-center gap-2"
               >
                 <Printer size={14} /> Print Bill

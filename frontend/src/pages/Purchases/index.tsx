@@ -84,6 +84,9 @@ interface BillItem {
   scheme_free: number;
   stock_qty?: number;
   loose_qty?: number;
+  // Set when invoice-prefill auto-identified this line against master data —
+  // renders the green "ready" signal. Unresolved lines stay unflagged.
+  prefill_matched?: boolean;
   name?: string;
   medicine?: string;
   quantity?: number | string;
@@ -120,6 +123,110 @@ let isMasterCatalogHydrating = false;
 let cachedMergedCatalog: Medicine[] | null = null;
 let lastMasterLength = -1;
 let lastCompactLength = -1;
+
+// One-shot purchase-history model (module-level, survives KeepAlive navigation):
+// GET /purchases/medicine-batches is fetched ONCE per medicine+distributor when a
+// medicine is selected/prefilled; batch suggestions, same-batch autofill and
+// rate/MRP hover intel all read from this cache with zero further API calls.
+interface MedicineBatchHistoryRow {
+  batch_no: string;
+  expiry_date: string;
+  rate: number;
+  mrp: number;
+  cgst_per: number | null;
+  sgst_per: number | null;
+  quantity: number;
+  distributor_name: string | null;
+  purchase_date: string | null;
+}
+
+const medicineHistoryCache = new Map<string, MedicineBatchHistoryRow[]>();
+const medicineHistoryPending = new Map<string, Promise<MedicineBatchHistoryRow[]>>();
+
+const historyCacheKey = (medId?: number | null, distId?: number | null): string =>
+  `${medId || 0}|${distId || 0}`;
+
+const getCachedMedicineHistory = (medId?: number | null, distId?: number | null): MedicineBatchHistoryRow[] | null =>
+  medicineHistoryCache.get(historyCacheKey(medId, distId)) || null;
+
+const loadMedicineHistory = (
+  medId?: number | null,
+  medName?: string,
+  distId?: number | null
+): Promise<MedicineBatchHistoryRow[]> => {
+  const key = historyCacheKey(medId, distId);
+  const cached = medicineHistoryCache.get(key);
+  if (cached) return Promise.resolve(cached);
+  const pending = medicineHistoryPending.get(key);
+  if (pending) return pending;
+  // Single-flight per key: overlapping focus/selection events share one request.
+  const request = api.getMedicineBatches(medId ?? undefined, medName ?? undefined, distId ?? undefined)
+    .then((rows) => {
+      const list = Array.isArray(rows) ? (rows as MedicineBatchHistoryRow[]) : [];
+      medicineHistoryCache.set(key, list);
+      return list;
+    })
+    .catch((err: unknown) => {
+      console.error('Failed to fetch medicine history:', err);
+      // Failure stays uncached so the next focus/selection retries.
+      return [] as MedicineBatchHistoryRow[];
+    })
+    .finally(() => {
+      medicineHistoryPending.delete(key);
+    });
+  medicineHistoryPending.set(key, request);
+  return request;
+};
+
+// Rows arrive sorted p.date DESC from the backend; prefer the selected
+// distributor's newest line, else the newest overall.
+const pickNewestHistoryRow = (
+  rows: MedicineBatchHistoryRow[],
+  distributorName?: string | null
+): MedicineBatchHistoryRow | null => {
+  if (!rows || rows.length === 0) return null;
+  const wanted = (distributorName || '').trim().toLowerCase();
+  if (wanted) {
+    const sameDist = rows.find(r => r.distributor_name && r.distributor_name.trim().toLowerCase() === wanted);
+    if (sameDist) return sameDist;
+  }
+  return rows[0];
+};
+
+const findSameBatchHistory = (rows: MedicineBatchHistoryRow[], batchNo: string): MedicineBatchHistoryRow | null => {
+  const wanted = String(batchNo || '').trim().toLowerCase();
+  if (!wanted) return null;
+  return rows.find(r => String(r.batch_no || '').trim().toLowerCase() === wanted) || null;
+};
+
+// Shape expected by HoverPriceIntelTable; cached rows render with zero network.
+interface PriceHistoryIntelRecord {
+  date: string;
+  distributor_name: string;
+  batch_no: string;
+  expiry_date: string;
+  rate: number;
+  mrp: number;
+  cgst_per: number;
+  sgst_per: number;
+  cd_rs: number;
+  qty?: number;
+}
+
+const historyRowsAsPriceRecords = (rows: MedicineBatchHistoryRow[] | null): PriceHistoryIntelRecord[] | null => {
+  if (!rows) return null;
+  return rows.map(r => ({
+    date: r.purchase_date || '',
+    distributor_name: r.distributor_name || 'Unknown',
+    batch_no: r.batch_no,
+    expiry_date: r.expiry_date || '',
+    rate: Number(r.rate) || 0,
+    mrp: Number(r.mrp) || 0,
+    cgst_per: Number(r.cgst_per) || 0,
+    sgst_per: Number(r.sgst_per) || 0,
+    cd_rs: 0,
+  }));
+};
 
 const getMergedCatalog = (): Medicine[] => {
   const compact = getCompactInventoryCache();
@@ -894,7 +1001,6 @@ const Purchases: React.FC = () => {
       if (e.key === 'Escape') {
         setShowUploadModal(false);
         setShowDistributorModal(false);
-        setShowPriceHistoryModal(false);
         setIsUniversalModalOpen(false);
         setPanelOpen(false);
       }
@@ -976,7 +1082,6 @@ const Purchases: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const savingStartedAtRef = useRef<number>(0);
   const savingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const batchLookupTimersRef = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
   const [hoveredPriceRow, setHoveredPriceRow] = useState<string | null>(null);
   const [lastSavedInvoiceNo, setLastSavedInvoiceNo] = useState('');
   const [lastSavedItems, setLastSavedItems] = useState<any[]>([]);
@@ -993,6 +1098,25 @@ const Purchases: React.FC = () => {
       }
     }
   }, [searchHighlightIndex]);
+
+  // Old batches dropdown state; history rows themselves live in the module-level
+  // medicineHistoryCache. activeBatchRequestRef drops stale dropdown responses.
+  const [activeBatchRowIndex, setActiveBatchRowIndex] = useState<number | null>(null);
+  const [rowBatchesList, setRowBatchesList] = useState<any[]>([]);
+  const [rowBatchesLoading, setRowBatchesLoading] = useState(false);
+  const [batchHighlightIndex, setBatchHighlightIndex] = useState(-1);
+  const activeBatchRequestRef = useRef<string>('');
+  const batchDropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (batchHighlightIndex >= 0 && batchDropdownRef.current) {
+      const highlighted = batchDropdownRef.current.querySelector('[data-batch-highlighted="true"]') as HTMLElement;
+      if (highlighted) {
+        highlighted.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+      }
+    }
+  }, [batchHighlightIndex]);
+
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [schemeMatchStatus, setSchemeMatchStatus] = useState<{ [key: string]: string }>({});
@@ -1006,12 +1130,75 @@ const Purchases: React.FC = () => {
     state_code: '',
   });
   const [savingDistributor, setSavingDistributor] = useState(false);
-  const [showPriceHistoryModal, setShowPriceHistoryModal] = useState(false);
-  const [priceHistory, setPriceHistory] = useState<any[]>([]);
-  const [priceHistoryMedicine, setPriceHistoryMedicine] = useState('');
   const [activeMedicineIndex, setActiveMedicineIndex] = useState<number | null>(null);
   const [mfgSuggestions, setMfgSuggestions] = useState<string[]>([]);
   const [showMfgSuggestions, setShowMfgSuggestions] = useState(false);
+
+  const selectBatch = (rowIndex: number, batch: any) => {
+    setItems(prev => {
+      const updated = [...prev];
+      const target = updated[rowIndex];
+      if (!target) return prev;
+      target.batch_no = batch.batch_no;
+      if (batch.expiry_date) {
+        target.expiry_date = formatExpiryToMMYY(batch.expiry_date);
+      }
+      if (batch.rate !== undefined && batch.rate !== null && Number(batch.rate) > 0) {
+        target.rate = batch.rate;
+      }
+      if (batch.mrp !== undefined && batch.mrp !== null && Number(batch.mrp) > 0) {
+        target.mrp = batch.mrp;
+      }
+      if (!target.gstTouched) {
+        if (batch.cgst_per !== undefined && batch.cgst_per !== null && Number(batch.cgst_per) > 0) {
+          target.cgst_per = batch.cgst_per;
+        }
+        if (batch.sgst_per !== undefined && batch.sgst_per !== null && Number(batch.sgst_per) > 0) {
+          target.sgst_per = batch.sgst_per;
+        }
+      }
+      target.amount = calculateItemAmount(target);
+      return updated;
+    });
+    setActiveBatchRowIndex(null);
+    setBatchHighlightIndex(-1);
+    activeBatchRequestRef.current = '';
+    focusRowField(rowIndex, 'expiry_date');
+  };
+
+  // Same-batch ⇒ same rate/MRP/expiry autofill, resolved from the module history
+  // cache (synchronous when the medicine was already loaded). When the cache is
+  // cold, one load fires and the patch applies under a strict stale-guard — this
+  // replaces the old per-keystroke network lookup whose late response could
+  // overwrite values right after a suggestion click.
+  const applySameBatchHistory = (rowIndex: number, medId: number, medName: string | undefined, batchVal: string, distId: number | null) => {
+    const patchFromRow = (row: MedicineBatchHistoryRow | null) => {
+      if (!row) return;
+      setItems(prev => {
+        const updated = [...prev];
+        const target = updated[rowIndex];
+        if (!target || target.medicine_id !== medId) return prev;
+        if (String(target.batch_no || '').trim().toLowerCase() !== batchVal.toLowerCase()) return prev;
+        if (Number(row.rate) > 0) target.rate = row.rate;
+        if (Number(row.mrp) > 0) target.mrp = row.mrp;
+        if (row.expiry_date) target.expiry_date = formatExpiryToMMYY(row.expiry_date);
+        if (!target.gstTouched) {
+          if (row.cgst_per !== null && Number(row.cgst_per) > 0) target.cgst_per = Number(row.cgst_per);
+          if (row.sgst_per !== null && Number(row.sgst_per) > 0) target.sgst_per = Number(row.sgst_per);
+        }
+        target.amount = calculateItemAmount(target);
+        return updated;
+      });
+    };
+    const cached = getCachedMedicineHistory(medId, distId);
+    if (cached) {
+      patchFromRow(findSameBatchHistory(cached, batchVal));
+      return;
+    }
+    loadMedicineHistory(medId, medName, distId)
+      .then(list => patchFromRow(findSameBatchHistory(list, batchVal)))
+      .catch(() => { /* history unavailable — user-entered values stay */ });
+  };
 
   const openAddMedicineModal = (index: number) => {
     setActiveMedicineIndex(index);
@@ -1223,9 +1410,18 @@ const Purchases: React.FC = () => {
             const cItem = compactMap.get(med.id);
             return {
               ...med,
-              stock_qty: cItem ? cItem.stock_qty : (med.stock_qty !== undefined ? med.stock_qty : 0),
-              loose_qty: cItem ? cItem.loose_quantity : (med.loose_qty !== undefined ? med.loose_qty : 0)
+              // stock_qty stays UNDEFINED for master-database-only entries (no
+              // inventory row yet) so the dropdown can label them distinctly.
+              stock_qty: cItem ? cItem.stock_qty : med.stock_qty,
+              loose_qty: cItem ? cItem.loose_quantity : med.loose_qty
             };
+          });
+          // In-stock inventory first; master-database entries grouped after.
+          enrichedResponse.sort((a: any, b: any) => {
+            const aStock = (((a.stock_qty as number) || 0) + ((a.loose_qty as number) || 0)) > 0 ? 1 : 0;
+            const bStock = (((b.stock_qty as number) || 0) + ((b.loose_qty as number) || 0)) > 0 ? 1 : 0;
+            if (aStock !== bStock) return bStock - aStock;
+            return String(a.name || '').localeCompare(String(b.name || ''));
           });
           setSearchResults(enrichedResponse);
           setSearchHighlightIndex(-1);
@@ -1243,17 +1439,6 @@ const Purchases: React.FC = () => {
       }
     };
   }, []);
-
-  const fetchPriceHistory = async (medicineName: string) => {
-    try {
-      const response = await apiClient.get(`/purchases/price-history?name=${encodeURIComponent(medicineName)}`);
-      setPriceHistory(response.data.data || []);
-      setPriceHistoryMedicine(medicineName);
-      setShowPriceHistoryModal(true);
-    } catch (error) {
-      console.error('Error fetching price history:', error);
-    }
-  };
 
   const focusRowMedicineName = (rowIndex: number) => {
     setTimeout(() => {
@@ -1288,6 +1473,41 @@ const Purchases: React.FC = () => {
   }, [activeSearchIndex, searchResults.length]);
 
   const handleRowInputKeyDown = (e: React.KeyboardEvent, index: number, fieldName: string) => {
+    if (fieldName === 'batch_no') {
+      const rowItem = items[index];
+      const currentBatchVal = rowItem?.batch_no || '';
+      const filteredBatches = (rowBatchesList || []).filter(b => {
+        if (!currentBatchVal || !currentBatchVal.trim()) return true;
+        return String(b.batch_no).toLowerCase().includes(String(currentBatchVal).toLowerCase().trim());
+      });
+
+      if (activeBatchRowIndex === index && filteredBatches.length > 0) {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          setBatchHighlightIndex(prev => Math.min(prev + 1, filteredBatches.length - 1));
+          return;
+        }
+        if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          setBatchHighlightIndex(prev => Math.max(prev - 1, 0));
+          return;
+        }
+        if (e.key === 'Enter' || (e.key === 'Tab' && !e.shiftKey)) {
+          if (batchHighlightIndex >= 0 && filteredBatches[batchHighlightIndex]) {
+            e.preventDefault();
+            selectBatch(index, filteredBatches[batchHighlightIndex]);
+            return;
+          }
+        }
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          setActiveBatchRowIndex(null);
+          setBatchHighlightIndex(-1);
+          return;
+        }
+      }
+    }
+
     if (e.key === 'ArrowDown') {
       e.preventDefault();
       const targetIndex = index + 1;
@@ -1313,6 +1533,8 @@ const Purchases: React.FC = () => {
         focusRowField(index, 'batch_no');
       } else if (fieldName === 'batch_no') {
         e.preventDefault();
+        setActiveBatchRowIndex(null);
+        setBatchHighlightIndex(-1);
         focusRowField(index, 'expiry_date');
       } else if (fieldName === 'expiry_date') {
         e.preventDefault();
@@ -1457,31 +1679,33 @@ const Purchases: React.FC = () => {
       api.createMedicineAlias(item.original_name, medicine.id).catch(e => console.error('Failed to create alias:', e));
     }
 
-    // Last purchase lookup: patches empty fields; carries the medicine's LAST GST
-    // into the row unless the user already set GST manually on this line.
-    api.getLastPurchase(medicine.name, medicine.id, selectedDistributor || undefined)
-      .then(response => {
-        if (response && response.found) {
-          setItems(prev => {
-            const updated = [...prev];
-            const target = updated[index];
-            // Guard: bail if the row was changed since we fired the request
-            if (!target || target.medicine_id !== medicine.id) return prev;
-            if (!target.batch_no && response.batch_no) target.batch_no = response.batch_no;
-            if (!target.expiry_date && response.expiry_date) target.expiry_date = formatExpiryToMMYY(response.expiry_date);
-            if ((!target.rate || target.rate === 0) && response.rate) target.rate = response.rate;
-            if ((!target.mrp || target.mrp === 0) && response.mrp) target.mrp = response.mrp;
-            if (!target.gstTouched) {
-              if (response.cgst_per !== undefined && response.cgst_per !== null && Number(response.cgst_per) > 0) target.cgst_per = response.cgst_per;
-              if (response.sgst_per !== undefined && response.sgst_per !== null && Number(response.sgst_per) > 0) target.sgst_per = response.sgst_per;
-            }
-            target.amount = calculateItemAmount(target);
-            return updated;
-          });
-        }
+    // One-shot history load for this medicine+distributor (cached module-level).
+    // Feeds batch suggestions, same-batch autofill and hover intel; here it also
+    // patches EMPTY fields from the newest historical line (preferring the
+    // selected distributor) — same contract as the previous /last-purchase call.
+    loadMedicineHistory(medicine.id, medicine.name, selectedDistributor || undefined)
+      .then(rows => {
+        const newest = pickNewestHistoryRow(rows, distributors.find(d => d.id === selectedDistributor)?.name);
+        if (!newest) return;
+        setItems(prev => {
+          const updated = [...prev];
+          const target = updated[index];
+          // Guard: bail if the row was changed since we fired the request
+          if (!target || target.medicine_id !== medicine.id) return prev;
+          if (!target.batch_no && newest.batch_no) target.batch_no = newest.batch_no;
+          if (!target.expiry_date && newest.expiry_date) target.expiry_date = formatExpiryToMMYY(newest.expiry_date);
+          if ((!target.rate || Number(target.rate) === 0) && Number(newest.rate) > 0) target.rate = newest.rate;
+          if ((!target.mrp || Number(target.mrp) === 0) && Number(newest.mrp) > 0) target.mrp = newest.mrp;
+          if (!target.gstTouched) {
+            if (newest.cgst_per !== null && Number(newest.cgst_per) > 0) target.cgst_per = Number(newest.cgst_per);
+            if (newest.sgst_per !== null && Number(newest.sgst_per) > 0) target.sgst_per = Number(newest.sgst_per);
+          }
+          target.amount = calculateItemAmount(target);
+          return updated;
+        });
       })
       .catch(() => {
-        // No last purchase found — no-op, fields already set from catalog
+        // No history available — fields already set from catalog
       });
   };
 
@@ -1524,16 +1748,17 @@ const Purchases: React.FC = () => {
       if (mapping_config) setMappingConfig(mapping_config);
       
       // Try to find matching distributor in distributors list
+      let matchedDistributor: Distributor | undefined;
       if (distributorName) {
         setDistributorSearch(distributorName);
         if (distributors.length > 0) {
-          const matched = distributors.find(
+          matchedDistributor = distributors.find(
             (d) => d.name && d.name.toLowerCase().includes(distributorName.toLowerCase()) ||
                    distributorName && distributorName.toLowerCase().includes(d.name && d.name.toLowerCase())
           );
-          if (matched) {
-            setSelectedDistributor(matched.id);
-            setDistributorSearch(matched.name || '');
+          if (matchedDistributor) {
+            setSelectedDistributor(matchedDistributor.id);
+            setDistributorSearch(matchedDistributor.name || '');
           }
         }
       }
@@ -1603,7 +1828,37 @@ const Purchases: React.FC = () => {
         const resolveMedicines = async () => {
           const updatedItems: BillItem[] = loadedItems.map(item => ({ ...item, original_name: item.medicine_name }));
           let hasChanges = false;
-          
+
+          // Step 0 — ONE batched identity pass (read-only /match-items, max 200
+          // names per call) against the same distributor. Identified lines get
+          // the green "ready" signal; misses fall through to the legacy chain.
+          const effectiveDistributorId = matchedDistributor?.id || distributor_id || null;
+          const uniqueNames = Array.from(
+            new Set(updatedItems.map(it => (it.original_name || '').trim()).filter(Boolean))
+          );
+          const identityMap = new Map<string, { medicine_id: number; matched_name: string | null }>();
+          try {
+            const responses = await Promise.all(
+              chunkArray(uniqueNames, 200).map(chunk =>
+                api.matchPurchaseItems(chunk, effectiveDistributorId)
+              )
+            );
+            for (const res of responses) {
+              const results = (res as { results?: Array<{ input: string; medicine_id: number | null; matched_name: string | null }> }).results;
+              if (!Array.isArray(results)) continue;
+              for (const r of results) {
+                if (r && r.input && r.medicine_id) {
+                  identityMap.set(r.input.trim().toLowerCase(), {
+                    medicine_id: r.medicine_id,
+                    matched_name: r.matched_name || null,
+                  });
+                }
+              }
+            }
+          } catch (err) {
+            console.warn('[Purchases] prefill match-items failed; falling back to per-item resolution', err);
+          }
+
           // D3: resolve items with bounded concurrency (batches of 5) instead of
           // fully sequential awaits, so large bills don't crawl through one lookup
           // at a time while also avoiding unbounded parallel hits on the local DB.
@@ -1614,6 +1869,17 @@ const Purchases: React.FC = () => {
             await Promise.all(indexChunk.map(async (i) => {
               const mName = updatedItems[i].original_name;
               if (!mName) return;
+
+              // 0. Batched resolver hit → instant green-signal link, no extra calls
+              const batchHit = identityMap.get(mName.trim().toLowerCase());
+              if (batchHit) {
+                updatedItems[i].medicine_id = batchHit.medicine_id;
+                if (batchHit.matched_name) updatedItems[i].medicine_name = batchHit.matched_name;
+                updatedItems[i].prefill_matched = true;
+                hasChanges = true;
+                return;
+              }
+
               try {
                 // 1. Check for learned mapping first
                 const learned = await api.getLearnedMapping(mName);
@@ -1627,6 +1893,7 @@ const Purchases: React.FC = () => {
                   updatedItems[i].cgst_per = updatedItems[i].cgst_per || match.cgst_per || 0;
                   updatedItems[i].sgst_per = updatedItems[i].sgst_per || match.sgst_per || 0;
                   updatedItems[i].amount = calculateItemAmount(updatedItems[i]);
+                  updatedItems[i].prefill_matched = true;
                   hasChanges = true;
                   return;
                 }
@@ -1695,6 +1962,7 @@ const Purchases: React.FC = () => {
                   updatedItems[i].cgst_per = updatedItems[i].cgst_per || bestMatch.cgst_per || 0;
                   updatedItems[i].sgst_per = updatedItems[i].sgst_per || bestMatch.sgst_per || 0;
                   updatedItems[i].amount = calculateItemAmount(updatedItems[i]);
+                  updatedItems[i].prefill_matched = true;
                   hasChanges = true;
                 } else {
                   // Suggest the original parsed name so it is visible and user can modify/correct it
@@ -1731,39 +1999,14 @@ const Purchases: React.FC = () => {
 
     if (field === 'batch_no') {
       (item as any)[field] = value;
-      const firedMedicineId = item.medicine_id;
-      const firedName = item.medicine_name;
-      const firedDistId = selectedDistributor || undefined;
-      // Debounced SAME-BATCH purchase-history lookup ("same batch → same rate/mrp/GST").
-      // Never touches qty/free_qty. GST is patched only when the user hasn't manually set it.
-      if (firedMedicineId && value && typeof value === 'string' && value.trim().length >= 1) {
-        const batchVal = value.trim();
-        if (batchLookupTimersRef.current[index]) clearTimeout(batchLookupTimersRef.current[index]);
-        batchLookupTimersRef.current[index] = setTimeout(() => {
-          api.getLastPurchase(firedName || '', firedMedicineId, firedDistId, batchVal)
-            .then(response => {
-              if (response && response.found) {
-                setItems(prevItems => {
-                  const updated = [...prevItems];
-                  const target = updated[index];
-                  // Stale guard: row's medicine or batch changed since we fired
-                  if (!target || target.medicine_id !== firedMedicineId || String(target.batch_no || '').trim().toLowerCase() !== batchVal.toLowerCase()) return prevItems;
-                  if (response.rate) target.rate = response.rate;
-                  if (response.mrp) target.mrp = response.mrp;
-                  if (response.expiry_date) target.expiry_date = formatExpiryToMMYY(response.expiry_date);
-                  if (!target.gstTouched) {
-                    if (response.cgst_per !== undefined && response.cgst_per !== null && Number(response.cgst_per) > 0) target.cgst_per = response.cgst_per;
-                    if (response.sgst_per !== undefined && response.sgst_per !== null && Number(response.sgst_per) > 0) target.sgst_per = response.sgst_per;
-                  }
-                  target.amount = calculateItemAmount(target);
-                  return updated;
-                });
-              }
-            })
-            .catch(e => console.log('Batch history lookup catch:', e));
-        }, 300);
+      // Same-batch autofill resolves locally from the one-shot history cache —
+      // zero per-keystroke network calls (contract: same batch ⇒ same rate/MRP/
+      // expiry; GST only when the user hasn't manually set it; qty never touched).
+      const trimmedBatch = typeof value === 'string' ? value.trim() : '';
+      if (item.medicine_id && trimmedBatch) {
+        applySameBatchHistory(index, item.medicine_id, item.medicine_name, trimmedBatch, selectedDistributor || null);
       }
-    } else if (field === 'qty' || field === 'free_qty' || field === 'rate' || field === 'mrp' || 
+    } else if (field === 'qty' || field === 'free_qty' || field === 'rate' || field === 'mrp' ||
         field === 'cgst_per' || field === 'sgst_per' || field === 'cd_rs' || field === 'cd_per' || field === 'additional_discount') {
       const parsedVal = parseFloat(value);
       (item as any)[field] = value === '' ? '' : (isNaN(parsedVal) ? 0 : parsedVal);
@@ -2607,8 +2850,14 @@ const Purchases: React.FC = () => {
                       setShowDistributorDropdown(false);
                       setDistributorHighlightIndex(-1);
                       e.preventDefault();
-                      const dateEl = document.getElementById('purchase-date-input') as HTMLInputElement | null;
-                      if (dateEl) { dateEl.focus(); }
+                      const invEl = document.getElementById('purchase-invoice-no-input') as HTMLInputElement | null;
+                      if (invEl) { 
+                        invEl.focus(); 
+                        invEl.select?.(); 
+                      } else {
+                        const dateEl = document.getElementById('purchase-date-input') as HTMLInputElement | null;
+                        if (dateEl) { dateEl.focus(); }
+                      }
                     } else if (e.key === 'Escape') {
                       setShowDistributorDropdown(false);
                       setDistributorHighlightIndex(-1);
@@ -2734,15 +2983,28 @@ const Purchases: React.FC = () => {
           <div className="w-44">
             <div className="flex items-center justify-between mb-1">
               <label className="block text-sm font-medium text-gray-300">Invoice No *</label>
-              <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">🔒 Auto</span>
             </div>
             <input
+              id="purchase-invoice-no-input"
               type="text"
-              readOnly={true}
-              value={invoiceNo || `PUR-${Date.now().toString().slice(-6)}`}
-              className="w-full bg-white/5 border border-white/20 rounded-lg px-3 py-2 text-white font-mono text-sm focus:outline-none cursor-not-allowed opacity-90 font-bold"
-              placeholder="PUR-001"
-              title="Sequential Purchase Invoice Number (Auto-Generated)"
+              value={invoiceNo}
+              onChange={(e) => setInvoiceNo(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || (e.key === 'Tab' && !e.shiftKey)) {
+                  e.preventDefault();
+                  const grnEl = document.getElementById('purchase-grn-no-input') as HTMLInputElement | null;
+                  if (grnEl) { 
+                    grnEl.focus(); 
+                    grnEl.select?.(); 
+                  } else {
+                    const dateEl = document.getElementById('purchase-date-input') as HTMLInputElement | null;
+                    if (dateEl) { dateEl.focus(); }
+                  }
+                }
+              }}
+              className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 font-bold"
+              placeholder="e.g. INV-1002"
+              title="Distributor / Purchase Invoice Number"
             />
           </div>
 
@@ -2750,9 +3012,17 @@ const Purchases: React.FC = () => {
           <div className="w-40">
             <label className="block text-sm font-medium text-gray-300 mb-1">GRN No</label>
             <input
+              id="purchase-grn-no-input"
               type="text"
               value={grnNo}
               onChange={(e) => setGrnNo(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || (e.key === 'Tab' && !e.shiftKey)) {
+                  e.preventDefault();
+                  const dateEl = document.getElementById('purchase-date-input') as HTMLInputElement | null;
+                  if (dateEl) { dateEl.focus(); }
+                }
+              }}
               className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-xs"
               title="Goods Receipt Note"
             />
@@ -2998,6 +3268,11 @@ const Purchases: React.FC = () => {
                               onFocus={() => {
                                 setActiveSearchIndex(index);
                                 setActiveMedicineIndex(index);
+                                // Row switch must NEVER inherit another row's
+                                // result list (gating rule: no dropdown from
+                                // focus alone). List rebuilds once ≥3 chars.
+                                setSearchResults([]);
+                                setSearchHighlightIndex(-1);
                               }}
                               onChange={(e) => {
                                 updateItem(index, 'medicine_name', e.target.value);
@@ -3071,6 +3346,14 @@ const Purchases: React.FC = () => {
                             </button>
                           </div>
                           <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                            {item.prefill_matched && item.medicine_id && (
+                              <span
+                                className="text-[10px] px-1.5 py-0.5 rounded font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 flex items-center gap-0.5"
+                                title="Auto-identified from master database against this distributor — ready to save"
+                              >
+                                ✓ Ready
+                              </span>
+                            )}
                             {(() => {
                               const live = getLiveStockForItem(item);
                               if (live && live.found) {
@@ -3165,17 +3448,30 @@ const Purchases: React.FC = () => {
                                     <div className="min-w-0 flex-1">
                                       <div className="font-medium truncate flex flex-wrap items-center gap-1.5">
                                         <span>{medicine.name}</span>
-                                        {(medicine as any).stock_qty !== undefined ? (
-                                          <span className={`text-[10px] px-1.5 py-0.5 rounded font-mono font-semibold ${
-                                            ((medicine as any).stock_qty || 0) > 0 || ((medicine as any).loose_qty || 0) > 0
-                                              ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30' 
-                                              : 'bg-zinc-500/15 text-zinc-400 border border-zinc-500/30'
-                                          }`}>
-                                            {((medicine as any).stock_qty || 0) <= 0 && ((medicine as any).loose_qty || 0) <= 0
-                                              ? '- 0'
-                                              : `Stock: ${(medicine as any).stock_qty || 0}${(medicine as any).loose_qty ? ` + ${(medicine as any).loose_qty}` : ''}`}
-                                          </span>
-                                        ) : null}
+                                        {(() => {
+                                          const sq = (medicine as any).stock_qty;
+                                          const lq = (medicine as any).loose_qty || 0;
+                                          // No stock fields at all → master-database-only entry
+                                          if (sq === undefined) {
+                                            return (
+                                              <span
+                                                className="text-[10px] px-1.5 py-0.5 rounded font-semibold bg-purple-500/15 text-purple-400 border border-purple-500/30"
+                                                title="Exists in the Medicine Master Database — not yet in your store inventory"
+                                              >
+                                                📚 Master DB
+                                              </span>
+                                            );
+                                          }
+                                          return (
+                                            <span className={`text-[10px] px-1.5 py-0.5 rounded font-mono font-semibold ${
+                                              (sq || 0) > 0 || lq > 0
+                                                ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+                                                : 'bg-zinc-500/15 text-zinc-400 border border-zinc-500/30'
+                                            }`}>
+                                              {(sq || 0) <= 0 && lq <= 0 ? '- 0' : `Stock: ${sq || 0}${lq ? ` + ${lq}` : ''}`}
+                                            </span>
+                                          );
+                                        })()}
                                         {(medicine as any).pharmarack_rate && (medicine as any).pharmarack_rate < (medicine.mrp || 99999) && (
                                            <span className="text-[10px] px-1.5 py-0.5 rounded font-mono font-semibold bg-amber-500/15 text-amber-400 border border-amber-500/30">
                                              ⚡ Pharmarack Rate: ₹{(medicine as any).pharmarack_rate} ({(medicine as any).pharmarack_distributor || 'Mapped Distributor'})
@@ -3221,7 +3517,7 @@ const Purchases: React.FC = () => {
                       <p className="text-yellow-400 text-xs mt-1">{schemeMatchStatus[item.id]}</p>
                     )}
                   </td>
-                  <td className="py-2.5 px-1">
+                  <td className="py-2.5 px-1 relative">
                     <input
                       type="text"
                       data-row-index={index}
@@ -3229,8 +3525,138 @@ const Purchases: React.FC = () => {
                       value={item.batch_no}
                       onChange={(e) => updateItem(index, 'batch_no', e.target.value)}
                       onKeyDown={(e) => handleRowInputKeyDown(e, index, 'batch_no')}
-                      className="w-20 bg-white/10 border border-white/20 rounded px-1.5 py-1 text-white text-sm h-8"
+                      onFocus={() => {
+                        setActiveBatchRowIndex(index);
+                        setBatchHighlightIndex(-1);
+                        // Invalidate any in-flight list for a previously
+                        // focused row — its response is foreign now.
+                        activeBatchRequestRef.current = '';
+                        const medId = item.medicine_id;
+                        const medName = item.medicine_name;
+                        if (!medId && !medName) {
+                          setRowBatchesList([]);
+                          return;
+                        }
+                        const cached = getCachedMedicineHistory(medId, selectedDistributor);
+                        if (cached) {
+                          setRowBatchesList(cached);
+                          return;
+                        }
+                        // Cold cache: one shared request; tag it so a late
+                        // response for another row/medicine/distributor is dropped.
+                        const requestKey = `${medId || ''}|${(medName || '').toLowerCase()}|${selectedDistributor || 0}`;
+                        activeBatchRequestRef.current = requestKey;
+                        setRowBatchesList([]);
+                        setRowBatchesLoading(true);
+                        loadMedicineHistory(medId ?? undefined, medName ?? undefined, selectedDistributor)
+                          .then(batches => {
+                            if (activeBatchRequestRef.current === requestKey) {
+                              setRowBatchesList(batches);
+                            }
+                          })
+                          .finally(() => {
+                            if (activeBatchRequestRef.current === requestKey) {
+                              setRowBatchesLoading(false);
+                            }
+                          });
+                      }}
+                      onBlur={() => {
+                        setTimeout(() => {
+                          if (activeBatchRowIndex === index) {
+                            setActiveBatchRowIndex(null);
+                            setBatchHighlightIndex(-1);
+                          }
+                        }, 220);
+                      }}
+                      className="w-20 bg-white/10 border border-white/20 rounded px-1.5 py-1 text-white text-sm h-8 font-mono uppercase"
+                      placeholder="BATCH"
+                      autoComplete="off"
                     />
+
+                    {/* Old Batches Dropdown */}
+                    {activeBatchRowIndex === index && (item.medicine_id || item.medicine_name) && (() => {
+                      const currentBatchVal = item.batch_no || '';
+                      const filteredBatches = (rowBatchesList || []).filter((b: any) => {
+                        if (!currentBatchVal || !currentBatchVal.trim()) return true;
+                        return String(b.batch_no).toLowerCase().includes(String(currentBatchVal).toLowerCase().trim());
+                      });
+
+                      return (
+                        <div 
+                          ref={batchDropdownRef}
+                          className="absolute left-0 top-full mt-1 z-dropdown min-w-[280px] max-w-[340px] bg-bg2 border border-glass-border rounded-xl shadow-2xl overflow-hidden animate-in fade-in slide-in-from-top-1 duration-150"
+                        >
+                          <div className="px-3 py-1.5 bg-bg3 border-b border-glass-border/40 flex items-center justify-between">
+                            <span className="text-[11px] font-bold text-muted uppercase tracking-wider flex items-center gap-1">
+                              <span>🏷️</span> Old Batches ({filteredBatches.length})
+                            </span>
+                            {rowBatchesLoading && (
+                              <span className="text-[10px] text-sky animate-pulse">Loading...</span>
+                            )}
+                          </div>
+
+                          <div className="max-h-52 overflow-y-auto divide-y divide-glass-border/20">
+                            {rowBatchesLoading && rowBatchesList.length === 0 ? (
+                              <div className="p-3 text-center text-xs text-muted">
+                                Fetching past batches...
+                              </div>
+                            ) : filteredBatches.length === 0 ? (
+                              <div className="p-3 text-center text-xs text-muted">
+                                {item.batch_no ? `No batches matching "${item.batch_no}"` : 'No previous batches recorded'}
+                                <div className="text-[10px] text-muted/70 mt-0.5">Type new batch number directly</div>
+                              </div>
+                            ) : (
+                              filteredBatches.map((b: any, bIdx: number) => {
+                                const isHighlighted = bIdx === batchHighlightIndex;
+                                return (
+                                  <button
+                                    key={`${b.batch_no}-${bIdx}`}
+                                    type="button"
+                                    data-batch-highlighted={isHighlighted ? "true" : "false"}
+                                    onMouseDown={(e) => {
+                                      e.preventDefault();
+                                      selectBatch(index, b);
+                                    }}
+                                    className={`w-full text-left p-2.5 transition-colors flex flex-col gap-1 ${
+                                      isHighlighted ? 'bg-primary/20 font-bold' : 'hover:bg-bg3'
+                                    }`}
+                                  >
+                                    <div className="flex items-center justify-between">
+                                      <span className="font-mono font-bold text-sm text-text bg-white/5 px-1.5 py-0.5 rounded border border-glass-border">
+                                        {b.batch_no}
+                                      </span>
+                                      {b.expiry_date && (
+                                        <span className="text-xs font-mono text-amber-300 font-medium">
+                                          Exp: {formatExpiryToMMYY(b.expiry_date)}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="flex items-center justify-between text-[11px] text-muted">
+                                      <div className="flex items-center gap-2">
+                                        {b.rate > 0 && (
+                                          <span className="text-emerald-400 font-semibold">Rate: ₹{Number(b.rate).toFixed(2)}</span>
+                                        )}
+                                        {b.mrp > 0 && (
+                                          <span>MRP: ₹{Number(b.mrp).toFixed(2)}</span>
+                                        )}
+                                      </div>
+                                      {b.quantity > 0 && (
+                                        <span className="text-sky text-[10px] font-medium">Stock: {b.quantity}</span>
+                                      )}
+                                    </div>
+                                    {b.distributor_name && (
+                                      <div className="text-[10px] text-muted truncate">
+                                        🏢 {b.distributor_name} {b.purchase_date ? `(${b.purchase_date.substring(0, 10)})` : ''}
+                                      </div>
+                                    )}
+                                  </button>
+                                );
+                              })
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </td>
                   <td className="py-2.5 px-1">
                     <input
@@ -3288,7 +3714,10 @@ const Purchases: React.FC = () => {
                     {item.medicine_name && (
                       <div className="absolute z-dropdown top-full left-0 mt-2 hidden group-hover/btn:block min-w-[320px]">
                         <div className="bg-gray-900 border border-blue-500 rounded-lg p-2 shadow-xl">
-                          <HoverPriceIntelTable medicineName={item.medicine_name} />
+                          <HoverPriceIntelTable
+                            medicineName={item.medicine_name}
+                            records={historyRowsAsPriceRecords(getCachedMedicineHistory(item.medicine_id, selectedDistributor))}
+                          />
                         </div>
                       </div>
                     )}
@@ -3329,7 +3758,10 @@ const Purchases: React.FC = () => {
                       <div className="absolute z-dropdown top-full left-0 mt-2 hidden group-hover/btn:block min-w-[320px]">
                         <div className="bg-gray-900 border border-purple-500 rounded-lg p-2 shadow-xl">
                           {hoveredPriceRow === item.id && (
-                            <HoverPriceIntelTable medicineName={item.medicine_name} />
+                            <HoverPriceIntelTable
+                              medicineName={item.medicine_name}
+                              records={historyRowsAsPriceRecords(getCachedMedicineHistory(item.medicine_id, selectedDistributor))}
+                            />
                           )}
                         </div>
                       </div>
@@ -3680,64 +4112,6 @@ const Purchases: React.FC = () => {
                   {savingDistributor ? 'Saving...' : editDistributorId ? 'Save Changes' : 'Add Distributor'}
                 </button>
               </div>
-            </div>
-          </div>
-        </div>,
-        document.body
-      )}
-
-
-      {/* Price History Modal */}
-      {showPriceHistoryModal && createPortal(
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-modal">
-          <div className="bg-gray-800 rounded-xl p-6 w-full max-w-2xl max-h-[80vh] overflow-y-auto">
-            <h3 className="text-lg font-semibold text-white mb-2">Price History</h3>
-            <p className="text-gray-400 text-sm mb-4">Past purchase prices for: <span className="text-white">{priceHistoryMedicine}</span></p>
-            
-            {priceHistory.length === 0 ? (
-              <p className="text-gray-400 text-center py-8">No purchase history found for this medicine</p>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    <tr className="text-left text-gray-300 border-b border-white/20">
-                      <th className="pb-3">Date</th>
-                      <th className="pb-3">Distributor</th>
-                      <th className="pb-3">Batch</th>
-                      <th className="pb-3">Rate</th>
-                      <th className="pb-3">MRP</th>
-                      <th className="pb-3">CGST%</th>
-                      <th className="pb-3">SGST%</th>
-                      <th className="pb-3">CD ₹</th>
-                      <th className="pb-3">CD %</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {priceHistory.map((item: any, idx: number) => (
-                      <tr key={idx} className="border-b border-white/10 hover:bg-white/5">
-                        <td className="py-3 text-gray-300">{item.date}</td>
-                        <td className="py-3 text-white">{item.distributor_name}</td>
-                        <td className="py-3 text-gray-300">{item.batch_no}</td>
-                        <td className="py-3 text-white font-medium">₹{item.rate}</td>
-                        <td className="py-3 text-white">₹{item.mrp}</td>
-                        <td className="py-3 text-gray-300">{item.cgst_per}%</td>
-                        <td className="py-3 text-gray-300">{item.sgst_per}%</td>
-                        <td className="py-3 text-gray-300">₹{item.cd_rs || 0}</td>
-                        <td className="py-3 text-gray-300">{item.cd_per || 0}%</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-
-            <div className="flex justify-end mt-4">
-              <button
-                onClick={() => setShowPriceHistoryModal(false)}
-                className="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg"
-              >
-                Close
-              </button>
             </div>
           </div>
         </div>,
