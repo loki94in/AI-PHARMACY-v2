@@ -425,7 +425,6 @@ const NotificationPanel = ({
   const panelRef = useRef<HTMLDivElement>(null);
   const [activeFilter, setActiveFilter] = useState<'all' | 'unread' | 'alerts'>('all');
   const [actionLogs, setActionLogs] = useState<LocalActionLogRow[]>([]);
-  const [] = useState(false);
 
   // Close on outside click
   useEffect(() => {
@@ -1400,7 +1399,7 @@ const Topbar = ({
     });
 
     return items;
-  }, [activeMsgProgress, waQueueDetail, isWaActive, isWaRecentlyDone, backupStatus, catalogJob, ocrStatus, servicesStatus, onOpenWaQueue, upcomingTriggers, fetchUpcomingTriggers]);
+  }, [activeMsgProgress, waQueueDetail, isWaActive, isWaRecentlyDone, backupStatus, catalogJob, ocrStatus, onOpenWaQueue, upcomingTriggers, fetchUpcomingTriggers, navigate]);
 
 
   const [carouselIndex, setCarouselIndex] = useState(0);
@@ -1951,7 +1950,6 @@ const QuickAssistSidebar = ({
 
   // Expand / collapse state for grouped patients (collapsed by default)
   const [expandedRefillKeys, setExpandedRefillKeys] = useState<Set<string>>(new Set());
-  const [] = useState<Set<string>>(new Set());
   const [expandedSpecialOrderKeys, setExpandedSpecialOrderKeys] = useState<Set<string>>(new Set());
 
   const toggleRefillKey = (key: string) => {

@@ -51,6 +51,108 @@ interface GroupedReturn {
   total_amount: number;
 }
 
+interface LocalReturnsTab {
+  id: string;
+  name: string;
+  items: ReturnItem[];
+}
+
+type LocalEditableReturnItem = ReturnItem & { _resolved_fields?: string[] };
+
+type LocalHistoryReturnDetail = Omit<ReturnItem, 'quantity' | 'cost_price' | 'mrp'> & {
+  quantity: number | string | null;
+  cost_price: number | string | null;
+  mrp: number | string | null;
+};
+
+interface LocalPurchaseLookupRow {
+  medicine_id: number;
+  medicine_name: string;
+  batch_no: string | null;
+  expiry_date: string | null;
+  cost_price: number | null;
+  mrp: number | null;
+  purchase_item_id?: number | null;
+  invoice_no: string | null;
+  purchase_date: string | null;
+  distributor_name: string | null;
+  distributor_id: number | null;
+}
+
+interface LocalReturnItemRow {
+  id: number;
+  medicine_id: number | null;
+  medicine_name?: string | null;
+  batch_no?: string | null;
+  expiry_date?: string | null;
+  quantity?: number | string | null;
+  cost_price?: number | null;
+  mrp?: number | null;
+  invoice_no?: string | null;
+  purchase_date?: string | null;
+  distributor_name?: string | null;
+  distributor_id?: number | null;
+  ret_invoice_no?: string | null;
+  ret_purchase_date?: string | null;
+  ret_distributor_name?: string | null;
+  ret_distributor_id?: number | null;
+  _resolved_fields?: string[];
+}
+
+interface LocalReturnHistoryRow {
+  id: number;
+  return_no?: string | null;
+  date?: string | null;
+  type?: string | null;
+  total_amount?: number | null;
+  original_invoice_id?: number | string | null;
+  distributor_id?: number | null;
+  distributor_name?: string | null;
+}
+
+interface LocalExpiryPrefillRow {
+  id?: number | null;
+  medicine_id?: number | null;
+  medicine_name?: string | null;
+  name?: string | null;
+  item_name?: string | null;
+  batch_no?: string | null;
+  batch?: string | null;
+  expiry_date?: string | null;
+  expiry?: string | null;
+  quantity?: number | null;
+  pack_quantity?: number | null;
+  current_stock?: number | null;
+  stock_quantity?: number | null;
+  cost_price?: number | null;
+  purchase_cost_price?: number | null;
+  purchase_cost?: number | null;
+  mrp?: number | null;
+  purchase_item_id?: number | null;
+  invoice_no?: string | null;
+  purchase_invoice_no?: string | null;
+  purchase_date?: string | null;
+  distributor_name?: string | null;
+  supplier_name?: string | null;
+  distributor?: string | null;
+  supplier_id?: number | null;
+  distributor_id?: number | null;
+}
+
+interface LocalCameraMedicineInfo {
+  potentialName?: string;
+  batchNumber?: string;
+  expiryDate?: string;
+  mrp?: number | string;
+}
+
+interface LocalMasterDistributor {
+  id?: number;
+  name?: string | null;
+}
+
+const numOr0 = (v: unknown): number => parseFloat(String(v ?? '')) || 0;
+
 const getInitialReturnsTabs = () => {
   const saved = localStorage.getItem('returns_draft_tabs');
   if (saved) {
@@ -81,7 +183,7 @@ const getInitialReturnsTabs = () => {
   ];
 };
 
-const getInitialReturnsActiveTabId = (initialTabs: any[]) => {
+const getInitialReturnsActiveTabId = (initialTabs: LocalReturnsTab[]) => {
   const saved = localStorage.getItem('returns_active_tab_id');
   if (saved && initialTabs.some(t => t.id === saved)) return saved;
   return initialTabs[0]?.id || 'default';
@@ -143,7 +245,7 @@ const getExpiryUrgencyStatus = (expiryStr: string): { label: string; className: 
   return { label: 'VALID', className: 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20', rank: 3 };
 };
 
-let cachedReturnHistory: any[] | null = null;
+let cachedReturnHistory: LocalReturnHistoryRow[] | null = null;
 const nowStamp = () => Date.now();
 
 const Returns: React.FC = () => {
@@ -155,7 +257,7 @@ const Returns: React.FC = () => {
   const initialActiveTabId = getInitialReturnsActiveTabId(initialTabs);
   const initialActiveTab = initialTabs.find(t => t.id === initialActiveTabId) || initialTabs[0];
 
-  const [tabs, setTabs] = useState<any[]>(initialTabs);
+  const [tabs, setTabs] = useState<LocalReturnsTab[]>(initialTabs);
   const [activeTabId, setActiveTabId] = useState<string>(initialActiveTabId);
 
   const [items, setItems] = useState<ReturnItem[]>(initialActiveTab.items || []);
@@ -167,7 +269,7 @@ const Returns: React.FC = () => {
       if (res?.stats) setPendingReviewCount(res.stats.pendingCount || 0);
     }).catch(() => {});
   }, []);
-  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [searchResults, setSearchResults] = useState<LocalPurchaseLookupRow[]>([]);
   const [activeSearchIndex, setActiveSearchIndex] = useState<number | null>(null);
   const [searchHighlightIndex, setSearchHighlightIndex] = useState(-1);
   const searchResultsRef = useRef<HTMLDivElement>(null);
@@ -189,34 +291,40 @@ const Returns: React.FC = () => {
   });
   const [, setGroupedReturns] = useState<GroupedReturn[]>([]);
 
-  const [selectedHistoryReturn, setSelectedHistoryReturn] = useState<any | null>(null);
-  const [historyReturnItems, setHistoryReturnItems] = useState<any[]>([]);
+  const [selectedHistoryReturn, setSelectedHistoryReturn] = useState<LocalReturnHistoryRow | null>(null);
+  const [historyReturnItems, setHistoryReturnItems] = useState<LocalHistoryReturnDetail[]>([]);
   const [loadingHistoryItems, setLoadingHistoryItems] = useState(false);
 
-  const handleSelectHistoryReturn = async (ret: any) => {
+  const handleSelectHistoryReturn = async (ret: LocalReturnHistoryRow) => {
     setSelectedHistoryReturn(ret);
     setLoadingHistoryItems(true);
     setIsEditingHistory(false);
     try {
       const response = await api.getReturnItems(ret.id);
-      const mapped = (response || []).map((item: any) => ({
+      const mapped = ((response || []) as LocalReturnItemRow[]).map((item): LocalHistoryReturnDetail => ({
         id: String(item.id),
         medicine_id: item.medicine_id,
         medicine_name: item.medicine_name || 'Unknown Medicine',
         batch_no: item.batch_no || '',
         expiry_date: item.expiry_date ? formatExpiryToMMYY(item.expiry_date) : '',
-        quantity: item.quantity,
-        cost_price: item.cost_price,
+        quantity: item.quantity ?? null,
+        cost_price: item.cost_price ?? null,
         mrp: item.mrp || 0,
         // Prefer the invoice_no joined from purchases; fall back to parent return's original_invoice_id
         invoice_no: item.invoice_no || (ret.original_invoice_id ? String(ret.original_invoice_id) : 'N/A'),
         purchase_date: item.purchase_date || '',
         // Prefer distributor from the joined row; fall back to parent return
         distributor_name: item.distributor_name || ret.distributor_name || 'Unknown Distributor',
-        distributor_id: item.distributor_id || ret.distributor_id,
+        distributor_id: item.distributor_id || ret.distributor_id || undefined,
       }));
       setHistoryReturnItems(mapped);
-      setEditingItems(mapped.map((i: any) => ({ ...i })));
+      const toEditable = (i: LocalHistoryReturnDetail): LocalEditableReturnItem => ({
+        ...i,
+        quantity: i.quantity ?? '',
+        cost_price: i.cost_price ?? '',
+        mrp: i.mrp ?? 0,
+      });
+      setEditingItems(mapped.map(toEditable));
     } catch (error) {
       console.error('Error fetching return items:', error);
     } finally {
@@ -229,7 +337,7 @@ const Returns: React.FC = () => {
     setHistoryReturnItems([]);
   };
 
-  const handleDeleteReturn = async (ret: any, e: React.MouseEvent) => {
+  const handleDeleteReturn = async (ret: LocalReturnHistoryRow, e: React.MouseEvent) => {
     e.stopPropagation();
     if (!window.confirm(`Delete return ${ret.return_no}? This cannot be undone.`)) return;
     try {
@@ -246,7 +354,7 @@ const Returns: React.FC = () => {
     }
   };
 
-  const handleEditHistoryReturn = async (ret: any, e: React.MouseEvent) => {
+  const handleEditHistoryReturn = async (ret: LocalReturnHistoryRow, e: React.MouseEvent) => {
     e.stopPropagation();
     await handleSelectHistoryReturn(ret);
     setIsEditingHistory(true);
@@ -256,9 +364,9 @@ const Returns: React.FC = () => {
     if (!selectedHistoryReturn) return;
     setSaving(true);
     try {
-      const validItems = editingItems.filter(i => i.medicine_id && (parseFloat(i.quantity) || 0) > 0);
+      const validItems = editingItems.filter(i => i.medicine_id && (parseFloat(String(i.quantity)) || 0) > 0);
       const total = validItems.reduce((s, i) => s + (Number(i.cost_price) || 0) * (Number(i.quantity) || 0), 0);
-      await api.updateReturn(selectedHistoryReturn.id, { items: validItems, total_amount: total });
+      await api.updateReturn(selectedHistoryReturn.id, { items: validItems as unknown as Array<Record<string, unknown>>, total_amount: total });
       setIsEditingHistory(false);
       await handleSelectHistoryReturn(selectedHistoryReturn);
       // Centralized cache invalidation for frontend lists and local infinite scroll caches
@@ -279,19 +387,19 @@ const Returns: React.FC = () => {
     setIsResolving(true);
     try {
       const response = await api.resolveReturnMissing(selectedHistoryReturn.id);
-      const mapped = (response || []).map((item: any) => ({
+      const mapped = ((response || []) as LocalReturnItemRow[]).map((item): LocalEditableReturnItem => ({
         id: String(item.id),
         medicine_id: item.medicine_id,
         medicine_name: item.medicine_name || 'Unknown Medicine',
         batch_no: item.batch_no || '',
         expiry_date: item.expiry_date ? formatExpiryToMMYY(item.expiry_date) : '',
-        quantity: item.quantity,
-        cost_price: item.cost_price,
+        quantity: item.quantity ?? '',
+        cost_price: item.cost_price ?? '',
         mrp: item.mrp || 0,
         invoice_no: item.invoice_no || item.ret_invoice_no || 'N/A',
         purchase_date: item.purchase_date || item.ret_purchase_date || '',
         distributor_name: item.distributor_name || item.ret_distributor_name || 'Unknown Distributor',
-        distributor_id: item.distributor_id || item.ret_distributor_id,
+        distributor_id: item.distributor_id || item.ret_distributor_id || undefined,
         _resolved_fields: item._resolved_fields || [],
       }));
       setEditingItems(mapped);
@@ -306,6 +414,7 @@ const Returns: React.FC = () => {
 
   // Sync items to active tab
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- mirror active draft items into its tab
     setTabs(prev => {
       const idx = prev.findIndex(t => t.id === activeTabId);
       if (idx === -1) return prev;
@@ -389,7 +498,7 @@ const Returns: React.FC = () => {
   const [searchFilterText, setSearchFilterText] = useState('');
   const queryClient = useQueryClient();
   const returnHistoryKey = ['return-history', dateFrom, dateTo, minAmount, maxAmount] as const;
-  const { data: returnHistory = [], isLoading: loading, refetch: refetchHistory } = useApiQuery(
+  const { data: returnHistory = [], isLoading: loading, refetch: refetchHistory } = useApiQuery<LocalReturnHistoryRow[]>(
     returnHistoryKey,
     async () => {
       const params = {
@@ -399,7 +508,7 @@ const Returns: React.FC = () => {
         max_amount: maxAmount ? parseFloat(maxAmount) : undefined,
       };
       const response = await api.getReturns(params);
-      const list = Array.isArray(response) ? response : (response.data || []);
+      const list = (Array.isArray(response) ? response : (response.data || [])) as LocalReturnHistoryRow[];
       cachedReturnHistory = list;
       return list;
     },
@@ -410,11 +519,11 @@ const Returns: React.FC = () => {
   );
 
   // Master active distributors directory
-  const { data: masterDistributors = [] } = useApiQuery(
+  const { data: masterDistributors = [] } = useApiQuery<LocalMasterDistributor[]>(
     ['distributors-list'],
     async () => {
       const res = await api.getDistributors();
-      return Array.isArray(res) ? res : (res?.data || []);
+      return (Array.isArray(res) ? res : (res?.data || [])) as LocalMasterDistributor[];
     },
     { staleTime: 30000 }
   );
@@ -441,7 +550,7 @@ const Returns: React.FC = () => {
 
   // Edit history state
   const [isEditingHistory, setIsEditingHistory] = useState(false);
-  const [editingItems, setEditingItems] = useState<any[]>([]);
+  const [editingItems, setEditingItems] = useState<LocalEditableReturnItem[]>([]);
   const [isResolving, setIsResolving] = useState(false);
 
   // True when any loaded history item has null/zero batch, expiry, or cost
@@ -451,6 +560,7 @@ const Returns: React.FC = () => {
 
   useEffect(() => {
     if (!manualToDate) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- default date-to only until user overrides
       setDateTo(getTodayString());
     }
   }, [manualToDate]);
@@ -471,7 +581,7 @@ const Returns: React.FC = () => {
     }
   };
 
-  const handleCameraScanResult = (result: any) => {
+  const handleCameraScanResult = (result: { medicineInfo?: LocalCameraMedicineInfo }) => {
     if (cameraTargetIndex === null) return;
     const info = result.medicineInfo || {};
     const newItems = [...items];
@@ -494,7 +604,7 @@ const Returns: React.FC = () => {
     const resolveDetails = async () => {
       try {
         const res = await api.lookupPurchases(item.medicine_name, item.batch_no || undefined);
-        const list = Array.isArray(res) ? res : (res?.data || []);
+        const list = (Array.isArray(res) ? res : (res?.data || [])) as LocalPurchaseLookupRow[];
         if (list.length > 0) {
           const purchase = list[0];
 
@@ -507,7 +617,7 @@ const Returns: React.FC = () => {
           if (existingIndex !== -1) {
             alert(`Scanned drug "${purchase.medicine_name}" (Batch: ${purchase.batch_no}) is already in your return cart!\n\nIncrementing quantity of the existing line.`);
             const updatedItems = [...items];
-            const existingQty = parseFloat(updatedItems[existingIndex].quantity as any) || 0;
+            const existingQty = numOr0(updatedItems[existingIndex].quantity);
             updatedItems[existingIndex].quantity = (existingQty + 1).toString();
             if (updatedItems.length > 1) {
               updatedItems.splice(cameraTargetIndex, 1);
@@ -520,15 +630,15 @@ const Returns: React.FC = () => {
 
           item.medicine_id = purchase.medicine_id;
           item.medicine_name = purchase.medicine_name;
-          item.batch_no = purchase.batch_no;
+          item.batch_no = purchase.batch_no || '';
           item.expiry_date = formatExpiryToMMYY(purchase.expiry_date || '');
-          item.cost_price = purchase.cost_price;
-          item.mrp = purchase.mrp;
-          item.purchase_item_id = purchase.purchase_item_id;
-          item.invoice_no = purchase.invoice_no;
-          item.purchase_date = purchase.purchase_date;
-          item.distributor_name = purchase.distributor_name;
-          item.distributor_id = purchase.distributor_id;
+          item.cost_price = purchase.cost_price ?? '';
+          item.mrp = purchase.mrp ?? '';
+          item.purchase_item_id = purchase.purchase_item_id || undefined;
+          item.invoice_no = purchase.invoice_no || undefined;
+          item.purchase_date = purchase.purchase_date || undefined;
+          item.distributor_name = purchase.distributor_name || undefined;
+          item.distributor_id = purchase.distributor_id || undefined;
         }
         setItems(newItems);
       } catch (err) {
@@ -558,9 +668,9 @@ const Returns: React.FC = () => {
     // Auto-prefill from Expiry page navigation or location state with robust property fallbacks
     const prefilledItems = location.state?.prefilledReturnItems;
     if (prefilledItems && Array.isArray(prefilledItems) && prefilledItems.length > 0) {
-      const mappedItems: ReturnItem[] = prefilledItems.map((item: any) => ({
-        id: item.id || item.medicine_id || generateUUID(),
-        medicine_id: item.medicine_id || item.id || undefined,
+      const mappedItems: ReturnItem[] = prefilledItems.map((item: LocalExpiryPrefillRow) => ({
+        id: String(item.id || item.medicine_id || generateUUID()),
+        medicine_id: item.medicine_id || item.id || null,
         medicine_name: item.medicine_name || item.name || item.item_name || '',
         batch_no: item.batch_no || item.batch || '',
         expiry_date: formatExpiryToMMYY(item.expiry_date || item.expiry || ''),
@@ -575,6 +685,7 @@ const Returns: React.FC = () => {
       }));
 
       // Append prefilled items without duplicating existing batch IDs
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot navigation hand-off prefill merge
       setItems(prev => {
         const existingKeys = new Set(prev.map(i => `${i.medicine_id}_${i.batch_no}`));
         const newUnique = mappedItems.filter(i => !existingKeys.has(`${i.medicine_id}_${i.batch_no}`));
@@ -586,7 +697,7 @@ const Returns: React.FC = () => {
 
   // RQ re-fetches automatically when returnHistoryKey changes (dateFrom/dateTo/minAmount/maxAmount)
 
-  const searchTimeoutRef = React.useRef<any>(null);
+  const searchTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const searchMedicines = useCallback((term: string, index: number) => {
     if (searchTimeoutRef.current) {
@@ -606,7 +717,7 @@ const Returns: React.FC = () => {
       searchTimeoutRef.current = setTimeout(async () => {
         try {
           const response = await api.lookupPurchases(term);
-          setSearchResults(Array.isArray(response) ? response : (response?.data || []));
+          setSearchResults((Array.isArray(response) ? response : (response?.data || [])) as LocalPurchaseLookupRow[]);
           setSearchHighlightIndex(-1);
         } catch (error) {
           console.error('Error prefetching medicines:', error);
@@ -621,7 +732,7 @@ const Returns: React.FC = () => {
     searchTimeoutRef.current = setTimeout(async () => {
       try {
         const response = await api.lookupPurchases(term);
-        setSearchResults(Array.isArray(response) ? response : (response?.data || []));
+        setSearchResults((Array.isArray(response) ? response : (response?.data || [])) as LocalPurchaseLookupRow[]);
         setSearchHighlightIndex(-1);
       } catch (error) {
         console.error('Error searching medicines:', error);
@@ -637,7 +748,7 @@ const Returns: React.FC = () => {
     };
   }, []);
 
-  const selectMedicine = (purchase: any, index: number) => {
+  const selectMedicine = (purchase: LocalPurchaseLookupRow, index: number) => {
     if (searchTimeoutRef.current) {
       clearTimeout(searchTimeoutRef.current);
     }
@@ -653,7 +764,7 @@ const Returns: React.FC = () => {
       alert(`"${purchase.medicine_name}" (Batch: ${purchase.batch_no}) is already in your return cart!\n\nIncrementing the quantity of the existing line.`);
       
       const newItems = [...items];
-      const existingQty = parseFloat(newItems[existingIndex].quantity as any) || 0;
+      const existingQty = numOr0(newItems[existingIndex].quantity);
       newItems[existingIndex].quantity = (existingQty + 1).toString();
       
       if (newItems.length > 1) {
@@ -674,15 +785,15 @@ const Returns: React.FC = () => {
 
     item.medicine_id = purchase.medicine_id;
     item.medicine_name = purchase.medicine_name;
-    item.batch_no = purchase.batch_no;
+    item.batch_no = purchase.batch_no || '';
     item.expiry_date = formatExpiryToMMYY(purchase.expiry_date || '');
-    item.cost_price = purchase.cost_price;
-    item.mrp = purchase.mrp;
-    item.purchase_item_id = purchase.purchase_item_id;
-    item.invoice_no = purchase.invoice_no;
-    item.purchase_date = purchase.purchase_date;
-    item.distributor_name = purchase.distributor_name;
-    item.distributor_id = purchase.distributor_id;
+    item.cost_price = purchase.cost_price ?? '';
+    item.mrp = purchase.mrp ?? '';
+    item.purchase_item_id = purchase.purchase_item_id || undefined;
+    item.invoice_no = purchase.invoice_no || undefined;
+    item.purchase_date = purchase.purchase_date || undefined;
+    item.distributor_name = purchase.distributor_name || undefined;
+    item.distributor_id = purchase.distributor_id || undefined;
 
     setItems(newItems);
     setSearchResults([]);
@@ -690,16 +801,14 @@ const Returns: React.FC = () => {
     setSearchHighlightIndex(-1);
   };
 
-  const updateItem = (index: number, field: keyof ReturnItem, value: any, format = false) => {
+  const updateItem = (index: number, field: 'medicine_name' | 'batch_no' | 'expiry_date' | 'quantity' | 'cost_price', value: string, format = false) => {
     const newItems = [...items];
     const item = newItems[index];
 
-    if (field === 'quantity' || field === 'cost_price' || field === 'mrp') {
-      (item as any)[field] = value;
-    } else if (field === 'expiry_date') {
-      (item as any)[field] = format ? formatExpiryToMMYY(value) : value;
+    if (field === 'expiry_date') {
+      item[field] = format ? formatExpiryToMMYY(value) : value;
     } else {
-      (item as any)[field] = value;
+      item[field] = value;
     }
 
     setItems(newItems);
@@ -762,8 +871,8 @@ const Returns: React.FC = () => {
       const invNo = hasDist ? (item.invoice_no || 'N/A') : 'Draft';
       const purchaseDate = item.purchase_date || '';
 
-      const qty = parseFloat(item.quantity as any) || 0;
-      const costPrice = parseFloat(item.cost_price as any) || 0;
+      const qty = numOr0(item.quantity);
+      const costPrice = numOr0(item.cost_price);
 
       if (!grouped[key]) {
         grouped[key] = {
@@ -799,7 +908,7 @@ const Returns: React.FC = () => {
 
   const processSingleGroup = async (group: DraftGroup) => {
     const validItems = group.items.filter(entry => {
-      const qty = parseFloat(entry.item.quantity as any) || 0;
+      const qty = numOr0(entry.item.quantity);
       return entry.item.medicine_id && qty > 0;
     });
 
@@ -827,9 +936,9 @@ const Returns: React.FC = () => {
       await api.processReturns(validItems.map(entry => ({
         medicine_id: entry.item.medicine_id,
         batch_no: entry.item.batch_no,
-        quantity: parseFloat(entry.item.quantity as any) || 0,
-        cost_price: parseFloat(entry.item.cost_price as any) || 0,
-        mrp: parseFloat(entry.item.mrp as any) || 0,
+        quantity: numOr0(entry.item.quantity),
+        cost_price: numOr0(entry.item.cost_price),
+        mrp: numOr0(entry.item.mrp),
         distributor_id: group.distributor_id,
         invoice_no: group.invoice_no,
       })), lossPercentage);
@@ -853,7 +962,7 @@ const Returns: React.FC = () => {
   const exportSingleGroupPDF = async (group: DraftGroup) => {
     const validItems = group.items
       .map(e => e.item)
-      .filter(item => (parseFloat(item.quantity as any) || 0) > 0);
+      .filter(item => numOr0(item.quantity) > 0);
 
     if (validItems.length === 0) {
       alert('No valid items with quantity to export for ' + group.distributor_name);
@@ -863,11 +972,11 @@ const Returns: React.FC = () => {
     try {
       const parsedItemsForExport = validItems.map(item => ({
         ...item,
-        quantity: parseFloat(item.quantity as any) || 0,
-        cost_price: parseFloat(item.cost_price as any) || 0,
-        mrp: parseFloat(item.mrp as any) || 0
+        quantity: numOr0(item.quantity),
+        cost_price: numOr0(item.cost_price),
+        mrp: numOr0(item.mrp)
       }));
-      const blob = await api.exportReturnsPDF(parsedItemsForExport);
+      const blob = await api.exportReturnsPDF(parsedItemsForExport as unknown as ReadonlyArray<Record<string, unknown>>);
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
         a.href = url;
@@ -937,7 +1046,7 @@ const Returns: React.FC = () => {
   // Group items by distributor + invoice
   const groupItemsByInvoice = (): GroupedReturn[] => {
     const validItems = items.filter(item => {
-      const qty = parseFloat(item.quantity as any) || 0;
+      const qty = numOr0(item.quantity);
       return item.medicine_id && qty > 0;
     });
     
@@ -946,8 +1055,8 @@ const Returns: React.FC = () => {
     validItems.forEach(item => {
       // Create key from distributor + invoice to group
       const key = `${item.distributor_id}_${item.invoice_no}`;
-      const qty = parseFloat(item.quantity as any) || 0;
-      const costPrice = parseFloat(item.cost_price as any) || 0;
+      const qty = numOr0(item.quantity);
+      const costPrice = numOr0(item.cost_price);
       
       if (!grouped[key]) {
         grouped[key] = {
@@ -970,12 +1079,12 @@ const Returns: React.FC = () => {
   const calculateGrandTotal = () => {
     return items
       .filter(item => {
-        const qty = parseFloat(item.quantity as any) || 0;
+        const qty = numOr0(item.quantity);
         return item.medicine_id && qty > 0;
       })
       .reduce((sum, item) => {
-        const qty = parseFloat(item.quantity as any) || 0;
-        const costPrice = parseFloat(item.cost_price as any) || 0;
+        const qty = numOr0(item.quantity);
+        const costPrice = numOr0(item.cost_price);
         return sum + (costPrice * qty);
       }, 0);
   };
@@ -1006,9 +1115,9 @@ const Returns: React.FC = () => {
         await api.processReturns(group.items.map(item => ({
           medicine_id: item.medicine_id,
           batch_no: item.batch_no,
-          quantity: parseFloat(item.quantity as any) || 0,
-          cost_price: parseFloat(item.cost_price as any) || 0,
-          mrp: parseFloat(item.mrp as any) || 0,
+          quantity: numOr0(item.quantity),
+          cost_price: numOr0(item.cost_price),
+          mrp: numOr0(item.mrp),
           distributor_id: group.distributor_id,
           invoice_no: group.invoice_no,
         })), lossPercentage);
@@ -1042,9 +1151,9 @@ const Returns: React.FC = () => {
       for (const group of grouped) {
         const parsedItemsForExport = group.items.map(item => ({
           ...item,
-          quantity: parseFloat(item.quantity as any) || 0,
-          cost_price: parseFloat(item.cost_price as any) || 0,
-          mrp: parseFloat(item.mrp as any) || 0
+          quantity: numOr0(item.quantity),
+          cost_price: numOr0(item.cost_price),
+          mrp: numOr0(item.mrp)
         }));
         const blob = await api.exportReturnsPDF(parsedItemsForExport);
         const url = window.URL.createObjectURL(blob);
@@ -1228,7 +1337,7 @@ const Returns: React.FC = () => {
                   className="flex-1 px-2 py-1 bg-bg border border-border/60 rounded-lg text-[10px] text-text font-semibold focus:outline-none focus:border-primary/60"
                 >
                   <option value="">All Distributors</option>
-                  {[...new Set(returnHistory.map((r: any) => r.distributor_name).filter(Boolean))].map((d: any) => (
+                  {[...new Set(returnHistory.map(r => r.distributor_name).filter(Boolean))].map(d => (
                     <option key={String(d)} value={String(d)}>{String(d)}</option>
                   ))}
                 </select>
@@ -1255,7 +1364,7 @@ const Returns: React.FC = () => {
                     if (!searchFilterText) return true;
                     const q = searchFilterText.toLowerCase();
                     const nameMatch = t.name.toLowerCase().includes(q);
-                    const itemMatch = (t.items || []).some((i: any) => 
+                    const itemMatch = (t.items || []).some(i => 
                       (i.medicine_name || '').toLowerCase().includes(q) ||
                       (i.distributor_name || '').toLowerCase().includes(q) ||
                       (i.invoice_no || '').toLowerCase().includes(q)
@@ -1264,12 +1373,12 @@ const Returns: React.FC = () => {
                   }).map((t) => {
                     const isActive = t.id === activeTabId && !selectedHistoryReturn;
                     const count = t.items ? t.items.length : 0;
-                    const firstDistributor = t.items ? t.items.find((item: any) => item.distributor_name)?.distributor_name : null;
+                    const firstDistributor = t.items ? t.items.find(item => item.distributor_name)?.distributor_name : null;
                     const displayName = firstDistributor ? `Ret: ${firstDistributor}` : t.name;
                     
-                    const tabTotal = (t.items || []).reduce((sum: number, item: any) => {
-                      const qty = parseFloat(item.quantity as any) || 0;
-                      const costPrice = parseFloat(item.cost_price as any) || 0;
+                    const tabTotal = (t.items || []).reduce((sum, item) => {
+                      const qty = numOr0(item.quantity);
+                      const costPrice = numOr0(item.cost_price);
                       return sum + (costPrice * qty);
                     }, 0);
 
@@ -1325,7 +1434,7 @@ const Returns: React.FC = () => {
                       <Loader2 size={16} className="animate-spin text-primary" />
                       Fetching History...
                     </div>
-                  ) : returnHistory.filter((ret: any) => {
+                  ) : returnHistory.filter(ret => {
                       const itemDate = ret.date ? ret.date.substring(0, 10) : '';
                       const matchesDate = (!dateFrom || itemDate >= dateFrom) && (!dateTo || itemDate <= dateTo);
                       const matchesMin = !minAmount || (ret.total_amount || 0) >= Number(minAmount);
@@ -1346,7 +1455,7 @@ const Returns: React.FC = () => {
                       No matching return entries found.
                     </div>
                   ) : (
-                    returnHistory.filter((ret: any) => {
+                    returnHistory.filter(ret => {
                       const itemDate = ret.date ? ret.date.substring(0, 10) : '';
                       const matchesDate = (!dateFrom || itemDate >= dateFrom) && (!dateTo || itemDate <= dateTo);
                       const matchesMin = !minAmount || (ret.total_amount || 0) >= Number(minAmount);
@@ -1362,7 +1471,7 @@ const Returns: React.FC = () => {
                       }
 
                       return matchesDate && matchesMin && matchesMax && matchesDist && matchesText;
-                    }).map((ret: any) => {
+                    }).map(ret => {
                       const isSelected = selectedHistoryReturn?.id === ret.id;
                       return (
                         <div 
@@ -1468,7 +1577,7 @@ const Returns: React.FC = () => {
                         <button
                           onClick={async () => {
                             try {
-                              const blob = await api.exportReturnsPDF(historyReturnItems);
+                              const blob = await api.exportReturnsPDF(historyReturnItems as unknown as ReadonlyArray<Record<string, unknown>>);
                               const url = window.URL.createObjectURL(blob);
                               const a = document.createElement('a');
                               a.href = url;
@@ -1487,7 +1596,7 @@ const Returns: React.FC = () => {
                           <FileText size={13} /> Export PDF
                         </button>
                         <button
-                          onClick={() => { setEditingItems(historyReturnItems.map(i => ({ ...i }))); setIsEditingHistory(true); }}
+                          onClick={() => { setEditingItems(historyReturnItems.map(i => ({ ...i, quantity: i.quantity ?? '', cost_price: i.cost_price ?? '', mrp: i.mrp ?? 0 }))); setIsEditingHistory(true); }}
                           className="bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer"
                         >
                           <Edit size={13} /> Edit
@@ -1571,7 +1680,7 @@ const Returns: React.FC = () => {
                                 />
                               </td>
                               <td className="p-3 text-xs text-text font-bold font-mono text-right">
-                                ₹{((item.cost_price || 0) * (item.quantity || 0)).toFixed(2)}
+                                ₹{(Number(item.cost_price || 0) * Number(item.quantity || 0)).toFixed(2)}
                               </td>
                             </tr>
                           );
@@ -1581,7 +1690,7 @@ const Returns: React.FC = () => {
                         <tr>
                           <td colSpan={6} className="p-3 text-xs font-bold text-text text-right">Updated Claim Total:</td>
                           <td className="p-3 text-sm font-black text-emerald-500 font-mono text-right">
-                            ₹{editingItems.reduce((s, i) => s + (i.cost_price || 0) * (i.quantity || 0), 0).toFixed(2)}
+                            ₹{editingItems.reduce((s, i) => s + Number(i.cost_price || 0) * Number(i.quantity || 0), 0).toFixed(2)}
                           </td>
                         </tr>
                         {editingItems.some(i => (i._resolved_fields || []).length > 0) && (
@@ -1622,11 +1731,11 @@ const Returns: React.FC = () => {
                             <td className="p-3.5 text-xs font-mono text-muted">{item.expiry_date || '—'}</td>
                             <td className="p-3.5 text-xs font-bold text-text text-center font-mono">{item.quantity ?? '—'}</td>
                             <td className="p-3.5 text-xs text-text font-mono text-right">
-                              {item.cost_price != null ? `₹${(item.cost_price || 0).toFixed(2)}` : '—'}
+                              {item.cost_price != null ? `₹${Number(item.cost_price || 0).toFixed(2)}` : '—'}
                             </td>
                             <td className="p-3.5 text-xs text-text font-extrabold font-mono text-right">
                               {item.cost_price != null && item.quantity != null
-                                ? `₹${((item.cost_price || 0) * (item.quantity || 0)).toFixed(2)}`
+                                ? `₹${(Number(item.cost_price || 0) * Number(item.quantity || 0)).toFixed(2)}`
                                 : '—'}
                             </td>
                             <td className="p-3.5 text-center">
@@ -1700,7 +1809,7 @@ const Returns: React.FC = () => {
                     })
                     .map(group => {
                       const isCollapsed = Boolean(collapsedCards[group.key]);
-                      const validCount = group.items.filter(e => (parseFloat(e.item.quantity as any) || 0) > 0).length;
+                      const validCount = group.items.filter(e => (numOr0(e.item.quantity)) > 0).length;
 
                       return (
                         <div
@@ -1903,7 +2012,7 @@ const Returns: React.FC = () => {
                                             <button
                                               type="button"
                                               onClick={() => {
-                                                const current = parseFloat(item.quantity as any) || 0;
+                                                const current = numOr0(item.quantity);
                                                 if (current > 0) updateItem(originalIndex, 'quantity', (current - 1).toString());
                                               }}
                                               className="w-6 h-7 rounded bg-bg3 border border-border/60 text-muted hover:text-text hover:bg-bg2 font-bold text-xs flex items-center justify-center cursor-pointer transition-colors"
@@ -1921,7 +2030,7 @@ const Returns: React.FC = () => {
                                             <button
                                               type="button"
                                               onClick={() => {
-                                                const current = parseFloat(item.quantity as any) || 0;
+                                                const current = numOr0(item.quantity);
                                                 updateItem(originalIndex, 'quantity', (current + 1).toString());
                                               }}
                                               className="w-6 h-7 rounded bg-bg3 border border-border/60 text-muted hover:text-text hover:bg-bg2 font-bold text-xs flex items-center justify-center cursor-pointer transition-colors"
@@ -1945,7 +2054,7 @@ const Returns: React.FC = () => {
 
                                         {/* Total */}
                                         <td className="p-2.5 text-text font-extrabold text-xs font-mono text-right">
-                                          ₹{((parseFloat(item.cost_price as any) || 0) * (parseFloat(item.quantity as any) || 0)).toFixed(2)}
+                                          ₹{(numOr0(item.cost_price) * numOr0(item.quantity)).toFixed(2)}
                                         </td>
 
                                         {/* Remove */}
@@ -1992,7 +2101,7 @@ const Returns: React.FC = () => {
                       </div>
                       <div className="h-4 w-[1px] bg-border/60 hidden sm:block" />
                       <span className="text-[11px] text-muted font-semibold hidden sm:block">
-                        {items.filter(i => (parseFloat(i.quantity as any) || 0) > 0).length} items across {groupAllItemsByDistributor().length} supplier card{groupAllItemsByDistributor().length !== 1 ? 's' : ''}
+                        {items.filter(i => (numOr0(i.quantity)) > 0).length} items across {groupAllItemsByDistributor().length} supplier card{groupAllItemsByDistributor().length !== 1 ? 's' : ''}
                       </span>
                     </div>
 
@@ -2089,7 +2198,7 @@ const Returns: React.FC = () => {
                       });
 
                       // 2. Add master active distributors from DB that have no active cards yet
-                      masterDistributors.forEach((d: any) => {
+                      masterDistributors.forEach(d => {
                         const distName = d.name || 'Unknown';
                         if (!activeDistNames.has(distName.toLowerCase())) {
                           sidebarEntries.push({
@@ -2107,7 +2216,7 @@ const Returns: React.FC = () => {
                         .map(entry => {
                           const g = entry.group;
                           const isFocused = g && focusedDistributorKey === g.key;
-                          const validItemCount = g ? g.items.filter(e => (parseFloat(e.item.quantity as any) || 0) > 0).length : 0;
+                          const validItemCount = g ? g.items.filter(e => (numOr0(e.item.quantity)) > 0).length : 0;
                           
                           // Inline preview of medicine names inside this card
                           const medNames = g

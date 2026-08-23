@@ -14,8 +14,8 @@ import { useQueryClient } from '@tanstack/react-query';
 
 // SSE event type -> react-query cache keys to invalidate
 const SSE_QUERY_MAP: Record<string, string[][]> = {
-  sale_created: [['dashboard'], ['reports'], ['sales'], ['invoices']],
-  invoice_saved: [['purchases'], ['purchase-history'], ['inventory'], ['inventory-list'], ['dashboard'], ['reports']],
+  sale_created: [['dashboard'], ['reports'], ['sales'], ['invoices'], ['sells-list']],
+  invoice_saved: [['purchases'], ['purchase-history'], ['purchase-history-list'], ['inventory'], ['inventory-list'], ['dashboard'], ['reports']],
   return_created: [['returns'], ['returns-history'], ['customer-returns'], ['pending-returns'], ['inventory'], ['inventory-list'], ['dashboard'], ['reports']],
   inventory_changed: [['inventory'], ['inventory-list'], ['compact-inventory'], ['pos-inventory'], ['expiry']],
   expiry_list_changed: [['expiry'], ['expiry-reviews']],
@@ -24,6 +24,8 @@ const SSE_QUERY_MAP: Record<string, string[][]> = {
   email_new: [['mail-inbox'], ['mail']],
   dispatch_updated: [['dispatch-orders'], ['delivery-boys'], ['distributor-reminders']],
   catalog_job_done: [['catalog-jobs'], ['medicines']],
+  sales_sync: [['sells-list']],
+  purchases_sync: [['purchase-history-list']],
 };
 
 // SSE event type -> DOM CustomEvents dispatched for non-react-query consumers

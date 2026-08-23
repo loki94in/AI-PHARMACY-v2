@@ -18,23 +18,29 @@ interface PriceRecord {
 
 interface HoverPriceIntelTableProps {
   medicineName: string;
+  /**
+   * Pre-loaded history rows (from the Purchases one-shot medicine-batches cache).
+   * When provided, NO network call is made — the table renders straight from
+   * these records (null/undefined falls back to the /price-history query).
+   */
+  records?: PriceRecord[] | null;
 }
 
-export const HoverPriceIntelTable: React.FC<HoverPriceIntelTableProps> = ({ medicineName }) => {
-  const canFetch = !!medicineName && medicineName.length >= 2;
+export const HoverPriceIntelTable: React.FC<HoverPriceIntelTableProps> = ({ medicineName, records }) => {
+  const canFetch = !!medicineName && medicineName.length >= 2 && !records;
   const { data: historyRes, isFetching, isSuccess, isError } = useApiQuery<{ data?: PriceRecord[] }>(
     ['medicine-price-history', medicineName],
     () => api.getMedicinePriceHistory(medicineName),
     { enabled: canFetch }
   );
-  const records: PriceRecord[] = historyRes?.data || [];
-  const loading = isFetching;
-  const loaded = isSuccess || isError;
+  const sourceRecords: PriceRecord[] = (records && records.length > 0 ? records : null) || historyRes?.data || [];
+  const loading = !records && isFetching;
+  const loaded = !!records || isSuccess || isError;
   const error = isError ? 'Could not load price history.' : null;
 
   if (!medicineName || medicineName.length < 2) return null;
 
-  if (loading) {
+  if (!records && loading) {
     return (
       <div className="flex items-center gap-2 py-2 text-muted text-xs p-3">
         <Loader size={12} className="animate-spin text-primary" />
@@ -52,7 +58,7 @@ export const HoverPriceIntelTable: React.FC<HoverPriceIntelTableProps> = ({ medi
     );
   }
 
-  if (loaded && records.length === 0) {
+  if (loaded && sourceRecords.length === 0) {
     return (
       <div className="py-2 text-xs text-muted italic p-3">
         No previous purchases found for "{medicineName}".
@@ -62,7 +68,7 @@ export const HoverPriceIntelTable: React.FC<HoverPriceIntelTableProps> = ({ medi
 
   // Deduplicate distributors and pick the latest/best record for each
   const distributorMap = new Map<string, PriceRecord>();
-  records.forEach(r => {
+  sourceRecords.forEach(r => {
     const key = r.distributor_name || 'Unknown';
     if (!distributorMap.has(key)) {
       distributorMap.set(key, r);

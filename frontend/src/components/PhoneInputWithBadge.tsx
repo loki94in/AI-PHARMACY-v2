@@ -46,10 +46,12 @@ export const PhoneInputWithBadge: React.FC<PhoneInputWithBadgeProps> = ({
 
   useEffect(() => {
     if (shakeOnError || isPartial) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- shake must react to parent error-prop signal
       setIsShaking(true);
       const timer = setTimeout(() => setIsShaking(false), 400);
       return () => clearTimeout(timer);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- adding isPartial would re-shake on every keystroke
   }, [shakeOnError]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {

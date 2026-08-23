@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { api, apiClient } from '../../services/api';
 import { useApiQuery } from '../../hooks/useApiQuery';
-import { Download, Eye, CheckCircle, AlertCircle, RefreshCw, Trash2, Edit, Calendar, Loader2, QrCode } from 'lucide-react';
+import { Download, Eye, CheckCircle, AlertCircle, RefreshCw, Trash2, Edit, Calendar, Loader2, QrCode, Printer } from 'lucide-react';
 import { usePersistedDateRange } from '../../hooks/usePersistedDateRange';
 import { getTodayString, getNDaysAgoString, formatDisplayDate, toDateInputValue } from '../../utils/date';
 import { useInfiniteScroll } from '../../hooks/useInfiniteScroll';
@@ -88,6 +88,10 @@ interface PurchaseTransaction {
 
 
 // Module-level cache for instant re-mount
+
+// Guards against out-of-order bill-barcode responses when switching purchases quickly
+let billBarcodeSeq = 0;
+const nextBillBarcodeRequestId = (): number => ++billBarcodeSeq;
 
 const PurchaseHistory = () => {
   const navigate = useNavigate();
@@ -196,6 +200,8 @@ const PurchaseHistory = () => {
   const [viewPurchase, setViewPurchase] = useState<LocalViewedPurchase | null>(null);
   const [generatingBarcodeId, setGeneratingBarcodeId] = useState<number | null>(null);
   const [generatingItemIndex, setGeneratingItemIndex] = useState<number | null>(null);
+  const [billBarcode, setBillBarcode] = useState<{ billNo: string; barcodeText: string; qrDataUrl: string; code128DataUrl: string; pdfUrl: string } | null>(null);
+  const [loadingBillBarcode, setLoadingBillBarcode] = useState(false);
 
   const handlePrintBillBarcodes = async (purchaseId: number, existingItems?: LocalPurchaseItem[]) => {
     setGeneratingBarcodeId(purchaseId);
@@ -315,11 +321,30 @@ const PurchaseHistory = () => {
   const openView = async (id: number) => {
     try {
       const data = await api.getPurchase(id);
+      setBillBarcode(null);
+      setLoadingBillBarcode(true);
       setViewPurchase(data);
+      const reqId = nextBillBarcodeRequestId();
+      api.getPurchaseBillBarcode(id)
+        .then(barcode => {
+          if (reqId === billBarcodeSeq) setBillBarcode(barcode);
+        })
+        .catch((err: unknown) => {
+          console.error('Bill barcode load error:', err);
+        })
+        .finally(() => {
+          if (reqId === billBarcodeSeq) setLoadingBillBarcode(false);
+        });
     } catch (err) {
       console.error('Failed to load purchase details:', err);
       alert('Failed to load purchase details.');
     }
+  };
+
+  const closeView = () => {
+    setViewPurchase(null);
+    setBillBarcode(null);
+    setLoadingBillBarcode(false);
   };
 
   const openEdit = async (id: number) => {
@@ -1003,7 +1028,7 @@ const PurchaseHistory = () => {
                 </p>
               </div>
               <button
-                onClick={() => setViewPurchase(null)}
+                onClick={closeView}
                 className="text-muted hover:text-text bg-bg3 hover:bg-glass-bg p-1.5 rounded-lg border border-glass-border transition-all text-xl font-bold"
               >
                 &times;
@@ -1064,6 +1089,35 @@ const PurchaseHistory = () => {
                 </div>
               )}
 
+              {/* Purchase Bill QR & Barcode */}
+              <div className="bg-bg2/60 p-4 rounded-xl border border-glass-border flex flex-col sm:flex-row items-center justify-between gap-3">
+                {billBarcode ? (
+                  <>
+                    <div className="flex items-center gap-4">
+                      <img src={billBarcode.qrDataUrl} alt="Bill QR" className="w-16 h-16 rounded bg-bg p-1 shrink-0 shadow-sm" />
+                      <div>
+                        <div className="text-[10px] font-bold text-muted uppercase tracking-wider mb-1 flex items-center gap-1.5">
+                          <QrCode size={12} /> Purchase Bill Barcode (Code128 + QR)
+                        </div>
+                        <img src={billBarcode.code128DataUrl} alt="Bill Code128" className="h-10 bg-bg p-1 rounded max-w-[220px]" />
+                        <div className="text-[10px] font-mono text-muted mt-1">{billBarcode.barcodeText}</div>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => window.open(billBarcode.pdfUrl, '_blank')}
+                      className="px-3.5 py-2 bg-primary/20 hover:bg-primary text-primary hover:text-text rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 border border-primary/30 shrink-0 cursor-pointer"
+                      title="Print the scannable QR + barcode label for this purchase bill"
+                    >
+                      <Printer size={14} /> Print Bill Label
+                    </button>
+                  </>
+                ) : loadingBillBarcode ? (
+                  <span className="text-xs text-muted py-2 flex items-center gap-2"><RefreshCw size={12} className="animate-spin" /> Loading bill barcode...</span>
+                ) : (
+                  <span className="text-xs text-muted py-2">Bill barcode unavailable</span>
+                )}
+              </div>
+
               <div>
                 <h4 className="text-sm font-bold text-text mb-3">Items</h4>
                 <div className="border border-glass-border rounded-xl overflow-hidden">
@@ -1121,7 +1175,7 @@ const PurchaseHistory = () => {
                 Print All Barcodes
               </button>
               <button
-                onClick={() => setViewPurchase(null)}
+                onClick={closeView}
                 className="px-5 py-2 text-xs font-bold rounded-xl bg-bg3 hover:bg-glass-bg text-muted hover:text-text border border-glass-border transition-all cursor-pointer"
               >
                 Close Preview
@@ -1129,7 +1183,7 @@ const PurchaseHistory = () => {
               <button
                 onClick={() => {
                   const idToEdit = viewPurchase.purchase.id;
-                  setViewPurchase(null);
+                  closeView();
                   openEdit(idToEdit);
                 }}
                 className="px-5 py-2 text-xs font-bold rounded-xl bg-primary/10 hover:bg-primary/20 text-primary border border-primary/30 transition-all flex items-center gap-2 cursor-pointer"

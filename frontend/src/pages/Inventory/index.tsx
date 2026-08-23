@@ -5,7 +5,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { PackageSearch, Plus, Minus, RefreshCw, X, AlertTriangle, ShieldAlert, BookOpen, Factory, Edit, Save, Loader2, Columns3, Check, Download, ShoppingCart } from 'lucide-react';
 import { api, type InventoryItem, type SpecialOrder } from '../../services/api';
 import { toastEvent } from '../../services/events';
-import { parsePackSizeFromPackaging } from '../../components/UniversalMedicineEditModal';
+import { parsePackSizeFromPackaging } from '../../utils/packagingMatcher';
 import { createPortal } from 'react-dom';
 import { useInfiniteScroll } from '../../hooks/useInfiniteScroll';
 import { useVirtualizer } from '../../hooks/useVirtualizer';

@@ -76,7 +76,6 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
   const [, setDelayCreditBill] = useState<number>(() => cachedDelayCreditBill);
   const [, setDelayDistributor] = useState<number>(() => cachedDelayDistributor);
   const [, setDelayDeliveryBoy] = useState<number>(() => cachedDelayDeliveryBoy);
-  const [] = useState(false);
 
   // Edit item modal state
   const [editingItem, setEditingItem] = useState<QueueItem | null>(null);
@@ -133,6 +132,7 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- sanctioned SSE queue-event refresh flow per AGENTS.md
     fetchStatus();
     const unsub = whatsappQueueEvent.subscribeUpdated(() => fetchStatus());
     const handleSse = () => fetchStatus();
@@ -142,6 +142,7 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
       unsub();
       window.removeEventListener('sse-wa-queue-updated', handleSse);
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only + event subscriptions, fetchStatus is stable-in-practice
   }, []);
 
   const [isFlushing, setIsFlushing] = useState(false);

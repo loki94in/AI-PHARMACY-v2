@@ -827,6 +827,13 @@ export const api = {
     if (batchNo && batchNo.trim()) params.batch_no = batchNo.trim();
     return apiClient.get('/purchases/last-purchase', { params }).then(res => res.data);
   },
+  getMedicineBatches: (medicineId?: number | null, name?: string, distributorId?: number | null) => {
+    const params: { medicine_id?: number; name?: string; distributor_id?: number } = {};
+    if (medicineId) params.medicine_id = medicineId;
+    if (name) params.name = name;
+    if (distributorId) params.distributor_id = distributorId;
+    return apiClient.get('/purchases/medicine-batches', { params }).then(res => res.data);
+  },
   batchLastPurchase: (medicines: Array<{name: string}>, distributorId?: number) =>
     apiClient.post('/purchases/batch-last-purchase', { medicines, distributor_id: distributorId }).then(res => res.data),
   matchPurchaseItems: (names: string[], distributorId?: number | null) =>
@@ -1044,6 +1051,14 @@ export const api = {
   // Utilities (Barcode generation)
   generateMedicineBarcodes: (items: Array<{ name: string; batch?: string }>) => apiClient.post('/utilities/barcode', { items }).then(res => res.data),
   generateBillBarcode: (code: string) => apiClient.get(`/utilities/barcode/${encodeURIComponent(code)}`).then(res => res.data),
+  getPurchaseBillBarcode: (purchaseId: number) => apiClient.get<{
+    success: boolean;
+    billNo: string;
+    barcodeText: string;
+    qrDataUrl: string;
+    code128DataUrl: string;
+    pdfUrl: string;
+  }>(`/purchases/bill-barcode/${purchaseId}`).then(res => res.data),
 
 
   // WhatsApp Custom UI

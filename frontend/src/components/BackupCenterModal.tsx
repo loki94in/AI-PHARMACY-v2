@@ -104,6 +104,7 @@ export const BackupCenterContent: React.FC<BackupCenterContentProps> = ({
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async mount fetch; setState fires after await only
     fetchStatus();
   }, []);
 

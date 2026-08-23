@@ -2,7 +2,8 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Database as DatabaseIcon, RefreshCw, BookOpen, ArrowDownAZ, Clock, X, Edit, Trash2, Plus, Upload, Unlock, ShoppingCart } from 'lucide-react';
 import { api } from '../../services/api';
-import { UniversalMedicineEditModal, parsePackSizeFromPackaging } from '../../components/UniversalMedicineEditModal';
+import { UniversalMedicineEditModal } from '../../components/UniversalMedicineEditModal';
+import { parsePackSizeFromPackaging } from '../../utils/packagingMatcher';
 import { useApiQuery } from '../../hooks/useApiQuery';
 import { useQueryClient } from '@tanstack/react-query';
 import { useSearchParams, useNavigate } from 'react-router-dom';
@@ -99,9 +100,6 @@ const DatabasePage = () => {
   const currentTab = searchParams.get('tab') || 'db';
   const queryClient = useQueryClient();
   const [medicines, setMedicines] = useState<MedicineRow[]>(cachedMedicines || []);
-  const [loading, setLoading] = useState(!cachedMedicines);
-  const [appending, setAppending] = useState(false);
-  const [searchPending, setSearchPending] = useState(false);
   const [productNameInput, setProductNameInput] = useState('');
 
   const [productNameTerm, setProductNameTerm] = useState('');
@@ -416,12 +414,8 @@ const DatabasePage = () => {
     { staleTime: 30000 }
   );
 
-  useEffect(() => {
-    if (queryIsFetching) {
-      if (page === 1 && medicines.length === 0) setLoading(true);
-      else if (page > 1) setAppending(true);
-    }
-  }, [queryIsFetching, page, medicines.length]);
+  const loading = queryIsFetching && page === 1 && medicines.length === 0;
+  const appending = queryIsFetching && page > 1;
 
   useEffect(() => {
     if (pageData) {
@@ -429,6 +423,7 @@ const DatabasePage = () => {
       const totalPagesVal = pageData.totalPages || 1;
       const totalItemsVal = pageData.totalItems || 0;
 
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- hydrate list + module cache from query snapshot
       setTotalPages(totalPagesVal);
       setTotalItems(totalItemsVal);
 
@@ -444,8 +439,6 @@ const DatabasePage = () => {
           return [...filteredPrev, ...data];
         });
       }
-      setLoading(false);
-      setAppending(false);
     }
   }, [pageData, page]);
 
@@ -488,16 +481,14 @@ const DatabasePage = () => {
 
   // Debounce search input
   useEffect(() => {
-    const hasChanges = 
+    const hasChanges =
       productNameInput !== productNameTerm ||
       mrpInput !== mrpTerm ||
       apiInput !== apiTerm ||
       packagingInput !== packagingTerm ||
       distributorInput !== distributorTerm;
 
-    if (hasChanges) {
-      setSearchPending(true);
-    }
+    if (!hasChanges) return;
 
     const timer = setTimeout(() => {
       setPage(1); // Reset to page 1 on new search
@@ -506,10 +497,16 @@ const DatabasePage = () => {
       setApiTerm(apiInput);
       setPackagingTerm(packagingInput);
       setDistributorTerm(distributorInput);
-      setSearchPending(false);
     }, 300);
     return () => clearTimeout(timer);
   }, [productNameInput, mrpInput, apiInput, packagingInput, distributorInput, productNameTerm, mrpTerm, apiTerm, packagingTerm, distributorTerm]);
+
+  const searchPending =
+    productNameInput !== productNameTerm ||
+    mrpInput !== mrpTerm ||
+    apiInput !== apiTerm ||
+    packagingInput !== packagingTerm ||
+    distributorInput !== distributorTerm;
 
   return (
     <div className="h-full flex flex-col fade-in relative gap-3">

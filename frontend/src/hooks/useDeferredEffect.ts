@@ -18,5 +18,6 @@ export const useDeferredEffect = (effect: EffectCallback, deps: DependencyList =
         cleanup();
       }
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- generic passthrough hook; caller owns the dependency list
   }, deps);
 };

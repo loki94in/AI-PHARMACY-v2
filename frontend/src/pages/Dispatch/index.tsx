@@ -463,6 +463,7 @@ const Dispatch = () => {
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- event-driven refresh flow per P1 contract; loaders are async
     fetchAll();
     fetchDistributorReminders();
     const handlePhoneUpdate = () => {
@@ -507,11 +508,13 @@ const Dispatch = () => {
 
   useEffect(() => {
     if (!showMessageData) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- lazy deferred load after 500ms reveal toggle
     fetchMessageDates();
   }, [showMessageData, fetchMessageDates]);
 
   useEffect(() => {
     if (selectedDate) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- loads messages for user-selected date
       fetchMessagesForDate(selectedDate);
     }
   }, [selectedDate, fetchMessagesForDate]);

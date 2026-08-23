@@ -314,6 +314,7 @@ const Mail = () => {
   useEffect(() => {
     const activeAtt = attachments.find(a => a.isSelected);
     if (!activeAtt) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- derived reset when no attachment is selected
       setPreviewContent('');
       setLoadingPreview(false);
       return;
@@ -444,6 +445,7 @@ const Mail = () => {
 
   // On mount: load local DB instantly.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- cache-first local DB paint per SPA contract
     loadLocalInbox();
   }, [loadLocalInbox]);
 
@@ -652,6 +654,7 @@ const Mail = () => {
   // Relative time string
   const [syncedDisplayTs, setSyncedDisplayTs] = useState(() => Date.now());
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- timestamp seed for relative-time label on sync change
     setSyncedDisplayTs(Date.now());
   }, [lastSyncedAt]);
   const relTime = lastSyncedAt

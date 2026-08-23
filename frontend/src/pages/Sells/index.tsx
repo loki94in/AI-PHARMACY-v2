@@ -56,6 +56,23 @@ interface SaleInvoice {
 
 type LocalSaleItemRow = SaleItem & { batch_no?: string; batch?: string; qty?: number };
 
+// Shop header for the printed sell bill — fetched once per session, cached module-level
+let sellBillShopCache: Record<string, string> | null = null;
+const loadSellBillShopDetails = async (): Promise<{ name: string; phone: string }> => {
+  if (!sellBillShopCache) {
+    try {
+      sellBillShopCache = ((await api.getSettings()) || {}) as Record<string, string>;
+    } catch {
+      sellBillShopCache = {};
+    }
+  }
+  const s = sellBillShopCache;
+  return {
+    name: s.pharmacy_name || s.shop_name || s.store_name || '',
+    phone: s.phone || s.shop_phone || '',
+  };
+};
+
 interface LocalQuickEditSeed {
   name?: string;
   mrp?: number | null;
@@ -150,22 +167,16 @@ const Sells = () => {
   const [universalEditMedicineId, setUniversalEditMedicineId] = useState<number | null>(null);
   const [universalEditItem, setUniversalEditItem] = useState<LocalQuickEditSeed | null>(null);
 
-  // Barcode state
+  // Barcode state (invoice-level only — product labels belong to Purchase History)
   const [barcodeModalInvoice, setBarcodeModalInvoice] = useState<string | null>(null);
   const [barcodeData, setBarcodeData] = useState<{ invoiceNo: string; qrDataUrl: string; code128DataUrl: string; pdfUrl: string; barcodeText: string } | null>(null);
   const [loadingBarcode, setLoadingBarcode] = useState(false);
-  const [, setBarcodeModalItems] = useState<SaleItem[]>([]);
-  const [, setProductBarcodeSearch] = useState('');
-  const [generatingProductBarcode, setGeneratingProductBarcode] = useState(false);
-  const [, setActiveBarcodeTab] = useState<'invoice' | 'products'>('invoice');
+  const [shopDetails, setShopDetails] = useState<{ name: string; phone: string }>({ name: '', phone: '' });
 
-  const handleOpenBarcode = async (invoiceNo: string, invoiceId?: number, existingItems?: SaleItem[]) => {
+  const handleOpenBarcode = async (invoiceNo: string) => {
     setBarcodeModalInvoice(invoiceNo);
     setLoadingBarcode(true);
     setBarcodeData(null);
-    setBarcodeModalItems(existingItems || []);
-    setProductBarcodeSearch('');
-    setActiveBarcodeTab('invoice');
 
     try {
       const res = await api.generateSaleInvoiceBarcode(invoiceNo);
@@ -174,50 +185,11 @@ const Sells = () => {
       } else {
         toastEvent.trigger('Failed to generate invoice barcode', 'error');
       }
-
-      if ((!existingItems || existingItems.length === 0) && invoiceId) {
-        const full = await api.getSale(invoiceId);
-        if (full && full.items) {
-          setBarcodeModalItems(full.items);
-        }
-      }
     } catch (err) {
       console.error('Barcode load error:', err);
       toastEvent.trigger('Failed to load invoice barcode', 'error');
     } finally {
       setLoadingBarcode(false);
-    }
-  };
-
-  const handleGenerateProductBarcodes = async (
-    itemsToGenerate: Array<{ medicine_name?: string; name?: string; batch_number?: string; batch?: string }>
-  ) => {
-    const payload = itemsToGenerate
-      .filter(it => (it.medicine_name || it.name || '').trim().length > 0)
-      .map(it => ({
-        name: (it.medicine_name || it.name || 'Medicine').trim(),
-        batch: (it.batch_number || it.batch || 'N/A').trim(),
-      }));
-
-    if (payload.length === 0) {
-      toastEvent.trigger('No valid items selected for product barcode generation', 'error');
-      return;
-    }
-
-    setGeneratingProductBarcode(true);
-    try {
-      const res = await api.generateMedicineBarcodes(payload);
-      if (res && res.pdfUrl) {
-        toastEvent.trigger(`Generated ${payload.length} product barcode label(s)`, 'success');
-        window.open(res.pdfUrl, '_blank');
-      } else {
-        toastEvent.trigger('Failed to generate product barcode label', 'error');
-      }
-    } catch (err) {
-      console.error('Product barcode generation error:', err);
-      toastEvent.trigger('Failed to generate product barcode label', 'error');
-    } finally {
-      setGeneratingProductBarcode(false);
     }
   };
 
@@ -358,6 +330,7 @@ const Sells = () => {
 
   const openView = async (invoice: SaleInvoice) => {
     try {
+      loadSellBillShopDetails().then(setShopDetails).catch(() => {});
       const full = await api.getSale(invoice.id);
       setBarcodeModalInvoice(null);
       setViewInvoice(full);
@@ -847,10 +820,10 @@ const Sells = () => {
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                handleOpenBarcode(inv.invoice_no, inv.id, inv.items);
+                                handleOpenBarcode(inv.invoice_no);
                               }}
                               className="p-2 rounded-lg bg-bg2 hover:bg-purple-500 hover:text-white border border-glass-border hover:border-purple-500 shadow-sm hover:shadow-[0_0_15px_rgba(168,85,247,0.4)] text-muted transition-all transform hover:scale-105 active:scale-95 cursor-pointer"
-                              title="View & Print Barcodes (Return Invoice & Product Labels)"
+                              title="View & Print Invoice Barcode (Code128 + QR)"
                             >
                               <QrCode size={14} />
                             </button>
@@ -1226,10 +1199,11 @@ const Sells = () => {
                     </div>
                   </div>
                   <button
-                    onClick={() => window.open(barcodeData.pdfUrl, '_blank')}
+                    onClick={() => window.print()}
                     className="px-3.5 py-2 bg-primary/20 hover:bg-primary text-primary hover:text-text rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 border border-primary/30 shrink-0 cursor-pointer"
+                    title="Print the complete saved bill (customer, doctor, items with batch/MRP/qty)"
                   >
-                    <Printer size={14} /> Print Barcode Label
+                    <Printer size={14} /> Print Bill
                   </button>
                 </div>
               ) : loadingBarcode ? (
@@ -1245,16 +1219,6 @@ const Sells = () => {
                     <h4 className="text-sm font-bold text-muted uppercase tracking-wider">Invoice Items</h4>
                     <span className="text-xs text-muted">{viewInvoice.items?.length || 0} item{(viewInvoice.items?.length || 0) !== 1 ? 's' : ''}</span>
                   </div>
-                  {viewInvoice.items && viewInvoice.items.length > 0 && (
-                    <button
-                      onClick={() => handleGenerateProductBarcodes(viewInvoice.items || [])}
-                      disabled={generatingProductBarcode}
-                      className="px-3 py-1.5 bg-purple-500/20 hover:bg-purple-600 text-purple-300 hover:text-text rounded-lg text-xs font-bold border border-purple-500/30 transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-                      title="Generate product barcode labels for all items in this bill (for missing/torn box barcodes)"
-                    >
-                      <QrCode size={13} /> Print All Product Barcodes
-                    </button>
-                  )}
                 </div>
                 <div className="overflow-x-auto border border-glass-border rounded-lg bg-bg2/40">
                   <table className="w-full text-left border-collapse">
@@ -1268,7 +1232,6 @@ const Sells = () => {
                         <th className="p-3 text-[10px] font-bold text-muted uppercase tracking-wider border-b border-glass-border">MRP</th>
                         <th className="p-3 text-[10px] font-bold text-muted uppercase tracking-wider border-b border-glass-border">Unit Price</th>
                         <th className="p-3 text-[10px] font-bold text-muted uppercase tracking-wider border-b border-glass-border">Subtotal</th>
-                        <th className="p-3 text-[10px] font-bold text-muted uppercase tracking-wider border-b border-glass-border text-center">Barcode Label</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1304,22 +1267,12 @@ const Sells = () => {
                             <td className="p-3 border-b border-glass-border/50 text-sm font-bold text-green">
                               ₹{Math.round(itemTotal)}
                             </td>
-                            <td className="p-3 border-b border-glass-border/50 text-center">
-                              <button
-                                onClick={() => handleGenerateProductBarcodes([{ medicine_name: item.medicine_name || `Item #${item.inventory_id}`, batch_number: item.batch_number || 'N/A' }])}
-                                disabled={generatingProductBarcode}
-                                className="px-2 py-1 bg-purple-500/10 hover:bg-purple-600 text-purple-400 hover:text-text rounded-md text-[11px] font-bold border border-purple-500/30 transition-all flex items-center gap-1 mx-auto cursor-pointer disabled:opacity-50"
-                                title="Generate product barcode label for missing/torn box barcode"
-                              >
-                                <QrCode size={11} /> Print Label
-                              </button>
-                            </td>
                           </tr>
                         );
                       })}
                       {(!viewInvoice.items || viewInvoice.items.length === 0) && (
                         <tr>
-                          <td colSpan={9} className="p-8 text-center text-muted">No items found in this invoice</td>
+                          <td colSpan={8} className="p-8 text-center text-muted">No items found in this invoice</td>
                         </tr>
                       )}
                     </tbody>
@@ -1583,6 +1536,104 @@ const Sells = () => {
             ) : (
               <div className="py-6 text-center text-sm text-muted">Failed to generate barcode label.</div>
             )}
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Complete Printable Sell Bill (hidden on screen, shown by print CSS) */}
+      {viewInvoice && createPortal(
+        <div id="printable-sell-bill" data-print-root className="hidden">
+          <div style={{ textAlign: 'center', marginBottom: '12px' }}>
+            {shopDetails.name && <h2 style={{ fontSize: '18px', fontWeight: 'bold', margin: '0 0 2px 0', color: '#000' }}>{shopDetails.name}</h2>}
+            {shopDetails.phone && <p style={{ fontSize: '11px', color: '#444', margin: '0' }}>Ph: {shopDetails.phone}</p>}
+            <p style={{ fontSize: '12px', color: '#555', margin: '2px 0' }}>Tax Invoice / Retail Counter Receipt</p>
+            <div style={{ borderBottom: '1px solid #ddd', margin: '8px 0' }} />
+          </div>
+
+          <div style={{ fontSize: '12px', marginBottom: '10px', display: 'flex', justifyContent: 'space-between', color: '#000' }}>
+            <div>
+              <p style={{ margin: '2px 0' }}><strong>Invoice No:</strong> #{viewInvoice.invoice_no}</p>
+              <p style={{ margin: '2px 0' }}><strong>Customer:</strong> {viewInvoice.customer_name || 'Walk-in'}</p>
+              {viewInvoice.customer_phone && <p style={{ margin: '2px 0' }}><strong>Phone:</strong> {viewInvoice.customer_phone}</p>}
+              {viewInvoice.doctor_name && <p style={{ margin: '2px 0' }}><strong>Doctor:</strong> {viewInvoice.doctor_name}</p>}
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <p style={{ margin: '2px 0' }}><strong>Date:</strong> {formatDate(viewInvoice.date)}</p>
+              <p style={{ margin: '2px 0' }}><strong>Payment:</strong> {viewInvoice.payment_medium || 'CASH'}</p>
+            </div>
+          </div>
+
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px', marginBottom: '12px', color: '#000' }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid #000', textTransform: 'uppercase' }}>
+                <th style={{ textAlign: 'left', padding: '5px 4px' }}>Medicine</th>
+                <th style={{ textAlign: 'left', padding: '5px 4px' }}>Batch</th>
+                <th style={{ textAlign: 'right', padding: '5px 4px' }}>MRP</th>
+                <th style={{ textAlign: 'center', padding: '5px 4px' }}>Qty</th>
+                <th style={{ textAlign: 'center', padding: '5px 4px' }}>Loose</th>
+                {(viewInvoice.items || []).some(it => (it.discount_per || 0) > 0) && (
+                  <th style={{ textAlign: 'center', padding: '5px 4px' }}>Disc%</th>
+                )}
+                <th style={{ textAlign: 'right', padding: '5px 4px' }}>Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(viewInvoice.items || []).map((item, idx) => {
+                const packSize = item.pack_size || 1;
+                const looseQty = item.loose_qty || 0;
+                const discPer = item.discount_per || 0;
+                const discountedPrice = item.unit_price * (1 - discPer / 100);
+                const itemTotal = (discountedPrice * item.quantity) + ((discountedPrice / packSize) * looseQty);
+                return (
+                  <tr key={idx} style={{ borderBottom: '1px dotted #bbb' }}>
+                    <td style={{ padding: '5px 4px' }}>{item.medicine_name || `Item #${item.inventory_id}`}</td>
+                    <td style={{ padding: '5px 4px' }}>{item.batch_number || '-'}</td>
+                    <td style={{ padding: '5px 4px', textAlign: 'right' }}>₹{item.mrp || 0}</td>
+                    <td style={{ padding: '5px 4px', textAlign: 'center' }}>{item.quantity}</td>
+                    <td style={{ padding: '5px 4px', textAlign: 'center' }}>{looseQty}</td>
+                    {(viewInvoice.items || []).some(it => (it.discount_per || 0) > 0) && (
+                      <td style={{ padding: '5px 4px', textAlign: 'center' }}>{discPer > 0 ? `${discPer}%` : '-'}</td>
+                    )}
+                    <td style={{ padding: '5px 4px', textAlign: 'right', fontWeight: 600 }}>₹{itemTotal.toFixed(2)}</td>
+                  </tr>
+                );
+              })}
+              {!viewInvoice.items?.length && (
+                <tr><td colSpan={7} style={{ padding: '8px', textAlign: 'center' }}>No items found in this invoice</td></tr>
+              )}
+            </tbody>
+          </table>
+
+          <div style={{ borderTop: '2px solid #000', paddingTop: '6px', display: 'flex', justifyContent: 'flex-end' }}>
+            <div style={{ width: '220px', fontSize: '12px', color: '#000' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span>Subtotal:</span><span>₹{Math.round(viewInvoice.subtotal || 0)}</span>
+              </div>
+              {(viewInvoice.discount || 0) > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>Discount:</span><span>-₹{Math.round(viewInvoice.discount || 0)}</span>
+                </div>
+              )}
+              {(viewInvoice.tax_amount || 0) > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>Tax (GST):</span><span>₹{Number(viewInvoice.tax_amount).toFixed(2)}</span>
+                </div>
+              )}
+              {viewInvoice.roff !== undefined && viewInvoice.roff !== null && viewInvoice.roff !== 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>Round Off:</span>
+                  <span>{viewInvoice.roff > 0 ? `+₹${viewInvoice.roff.toFixed(2)}` : `-₹${Math.abs(viewInvoice.roff).toFixed(2)}`}</span>
+                </div>
+              )}
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', fontSize: '14px', borderTop: '1px solid #000', marginTop: '4px', paddingTop: '4px' }}>
+                <span>Grand Total:</span><span>₹{Math.round(viewInvoice.total_amount || 0)}</span>
+              </div>
+            </div>
+          </div>
+
+          <div style={{ textAlign: 'center', marginTop: '18px', fontSize: '11px', color: '#777' }}>
+            Thank you for your visit! &middot; Get Well Soon
           </div>
         </div>,
         document.body

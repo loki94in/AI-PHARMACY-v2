@@ -8,31 +8,7 @@ import { api, type HistoryPrefillResult } from '../services/api';
 import { useQueryClient } from '@tanstack/react-query';
 import { invalidateAfterStockWrite } from '../utils/cacheInvalidation';
 import { toastEvent } from '../services/events';
-
-export const parsePackSizeFromPackaging = (packaging: string | null | undefined): number | null => {
-  if (!packaging) return null;
-  const trimmed = packaging.trim();
-  const stripOfMatch = trimmed.match(/^\s*(?:STRIP|PACK|BOX|BLISTER)\s+OF\s+(\d+)/i);
-  if (stripOfMatch) {
-    const size = parseInt(stripOfMatch[1], 10);
-    if (size > 0) return size;
-  }
-  const bottleOfMatch = trimmed.match(/^\s*BOTTLE\s+OF\s+(\d+)/i);
-  if (bottleOfMatch) {
-    const size = parseInt(bottleOfMatch[1], 10);
-    if (size > 0) return size;
-  }
-  if (/\b\d+\s*x\s*\d+\b/i.test(trimmed)) {
-    const parts = trimmed.split(/x/i);
-    return (parseInt(parts[0], 10) || 1) * (parseInt(parts[1], 10) || 1);
-  }
-  const match = trimmed.match(/^(\d+)/);
-  if (match) {
-    const size = parseInt(match[1], 10);
-    if (size > 0) return size;
-  }
-  return null;
-};
+import { parsePackSizeFromPackaging } from '../utils/packagingMatcher';
 
 const splitMedicineName = (name: string, packaging: string) => {
   const trimmedName = name.trim();
@@ -427,6 +403,7 @@ const UniversalMedicineEditModalInner: React.FC<UniversalMedicineEditModalProps>
 
   useEffect(() => {
     if (isCreateMode || !medicineId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- modal open/close loading gate, not a data effect
       setLoading(false);
       return;
     }
@@ -508,6 +485,7 @@ const UniversalMedicineEditModalInner: React.FC<UniversalMedicineEditModalProps>
         }
         setLoading(false);
       });
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- hydrate once per medicine; initialData/ocrData would restart mid-edit
   }, [medicineId, isCreateMode]);
 
   useEffect(() => {
@@ -523,7 +501,8 @@ const UniversalMedicineEditModalInner: React.FC<UniversalMedicineEditModalProps>
   useEffect(() => {
     if (loading) return;
     const packagingStr = getPackagingString(packQtyUnit, packType, customPackaging);
-    
+
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- derived form-field sync from pack selectors
     setForm(prev => {
       const updated = { 
         ...prev, 
@@ -545,6 +524,7 @@ const UniversalMedicineEditModalInner: React.FC<UniversalMedicineEditModalProps>
     if (!isCreateMode || loading) return;
     const term = baseName.trim();
     if (term.length < 3) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- sync reset of stale prefill below the gating threshold
       setHistoryPrefill(null);
       return;
     }

@@ -101,7 +101,6 @@ const Expiry = () => {
   // Custom Filters
   const [minQty, setMinQty] = useState('');
   const [maxQty, setMaxQty] = useState('');
-  const [] = useState(false);
   const [colFilterId, setColFilterId] = useState('');
   const [colFilterMedName, setColFilterMedName] = useState('');
   const [colFilterBatchNo, setColFilterBatchNo] = useState('');
@@ -121,7 +120,11 @@ const Expiry = () => {
   const toggleSelect = (id: number) => {
     setSelectedIds(prev => {
       const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
       return next;
     });
   };

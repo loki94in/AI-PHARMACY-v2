@@ -207,3 +207,29 @@ export function formatPackagingAndUnit(
     totalUnitsNote
   };
 }
+
+export const parsePackSizeFromPackaging = (packaging: string | null | undefined): number | null => {
+  if (!packaging) return null;
+  const trimmed = packaging.trim();
+  const stripOfMatch = trimmed.match(/^\s*(?:STRIP|PACK|BOX|BLISTER)\s+OF\s+(\d+)/i);
+  if (stripOfMatch) {
+    const size = parseInt(stripOfMatch[1], 10);
+    if (size > 0) return size;
+  }
+  const bottleOfMatch = trimmed.match(/^\s*BOTTLE\s+OF\s+(\d+)/i);
+  if (bottleOfMatch) {
+    const size = parseInt(bottleOfMatch[1], 10);
+    if (size > 0) return size;
+  }
+  if (/\b\d+\s*x\s*\d+\b/i.test(trimmed)) {
+    const parts = trimmed.split(/x/i);
+    return (parseInt(parts[0], 10) || 1) * (parseInt(parts[1], 10) || 1);
+  }
+  const match = trimmed.match(/^(\d+)/);
+  if (match) {
+    const size = parseInt(match[1], 10);
+    if (size > 0) return size;
+  }
+  return null;
+};
+

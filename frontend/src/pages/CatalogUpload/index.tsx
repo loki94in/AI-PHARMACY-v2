@@ -169,6 +169,7 @@ const ReviewDetailPane = ({ review, onApproved, onRejected, googleSearchStatus }
 
   useEffect(() => {
     if (review) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- hydrate form fields when selected review changes
       setName(review.approved_json?.name || review.extracted_json?.name || review.medicine_name || '');
       setApiReference(review.approved_json?.api_reference || review.extracted_json?.api_reference || (review.original_row_data?.api_reference as string | undefined) || '');
       setStrength(review.approved_json?.strength || review.extracted_json?.strength || (review.original_row_data?.strength as string | undefined) || '');
@@ -621,6 +622,7 @@ const CatalogUpload = () => {
   useEffect(() => {
     jobIdRef.current = jobId;
     if (jobId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- SSE events drive review refresh; this mirrors jobId only
       fetchReviews(jobId);
     }
   }, [jobId, fetchReviews]);
@@ -755,7 +757,7 @@ const CatalogUpload = () => {
       window.removeEventListener('sse-catalog-review', handleCatalogJob);
       window.removeEventListener('sse-google-verification', handleCatalogJob);
     };
-  }, [queryClient]);
+  }, [queryClient, fetchReviews]);
 
   useEffect(() => {
     if (hoveredHeader && scrollContainerRef.current) {

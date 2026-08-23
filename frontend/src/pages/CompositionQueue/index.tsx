@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Beaker, Play, Square, CheckCircle, AlertTriangle, XCircle, Save, ChevronLeft, ChevronRight, Loader2, Sparkles, Upload, Download, Search, RotateCcw, ChevronUp } from 'lucide-react';
 import { api } from '../../services/api';
+import { useApiQuery } from '../../hooks/useApiQuery';
 import { useFetchMode } from '../../hooks/useFetchMode';
 import { usePageActive } from '../../lib/keepAlive/PageActiveContext';
 
@@ -45,50 +46,39 @@ function downloadBlob(blob: Blob, filename: string) {
 interface Token { text: string; included: boolean; }
 
 function SearchTermEditor({ item, onEnriched }: { item: QueueItem; onEnriched: (id: number) => void }) {
-  const [tokens, setTokens] = useState<Token[]>([]);
-  const [, setPreview] = useState('');
-  const [loading, setLoading] = useState(true);
+  const [tokens, setTokens] = useState<Token[] | null>(null);
   const [searching, setSearching] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState('');
 
-  // Fetch default token classification from backend on mount
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    api.getTokenPreview(item.name)
-      .then(data => {
-        if (cancelled) return;
-        setTokens(data.tokens);
-        setPreview(data.preview);
-        setLoading(false);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        // Fallback: show all tokens as single chip
-        setTokens([{ text: item.name, included: true }]);
-        setPreview(item.name.toUpperCase());
-        setLoading(false);
-      });
-    return () => { cancelled = true; };
-  }, [item.name]);
+  const { data: tokenData, error: tokenError, isPending, isFetching, refetch } = useApiQuery<{ tokens: Token[]; preview: string }>(
+    ['composition-token-preview', item.name],
+    () => api.getTokenPreview(item.name)
+  );
+
+  // tokens === null means "follow server defaults" (initial load or Reset click);
+  // any chip toggle pins a local override. Failed re-fetch keeps last good data.
+  const effectiveTokens: Token[] =
+    tokens ??
+    tokenData?.tokens ??
+    (tokenError ? [{ text: item.name, included: true }] : []);
+
+  const loading = isPending || (isFetching && tokens === null);
 
   // Recompute preview whenever tokens change
-  const computedPreview = tokens
+  const computedPreview = effectiveTokens
     .filter(t => t.included)
     .map(t => t.text.toUpperCase())
     .join(' ');
 
   const toggleToken = (idx: number) => {
-    setTokens(prev => prev.map((t, i) => i === idx ? { ...t, included: !t.included } : t));
+    setTokens(prev => (prev ?? effectiveTokens).map((t, i) => i === idx ? { ...t, included: !t.included } : t));
   };
 
   const resetToDefault = () => {
-    // Reset: re-fetch defaults
-    setLoading(true);
-    api.getTokenPreview(item.name)
-      .then(data => { setTokens(data.tokens); setPreview(data.preview); setLoading(false); })
-      .catch(() => setLoading(false));
+    // Reset: drop local override and re-fetch server defaults
+    setTokens(null);
+    refetch();
   };
 
   const handleSearch = async () => {
@@ -142,7 +132,7 @@ function SearchTermEditor({ item, onEnriched }: { item: QueueItem; onEnriched: (
 
       {/* Token chips */}
       <div className="flex flex-wrap gap-1.5 mb-3">
-        {tokens.map((tok, idx) => (
+        {effectiveTokens.map((tok, idx) => (
           <button
             key={idx}
             onClick={() => toggleToken(idx)}
@@ -237,13 +227,20 @@ export default function CompositionQueue() {
     }
   }, [page, filter]);
 
-  useEffect(() => { loadStatus(); }, [loadStatus]);
-  useEffect(() => { loadQueue(); }, [loadQueue]);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- status loader is async; rule cannot see through useCallback
+    loadStatus();
+  }, [loadStatus]);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- queue loader is async; rule cannot see through useCallback
+    loadQueue();
+  }, [loadQueue]);
 
   const pageActive = usePageActive();
 
   useEffect(() => {
     if (!status?.isRunning || !statusPollControl.shouldFetch || !pageActive) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- gated poll refresh; loader is async
     loadStatus();
   }, [status?.isRunning, loadStatus, statusPollControl.shouldFetch, pageActive]);
 

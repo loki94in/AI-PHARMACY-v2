@@ -410,6 +410,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
       }, 300);
       return () => clearTimeout(timer);
     } else {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- clear stale overstock info when input empties
       setOverstockInfo(null);
     }
   }, [selectedMedicineName, product, qty]);
@@ -432,7 +433,6 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
 
   // Pending Orders States and Functions
   const [pendingOrders, setPendingOrders] = useState<SpecialOrder[]>(cachedPendingOrders);
-  const [] = useState<number | null>(null);
 
   // Pending Filter Tab State
   const [pendingFilterTab, setPendingFilterTab] = useState<'all' | 'bounced' | 'orders' | 'minstock' | 'skipped'>('all');
@@ -471,13 +471,10 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
 
   // Pending Refills States and Functions
   const [pendingRefills, setPendingRefills] = useState<Refill[]>(cachedPendingRefills);
-  const [] = useState<number | null>(null);
 
   // Reconcile Orders (unreconciled distributor email orders)
   const [reconOrders, setReconOrders] = useState<LocalReconOrder[]>(cachedReconOrders);
-  const [] = useState<number | null>(null);
-  const [] = useState<string>('');
-    const [addedReconMedicines] = useState<Record<number | string, string[]>>({});
+  const [addedReconMedicines] = useState<Record<number | string, string[]>>({});
   // Permanently Ignored Words State
   const [ignoredWords, setIgnoredWords] = useState<Array<{ id: number; word: string; source: string; created_at: string }>>(cachedIgnoredWords);
   const [showIgnoredList, setShowIgnoredList] = useState(false);
@@ -555,15 +552,8 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
 
   // High-Frequency Low Stock Auto-Refills State
   const [autoRefillItems, setAutoRefillItems] = useState<LocalAutoRefillItem[]>(cachedAutoRefillItems);
-  const [] = useState<number | null>(null);
-  const [] = useState<number | null>(null);
-  const [] = useState<string | null>(null);
 
   // Distributor Picker States (for Orders & Refills)
-  const [] = useState<number | null>(null);
-  const [] = useState<number | null>(null);
-  const [] = useState<SuggestionMedicine[]>([]);
-  const [] = useState(false);
 
   // New Special Request inline form states
   const [showNewRequestForm, setShowNewRequestForm] = useState(false);
@@ -829,6 +819,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
     if (isOpen) {
       const freshSkipped = loadInitialSkippedKeys();
       cachedSkippedItemKeys = freshSkipped;
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- hydrate skipped-keys module cache on modal open
       setSkippedItemKeys(new Set(freshSkipped));
 
       const hasCache = cachedCartDistributors.length > 0;
@@ -905,6 +896,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
     const cleanQuery = product.replace(/\s*\([^)]*\)$/, '').trim();
 
     if (cleanQuery.length < 2) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- gating rule: clear dropdown below the 2-char threshold
       setSuggestions([]);
       setShowSuggestions(false);
       return;
