@@ -1,11 +1,11 @@
 import { useState, useEffect, useRef, lazy, Suspense, useMemo, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import {} from '../../hooks/useDeferredEffect';
 import { useOnClickOutside } from '../../hooks/useOnClickOutside';
 import { createPortal } from 'react-dom';
 import { Search, ShoppingCart, Trash2, CheckCircle, Camera, Plus, X, Phone, Calendar, UserCheck, Edit, Loader2, Send, Zap, Printer, MessageSquare, FileText } from 'lucide-react';
 import AICamera from '../../components/AICamera';
-import { api, apiClient, getCompactInventoryCache, isCompactInventoryCacheReady, type SpecialOrder } from '../../services/api';
+import { api, apiClient, getCompactInventoryCache, isCompactInventoryCacheReady,
+  type SpecialOrder, type CompactInventoryItem } from '../../services/api';
 import { useApiQuery } from '../../hooks/useApiQuery';
 import { useQueryClient } from '@tanstack/react-query';
 import { toastEvent } from '../../services/events';
@@ -69,7 +69,329 @@ const ModalSkeleton = () => (
   </div>
 );
 
-const getInitialPOSTabs = () => {
+interface CartRow {
+  id: number | string;
+  medicine_id?: number | string;
+  inventory_id?: number | string;
+  name?: string;
+  medicine_name?: string;
+  batch?: string;
+  batch_no?: string;
+  batch_number?: string;
+  expiry?: string;
+  expiry_date?: string;
+  mrp?: number;
+  item_mrp?: number | string;
+  sell_price?: number | string | null;
+  unit_price?: number;
+  unitPrice?: number;
+  cost_price?: number | null;
+  costPrice?: number | null;
+  qty?: number;
+  quantity?: number;
+  looseQty?: number;
+  loose_qty?: number;
+  loose_quantity?: number;
+  discount?: number;
+  discount_per?: number;
+  discountPer?: number;
+  packSize?: number;
+  pack_size?: number | null;
+  gst_percent?: number;
+  stock_qty?: number;
+  availableStock?: number;
+  availableLooseStock?: number;
+  salts?: string;
+  isEmptyRow?: boolean;
+  allow_loose_sale?: number | boolean;
+  alternative_batches?: unknown[];
+  alternatives?: PosBatchItem[];
+  scanImage?: string;
+  rawOcrText?: string;
+  hsn_code?: string;
+  api_reference?: string;
+  manufacturer?: string;
+  packaging?: string | null;
+  is_out_of_stock?: boolean;
+  batch_quantity?: number;
+  gst?: number | string;
+  tax_percent?: number | string;
+  item_code?: string;
+  short_code?: string;
+  therapeutic?: string;
+  sub_therapeutic?: string;
+  [key: string]: unknown;
+}
+
+interface PosBatchItem {
+  id?: number | string;
+  medicine_id?: number | string;
+  inventory_id?: number | string;
+  name?: string;
+  medicine_name?: string;
+  item_code?: string;
+  short_code?: string;
+  therapeutic?: string;
+  sub_therapeutic?: string;
+  batch_no?: string;
+  expiry_date?: string;
+  expiry?: string;
+  quantity?: number;
+  stock_qty?: number;
+  loose_quantity?: number;
+  mrp?: number;
+  cost_price?: number | null;
+  unit_price?: number;
+  sell_price?: number | string | null;
+  pack_size?: number | null;
+  packaging?: string | null;
+  manufacturer?: string;
+  salts?: string;
+  hsn_code?: string;
+  api_reference?: string;
+  alternatives?: PosBatchItem[];
+  is_out_of_stock?: boolean;
+  discount?: number;
+  batch_quantity?: number;
+  __fefoRank?: string;
+  scanImage?: string;
+  rawOcrText?: string;
+  [key: string]: unknown;
+}
+
+interface POSTab {
+  id: string;
+  title?: string;
+  name?: string;
+  patientName?: string;
+  patientPhone?: string;
+  selectedCustomerId?: number | null;
+  refillEnabled?: boolean;
+  refillDays?: number;
+  doctor?: string;
+  isManualDoctor?: boolean;
+  selectedDoctorId?: number | null;
+  discount?: number;
+  sendWhatsApp?: boolean;
+  paymentMedium?: string;
+  items?: CartRow[];
+  prescriptions?: unknown[];
+}
+
+interface EditSaleLine {
+  id?: number;
+  inventory_id?: number;
+  medicine_id?: number;
+  medicine_name?: string;
+  name?: string;
+  product_name?: string;
+  batch_number?: string;
+  batch_no?: string;
+  expiry_date?: string;
+  item_mrp?: number | string;
+  mrp?: number | string;
+  unit_price?: number | string;
+  rate?: number | string;
+  sell_price?: number | string | null;
+  quantity?: number | string | null;
+  qty?: number | string | null;
+  loose_qty?: number | string | null;
+  looseQty?: number | string | null;
+  pack_size?: number | string | null;
+  packSize?: number | string | null;
+  discount_per?: number | string | null;
+  discount?: number | string | null;
+  stock_qty?: number | string | null;
+  loose_quantity?: number | string | null;
+}
+
+interface PosEditSale {
+  id: number | string;
+  invoice_no?: string;
+  customer_name?: string;
+  customer_phone?: string;
+  doctor_name?: string;
+  discount?: number | string;
+  payment_medium?: string;
+  date?: string;
+  items?: EditSaleLine[];
+  sale_items?: EditSaleLine[];
+}
+
+interface PrefillMed {
+  is_ready?: number;
+  stock_verified_override?: number;
+  medicineId?: number;
+  medicine_id?: number;
+  medicineName?: string;
+  medicine_name?: string;
+  name?: string;
+  quantity?: number | string;
+  quantity_needed?: number | string;
+  qty?: number | string;
+  looseQty?: number | string;
+  loose_qty?: number | string;
+  loose_quantity?: number | string;
+  packaging?: string | null;
+  pack_size?: number | string;
+  packSize?: number | string;
+  sell_price?: number | string | null;
+  mrp?: number | string;
+  unit_price?: number | string;
+  unitPrice?: number | string;
+  discount?: number | string;
+  batch_no?: string;
+  expiry_date?: string;
+  inventory_id?: number;
+  id?: number;
+}
+
+interface PosPrefill {
+  patientName?: string;
+  patientPhone?: string;
+  advancePayment?: number | string;
+  specialOrderId?: number;
+  customerId?: number;
+  selectedCustomerId?: number;
+  refillPatient?: boolean;
+  refillId?: number;
+  refillDays?: number;
+  doctorName?: string;
+  doctor?: string;
+  medicines?: PrefillMed[];
+  medicineId?: number;
+  medicineName?: string;
+  medicine?: PrefillMed;
+  item?: PrefillMed;
+  quantity?: number | string;
+  qty?: number | string;
+  refillIds?: number[];
+}
+
+interface PosLocationState {
+  editSale?: PosEditSale;
+  prefill?: PosPrefill;
+}
+
+type LocalApiError = { response?: { data?: { error?: string; message?: string; layer?: string } }; message?: string; layer?: string };
+
+interface MedicineQuickDetails {
+  mrp?: number | string;
+  sell_price?: number | string | null;
+  packaging?: string | null;
+  pack_size?: number | string | null;
+  api_reference?: string;
+  hsn_code?: string;
+  alternatives?: PosBatchItem[];
+}
+
+interface DoctorSuggestion {
+  id: number;
+  name: string;
+  most_common_qty?: number;
+  most_common_loose_qty?: number;
+  frequency?: number;
+  specialization?: string;
+  specialty?: string;
+  phone?: string;
+  clinic_name?: string;
+  address?: string;
+  reg_no?: string;
+  registration_number?: string;
+}
+
+interface PatientSuggestion {
+  id: number;
+  name: string;
+  phone?: string;
+  credit_balance?: number;
+  credit_enabled?: number;
+  last_sale_date?: string;
+  purchase_count?: number;
+  active_refill?: number;
+  last_purchase_date?: string;
+}
+
+interface PatientLookupResponse {
+  suggestions?: PatientSuggestion[];
+  isSuggestion?: boolean;
+}
+
+interface MedSuggestion {
+  name: string;
+  medicine_id?: number;
+  api_reference?: string;
+  manufacturer?: string;
+}
+
+interface MatchedRefill extends PrefillMed {
+  patient_name?: string;
+  patient_phone?: string;
+  doctor_name?: string;
+  medicines?: PrefillMed[];
+}
+
+interface RefillPanelGroup {
+  patient_name?: string;
+  patient_phone?: string;
+  customer_id?: number;
+  next_refill_date?: string;
+  medicines?: PrefillMed[];
+}
+
+
+interface ScanResultInfo {
+  text?: string;
+  capturedImage?: string;
+  scanImage?: string;
+  rawOcrText?: string;
+  medicineInfo?: { batchNumber?: string; potentialName?: string; mrp?: number | string; packaging?: string | null; expiryDate?: string; costPrice?: number | string | null };
+}
+
+interface SavedBillItemRow {
+  name?: string;
+  batch?: string;
+  qty?: number | string;
+  looseQty?: number | string;
+  discountPer?: number;
+  amount?: number;
+}
+
+interface StagedLine {
+  id?: number;
+  inventory_id?: number;
+  medicine_id?: number;
+  name?: string;
+  medicine_name?: string;
+  batch_no?: string;
+  mrp?: number | string;
+  sell_price?: number | string | null;
+  rate?: number | string;
+  quantity?: number | string | null;
+  qty?: number | string | null;
+  loose_qty?: number | string | null;
+  discount?: number | string | null;
+  pack_size?: number | string | null;
+  availableStock?: number | string | null;
+  stock_qty?: number | string | null;
+  loose_quantity?: number | string | null;
+  looseQty?: number | string | null;
+  unit_price?: number | string | null;
+  cost_price?: number | string | null;
+  batch_number?: string;
+  batch?: string;
+  expiry_date?: string;
+  expiry?: string;
+  salts?: string;
+}
+
+function writeRef<T>(ref: { current: T }, value: T): void {
+  ref.current = value;
+}
+
+const generatePatientDisplayId = (): string => 'P-' + Math.floor(100000 + Math.random() * 900000);
+
+const getInitialPOSTabs = (): POSTab[] => {
   const defaultTab = {
     id: 'default',
     title: 'Cart 1',
@@ -87,7 +409,7 @@ const getInitialPOSTabs = () => {
     try {
       const parsed = JSON.parse(savedTabsJson);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed.map((t, idx) => ({
+        return (parsed as POSTab[]).map((t, idx) => ({
           ...defaultTab,
           ...t,
           id: t.id || `tab_${idx}_${Date.now()}`
@@ -101,7 +423,7 @@ const getInitialPOSTabs = () => {
   return [defaultTab];
 };
 
-const getInitialPOSActiveTabId = (initialTabs: any[]) => {
+const getInitialPOSActiveTabId = (initialTabs: POSTab[]) => {
   const saved = localStorage.getItem('pos_active_tab_id');
   if (saved && initialTabs.some(t => t.id === saved)) return saved;
   return initialTabs[0]?.id || 'default';
@@ -116,19 +438,19 @@ const GROUP_BATCHES_MAX_DEPTH = 3;
 // avoids recomputing the same medicine's alternatives subtree repeatedly
 // within a single groupBatches() invocation/render cycle.
 const groupBatchesInternal = (
-  items: any[],
+  items: PosBatchItem[],
   depth: number,
-  cache: Map<number, { input: any[]; output: any[] }>
-): any[] => {
-  const grouped: any[] = [];
-  const map = new Map<number, any>();
+  cache: Map<number, { input: PosBatchItem[]; output: PosBatchItem[] }>
+): PosBatchItem[] => {
+  const grouped: PosBatchItem[] = [];
+  const map = new Map<number, PosBatchItem>();
 
   // FEFO rank for choosing which batch the sale will actually target:
   // batches that still have strips beat loose-only batches; among those, earliest expiry wins.
   const fefoRank = (stripQty: number, exp?: string) =>
     `${Number(stripQty) > 0 ? 0 : 1}|${exp || '9999-12'}`;
 
-  const groupAlternatives = (medId: number, altItems: any[]): any[] => {
+  const groupAlternatives = (medId: number, altItems: PosBatchItem[]): PosBatchItem[] => {
     if (depth >= GROUP_BATCHES_MAX_DEPTH) return [];
     const cached = cache.get(medId);
     if (cached && cached.input === altItems) {
@@ -143,10 +465,10 @@ const groupBatchesInternal = (
     // Exclude expired batches strictly from POS sales
     if (isExpiredDate(item.expiry_date || item.expiry)) continue;
 
-    const medId = item.medicine_id || item.inventory_id || Math.random();
-    const stripQty = item.quantity || 0;
+    const medId = Number(item.medicine_id || item.inventory_id) || Math.random();
+    const stripQty = Number(item.quantity || 0);
     if (!map.has(medId)) {
-      const copy = {
+      const copy: PosBatchItem = {
         ...item,
         quantity: stripQty, // running total across batches (display only)
         batch_quantity: stripQty, // stock of the chosen batch — what the sale can actually use
@@ -161,13 +483,13 @@ const groupBatchesInternal = (
       map.set(medId, copy);
       grouped.push(copy);
     } else {
-      const existing = map.get(medId);
+      const existing = map.get(medId)!;
       existing.quantity = (existing.quantity || 0) + stripQty;
 
       // FEFO (First Expiry, First Out): adopt this batch if it ranks better,
       // keeping its OWN stock figures so the cart never mixes one batch's id with another's quantity.
       const rank = fefoRank(stripQty, item.expiry_date);
-      if (rank < existing.__fefoRank) {
+      if (rank < existing.__fefoRank!) {
         existing.__fefoRank = rank;
         existing.inventory_id = item.inventory_id;
         existing.batch_no = item.batch_no;
@@ -182,28 +504,28 @@ const groupBatchesInternal = (
       if (item.alternatives && Array.isArray(item.alternatives) && item.alternatives.length > 0) {
         existing.alternatives = depth >= GROUP_BATCHES_MAX_DEPTH
           ? existing.alternatives
-          : groupBatchesInternal([...existing.alternatives, ...item.alternatives], depth + 1, cache);
+          : groupBatchesInternal([...(existing.alternatives ?? []), ...(item.alternatives ?? [])], depth + 1, cache);
       }
     }
   }
   return grouped;
 };
 
-const groupBatches = (items: any[]): any[] => {
-  return groupBatchesInternal(items, 0, new Map<number, { input: any[]; output: any[] }>());
+const groupBatches = (items: PosBatchItem[]): PosBatchItem[] => {
+  return groupBatchesInternal(items, 0, new Map<number, { input: PosBatchItem[]; output: PosBatchItem[] }>());
 };
 
 // Stable empty array reference to prevent reference-mismatch state updates
-const EMPTY_ARRAY: any[] = [];
+const EMPTY_ARRAY: never[] = [];
 
 
-const filterLocalInventory = (query: string, inventory: any[]): any[] => {
+const filterLocalInventory = (query: string, inventory: PosBatchItem[]): PosBatchItem[] => {
   if (!query || query.trim().length < 2) return [];
   const term = query.trim().toLowerCase();
   
   // Filter strictly for items present in active inventory with positive stock AND NOT EXPIRED
   const validInventory = inventory.filter(item => {
-    const hasInventory = !!item.inventory_id && ((item.stock_qty || item.quantity || 0) > 0 || (item.loose_quantity || 0) > 0);
+    const hasInventory = !!item.inventory_id && (Number(item.stock_qty || item.quantity || 0) > 0 || Number(item.loose_quantity || 0) > 0);
     const expired = isExpiredDate(item.expiry_date || item.expiry);
     return hasInventory && !expired;
   });
@@ -243,9 +565,9 @@ const filterLocalInventory = (query: string, inventory: any[]): any[] => {
   return [...prefixes, ...infixes].slice(0, 30);
 };
 
-const mapEditSaleItemsToCart = (itemsList: any[]): any[] => {
+const mapEditSaleItemsToCart = (itemsList: EditSaleLine[]): CartRow[] => {
   if (!Array.isArray(itemsList) || itemsList.length === 0) return [];
-  const mapped: any[] = itemsList.map((it: any, idx: number) => {
+  const mapped: CartRow[] = itemsList.map((it, idx) => {
     const itemQty = it.quantity !== undefined && it.quantity !== null 
       ? Number(it.quantity) 
       : (it.qty !== undefined && it.qty !== null ? Number(it.qty) : 0);
@@ -280,7 +602,7 @@ const mapEditSaleItemsToCart = (itemsList: any[]): any[] => {
   return mapped;
 };
 
-function makeEmptyCartRow(): any {
+function makeEmptyCartRow(): CartRow {
   return {
     id: 'empty_row_' + Date.now(),
     name: '',
@@ -296,16 +618,17 @@ function makeEmptyCartRow(): any {
 }
 
 // Universal FEFO Batch Allocator: Distributes requested quantity across unexpired batches
+// eslint-disable-next-line react-refresh/only-export-components -- allocator shared by POS flows
 export function allocateMedicineBatches(params: {
   medicineId: number;
   medicineName: string;
   requestedQty: number;
   requestedLooseQty: number;
   packSize?: number;
-  fallbackItem?: any;
-  compactInventory: any[];
+  fallbackItem?: Partial<CartRow>;
+  compactInventory: CompactInventoryItem[];
   editingInvoiceId?: number | null;
-}): any[] {
+}): CartRow[] {
   const { medicineId, medicineName, compactInventory, editingInvoiceId, requestedQty, requestedLooseQty } = params;
   const pSize = Math.max(1, params.packSize || params.fallbackItem?.packSize || params.fallbackItem?.pack_size || 1);
   const totalRequestedTablets = (requestedQty * pSize) + (requestedLooseQty || 0);
@@ -401,7 +724,7 @@ export function allocateMedicineBatches(params: {
 
   // 4. Distribute the requested quantity across batches
   let remainingTablets = totalRequestedTablets;
-  const allocations: any[] = [];
+  const allocations: CartRow[] = [];
   let totalAvailableTablets = 0;
 
   for (const batch of activeBatches) {
@@ -498,7 +821,7 @@ const POS = () => {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const locState = location.state as any;
+  const locState = location.state as PosLocationState;
   const editSaleFromState = locState?.editSale || null;
 
   const [initialTabs] = useState(() => {
@@ -535,13 +858,28 @@ const POS = () => {
   const [patientName, setPatientName] = useState(() => editSaleFromState?.customer_name || initialActiveTab.patientName || '');
   const [patientPhone, setPatientPhone] = useState(() => editSaleFromState?.customer_phone || initialActiveTab.patientPhone || '');
   const [selectedCustomerId, setSelectedCustomerId] = useState<number | null>(initialActiveTab.selectedCustomerId || null);
-  const [patientId] = useState('P-' + Math.floor(100000 + Math.random() * 900000));
+  const [patientId] = useState(generatePatientDisplayId());
   const [refillEnabled, setRefillEnabled] = useState(initialActiveTab.refillEnabled || false);
   const [refillDays, setRefillDays] = useState(initialActiveTab.refillDays || 30);
   const [activeRefillId, setActiveRefillId] = useState<number | null>(null);
-  const [matchedRefill, setMatchedRefill] = useState<any | null>(null);
+  const [matchedRefill, setMatchedRefill] = useState<MatchedRefill | null>(null);
   const [dismissedRefillId, setDismissedRefillId] = useState<number | null>(null);
 
+  const productSearchRef = useRef<HTMLDivElement>(null);
+  const activeRowRef = useRef<HTMLDivElement>(null);
+  const skipEmptyRowAutofocusRef = useRef(false);
+  // ponytail: generation counter to invalidate stale queueMicrotask closures from addToCart
+  // when the cart is replaced wholesale (edit-bill load, tab switch, clear).
+  const cartGenerationRef = useRef(0);
+  const patientSuggestionsRef = useRef<HTMLDivElement>(null);
+  const doctorSuggestionsRef = useRef<HTMLDivElement>(null);
+  const patientSectionRef = useRef<HTMLDivElement>(null);
+  const doctorSectionRef = useRef<HTMLDivElement>(null);
+  const searchResultsRef = useRef<HTMLDivElement>(null);
+  const rowSearchResultsRef = useRef<HTMLDivElement>(null);
+  const selectedCustomerIdRef = useRef<number | null>(null);
+  const justSelectedPatientRef = useRef<boolean>(false);
+  const selectedDoctorIdRef = useRef<number | null>(null);
   // Auto-focus Patient Name input on POS page mount so user can immediately start typing
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -554,8 +892,107 @@ const POS = () => {
     return () => clearTimeout(timer);
   }, []);
 
+  const [showPatientModal, setShowPatientModal] = useState(false);
+  const [showBarcodeModal, setShowBarcodeModal] = useState(false);
+  const [lastSavedInvoiceNo, setLastSavedInvoiceNo] = useState('');
+  const [lastSavedItems, setLastSavedItems] = useState<SavedBillItemRow[]>([]);
+  const [lastSavedPatientName, setLastSavedPatientName] = useState('');
+  const [lastSavedPatientPhone, setLastSavedPatientPhone] = useState('');
+  const [lastSavedGrandTotal, setLastSavedGrandTotal] = useState(0);
+  const [lastSavedPaymentMedium, setLastSavedPaymentMedium] = useState('CASH');
+  const [lastSavedDoctorName, setLastSavedDoctorName] = useState('');
+  const [lastSavedWasWhatsAppSent, setLastSavedWasWhatsAppSent] = useState(false);
+  const [lastSavedBillDiscount, setLastSavedBillDiscount] = useState(0);
+  const [lastSavedCreditDues, setLastSavedCreditDues] = useState<{ invoice_no: string; total_amount: number }[] | null>(null);
+  const [lastSavedCreditBalance, setLastSavedCreditBalance] = useState(0);
+  const [lastSavedNextRefillDue, setLastSavedNextRefillDue] = useState<string | null>(null);
+  const [editingInvoiceId, setEditingInvoiceId] = useState<number | null>(() => Number(editSaleFromState?.id) || null);
+  const [editingInvoiceNo, setEditingInvoiceNo] = useState<string | null>(() => (editSaleFromState?.invoice_no || editSaleFromState?.id || null) as string | null);
+  const [finalizingStagedSale, setFinalizingStagedSale] = useState<{ id: number } | null>(null);
+  // ponytail: stores refill IDs from CRM prefill; cleared after bill save (fulfill call)
+  const pendingRefillIdsRef = useRef<number[]>([]);
+  const pendingDirectSaveRef = useRef<boolean>(false);
+  const [doctor, setDoctor] = useState(() => editSaleFromState?.doctor_name || initialActiveTab.doctor || '');
+  const [isDoctorDropdownOpen, setIsDoctorDropdownOpen] = useState(false);
+  const [doctorHighlightIndex, setDoctorHighlightIndex] = useState(-1);
+  const [isManualDoctor, setIsManualDoctor] = useState(initialActiveTab.isManualDoctor || false);
+  const [selectedDoctorId, setSelectedDoctorId] = useState<number | null>(initialActiveTab.selectedDoctorId || null);
+  const [doctorSuggestions, setDoctorSuggestions] = useState<DoctorSuggestion[]>([]);
+  const [, setDoctorComboSuggestions] = useState<DoctorSuggestion[]>([]);
+  const [showSearchDropdown, setShowSearchDropdown] = useState(false);
+  
+  // Doctor Modal state
+  const [showDoctorModal, setShowDoctorModal] = useState(false);
+  const [editingDoctorId, setEditingDoctorId] = useState<number | string | null>(null);
+  const [newDoctorName, setNewDoctorName] = useState('');
+  const [newDoctorSpecialty, setNewDoctorSpecialty] = useState('');
+  const [newDoctorPhone, setNewDoctorPhone] = useState('');
+  const [newDoctorClinic, setNewDoctorClinic] = useState('');
+  const [newDoctorRegNo, setNewDoctorRegNo] = useState('');
+  // Patient autocomplete
+  const [patientSuggestions, setPatientSuggestions] = useState<PatientSuggestion[]>([]);
+  const [showPatientSuggestions, setShowPatientSuggestions] = useState(false);
+  const [isPatientFuzzyMatch, setIsPatientFuzzyMatch] = useState(false);
+  const [patientHighlightIndex, setPatientHighlightIndex] = useState(-1);
+  const [discount, setDiscount] = useState(() => editSaleFromState?.discount !== undefined ? Number(editSaleFromState.discount || 0) : (initialActiveTab.discount || 0));
+  const [date, setDate] = useState(() => editSaleFromState?.date ? editSaleFromState.date.split('T')[0] : getLocalDateString());
+  const [cart, setCart] = useState<CartRow[]>(() => {
+    if (initialActiveTab.items && initialActiveTab.items.length > 0) {
+      return initialActiveTab.items;
+    }
+    return [makeEmptyCartRow()];
+  });
+  const [sendWhatsApp, setSendWhatsApp] = useState(initialActiveTab.sendWhatsApp || false); // DEFAULT: OFF
+  const [paymentMedium, setPaymentMedium] = useState<string>(() => editSaleFromState?.payment_medium || initialActiveTab.paymentMedium || 'CASH'); // DEFAULT: CASH
+  const queryClient = useQueryClient();
+
+  const specialOrdersControl = useFetchMode('pos.specialOrders');
+  const doctorsControl = useFetchMode('pos.doctors');
+
+  const handlePosRowInputKeyDown = (e: React.KeyboardEvent, index: number, fieldName: string) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      const targetIndex = index + 1;
+      if (targetIndex < cart.length) {
+        const el = (
+          document.querySelector(`input[data-pos-row-index="${targetIndex}"][data-pos-field="${fieldName}"]`) ||
+          document.getElementById(`row-${fieldName}-input-${targetIndex}`)
+        ) as HTMLInputElement;
+        if (el) {
+          el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+          el.focus();
+          el.select();
+        }
+      }
+      return;
+    }
+
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      const targetIndex = index - 1;
+      if (targetIndex >= 0) {
+        const el = (
+          document.querySelector(`input[data-pos-row-index="${targetIndex}"][data-pos-field="${fieldName}"]`) ||
+          document.getElementById(`row-${fieldName}-input-${targetIndex}`)
+        ) as HTMLInputElement;
+        if (el) {
+          el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+          el.focus();
+          el.select();
+        }
+      }
+      return;
+    }
+  };
+
+  // B1: the cart itself loads immediately (lazy-initialized from localStorage,
+  // no network call). These three non-essential mount fetches (special orders,
+  // common combinations, doctors list) are staggered ~500ms after mount so
+  // they don't all compete with the cart/checkout UI for bandwidth/CPU on
+  // initial page load.
   // Hydrate POS cart from URL parameters for automatic refill checkouts
   useEffect(() => {
+  
     const params = new URLSearchParams(window.location.search);
     const refillPatientName = params.get('refillPatientName');
     const refillPatientPhone = params.get('refillPatientPhone');
@@ -566,6 +1003,7 @@ const POS = () => {
     const refillDaysParam = params.get('refillDays') || '30';
 
     if (refillPatientName && refillMedicineId && refillMedicineName && refillId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot URL hydration seeds cart
       setPatientName(refillPatientName);
       setPatientPhone(refillPatientPhone || '');
       setRefillEnabled(true);
@@ -636,11 +1074,12 @@ const POS = () => {
 
   // Hydrate POS cart from router state parameter when editing an existing bill or prefilling
   useEffect(() => {
-    const locState = location.state as any;
+      const locState = location.state as PosLocationState;
     if (locState && locState.editSale) {
       const editSale = locState.editSale;
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- edit-bill hydration loads invoice
       setEditingInvoiceId(Number(editSale.id) || null);
-      setEditingInvoiceNo(editSale.invoice_no || editSale.id || null);
+      setEditingInvoiceNo((editSale.invoice_no || editSale.id || null) as string | null);
       if (editSale.customer_name) setPatientName(editSale.customer_name);
       if (editSale.customer_phone) setPatientPhone(editSale.customer_phone);
       if (editSale.doctor_name) setDoctor(editSale.doctor_name);
@@ -651,7 +1090,7 @@ const POS = () => {
       const itemsList = Array.isArray(editSale.items) ? editSale.items : (Array.isArray(editSale.sale_items) ? editSale.sale_items : []);
       const cartItems = mapEditSaleItemsToCart(itemsList);
       if (cartItems.length > 0) {
-        cartGenerationRef.current += 1;
+        writeRef(cartGenerationRef, cartGenerationRef.current + 1);
         setCart(cartItems);
       }
       toastEvent.trigger(`Loaded Bill #${editSale.invoice_no || editSale.id} into POS for Editing`, 'info');
@@ -659,9 +1098,10 @@ const POS = () => {
       return;
     }
 
-    if (location.state && (location.state as any).prefill) {
-      const prefill = (location.state as any).prefill;
-      const { patientName: name, patientPhone: phone, advancePayment, specialOrderId, refillPatient, refillId, refillDays: rDays, doctorName, doctor: docName, selectedCustomerId: prefCustId, customerId: prefCId } = prefill;
+    const posState = location.state as PosLocationState | null;
+    if (posState && posState.prefill) {
+      const prefill = posState.prefill;
+      const { patientName: name, patientPhone: phone, advancePayment, refillPatient, refillId, refillDays: rDays, doctorName, doctor: docName, selectedCustomerId: prefCustId, customerId: prefCId } = prefill;
       // ponytail: capture refillIds so we can fulfill after successful bill save
       if (Array.isArray(prefill.refillIds) && prefill.refillIds.length > 0) {
         pendingRefillIdsRef.current = prefill.refillIds.map(Number).filter(Boolean);
@@ -677,7 +1117,7 @@ const POS = () => {
         selectedCustomerIdRef.current = resolvedCId;
       }
       if (doctorName || docName) {
-        setDoctor(doctorName || docName);
+        setDoctor(doctorName || docName || '');
       }
       if (refillPatient || refillId) {
         setRefillEnabled(true);
@@ -706,7 +1146,7 @@ const POS = () => {
               } catch {}
             }
 
-            const expandedRows: any[] = [];
+            const expandedRows: CartRow[] = [];
 
             for (const med of rawMedsList) {
               const targetId = Number(med.medicineId || med.medicine_id || med.id || 0);
@@ -739,8 +1179,8 @@ const POS = () => {
                 medicineName: targetName,
                 requestedQty: targetQty,
                 requestedLooseQty: targetLooseQty,
-                packSize: pSize,
-                fallbackItem,
+                packSize: Number(pSize) || 1,
+                fallbackItem: fallbackItem as Partial<CartRow>,
                 compactInventory: compactInv,
                 editingInvoiceId: null
               });
@@ -835,7 +1275,7 @@ const POS = () => {
             if (expandedRows.length > 0) {
               const emptyTrailingRow = makeEmptyCartRow();
               const finalCart = [...expandedRows, emptyTrailingRow];
-              cartGenerationRef.current += 1;
+              writeRef(cartGenerationRef, cartGenerationRef.current + 1);
               setCart(finalCart);
               toastEvent.trigger(`Loaded ${expandedRows.length} item line(s) into POS`, 'success', '/pos');
             }
@@ -847,169 +1287,31 @@ const POS = () => {
       fetchAndAdd();
       navigate(location.pathname, { replace: true, state: {} });
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot hydration; deps would refire loads
   }, [location.state, navigate]);
 
-  const [showPatientModal, setShowPatientModal] = useState(false);
-  const [showBarcodeModal, setShowBarcodeModal] = useState(false);
-  const [lastSavedInvoiceNo, setLastSavedInvoiceNo] = useState('');
-  const [lastSavedItems, setLastSavedItems] = useState<any[]>([]);
-  const [lastSavedPatientName, setLastSavedPatientName] = useState('');
-  const [lastSavedPatientPhone, setLastSavedPatientPhone] = useState('');
-  const [lastSavedGrandTotal, setLastSavedGrandTotal] = useState(0);
-  const [lastSavedPaymentMedium, setLastSavedPaymentMedium] = useState('CASH');
-  const [lastSavedDoctorName, setLastSavedDoctorName] = useState('');
-  const [lastSavedWasWhatsAppSent, setLastSavedWasWhatsAppSent] = useState(false);
-  const [editingInvoiceId, setEditingInvoiceId] = useState<number | null>(() => Number(editSaleFromState?.id) || null);
-  const [editingInvoiceNo, setEditingInvoiceNo] = useState<string | null>(() => editSaleFromState?.invoice_no || editSaleFromState?.id || null);
-  const [finalizingStagedSale, setFinalizingStagedSale] = useState<{ id: number } | null>(null);
-  // ponytail: stores refill IDs from CRM prefill; cleared after bill save (fulfill call)
-  const pendingRefillIdsRef = useRef<number[]>([]);
-  const pendingDirectSaveRef = useRef<boolean>(false);
-  const [doctor, setDoctor] = useState(() => editSaleFromState?.doctor_name || initialActiveTab.doctor || '');
-  const [isDoctorDropdownOpen, setIsDoctorDropdownOpen] = useState(false);
-  const [doctorHighlightIndex, setDoctorHighlightIndex] = useState(-1);
-  const [isManualDoctor, setIsManualDoctor] = useState(initialActiveTab.isManualDoctor || false);
-  const [selectedDoctorId, setSelectedDoctorId] = useState<number | null>(initialActiveTab.selectedDoctorId || null);
-  const [doctorSuggestions, setDoctorSuggestions] = useState<any[]>([]);
-  const [, setDoctorComboSuggestions] = useState<any[]>([]);
-  const [showSearchDropdown, setShowSearchDropdown] = useState(false);
-  
-  // Doctor Modal state
-  const [showDoctorModal, setShowDoctorModal] = useState(false);
-  const [editingDoctorId, setEditingDoctorId] = useState<number | string | null>(null);
-  const [newDoctorName, setNewDoctorName] = useState('');
-  const [newDoctorSpecialty, setNewDoctorSpecialty] = useState('');
-  const [newDoctorPhone, setNewDoctorPhone] = useState('');
-  const [newDoctorClinic, setNewDoctorClinic] = useState('');
-  const [newDoctorRegNo, setNewDoctorRegNo] = useState('');
-  // Patient autocomplete
-  const [patientSuggestions, setPatientSuggestions] = useState<any[]>([]);
-  const [showPatientSuggestions, setShowPatientSuggestions] = useState(false);
-  const [isPatientFuzzyMatch, setIsPatientFuzzyMatch] = useState(false);
-  const [patientHighlightIndex, setPatientHighlightIndex] = useState(-1);
-  const [discount, setDiscount] = useState(() => editSaleFromState?.discount !== undefined ? Number(editSaleFromState.discount || 0) : (initialActiveTab.discount || 0));
-  const [date, setDate] = useState(() => editSaleFromState?.date ? editSaleFromState.date.split('T')[0] : getLocalDateString());
-  const [cart, setCart] = useState<any[]>(() => {
-    if (initialActiveTab.items && initialActiveTab.items.length > 0) {
-      return initialActiveTab.items;
-    }
-    return [makeEmptyCartRow()];
-  });
-  const [sendWhatsApp, setSendWhatsApp] = useState(initialActiveTab.sendWhatsApp || false); // DEFAULT: OFF
-  const [paymentMedium, setPaymentMedium] = useState<string>(() => editSaleFromState?.payment_medium || initialActiveTab.paymentMedium || 'CASH'); // DEFAULT: CASH
-  const queryClient = useQueryClient();
-
-  const specialOrdersControl = useFetchMode('pos.specialOrders');
-  const combinationsControl = useFetchMode('pos.combinations');
-  const doctorsControl = useFetchMode('pos.doctors');
-
-  const handlePosRowInputKeyDown = (e: React.KeyboardEvent, index: number, fieldName: string) => {
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      const targetIndex = index + 1;
-      if (targetIndex < cart.length) {
-        const el = (
-          document.querySelector(`input[data-pos-row-index="${targetIndex}"][data-pos-field="${fieldName}"]`) ||
-          document.getElementById(`row-${fieldName}-input-${targetIndex}`)
-        ) as HTMLInputElement;
-        if (el) {
-          el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-          el.focus();
-          el.select();
-        }
-      }
-      return;
-    }
-
-    if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      const targetIndex = index - 1;
-      if (targetIndex >= 0) {
-        const el = (
-          document.querySelector(`input[data-pos-row-index="${targetIndex}"][data-pos-field="${fieldName}"]`) ||
-          document.getElementById(`row-${fieldName}-input-${targetIndex}`)
-        ) as HTMLInputElement;
-        if (el) {
-          el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-          el.focus();
-          el.select();
-        }
-      }
-      return;
-    }
-  };
-
-  // B1: the cart itself loads immediately (lazy-initialized from localStorage,
-  // no network call). These three non-essential mount fetches (special orders,
-  // common combinations, doctors list) are staggered ~500ms after mount so
-  // they don't all compete with the cart/checkout UI for bandwidth/CPU on
-  // initial page load.
   const [mountFetchesReady, setMountFetchesReady] = useState(false);
   useEffect(() => {
     const timer = setTimeout(() => setMountFetchesReady(true), 500);
     return () => clearTimeout(timer);
   }, []);
 
-  const { data: specialOrders = [] } = useApiQuery<any[]>(
+  const { data: specialOrders = [] } = useApiQuery<SpecialOrder[]>(
     'pos-special-orders',
-    () => api.getOrders().then(data => Array.isArray(data) ? data.filter(o => o.status === 'Pending' || o.status === 'Ordered') : []),
+    () => api.getOrders().then((data: unknown) => Array.isArray(data) ? (data as SpecialOrder[]).filter(o => o.status === 'Pending' || o.status === 'Ordered') : []),
     { enabled: mountFetchesReady && specialOrdersControl.shouldFetch }
   );
 
-  const { data: commonCombinations = [] } = useApiQuery<any[]>(
-    'pos-common-combinations',
-    async () => {
-      const data = await api.getInventory({ limit: 12 });
-      if (!Array.isArray(data)) return [];
-      const topItems = data.slice(0, 12).map(med => ({
-        id: med.id,
-        name: med.name,
-        batch: med.batch_number || '',
-        expiry: med.expiry_date || '',
-        mrp: med.mrp || 0,
-        costPrice: med.purchase_price || med.cost_price || 0,
-        salts: med.hsn || '',
-        packSize: parseInt(med.pack_size || '1', 10) || 1,
-        recommendedQty: 1,
-        recommendedLooseQty: 0,
-        recommendationMsg: '',
-        quantity: med.stock_quantity
-      }));
-
-      try {
-        const medNames = topItems.map(m => m.name).join(',');
-        const response = await apiClient.get('/sales/recommend-quantity/batch', { params: { medicineNames: medNames } });
-        const recommendations = response.data || {};
-
-        return topItems.map(med => {
-          const rec = recommendations[med.name];
-          if (rec) {
-            return {
-              ...med,
-              recommendedQty: rec.type === 'strip' ? (rec.recommendedQty || 1) : 0,
-              recommendedLooseQty: rec.type === 'loose' ? (rec.recommendedQty || 1) : 0,
-              recommendationMsg: rec.message || ''
-            };
-          }
-          return med;
-        });
-      } catch (err) {
-        console.error('Batch quantity enrichment failed:', err);
-        return topItems;
-      }
-    },
-    { enabled: mountFetchesReady && combinationsControl.shouldFetch }
-  );
-
-  const [rowBatchesList, setRowBatchesList] = useState<any[]>([]);
+  const [rowBatchesList, setRowBatchesList] = useState<PosBatchItem[]>([]);
   const [activeBatchRowId, setActiveBatchRowId] = useState<number | null>(null);
 
   // Multi-cart tab states
-  const [tabs, setTabs] = useState<any[]>(initialTabs);
+  const [tabs, setTabs] = useState<POSTab[]>(initialTabs);
   const [activeTabId, setActiveTabId] = useState<string>(initialActiveTabId);
 
   // Synchronize active states with the active tab in the tabs list
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- mirrors live state into tab
     setTabs(prev => {
       const idx = prev.findIndex(t => t.id === activeTabId);
       if (idx === -1) return prev;
@@ -1063,6 +1365,7 @@ const POS = () => {
   useEffect(() => {
     // 1) Auto-initialize with an empty row if the cart is completely empty
     if (cart.length === 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- auto-seed empty cart row
       setCart([makeEmptyCartRow()]);
       return;
     }
@@ -1080,7 +1383,7 @@ const POS = () => {
   // Autofocus the next empty row's medicine input when cart length increases or changes
   useEffect(() => {
     if (skipEmptyRowAutofocusRef.current) {
-      skipEmptyRowAutofocusRef.current = false;
+      writeRef(skipEmptyRowAutofocusRef, false);
       return;
     }
     if (cart.length > 0) {
@@ -1095,6 +1398,7 @@ const POS = () => {
         }, 80);
       }
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- length-only trigger avoids focus loops
   }, [cart.length]);
 
   // Clean up any potential legacy conflicting local storage keys to ensure robust cache
@@ -1189,19 +1493,19 @@ const POS = () => {
     }
     setTabs(filtered.map((t, idx) => ({
       ...t,
-      name: t.name.startsWith('Cart ') ? `Cart ${idx + 1}` : t.name
+      name: (t.name || '').startsWith('Cart ') ? `Cart ${idx + 1}` : t.name
     })));
   };
 
-  const getTabItemsCount = (tab: any) => {
+  const getTabItemsCount = (tab: POSTab) => {
     if (tab.id === activeTabId) {
       return cart.filter(item => !item.isEmptyRow).length;
     }
     const items = tab.items || [];
-    return items.filter((item: any) => !item.isEmptyRow).length;
+    return items.filter(item => !item.isEmptyRow).length;
   };
 
-  const updateCart = (newCartOrFn: any[] | ((prev: any[]) => any[])) => {
+  const updateCart = (newCartOrFn: CartRow[] | ((prev: CartRow[]) => CartRow[])) => {
     setCart(prev => {
       const next = typeof newCartOrFn === 'function' ? newCartOrFn(prev) : newCartOrFn;
       return next;
@@ -1212,7 +1516,7 @@ const POS = () => {
     setPatientName(name);
   };
   
-  const { data: doctorsList } = useApiQuery<any[]>(
+  const { data: doctorsList } = useApiQuery<DoctorSuggestion[]>(
     'crm-doctors',
     () => api.getDoctors(),
     { enabled: mountFetchesReady && doctorsControl.shouldFetch }
@@ -1230,9 +1534,9 @@ const POS = () => {
 
   // Handle auto-resolving doctor ID from typed or selected name
   useEffect(() => {
-    if (doctor.trim() === '') {
+      if (doctor.trim() === '') {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reconciles typed doctor with id
       setSelectedDoctorId(null);
-      setDoctorSuggestions(EMPTY_ARRAY);
       setDoctorComboSuggestions(EMPTY_ARRAY);
       return;
     }
@@ -1241,7 +1545,6 @@ const POS = () => {
       setSelectedDoctorId(match.id);
     } else {
       setSelectedDoctorId(null);
-      setDoctorSuggestions(EMPTY_ARRAY);
       setDoctorComboSuggestions(EMPTY_ARRAY);
     }
   }, [doctor, allDoctors]);
@@ -1252,7 +1555,7 @@ const POS = () => {
     if (selectedDoctorId) {
       const timer = setTimeout(() => {
         api.getDoctorSuggestions(selectedDoctorId)
-          .then((data: any[]) => {
+          .then(data => {
             if (active && Array.isArray(data)) {
               setDoctorSuggestions(data);
             }
@@ -1260,7 +1563,6 @@ const POS = () => {
           .catch(err => {
             if (active) {
               console.error('Failed to fetch doctor suggestions:', err);
-              setDoctorSuggestions(EMPTY_ARRAY);
             }
           });
       }, 200);
@@ -1269,37 +1571,23 @@ const POS = () => {
         clearTimeout(timer);
       };
     } else {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- clears stale Rx chips
       setDoctorSuggestions(EMPTY_ARRAY);
     }
   }, [selectedDoctorId]);
 
-  const [searchResults, setSearchResults] = useState<any[]>([]);
-  const [onlineResults, setOnlineResults] = useState<any[]>([]);
+  const [searchResults, setSearchResults] = useState<PosBatchItem[]>([]);
+  const [onlineResults, setOnlineResults] = useState<PosBatchItem[]>([]);
   const [searchingOnline, setSearchingOnline] = useState(false);
-  const [suggestions, setSuggestions] = useState<any[]>([]);
+  const [suggestions, setSuggestions] = useState<MedSuggestion[]>([]);
   const [isSearchExpanded, setIsSearchExpanded] = useState(false);
 
   const [activeRowSearchIndex, setActiveRowSearchIndex] = useState<number | null>(null);
   const [rowSearchTerm, setRowSearchTerm] = useState('');
-  const [rowSearchResults, setRowSearchResults] = useState<any[]>([]);
+  const [rowSearchResults, setRowSearchResults] = useState<PosBatchItem[]>([]);
   const [searchHighlightIndex, setSearchHighlightIndex] = useState(-1);
   const [rowSearchHighlightIndex, setRowSearchHighlightIndex] = useState(-1);
 
-  const productSearchRef = useRef<HTMLDivElement>(null);
-  const activeRowRef = useRef<HTMLDivElement>(null);
-  const skipEmptyRowAutofocusRef = useRef(false);
-  // ponytail: generation counter to invalidate stale queueMicrotask closures from addToCart
-  // when the cart is replaced wholesale (edit-bill load, tab switch, clear).
-  const cartGenerationRef = useRef(0);
-  const patientSuggestionsRef = useRef<HTMLDivElement>(null);
-  const doctorSuggestionsRef = useRef<HTMLDivElement>(null);
-  const patientSectionRef = useRef<HTMLDivElement>(null);
-  const doctorSectionRef = useRef<HTMLDivElement>(null);
-  const searchResultsRef = useRef<HTMLDivElement>(null);
-  const rowSearchResultsRef = useRef<HTMLDivElement>(null);
-  const selectedCustomerIdRef = useRef<number | null>(null);
-  const justSelectedPatientRef = useRef<boolean>(false);
-  const selectedDoctorIdRef = useRef<number | null>(null);
   const justSelectedDoctorRef = useRef<boolean>(false);
 
   const focusMedicineSearch = useCallback(() => {
@@ -1396,6 +1684,7 @@ const POS = () => {
   // not on every keystroke — both search dropdowns below consume this same
   // reference instead of each doing their own `.map()` per render.
   const mappedInventory = useMemo(() => {
+    void cacheVersion; // intentional external-cache invalidation trigger
     const compactInventory = getCompactInventoryCache();
     return compactInventory.map(item => ({
       ...item,
@@ -1408,7 +1697,8 @@ const POS = () => {
   // Local row search autocomplete
   useEffect(() => {
     const term = rowSearchTerm.trim();
-    if (activeRowSearchIndex === null || term.length < 2) {
+      if (activeRowSearchIndex === null || term.length < 2) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- clears row dropdown on short term
       setRowSearchResults([]);
       setRowSearchHighlightIndex(-1);
       return;
@@ -1422,11 +1712,11 @@ const POS = () => {
 
   // Synchronize selection refs to avoid closure staleness in async callbacks
   useEffect(() => {
-    selectedCustomerIdRef.current = selectedCustomerId;
+    writeRef(selectedCustomerIdRef, selectedCustomerId);
   }, [selectedCustomerId]);
 
   useEffect(() => {
-    selectedDoctorIdRef.current = selectedDoctorId;
+    writeRef(selectedDoctorIdRef, selectedDoctorId);
   }, [selectedDoctorId]);
 
   // Fetch customer suggestions for patient autocomplete (P2)
@@ -1446,9 +1736,10 @@ const POS = () => {
     const currentQuery = patientName.trim();
     const delayDebounce = setTimeout(() => {
       api.getPatients({ q: currentQuery, limit: 8 })
-        .then((data: any) => {
-          const list = Array.isArray(data) ? data : (data?.suggestions || []);
-          const isFuzzy = !Array.isArray(data) && Boolean(data?.isSuggestion);
+        .then((data: unknown) => {
+          const lookup = data as PatientLookupResponse | PatientSuggestion[];
+          const list = Array.isArray(lookup) ? lookup : (lookup?.suggestions || []);
+          const isFuzzy = !Array.isArray(lookup) && Boolean(lookup?.isSuggestion);
           const isFocused = document.activeElement && (
             document.activeElement.getAttribute('aria-label') === 'Patient Name' ||
             document.activeElement.id === 'patient-name-input'
@@ -1467,11 +1758,12 @@ const POS = () => {
 
   // C4: cache the refills panel result set once and filter it client-side on
   // subsequent patientName keystrokes, instead of re-hitting the API per keystroke.
-  const refillsPanelCacheRef = useRef<any[] | null>(null);
+  const refillsPanelCacheRef = useRef<RefillPanelGroup[] | null>(null);
 
   // Search for pending refills / previous prescriptions matching the patient
   useEffect(() => {
     const cleanPName = patientName.trim();
+  
     const cleanPPhone = patientPhone.trim();
     // Pick-person-first guard: a bare typed name can match several DIFFERENT people.
     // Refill suggestions require a pinned customer (picked from list) or a real phone number.
@@ -1481,6 +1773,7 @@ const POS = () => {
       return;
     }
     if (cleanPName.length < 2 && cleanPPhone.length < 5) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- refill banner guard reset
       setMatchedRefill(null);
       return;
     }
@@ -1512,18 +1805,18 @@ const POS = () => {
         let panelData = refillsPanelCacheRef.current;
         if (!panelData) {
           const response = await apiClient.get('/refills/panel');
-          panelData = Array.isArray(response.data) ? response.data : [];
+          panelData = Array.isArray(response.data) ? (response.data as RefillPanelGroup[]) : [];
           refillsPanelCacheRef.current = panelData;
         }
         const match =
           (refillDigits.length >= 5
-            ? panelData.find((group: any) => group.patient_phone?.replace(/\D/g, '').includes(refillDigits))
+            ? panelData.find(group => group.patient_phone?.replace(/\D/g, '').includes(refillDigits))
             : undefined) ||
           (selectedCustomerIdRef.current !== null && cleanPName.length >= 2
-            ? panelData.find((group: any) => group.patient_name?.toLowerCase().trim() === cleanPName.toLowerCase())
+            ? panelData.find(group => group.patient_name?.toLowerCase().trim() === cleanPName.toLowerCase())
             : undefined);
-        if (match && match.medicines.length > 0) {
-          const med = match.medicines.find((m: any) => m.is_ready === 1 || m.stock_verified_override === 1);
+        if (match && match.medicines && match.medicines.length > 0) {
+          const med = match.medicines.find(m => m.is_ready === 1 || m.stock_verified_override === 1);
           if (med && med.id !== dismissedRefillId) {
             setMatchedRefill({
               id: med.id,
@@ -1560,7 +1853,7 @@ const POS = () => {
         } catch {}
       }
 
-      const newItems: any[] = [];
+      const newItems: CartRow[] = [];
       for (const med of medsToAdd) {
         const medName = med.medicine_name || med.name || '';
         const targetId = Number(med.medicineId || med.medicine_id || med.id || 0);
@@ -1592,8 +1885,8 @@ const POS = () => {
           medicineName: medName,
           requestedQty: targetQty,
           requestedLooseQty: targetLooseQty,
-          packSize: pSize,
-          fallbackItem,
+          packSize: Number(pSize) || 1,
+          fallbackItem: fallbackItem as Partial<CartRow>,
           compactInventory: compactInv,
           editingInvoiceId
         });
@@ -1620,7 +1913,7 @@ const POS = () => {
                 unitPrice: Number(bestInv.unit_price || med.sell_price || med.mrp || 0),
                 looseQty: targetLooseQty,
                 discount: Number(med.discount || 0),
-                packSize: pSize,
+                packSize: Number(pSize) || 1,
                 availableStock: Number(bestInv.quantity || 0),
                 availableLooseStock: Number(bestInv.loose_quantity || 0),
                 isEmptyRow: false
@@ -1651,7 +1944,7 @@ const POS = () => {
                 unitPrice: Number(matched.unit_price || matched.sell_price || matched.mrp || 0),
                 looseQty: targetLooseQty,
                 discount: Number(med.discount || 0),
-                packSize: pSize,
+                packSize: Number(pSize) || 1,
                 isEmptyRow: false
               }];
             }
@@ -1694,7 +1987,7 @@ const POS = () => {
     if (patientName.trim()) {
       try {
         await api.addPatient({ name: patientName.trim(), phone: patientPhone.trim() });
-      } catch (e) {
+      } catch {
         // Patient may already exist, ignore duplicate errors
       }
       try {
@@ -1705,20 +1998,13 @@ const POS = () => {
         });
         window.dispatchEvent(new CustomEvent('phone-numbers-updated'));
         window.dispatchEvent(new CustomEvent('contacts-updated'));
-      } catch (e) {}
+      } catch {}
     }
     setShowPatientModal(false);
   };
 
-  const handleCompleteSaleRef = useRef<any>(null);
-  const handleSavePatientProfileRef = useRef<any>(null);
-  const showPatientModalRef = useRef<boolean>(false);
-
-  useEffect(() => {
-    handleCompleteSaleRef.current = handleCompleteSale;
-    handleSavePatientProfileRef.current = handleSavePatientProfile;
-    showPatientModalRef.current = showPatientModal;
-  });
+  // Universal Edit state
+  const [editMedicineId, setEditMedicineId] = useState<number | null>(null);
 
   // Keyboard shortcut listeners (e.g. 'X' for camera, 'Alt+E' or 'F8' for quick edit medicine)
   useEffect(() => {
@@ -1743,9 +2029,9 @@ const POS = () => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
         e.preventDefault();
         if (showPatientModalRef.current) {
-          handleSavePatientProfileRef.current();
+          handleSavePatientProfileRef.current?.();
         } else {
-          handleCompleteSaleRef.current();
+          handleCompleteSaleRef.current?.();
         }
         return;
       }
@@ -1811,7 +2097,8 @@ const POS = () => {
   }, []);
 
   useEffect(() => {
-    if (searchTerm.trim().length < 2) {
+      if (searchTerm.trim().length < 2) {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- clears search dropdown states
       setSearchResults([]);
       setSearchHighlightIndex(-1);
       setOnlineResults([]);
@@ -1823,7 +2110,8 @@ const POS = () => {
 
   // Fetch fuzzy did-you-mean suggestions when results are thin
   useEffect(() => {
-    if (searchTerm.trim().length < 2 || searchResults.length >= 5) {
+      if (searchTerm.trim().length < 2 || searchResults.length >= 5) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- thin-results suggestion prefetch guard
       setSuggestions([]);
       return;
     }
@@ -1832,7 +2120,8 @@ const POS = () => {
       try {
         const data = await api.suggestMedicine(searchTerm.trim());
         if (Array.isArray(data)) {
-          const filtered = data.filter(sug => !searchResults.some(r => r.medicine_name.toLowerCase() === sug.name.toLowerCase()));
+          const filtered = data.filter(sug => !(searchResults.some(r => (r.medicine_name || '').toLowerCase() === sug.name.toLowerCase())));
+
           setSuggestions(filtered);
         }
       } catch (err) {
@@ -1864,40 +2153,7 @@ const POS = () => {
     };
   }, []);
 
-  useEffect(() => {
-    const term = searchTerm.trim();
-    if (term.length < 2) {
-      setSearchResults([]);
-      setSearchHighlightIndex(-1);
-      return;
-    }
-
-    const filtered = filterLocalInventory(term, mappedInventory);
-    const groupedData = groupBatches(filtered);
-
-    // Premium Barcode Auto-Add Feature:
-    const barcodeTerm = term.toUpperCase();
-    if (groupedData.length === 1) {
-      const matched = groupedData[0];
-      const barcode = (matched.item_code || '').toUpperCase().trim();
-      if (barcode === barcodeTerm && matched.inventory_id && !matched.is_out_of_stock) {
-        fetchDetailsAndAddToCart(matched);
-        setSearchTerm('');
-        setSearchResults([]);
-        setSearchHighlightIndex(-1);
-        return;
-      }
-    }
-    setSearchResults(groupedData);
-    setSearchHighlightIndex(-1);
-    setOnlineResults([]);
-    setSearchingOnline(false);
-  }, [searchTerm, mappedInventory]);
-
-  // Universal Edit state
-  const [editMedicineId, setEditMedicineId] = useState<number | null>(null);
-
-  const rebalanceCartMedicine = (prevCart: any[], medicineId: number, targetItemId: number, updatedFields: { qty?: number; looseQty?: number }) => {
+  const rebalanceCartMedicine = (prevCart: CartRow[], medicineId: number | string, targetItemId: number | string, updatedFields: { qty?: number; looseQty?: number }) => {
     const targetItem = prevCart.find(i => i.id === targetItemId);
     const targetMedId = medicineId || targetItem?.medicine_id;
     const targetMedName = (targetItem?.name || targetItem?.medicine_name || '').toLowerCase().trim();
@@ -1930,7 +2186,7 @@ const POS = () => {
 
     const compactInventory = getCompactInventoryCache();
     const newMedRows = allocateMedicineBatches({
-      medicineId: targetMedId || 0,
+      medicineId: Number(targetMedId || 0),
       medicineName: medicineItems[0].name || medicineItems[0].medicine_name || '',
       requestedQty,
       requestedLooseQty,
@@ -1951,7 +2207,7 @@ const POS = () => {
     }
 
     // Replace all old rows of this medicine in the cart with the new allocated rows
-    const newCart: any[] = [];
+    const newCart: CartRow[] = [];
     let inserted = false;
     for (const item of prevCart) {
       const isThisMed = (targetMedId && item.medicine_id === targetMedId) ||
@@ -1971,7 +2227,7 @@ const POS = () => {
     return newCart;
   };
 
-  const addToCart = (med: any) => {
+  const addToCart = (med: CartRow | PosBatchItem) => {
     // Expiry check
     const expiryStr = med.expiry || med.expiry_date || '';
     if (expiryStr) {
@@ -1993,8 +2249,8 @@ const POS = () => {
 
     // Check if added item has special order request
     const pendingMatches = specialOrders.filter(
-      o => o.product.toLowerCase().trim() === med.name.toLowerCase().trim() ||
-           med.name.toLowerCase().includes(o.product.toLowerCase().trim())
+      o => o.product.toLowerCase().trim() === (med.name || '').toLowerCase().trim() ||
+           (med.name || '').toLowerCase().includes(o.product.toLowerCase().trim())
     );
     if (pendingMatches.length > 0) {
       toastEvent.trigger(
@@ -2005,17 +2261,17 @@ const POS = () => {
 
     const cleanCart = cart.filter(item => !item.isEmptyRow);
     const existingIndex = cleanCart.findIndex(item => {
-      const isDbId = (id: any) => typeof id === 'number' && id < 1000000;
+      const isDbId = (id: unknown): id is number => typeof id === 'number' && id < 1000000;
       const idMatches = isDbId(item.id) && isDbId(med.id) && item.id === med.id;
       const medicineIdMatch = item.medicine_id !== undefined && med.medicine_id !== undefined && item.medicine_id === med.medicine_id;
-      const nameMatch = item.name.toLowerCase().trim() === med.name.toLowerCase().trim();
+      const nameMatch = (item.name || '').toLowerCase().trim() === (med.name || '').toLowerCase().trim();
       return idMatches || medicineIdMatch || nameMatch;
     });
 
     const targetIndex = existingIndex !== -1 ? existingIndex : cleanCart.length;
-    skipEmptyRowAutofocusRef.current = true;
+    writeRef(skipEmptyRowAutofocusRef, true);
 
-    updateCart(prevCart => {
+    updateCart((prevCart): CartRow[] => {
       const cleanPrev = prevCart.filter(item => !item.isEmptyRow);
       // ponytail: POS sell cart always adds 1 strip — recommended/default qty is Live Cart only
       const incQty = 1;
@@ -2025,13 +2281,13 @@ const POS = () => {
         const existingItem = cleanPrev[existingIndex];
         const newQty = (existingItem.qty || 0) + incQty;
         const newLoose = (existingItem.looseQty || 0) + incLooseQty;
-        return rebalanceCartMedicine(cleanPrev, existingItem.medicine_id || existingItem.id, existingItem.id, { qty: newQty, looseQty: newLoose });
+        return rebalanceCartMedicine(cleanPrev, Number(existingItem.medicine_id || existingItem.id || 0), existingItem.id, { qty: newQty, looseQty: newLoose });
       }
       
       const hasRealBatch = !!(med.batch_no || med.batch) && !!(med.inventory_id || (typeof med.id === 'number' && med.id < 1000000000));
       const initialMrp = hasRealBatch ? (med.mrp || 0) : 0;
       const initialUnitPrice = hasRealBatch ? (med.unitPrice || med.unit_price || med.mrp || 0) : 0;
-      const initialGst = med.gst_percent !== undefined ? med.gst_percent : (med.gst !== undefined ? med.gst : (med.tax_percent !== undefined ? med.tax_percent : 12));
+      const initialGst = Number(med.gst_percent !== undefined ? med.gst_percent : (med.gst !== undefined ? med.gst : (med.tax_percent !== undefined ? med.tax_percent : 12)));
 
       // Auto-calculate discount percentage if sell_price is set for this medicine
       let initialDiscount = med.discount !== undefined ? med.discount : 0;
@@ -2054,10 +2310,10 @@ const POS = () => {
         looseQty: incLooseQty,
         discount: initialDiscount,
         gst_percent: initialGst,
-        packSize: med.packSize || med.pack_size || 1,
+        packSize: Number(med.packSize || med.pack_size || 1),
         mrp: initialMrp, 
-        sell_price: med.sell_price || null,
-        unitPrice: initialUnitPrice,
+        sell_price: med.sell_price != null ? Number(med.sell_price) : null,
+        unitPrice: Number(initialUnitPrice),
         costPrice: med.costPrice != null ? med.costPrice : (med.cost_price != null ? med.cost_price : null),
         salts: med.salts || '',
         availableStock: med.batch_quantity !== undefined ? med.batch_quantity : (med.quantity !== undefined ? med.quantity : (med.availableStock !== undefined ? med.availableStock : 0)),
@@ -2067,12 +2323,12 @@ const POS = () => {
       
       const compactInventory = getCompactInventoryCache();
       const allocated = allocateMedicineBatches({
-        medicineId: med.medicine_id || (typeof med.id === 'number' && med.id < 1000000000 ? med.id : 0),
+        medicineId: Number(med.medicine_id || (typeof med.id === 'number' && med.id < 1000000000 ? med.id : 0)),
         medicineName: med.name || med.medicine_name || '',
         requestedQty: incQty,
         requestedLooseQty: incLooseQty,
-        packSize: med.packSize || med.pack_size || 1,
-        fallbackItem: newItem,
+        packSize: Number(med.packSize || med.pack_size || 1),
+        fallbackItem: newItem as Partial<CartRow>,
         compactInventory,
         editingInvoiceId
       });
@@ -2080,16 +2336,16 @@ const POS = () => {
       if (allocated.length > 0) {
         return [...cleanPrev, ...allocated];
       }
-      return [...cleanPrev, newItem];
+      return [...cleanPrev, newItem as CartRow];
     });
 
     // Fetch doctor combination recommendations
     const medId = med.medicine_id || med.id;
     if (selectedDoctorId && medId) {
-      api.getDoctorCombinations(selectedDoctorId, medId)
-        .then((data: any[]) => {
-          if (Array.isArray(data)) {
-            setDoctorComboSuggestions(data);
+      api.getDoctorCombinations(selectedDoctorId, Number(medId))
+        .then((comboData: unknown) => {
+          if (Array.isArray(comboData)) {
+            setDoctorComboSuggestions(comboData as DoctorSuggestion[]);
           }
         })
         .catch(err => {
@@ -2107,7 +2363,7 @@ const POS = () => {
     }, 120);
   };
 
-  const toggleAllowLooseSale = async (item: any) => {
+  const toggleAllowLooseSale = async (item: CartRow | PosBatchItem) => {
     const medId = item.medicine_id || item.id;
     if (!medId) return;
     const currentFlag = item.allow_loose_sale !== undefined ? (item.allow_loose_sale ? 1 : 0) : 1;
@@ -2125,7 +2381,7 @@ const POS = () => {
     }));
 
     try {
-      await api.patchAllowLooseSale(medId, newFlag);
+      await api.patchAllowLooseSale(Number(medId), newFlag);
       toastEvent.trigger(
         newFlag ? `Loose sale enabled for ${item.name || item.medicine_name || 'medicine'}` : `Full Strip Only restriction applied to ${item.name || item.medicine_name || 'medicine'}`,
         'info'
@@ -2137,7 +2393,7 @@ const POS = () => {
     }
   };
 
-  const fetchDetailsAndAddToCart = async (item: any) => {
+  const fetchDetailsAndAddToCart = async (item: PosBatchItem) => {
     const autoDisc = (item.sell_price && item.mrp && Number(item.sell_price) > 0 && Number(item.mrp) > 0 && Number(item.sell_price) < Number(item.mrp))
       ? parseFloat((((Number(item.mrp) - Number(item.sell_price)) / Number(item.mrp)) * 100).toFixed(2))
       : (item.discount || 0);
@@ -2163,7 +2419,7 @@ const POS = () => {
     });
 
     try {
-      const details = await api.getMedicineQuickDetails(item.medicine_id);
+      const details = await api.getMedicineQuickDetails(Number(item.medicine_id));
       if (!details) return;
 
       const fetchedSellPrice = details.sell_price !== undefined ? details.sell_price : (item.sell_price || null);
@@ -2195,12 +2451,44 @@ const POS = () => {
     }
   };
 
-  const handleSelectOnlineSuggestion = async (sug: any) => {
+  useEffect(() => {
+    const term = searchTerm.trim();
+    if (term.length < 2) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- barcode auto-add search pipeline
+      setSearchResults([]);
+      setSearchHighlightIndex(-1);
+      return;
+    }
+
+    const filtered = filterLocalInventory(term, mappedInventory);
+    const groupedData = groupBatches(filtered);
+
+    // Premium Barcode Auto-Add Feature:
+    const barcodeTerm = term.toUpperCase();
+    if (groupedData.length === 1) {
+      const matched = groupedData[0];
+      const barcode = (matched.item_code || '').toUpperCase().trim();
+      if (barcode === barcodeTerm && matched.inventory_id && !matched.is_out_of_stock) {
+        fetchDetailsAndAddToCart(matched);
+        setSearchTerm('');
+        setSearchResults([]);
+        setSearchHighlightIndex(-1);
+        return;
+      }
+    }
+    setSearchResults(groupedData);
+    setSearchHighlightIndex(-1);
+    setOnlineResults([]);
+    setSearchingOnline(false);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- handler identity churn must not refire
+  }, [searchTerm, mappedInventory]);
+
+  const handleSelectOnlineSuggestion = async (sug: MedSuggestion | PosBatchItem) => {
     try {
       const res = await api.autoEnrich({
-        name: sug.name,
-        api_reference: sug.api_reference,
-        manufacturer: sug.manufacturer
+        name: sug.name || '',
+        api_reference: sug.api_reference || '',
+        manufacturer: sug.manufacturer || undefined
       });
       
       const addedName = res?.medicine?.name || sug.name;
@@ -2209,18 +2497,18 @@ const POS = () => {
       setSearchTerm('');
       setOnlineResults([]);
       setSearchResults([]);
-    } catch (err: any) {
-      alert(`Failed to auto-enrich medicine: ${err.message || 'Unknown error'}`);
+    } catch (err) {
+      alert(`Failed to auto-enrich medicine: ${(err as LocalApiError).message || 'Unknown error'}`);
     }
   };
 
-  const removeFromCart = (id: number) => {
+  const removeFromCart = (id: number | string) => {
     updateCart(prevCart => prevCart.filter(item => item.id !== id));
   };
 
-  const changeRowMedicine = (index: number, med: any, opts?: { presetQty?: number; presetLooseQty?: number }) => {
+  const changeRowMedicine = (index: number, med: CartRow | PosBatchItem, opts?: { presetQty?: number; presetLooseQty?: number }) => {
     const originalItem = cart[index];
-    if (originalItem && originalItem.rawOcrText && originalItem.name.toLowerCase().trim() !== med.medicine_name.toLowerCase().trim()) {
+    if (originalItem && originalItem.rawOcrText && (originalItem.name || '').toLowerCase().trim() !== (med.medicine_name || '').toLowerCase().trim()) {
       apiClient.post('/aicamera/learn', {
         ocrText: originalItem.rawOcrText,
         correctName: med.medicine_name
@@ -2231,7 +2519,7 @@ const POS = () => {
     const defaultLooseQty = opts?.presetLooseQty ?? 0;
     const compactInventory = getCompactInventoryCache();
     const allocated = allocateMedicineBatches({
-      medicineId: med.medicine_id || (typeof med.id === 'number' && med.id < 1000000000 ? med.id : 0),
+      medicineId: Number(med.medicine_id || (typeof med.id === 'number' && med.id < 1000000000 ? med.id : 0)),
       medicineName: med.medicine_name || med.name || '',
       requestedQty: defaultQty,
       requestedLooseQty: defaultLooseQty,
@@ -2243,7 +2531,7 @@ const POS = () => {
     updateCart(prev => {
       const clean = prev.filter((_, idx) => idx !== index);
       const isOrigEmpty = originalItem?.isEmptyRow;
-      const rowsToAdd = allocated.length > 0 ? allocated : [{
+      const rowsToAdd: CartRow[] = allocated.length > 0 ? allocated : ([{
         id: med.inventory_id || med.id,
         medicine_id: med.medicine_id || med.id,
         name: med.medicine_name || med.name,
@@ -2257,9 +2545,9 @@ const POS = () => {
         quantity: defaultQty,
         looseQty: defaultLooseQty,
         availableStock: med.batch_quantity !== undefined ? med.batch_quantity : (med.quantity !== undefined ? med.quantity : 0),
-        availableLooseStock: med.loose_quantity !== undefined ? med.loose_quantity : 0,
+        availableLooseStock: med.loose_quantity !== undefined ? Number(med.loose_quantity) : 0,
         isEmptyRow: false
-      }];
+      }]) as CartRow[];
 
       if (isOrigEmpty) {
         return [...clean, ...rowsToAdd];
@@ -2275,8 +2563,8 @@ const POS = () => {
     setRowSearchHighlightIndex(-1);
   };
 
-  const fetchDetailsAndChangeRowMedicine = (index: number, med: any, opts?: { presetQty?: number; presetLooseQty?: number }) => {
-    skipEmptyRowAutofocusRef.current = true;
+  const fetchDetailsAndChangeRowMedicine = (index: number, med: CartRow | PosBatchItem, opts?: { presetQty?: number; presetLooseQty?: number }) => {
+    writeRef(skipEmptyRowAutofocusRef, true);
 
     // Apply medicine selection synchronously for instant UI response (<5ms)
     changeRowMedicine(index, med, opts);
@@ -2290,10 +2578,10 @@ const POS = () => {
     }, 40);
 
     // Enrich salts & alternatives asynchronously in the background
-    api.getMedicineQuickDetails(med.medicine_id)
-      .then((details: any) => {
+    api.getMedicineQuickDetails(Number(med.medicine_id))
+      .then((details: MedicineQuickDetails) => {
         if (details) {
-          updateCart((prevCart: any[]) => {
+          updateCart(prevCart => {
             const updated = [...prevCart];
             const target = updated[index];
             if (!target || target.medicine_id !== med.medicine_id) return prevCart;
@@ -2303,13 +2591,13 @@ const POS = () => {
           });
         }
       })
-      .catch((error: any) => {
+      .catch((error: unknown) => {
         console.warn('Background quick details fetch failed/skipped:', error);
       });
   };
 
   // Doctor-prescription quick-add: fills the cart's trailing empty row with this doctor's usual qty.
-  const handleDoctorSuggestionClick = (s: any) => {
+  const handleDoctorSuggestionClick = (s: DoctorSuggestion) => {
     const med = { medicine_id: s.id, medicine_name: s.name };
     const presetOpts = { presetQty: s.most_common_qty || 1, presetLooseQty: s.most_common_loose_qty || 0 };
     const emptyRows = cart.map(c => c.isEmptyRow === true);
@@ -2326,7 +2614,7 @@ const POS = () => {
     }
   };
 
-  const updateCartItem = (id: number, field: string, value: any) => {
+  const updateCartItem = (id: number | string, field: string, value: unknown) => {
     updateCart(prevCart => {
       const item = prevCart.find(i => i.id === id);
       if (!item) return prevCart;
@@ -2349,7 +2637,7 @@ const POS = () => {
           }
         }
 
-        return rebalanceCartMedicine(prevCart, item.medicine_id, id, { qty: updatedQty, looseQty: updatedLoose });
+        return rebalanceCartMedicine(prevCart, Number(item.medicine_id ?? 0), id, { qty: updatedQty, looseQty: updatedLoose });
       }
 
       // Standard mapping for other fields
@@ -2398,7 +2686,7 @@ const POS = () => {
     updateCart([]);
   };
 
-  const handleScanResult = (result: any) => {
+  const handleScanResult = (result: ScanResultInfo) => {
     setShowCamera(false);
     if (!result) return;
 
@@ -2432,7 +2720,7 @@ const POS = () => {
         const nameTerm = nameQuery.trim().toLowerCase();
         const matches = filterLocalInventory(nameTerm, mapped);
         if (matches.length > 0) {
-          const exact = matches.find(m => m.medicine_name.toLowerCase() === nameTerm);
+          const exact = matches.find(m => (m.medicine_name || '').toLowerCase() === nameTerm);
           return exact || matches[0];
         }
       }
@@ -2470,8 +2758,8 @@ const POS = () => {
           name: nameQuery.trim() || 'Scanned Item',
           batch: info.batchNumber || '',
           expiry: info.expiryDate || '',
-          mrp: info.mrp || 0,
-          costPrice: info.costPrice || 0,
+          mrp: Number(info.mrp || 0),
+          costPrice: info.costPrice != null ? Number(info.costPrice) : 0,
           salts: 'OCR Scan Entry',
           packSize: extractedPackSize,
           scanImage: result.capturedImage,
@@ -2492,13 +2780,13 @@ const POS = () => {
     for (const item of cart) {
       if (item.isEmptyRow) continue;
       const stripPrice = Number(item.unitPrice !== undefined && item.unitPrice !== null ? item.unitPrice : (item.sell_price !== undefined && item.sell_price !== null ? item.sell_price : (item.mrp || 0)));
-      const unitRate = item.packSize > 0 ? stripPrice / item.packSize : stripPrice;
-      const itemTotalBeforeDiscount = (stripPrice * item.qty) + (unitRate * (item.looseQty || 0));
+      const unitRate = (item.packSize || 0) > 0 ? stripPrice / (item.packSize || 1) : stripPrice;
+      const itemTotalBeforeDiscount = (stripPrice * (item.qty || 0)) + (unitRate * (item.looseQty || 0));
       sub += itemTotalBeforeDiscount * (1 - (item.discount || 0) / 100);
 
       const itemCost = item.costPrice != null ? item.costPrice : 0;
-      const unitCostRate = item.packSize > 0 ? itemCost / item.packSize : itemCost;
-      cost += (itemCost * item.qty) + (unitCostRate * (item.looseQty || 0));
+      const unitCostRate = (item.packSize || 0) > 0 ? itemCost / (item.packSize || 1) : itemCost;
+      cost += (itemCost * (item.qty || 0)) + (unitCostRate * (item.looseQty || 0));
     }
     const discAmt = sub * (discount / 100);
     return {
@@ -2656,34 +2944,34 @@ const POS = () => {
         refill_ids: pendingRefillIdsRef.current.length > 0 ? [...pendingRefillIdsRef.current] : undefined,
         editingInvoiceId: editingInvoiceId || undefined
       };
-      pendingRefillIdsRef.current = [];
+      writeRef(pendingRefillIdsRef, []);
 
       // Verification Layer Check: Pre-save validation
       try {
-        const validation = await api.validateBill(payload);
+        const validation = await api.validateBill(payload as Parameters<typeof api.validateBill>[0]);
         if (!validation.success) {
           alert(`❌ Save Blocked by Verification Layer:\n\nStep: ${validation.layer}\nReason: ${validation.message}`);
           return;
         }
-      } catch (err: any) {
-        const serverError = err.response?.data?.message || err.response?.data?.error || err.message;
-        const layer = err.response?.data?.layer || 'Validation';
+      } catch (err) {
+        const serverError = (err as LocalApiError).response?.data?.message || (err as LocalApiError).response?.data?.error || (err as LocalApiError).message;
+        const layer = (err as LocalApiError).response?.data?.layer || 'Validation';
         alert(`❌ Verification Layer Pre-Save Failure:\n\nStep: ${layer}\nReason: ${serverError}`);
         return;
       }
 
       // Proceed to save or update bill
-      let result: any;
+      let result: { invoice_no?: string; invoiceNo?: string } | undefined;
       let isEditMode = false;
       if (editingInvoiceId) {
         isEditMode = true;
-        result = await api.updateSale(editingInvoiceId, payload);
+        result = await api.updateSale(editingInvoiceId, payload as Parameters<typeof api.updateSale>[1]);
         if (!result) result = {};
         result.invoice_no = editingInvoiceNo || result.invoice_no || result.invoiceNo || `INV-${editingInvoiceId}`;
       } else {
-        result = await api.createSale(payload);
+        result = await api.createSale(payload as Parameters<typeof api.createSale>[0]);
       }
-      const invoiceNo = result.invoice_no || result.invoiceNo || 'SAVED';
+      const invoiceNo = result!.invoice_no || result!.invoiceNo || 'SAVED';
 
       // Verification Layer Check: Post-save history validation
       if (invoiceNo !== 'SAVED') {
@@ -2692,7 +2980,7 @@ const POS = () => {
           if (!syncVerify.success) {
             console.error(`[Verification Layer] Post-save sync check failed: ${syncVerify.message}`);
           }
-        } catch (syncErr: any) {
+        } catch (syncErr) {
           console.error('[Verification Layer] Post-save verification API failed:', syncErr);
         }
       }
@@ -2713,6 +3001,20 @@ const POS = () => {
           })
           .catch(() => {});
       }
+
+      if ((paymentMedium || '').toUpperCase() === 'CREDIT' && (selectedCustomerId || phoneToUse)) {
+        api.getCreditDues({ customerId: selectedCustomerId, phone: phoneToUse, refillId: activeRefillId })
+          .then(credit => {
+            if (credit.dues.length > 0) {
+              setLastSavedCreditDues(credit.dues);
+              setLastSavedCreditBalance(credit.balance);
+            }
+            if (credit.next_refill_due) {
+              setLastSavedNextRefillDue(credit.next_refill_due);
+            }
+          })
+          .catch(() => {});
+      }
       
       const isWaSent = Boolean(sendWhatsApp) && !!phoneToUse.trim();
 
@@ -2723,10 +3025,27 @@ const POS = () => {
       setLastSavedPaymentMedium(paymentMedium);
       setLastSavedDoctorName(doctor || '');
       setLastSavedWasWhatsAppSent(isWaSent);
-      setLastSavedItems(cart.filter(item => !item.isEmptyRow).map(item => ({
-        name: item.name || item.medicine_name,
-        batch: item.batch_number || item.batch_no || 'N/A'
-      })));
+      setLastSavedBillDiscount(Number(discountAmount) || 0);
+      setLastSavedCreditDues(null);
+      setLastSavedCreditBalance(0);
+      setLastSavedNextRefillDue(null);
+      setLastSavedItems(cart.filter(item => !item.isEmptyRow).map(item => {
+        const discPer = Number(item.discountPer || item.discount || 0);
+        const lineMrp = Number(item.unitPrice || item.mrp || item.unit_price || 0);
+        const dPrice = lineMrp * (1 - discPer / 100);
+        const packSize = Number(item.packSize || item.pack_size || 1) || 1;
+        const qty = Number(item.qty ?? item.quantity ?? 0);
+        const loose = Number(item.looseQty ?? item.loose_qty ?? 0);
+        return {
+          name: item.name || item.medicine_name,
+          batch: item.batch_number || item.batch_no || 'N/A',
+          mrp: lineMrp,
+          qty,
+          looseQty: loose,
+          discountPer: discPer,
+          amount: dPrice * qty + (dPrice / packSize) * loose
+        };
+      }));
       
       if (!isDirectSave) {
         setShowBarcodeModal(true);
@@ -2765,10 +3084,10 @@ const POS = () => {
         }
         return t;
       }));
-    } catch (error: any) {
+    } catch (error) {
       console.error('Error completing sale:', error);
       // Show actual server error message to help diagnose the issue
-      const serverMsg = error?.response?.data?.error || error?.message || 'Unknown error';
+      const serverMsg = (error as LocalApiError)?.response?.data?.error || (error as LocalApiError)?.message || 'Unknown error';
       alert(`Failed to save sale:\n\n${serverMsg}\n\nIf this persists, check that the backend server is running.`);
     }
   };
@@ -2784,8 +3103,8 @@ const POS = () => {
   };
 
   const handleOpenEditDoctorModal = () => {
-    const matchedDoc = (doctorsList || []).find((d: any) => d.id === selectedDoctorId) ||
-      allDoctors.find((d: any) => d.id === selectedDoctorId || (d.name && d.name.toLowerCase().trim() === doctor.toLowerCase().trim()));
+    const matchedDoc = (doctorsList || []).find(d => d.id === selectedDoctorId) ||
+      allDoctors.find(d => d.id === selectedDoctorId || (d.name && d.name.toLowerCase().trim() === doctor.toLowerCase().trim()));
 
     if (matchedDoc) {
       setEditingDoctorId(matchedDoc.id);
@@ -2814,7 +3133,7 @@ const POS = () => {
       const formattedName = newDoctorName.trim().toLowerCase().startsWith('dr.') ? newDoctorName.trim() : `Dr. ${newDoctorName.trim()}`;
       const docName = newDoctorSpecialty ? `${formattedName} (${newDoctorSpecialty.trim()})` : formattedName;
 
-      let res: any = null;
+      let res: { id?: number } | undefined = undefined;
       if (editingDoctorId) {
         res = await api.updateDoctor(editingDoctorId, {
           name: docName,
@@ -2844,7 +3163,7 @@ const POS = () => {
         });
         window.dispatchEvent(new CustomEvent('phone-numbers-updated'));
         window.dispatchEvent(new CustomEvent('contacts-updated'));
-      } catch (e) {}
+      } catch {}
 
       // Refresh doctors list
       queryClient.invalidateQueries({ queryKey: ['crm-doctors'] });
@@ -2865,18 +3184,28 @@ const POS = () => {
     }
   };
 
+  const handleCompleteSaleRef = useRef<((overridePhone?: string, isDirectSave?: boolean) => Promise<void> | void) | null>(null);
+  const handleSavePatientProfileRef = useRef<(() => Promise<void> | void) | null>(null);
+  const showPatientModalRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    writeRef(handleCompleteSaleRef, handleCompleteSale);
+    writeRef(handleSavePatientProfileRef, handleSavePatientProfile);
+    writeRef(showPatientModalRef, showPatientModal);
+  });
+
   const handleLoadStagedItemIntoPOS = (stagedItem: StagedItem) => {
     if (!stagedItem) return;
-    let rawItems: any[] = [];
+    let rawItems: StagedLine[];
     try {
       rawItems = typeof stagedItem.items_json === 'string'
-        ? JSON.parse(stagedItem.items_json)
-        : (stagedItem.items_json || stagedItem.items || []);
+        ? (JSON.parse(stagedItem.items_json) as StagedLine[])
+        : ((stagedItem.items_json || stagedItem.items || []) as StagedLine[]);
     } catch {
       rawItems = [];
     }
 
-    const posItems = rawItems.map((it: any, idx: number) => ({
+    const posItems = rawItems.map((it, idx: number) => ({
       id: it.inventory_id || it.id || (1000 + idx),
       medicine_id: it.medicine_id || 0,
       name: it.name || it.medicine_name || 'Unknown',
@@ -2897,7 +3226,7 @@ const POS = () => {
       isEmptyRow: false,
     }));
 
-    setTabs(prev => prev.map(t => {
+    setTabs(prev => prev.map((t): POSTab => {
       if (t.id === activeTabId) {
         return {
           ...t,
@@ -2906,7 +3235,7 @@ const POS = () => {
           doctor: stagedItem.doctor_name || '',
           discount: Number(stagedItem.discount || 0),
           paymentMedium: stagedItem.payment_medium || 'CASH',
-          items: posItems,
+          items: posItems as unknown as CartRow[],
         };
       }
       return t;
@@ -2924,11 +3253,12 @@ const POS = () => {
       if (!current) return;
       const state = stagedQueueService.getQueueState();
       if (lastStagedLoadRef.current && lastStagedLoadRef.current.id === current.id && lastStagedLoadRef.current.index === state.currentIndex) return;
-      lastStagedLoadRef.current = { id: current.id, index: state.currentIndex };
+      writeRef(lastStagedLoadRef, { id: current.id, index: state.currentIndex });
       handleLoadStagedItemIntoPOS(current);
     };
     maybeLoadCurrentStaged();
     return stagedQueueService.subscribe(maybeLoadCurrentStaged);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- stale-closure guard reads live queue
   }, []);
 
   return (
@@ -2988,7 +3318,7 @@ const POS = () => {
                   <span className="truncate">
                     <strong className="text-text">{matchedRefill.patient_name}</strong> has previous prescription / refill: {
                       Array.isArray(matchedRefill.medicines) && matchedRefill.medicines.length > 0 ? (
-                        matchedRefill.medicines.map((m: any, idx: number) => (
+                        matchedRefill.medicines.map((m, idx) => (
                           <span key={idx} className="text-violet-300 font-bold">
                             {idx > 0 && ', '}
                             {m.medicine_name || m.name} (Qty: {m.quantity || m.quantity_needed || 1})
@@ -3032,8 +3362,8 @@ const POS = () => {
                     placeholder="Walk-in Customer"
                     value={patientName}
                     onChange={e => {
-                      justSelectedPatientRef.current = false;
-                      selectedCustomerIdRef.current = null;
+                      writeRef(justSelectedPatientRef, false);
+                      writeRef(selectedCustomerIdRef, null);
                       updatePatientName(e.target.value);
                       setSelectedCustomerId(null);
                       setPatientHighlightIndex(-1);
@@ -3044,8 +3374,8 @@ const POS = () => {
                       if (e.key === 'Enter' || (e.key === 'Tab' && !e.shiftKey)) {
                         if (showPatientSuggestions && patientSuggestions.length > 0 && patientHighlightIndex >= 0) {
                           const sel = patientSuggestions[patientHighlightIndex];
-                          justSelectedPatientRef.current = true;
-                          selectedCustomerIdRef.current = sel.id;
+                          writeRef(justSelectedPatientRef, true);
+                          writeRef(selectedCustomerIdRef, sel.id);
                           updatePatientName(sel.name);
                           setPatientPhone(sel.phone || '');
                           setSelectedCustomerId(sel.id);
@@ -3121,10 +3451,10 @@ const POS = () => {
                               )}
                             </div>
                             <span className="flex items-center gap-2 shrink-0">
-                              {!c.active_refill && c.purchase_count > 0 && c.last_sale_date && (
+                              {!c.active_refill && (c.purchase_count || 0) > 0 && c.last_sale_date && (
                                 <span
                                   className="text-muted text-[10px] font-semibold"
-                                  title={`Returning patient — ${c.purchase_count} purchase${c.purchase_count > 1 ? 's' : ''}`}
+                                  title={`Returning patient — ${c.purchase_count} purchase${(c.purchase_count || 0) > 1 ? 's' : ''}`}
                                 >
                                   ↩ last {new Date(c.last_sale_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
                                 </span>
@@ -3568,7 +3898,7 @@ const POS = () => {
                     </div>
                     <div className="flex flex-col">
                       {searchResults.map((med) => {
-                        const renderMedicineItem = (item: any, isAlt = false) => {
+                        const renderMedicineItem = (item: PosBatchItem, isAlt = false) => {
                           const isHighlighted = !isAlt && searchHighlightIndex === searchResults.indexOf(item);
                           const packSize = item.pack_size || 1;
                           const totalUnits = (item.quantity || 0) * packSize + (item.loose_quantity || 0);
@@ -3641,7 +3971,7 @@ const POS = () => {
                                     onClick={async (e) => {
                                       e.stopPropagation();
                                       try {
-                                        const res = await api.queueFromPos(item.medicine_id);
+                                        const res = await api.queueFromPos(Number(item.medicine_id));
                                         navigate(`/composition-queue?highlight=${res.id}`);
                                       } catch (err) {
                                         console.error('Failed to queue medicine from POS:', err);
@@ -3655,14 +3985,14 @@ const POS = () => {
                               </div>
                               <div className="flex items-center gap-4">
                                 <div className="text-right">
-                                  <div className="font-mono text-green font-bold">MRP: ₹{Math.round(item.mrp)}</div>
+                                  <div className="font-mono text-green font-bold">MRP: ₹{Math.round(item.mrp ?? 0)}</div>
                                 </div>
                                 <div className="flex items-center gap-2">
                                   <button
                                     type="button"
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      setEditMedicineId(item.medicine_id);
+                                      setEditMedicineId(Number(item.medicine_id));
                                     }}
                                     className="p-1.5 rounded-lg bg-bg border border-border/40 text-muted hover:text-text hover:bg-bg3 transition-all"
                                     title="Quick Edit Medicine"
@@ -3678,7 +4008,7 @@ const POS = () => {
 
                         const cartQty = cart.reduce((sum, c) => {
                           if (c.medicine_id === med.medicine_id) {
-                            return sum + c.qty;
+                            return sum + (c.qty || 0);
                           }
                           return sum;
                         }, 0);
@@ -3701,7 +4031,7 @@ const POS = () => {
                                    </div>
                                  )}
                               </div>
-                              {med.alternatives && med.alternatives.map((alt: any) => renderMedicineItem(alt, true))}
+                              {med.alternatives && med.alternatives.map(alt => renderMedicineItem(alt, true))}
                             </div>
                           );
                         }
@@ -3714,7 +4044,7 @@ const POS = () => {
                                 <div className="px-6 py-1.5 bg-sky/5 text-[13px] text-sky font-bold uppercase tracking-wider flex items-center gap-1">
                                   <span className="rotate-90">↳</span> Substitutes Available:
                                 </div>
-                                {med.alternatives.map((alt: any) => renderMedicineItem(alt, true))}
+                                {med.alternatives.map(alt => renderMedicineItem(alt, true))}
                               </div>
                             )}
                           </div>
@@ -3761,7 +4091,7 @@ const POS = () => {
               {selectedDoctorId != null && doctorSuggestions.length > 0 && (
                 <div className="flex items-center gap-1 min-w-0 max-w-[46%] overflow-x-auto scrollbar-thin shrink-0">
                   <span className="text-[9px] font-black uppercase tracking-wider text-sky shrink-0">Dr. Rx:</span>
-                  {doctorSuggestions.slice(0, 8).map((s: any) => (
+                  {doctorSuggestions.slice(0, 8).map(s => (
                     <button
                       key={s.id}
                       type="button"
@@ -3795,7 +4125,7 @@ const POS = () => {
                 {tabs.map((t) => {
                   const isActive = t.id === activeTabId;
                   const count = getTabItemsCount(t);
-                  const displayName = t.patientName.trim() ? `Pt: ${t.patientName}` : t.name;
+                  const displayName = (t.patientName || '').trim() ? `Pt: ${t.patientName}` : t.name;
                   return (
                     <div
                       key={t.id}
@@ -3869,8 +4199,8 @@ const POS = () => {
                 <tbody>
                   {cart.map(item => {
                     const stripPrice = Number(item.unitPrice !== undefined && item.unitPrice !== null ? item.unitPrice : (item.sell_price !== undefined && item.sell_price !== null ? item.sell_price : (item.mrp || 0)));
-                    const unitRate = item.packSize > 0 ? stripPrice / item.packSize : stripPrice;
-                    const itemTotal = ((stripPrice * item.qty) + (unitRate * (item.looseQty || 0))) * (1 - (item.discount || 0) / 100);
+                    const unitRate = (item.packSize || 0) > 0 ? stripPrice / (item.packSize || 1) : stripPrice;
+                    const itemTotal = ((stripPrice * (item.qty || 0)) + (unitRate * (item.looseQty || 0))) * (1 - (item.discount || 0) / 100);
                     
                     // Near expiry highlight
                     let expBadgeClass = "bg-bg3 border border-border text-text";
@@ -3916,7 +4246,7 @@ const POS = () => {
                                   alt="Scan thumbnail"
                                   decoding="async"
                                   className="w-7 h-7 object-cover rounded-lg border border-border/60 hover:border-primary/60 transition-all cursor-zoom-in shadow-sm"
-                                  onClick={() => setZoomedImage(item.scanImage)}
+                                  onClick={() => setZoomedImage(item.scanImage ?? null)}
                                 />
                                 <div className="absolute left-0 bottom-full mb-2 hidden group-hover/thumb:block z-[100] bg-bg2 border border-border rounded-xl p-2 shadow-2xl w-48 animate-in fade-in duration-150">
                                   <img src={item.scanImage} alt="Scan preview" decoding="async" className="w-full h-auto rounded-lg object-contain" />
@@ -3993,8 +4323,8 @@ const POS = () => {
                                 <div ref={rowSearchResultsRef} className="absolute left-0 right-0 z-[9999] mt-1 bg-bg2 border-2 border-primary/40 rounded-xl overflow-hidden max-h-56 overflow-y-auto w-[320px] shadow-[0_20px_50px_rgba(0,0,0,0.8)]">
                                   {rowSearchResults.map((med) => {
                                     const rowPendingMatches = specialOrders.filter(
-                                      o => o.product.toLowerCase().trim() === med.medicine_name.toLowerCase().trim() ||
-                                           med.medicine_name.toLowerCase().includes(o.product.toLowerCase().trim())
+                                      o => o.product.toLowerCase().trim() === (med.medicine_name || '').toLowerCase().trim() ||
+                                           (med.medicine_name || '').toLowerCase().includes(o.product.toLowerCase().trim())
                                     );
                                     const rowHasPending = rowPendingMatches.length > 0;
                                     const isRowHighlighted = rowSearchHighlightIndex === rowSearchResults.indexOf(med);
@@ -4019,9 +4349,9 @@ const POS = () => {
                                         </div>
                                         <span className="text-[11px] text-muted font-mono mt-0.5">Batch: {med.batch_no} | Exp: {med.expiry_date}</span>
                                         <span className="text-[11px] text-green font-bold font-mono mt-0.5">
-                                          MRP: ₹{Math.round(med.mrp)} | Stock: {(() => {
-                                            const packSize = med.pack_size || 1;
-                                            const totalUnits = (med.quantity || 0) * packSize + (med.loose_quantity || med.loose_qty || 0);
+                                          MRP: ₹{Math.round(med.mrp ?? 0)} | Stock: {(() => {
+                                            const packSize = Number(med.pack_size || 1);
+                                            const totalUnits = Number(med.quantity || 0) * packSize + Number(med.loose_quantity ?? med.loose_qty ?? 0);
                                             const cartUnits = cart.reduce((sum, c) => {
                                               const isSameMed = c.medicine_id === med.medicine_id || 
                                                 (c.name || c.medicine_name || '').toLowerCase().trim() === (med.medicine_name || '').toLowerCase().trim();
@@ -4035,7 +4365,7 @@ const POS = () => {
                                             const remainingUnits = Math.max(0, totalUnits - cartUnits);
                                             const remainingPacks = Math.floor(remainingUnits / packSize);
                                             const remainingLoose = remainingUnits % packSize;
-                                            const hasLoose = (med.loose_quantity !== undefined && med.loose_quantity > 0) || (med.loose_qty !== undefined && med.loose_qty > 0) || remainingLoose > 0;
+                                            const hasLoose = Number(med.loose_quantity ?? 0) > 0 || Number(med.loose_qty ?? 0) > 0 || remainingLoose > 0;
                                             return `${remainingPacks} Str${hasLoose ? ` / ${remainingLoose} Tab` : ''}`;
                                           })()}
                                         </span>
@@ -4067,11 +4397,11 @@ const POS = () => {
                               onPaste={e => e.preventDefault()}
                               onFocus={() => {
                                 if (item.isEmptyRow) return;
-                                setActiveBatchRowId(item.id);
-                                api.searchMedicine(item.name)
+                                setActiveBatchRowId(Number(item.id));
+                                api.searchMedicine(item.name || '')
                                   .then(data => {
                                     if (Array.isArray(data)) {
-                                      const matches = data.filter(med => med.medicine_name.toLowerCase().trim() === item.name.toLowerCase().trim());
+                                      const matches = data.filter(med => (med.medicine_name || '').toLowerCase().trim() === (item.name || '').toLowerCase().trim());
                                       setRowBatchesList(matches.length > 0 ? matches : data);
                                     }
                                   })
@@ -4095,7 +4425,7 @@ const POS = () => {
                                   const otherCartQty = cart.reduce((sum, c) => {
                                     if (c.id === item.id) return sum; // exclude current row
                                     if (c.id === b.inventory_id || (c.medicine_id === b.medicine_id && c.batch === b.batch_no)) {
-                                      return sum + c.qty;
+                                      return sum + (c.qty || 0);
                                     }
                                     return sum;
                                   }, 0);
@@ -4105,7 +4435,7 @@ const POS = () => {
                                       key={b.inventory_id}
                                       type="button"
                                       onMouseDown={() => {
-                                        updateCart(prev => prev.map(cItem => {
+                                        updateCart(prev => prev.map((cItem): CartRow => {
                                           if (cItem.id !== item.id) return cItem;
                                           const newSellPrice = b.sell_price || cItem.sell_price || null;
                                           const newMrp = Number(b.mrp || cItem.mrp || 0);
@@ -4115,7 +4445,7 @@ const POS = () => {
                                             : cItem.discount;
                                           return {
                                             ...cItem,
-                                            id: b.inventory_id,
+                                            id: b.inventory_id!,
                                             batch: b.batch_no,
                                             expiry: b.expiry_date,
                                             mrp: b.mrp,
@@ -4336,7 +4666,7 @@ const POS = () => {
                               const totalAvailableLooseStock = item.availableLooseStock || 0;
 
                               const totalUnits = (totalAvailableStock * packSize) + totalAvailableLooseStock;
-                              const cartUnits = (item.qty * packSize) + (item.looseQty || 0);
+                              const cartUnits = ((item.qty || 0) * packSize) + (item.looseQty || 0);
                               const remainingUnits = Math.max(0, totalUnits - cartUnits);
 
                               remainingStock = Math.floor(remainingUnits / packSize);
@@ -4533,7 +4863,7 @@ const POS = () => {
                               type="button"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                if (item.medicine_id) setEditMedicineId(item.medicine_id);
+                                if (item.medicine_id) setEditMedicineId(Number(item.medicine_id));
                               }}
                               disabled={!item.medicine_id}
                               className={`p-1 rounded-md transition-all ${item.medicine_id ? 'hover:bg-sky/10 text-muted hover:text-sky' : 'opacity-30 cursor-not-allowed text-muted'}`}
@@ -5002,25 +5332,65 @@ const POS = () => {
               <p style={{ margin: '2px 0' }}><strong>Payment:</strong> {lastSavedPaymentMedium}</p>
             </div>
           </div>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', marginBottom: '15px', color: '#000' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px', marginBottom: '15px', color: '#000' }}>
             <thead>
               <tr style={{ borderBottom: '1px solid #000', textTransform: 'uppercase' }}>
-                <th style={{ textAlign: 'left', padding: '6px 0' }}>Item Name</th>
-                <th style={{ textAlign: 'left', padding: '6px 0' }}>Batch</th>
+                <th style={{ textAlign: 'left', padding: '6px 2px' }}>Item Name</th>
+                <th style={{ textAlign: 'left', padding: '6px 2px' }}>Batch</th>
+                <th style={{ textAlign: 'center', padding: '6px 2px' }}>Qty</th>
+                <th style={{ textAlign: 'center', padding: '6px 2px' }}>Loose</th>
+                {lastSavedItems.some(item => Number(item.discountPer || 0) > 0) && (
+                  <th style={{ textAlign: 'center', padding: '6px 2px' }}>Disc%</th>
+                )}
+                <th style={{ textAlign: 'right', padding: '6px 2px' }}>Amount</th>
               </tr>
             </thead>
             <tbody>
-              {lastSavedItems.map((item: any, idx: number) => (
+              {lastSavedItems.map((item, idx) => (
                 <tr key={idx} style={{ borderBottom: '1px dotted #ccc' }}>
-                  <td style={{ padding: '6px 0' }}>{item.name}</td>
-                  <td style={{ padding: '6px 0' }}>{item.batch}</td>
+                  <td style={{ padding: '6px 2px' }}>{item.name}</td>
+                  <td style={{ padding: '6px 2px' }}>{item.batch}</td>
+                  <td style={{ padding: '6px 2px', textAlign: 'center' }}>{item.qty}</td>
+                  <td style={{ padding: '6px 2px', textAlign: 'center' }}>{item.looseQty || 0}</td>
+                  {lastSavedItems.some(it => Number(it.discountPer || 0) > 0) && (
+                    <td style={{ padding: '6px 2px', textAlign: 'center' }}>{Number(item.discountPer || 0) > 0 ? `${item.discountPer}%` : '-'}</td>
+                  )}
+                  <td style={{ padding: '6px 2px', textAlign: 'right', fontWeight: 600 }}>₹{Number(item.amount || 0).toFixed(2)}</td>
                 </tr>
               ))}
             </tbody>
           </table>
-          <div style={{ borderTop: '2px solid #000', paddingTop: '8px', textAlign: 'right', fontSize: '14px', fontWeight: 'bold', color: '#000' }}>
-            Grand Total: ₹{Number(lastSavedGrandTotal).toFixed(2)}
+          <div style={{ borderTop: '2px solid #000', paddingTop: '8px', textAlign: 'right', fontSize: '12px', color: '#000' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', maxWidth: '260px', marginLeft: 'auto' }}>
+              <span>Subtotal:</span><span>₹{lastSavedItems.reduce((sum, item) => sum + Number(item.amount || 0), 0).toFixed(2)}</span>
+            </div>
+            {lastSavedBillDiscount > 0 && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', maxWidth: '260px', marginLeft: 'auto' }}>
+                <span>Discount:</span><span>-₹{Number(lastSavedBillDiscount).toFixed(2)}</span>
+              </div>
+            )}
+            <div style={{ display: 'flex', justifyContent: 'space-between', maxWidth: '260px', marginLeft: 'auto', fontWeight: 'bold', fontSize: '14px', marginTop: '4px', borderTop: '1px solid #000', paddingTop: '4px' }}>
+              <span>Grand Total:</span><span>₹{Number(lastSavedGrandTotal).toFixed(2)}</span>
+            </div>
           </div>
+          {lastSavedPaymentMedium === 'CREDIT' && lastSavedCreditDues && lastSavedCreditDues.length > 0 && (
+            <div style={{ marginTop: '14px', border: '1px solid #000', padding: '8px 10px', fontSize: '11px', color: '#000' }}>
+              <div style={{ fontWeight: 'bold', textTransform: 'uppercase', borderBottom: '1px solid #999', paddingBottom: '3px', marginBottom: '5px' }}>Credit Invoices Due - {lastSavedPatientName}</div>
+              {lastSavedCreditDues.map((due, idx) => (
+                <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', padding: '1px 0' }}>
+                  <span>#{due.invoice_no}</span><span>₹{Number(due.total_amount).toFixed(2)}</span>
+                </div>
+              ))}
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', borderTop: '1px solid #000', marginTop: '4px', paddingTop: '3px', fontSize: '13px' }}>
+                <span>Total Credit Balance:</span><span>₹{Number(lastSavedCreditBalance).toFixed(2)}</span>
+              </div>
+            </div>
+          )}
+          {lastSavedPaymentMedium === 'CREDIT' && lastSavedNextRefillDue && (
+            <div style={{ marginTop: '10px', fontSize: '11px', color: '#000', background: '#f3f4f6', border: '1px dashed #666', padding: '6px 10px' }}>
+              Next Refill Due: {new Date(lastSavedNextRefillDue).toLocaleDateString('en-IN')}
+            </div>
+          )}
           <div style={{ textAlign: 'center', marginTop: '20px', fontSize: '11px', color: '#777' }}>
             Thank you for your visit! &middot; Get Well Soon
           </div>
@@ -5131,7 +5501,7 @@ const POS = () => {
         <Suspense fallback={<ModalSkeleton />}>
           <UniversalMedicineEditModal 
             medicineId={editMedicineId} 
-            initialData={cart.find((i: any) => i.medicine_id === editMedicineId || i.id === editMedicineId)}
+            initialData={cart.find(i => i.medicine_id === editMedicineId || i.id === editMedicineId) as React.ComponentProps<typeof UniversalMedicineEditModal>['initialData']}
             onClose={() => setEditMedicineId(null)} 
             onSave={async () => {
               const currentMedId = editMedicineId;

@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {} from '../../hooks/useDeferredEffect';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Edit, Camera, CheckCircle, Mail, Package, X, Plus, BookOpen, AlertTriangle, ShieldAlert, Factory, RefreshCw, ExternalLink } from 'lucide-react';
 import { useOnClickOutside } from '../../hooks/useOnClickOutside';
 import { api, apiClient, getCompactInventoryCache } from '../../services/api';
 import { useApiQuery } from '../../hooks/useApiQuery';
+
 import { useQueryClient } from '@tanstack/react-query';
 import { HoverPriceIntelTable } from '../../components/HoverPriceIntelTable';
 import { createPortal } from 'react-dom';
@@ -12,12 +13,14 @@ import { UniversalMedicineEditModal } from '../../components/UniversalMedicineEd
 import { PurchaseSaveVerificationModal, type SaveVerificationData } from '../../components/PurchaseSaveVerificationModal';
 import { calculateSimilarity } from '../../utils/fuzzy';
 import { invalidateAfterStockWrite } from '../../utils/cacheInvalidation';
-import { getTodayString, getNDaysAgoString, toDateInputValue } from '../../utils/date';
+import { getTodayString, toDateInputValue } from '../../utils/date';
 import { toastEvent } from '../../services/events';
 import {} from '../../utils/phone';
 import { PhoneInputWithBadge } from '../../components/PhoneInputWithBadge';
 import { SaveBillSpecialPriceModal } from '../../components/SaveBillSpecialPriceModal';
 import { isValidDistributorName } from '../../utils/distributorValidator';
+
+/* eslint-disable react-hooks/refs -- conditional JSX ref assignment is standard React pattern */
 
 const generateUUID = () => {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -98,6 +101,13 @@ interface BillItem {
   cgst?: number | string;
   sgst?: number | string;
   pack_size?: number | string;
+  hsn_code?: string;
+  generic_name?: string;
+  marketed_by?: string;
+  pack_unit?: string;
+  strength?: string;
+  _extracted_data?: { manufacturer?: string; hsn_code?: string } & Record<string, unknown>;
+  [key: string]: unknown;
 }
 
 interface Distributor {
@@ -118,6 +128,136 @@ interface PurchaseHistory {
   total_amount: number;
 }
 
+interface PurchaseTab {
+  id?: string;
+  name?: string;
+  selectedDistributor?: number | null;
+  distributorSearch?: string;
+  invoiceNo?: string;
+  grnNo?: string;
+  invoiceDate?: string;
+  globalCdPer?: number | string;
+  extraCredit?: number | string;
+  cnAmount?: number | string;
+  cnNumber?: string;
+  reconcileExpiryReturnId?: number | null;
+  items?: BillItem[];
+  sourceFilename?: string;
+  sourceFileHeaders?: string[];
+  mappingConfig?: Record<string, string>;
+  editPurchaseId?: number | null;
+}
+
+interface PendingReturnRow {
+  id: number;
+  return_no?: string;
+  expected_credit_amount?: number;
+  return_date?: string;
+  medicine_name?: string;
+  [key: string]: unknown;
+}
+
+interface CatalogSearchRow {
+  id: number;
+  name: string;
+  generic_name?: string;
+  manufacturer?: string;
+  strength?: string;
+  pack_unit?: string;
+  mrp?: number | string;
+  rate?: number | string;
+  cgst_per?: number | null;
+  sgst_per?: number | null;
+  stock_qty?: number;
+  loose_qty?: number;
+  pharmarack_rate?: number | null;
+  pharmarack_distributor?: string | null;
+}
+
+interface UniversalEditSeed {
+  name?: string;
+  packaging?: string;
+  mrp?: number | string | null;
+  rate?: number | string | null;
+  sell_price?: number | string | null;
+  item_type?: string;
+  category?: string;
+  pack_unit?: string;
+  pack_size?: number | null;
+  therapeutic?: string;
+  sub_therapeutic?: string;
+  schedule_type?: string;
+  generic_name?: string;
+  manufacturer?: string;
+  marketed_by?: string;
+  item_code?: string;
+  short_code?: string;
+  ucode?: string;
+  hsn_code?: string;
+  cgst_per?: number | null;
+  sgst_per?: number | null;
+  igst_per?: number | null;
+  api_reference?: string;
+  quantity?: number | null;
+  reorder_level?: number | null;
+  max_stock_level?: number | null;
+  rack_location?: string;
+  rack?: string;
+  is_loose?: boolean | number | null;
+  allow_loose_sale?: boolean | number | null;
+  disable_auto_barcode?: boolean | number | null;
+  tb_medicine?: boolean | number | null;
+  batch_no?: string;
+}
+
+interface UniversalEditOcrPayload {
+  potentialName?: string;
+  genericName?: string;
+  strength?: string;
+  manufacturer?: string;
+  packaging?: string;
+  dosageForm?: string;
+  mrp?: number;
+  rate?: number;
+  sell_price?: number;
+  batchNumber?: string;
+  expiryDate?: string;
+  hsn_code?: string;
+  cgst_per?: number;
+  sgst_per?: number;
+  [key: string]: unknown;
+}
+
+interface EnrichedDetails {
+  activeIngredients?: string[];
+  indications?: string;
+  warnings?: string;
+  sideEffects?: string;
+  manufacturer?: string;
+  enrichmentSource?: string;
+  [key: string]: unknown;
+}
+
+interface SpecialPriceRow {
+  medicine_id?: number | null;
+  name?: string;
+  medicine_name?: string;
+  mrp: number | string;
+  rate: number | string;
+  sell_price?: number | string | null;
+  [key: string]: unknown;
+}
+
+type LocalApiError = { response?: { data?: { error?: string; message?: string; unresolved_items?: Array<{ name?: string }> } }; message?: string };
+
+function writeRef<T>(ref: { current: T }, value: T): void {
+  ref.current = value;
+}
+
+const newBillId = (): string => 'bill_' + Date.now();
+const newGrnNo = (): string => `P-${Math.floor(100 + Math.random() * 900)}`;
+const generateInvoiceNo = (): string => `INV-${Date.now().toString().slice(-6)}`;
+const nowMs = (): number => Date.now();
 let cachedMasterCatalog: Medicine[] = [];
 let isMasterCatalogHydrating = false;
 let cachedMergedCatalog: Medicine[] | null = null;
@@ -285,7 +425,7 @@ const getLiveStockForItem = (item: BillItem): { stock_qty: number; loose_qty: nu
   if (!item) return null;
   const compact = getCompactInventoryCache();
   if (item.medicine_id) {
-    const matched = compact.find((c: any) => (c.medicine_id || c.id) === item.medicine_id);
+    const matched = compact.find(c => (c.medicine_id || c.id) === item.medicine_id);
     if (matched) {
       return {
         stock_qty: typeof matched.stock_qty === 'number' ? matched.stock_qty : 0,
@@ -296,7 +436,7 @@ const getLiveStockForItem = (item: BillItem): { stock_qty: number; loose_qty: nu
   }
   if (item.medicine_name && item.medicine_name.trim()) {
     const term = item.medicine_name.trim().toLowerCase();
-    const matched = compact.find((c: any) => c.name && c.name.trim().toLowerCase() === term);
+    const matched = compact.find(c => c.name && c.name.trim().toLowerCase() === term);
     if (matched) {
       return {
         stock_qty: typeof matched.stock_qty === 'number' ? matched.stock_qty : 0,
@@ -342,22 +482,22 @@ const filterLocalCatalog = (query: string, catalog?: Medicine[]): Medicine[] => 
   return prefixes.length >= 15 ? prefixes.slice(0, 30) : [...prefixes, ...infixes].slice(0, 30);
 };
 
-const getInitialPurchasesTabs = () => {
+const getInitialPurchasesTabs = (): PurchaseTab[] => {
   const saved = localStorage.getItem('purchase_tabs');
   if (saved) {
     try {
       const parsed = JSON.parse(saved);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        const validTabs = parsed.filter(t => t && typeof t === 'object' && Array.isArray(t.items));
+        const validTabs = (parsed as PurchaseTab[]).filter(t => t && typeof t === 'object' && Array.isArray(t.items));
         if (validTabs.length > 0) {
-          return validTabs.map(tab => ({
+          return validTabs.map((tab): PurchaseTab => ({
             ...tab,
             id: tab.id || 'bill_' + Date.now(),
             name: tab.name || 'Bill 1',
             items: (Array.isArray(tab.items) && tab.items.length > 0)
-              ? tab.items.map((item: any) => ({
-                  id: item?.id || generateUUID(),
-                  medicine_id: item?.medicine_id ?? null,
+              ? tab.items.map((item): BillItem => ({
+                  id: (item?.id as string) || generateUUID(),
+                  medicine_id: (item?.medicine_id as number | null) ?? null,
                   medicine_name: item?.medicine_name || '',
                   original_name: item?.original_name || '',
                   manufacturer: item?.manufacturer || '',
@@ -412,7 +552,7 @@ const getInitialPurchasesTabs = () => {
       selectedDistributor: null,
       distributorSearch: '',
       invoiceNo: '',
-      grnNo: `P-${Math.floor(100 + Math.random()*900)}`,
+      grnNo: newGrnNo(),
       invoiceDate: getTodayString(),
       globalCdPer: '',
       extraCredit: '',
@@ -448,7 +588,7 @@ const getInitialPurchasesTabs = () => {
   ];
 };
 
-const getInitialPurchasesActiveTabId = (initialTabs: any[]) => {
+const getInitialPurchasesActiveTabId = (initialTabs: PurchaseTab[]) => {
   const saved = localStorage.getItem('purchase_active_tab_id');
   if (saved && initialTabs.some(t => t && t.id === saved)) return saved;
   return initialTabs[0]?.id || 'default';
@@ -564,7 +704,7 @@ const Purchases: React.FC = () => {
   const initialActiveTabId = getInitialPurchasesActiveTabId(initialTabs);
   const initialActiveTab = initialTabs.find(t => t && t.id === initialActiveTabId) || initialTabs[0] || {};
 
-  const [tabs, setTabs] = useState<any[]>(initialTabs);
+  const [tabs, setTabs] = useState<PurchaseTab[]>(initialTabs);
   const [activeTabId, setActiveTabId] = useState<string>(initialActiveTabId);
 
   const queryClient = useQueryClient();
@@ -585,7 +725,7 @@ const Purchases: React.FC = () => {
     () => api.getDistributors().then(res => Array.isArray(res) ? res : (res?.data || []))
   );
 
-  const { data: purchaseHistory = [] } = useApiQuery<PurchaseHistory[]>(
+  useApiQuery<PurchaseHistory[]>(
     'purchase-history',
     () => api.getPurchases({ limit: 100 }).then(res => Array.isArray(res) ? res : []),
     { enabled: deferredFetchesReady }
@@ -593,7 +733,7 @@ const Purchases: React.FC = () => {
 
   const [selectedDistributor, setSelectedDistributor] = useState<number | null>(initialActiveTab?.selectedDistributor || null);
 
-  const { data: pendingReturns = [] } = useApiQuery<any[]>(
+  const { data: pendingReturns = [] } = useApiQuery<PendingReturnRow[]>(
     ['pending-returns', selectedDistributor],
     () => api.getPendingReturns(selectedDistributor!),
     { enabled: deferredFetchesReady && !!selectedDistributor }
@@ -612,7 +752,7 @@ const Purchases: React.FC = () => {
   const [showCreditNotesPanel, setShowCreditNotesPanel] = useState(false);
   const [showSpecialPriceModal, setShowSpecialPriceModal] = useState(false);
   const [specialPriceModalInvoiceNo, setSpecialPriceModalInvoiceNo] = useState('');
-  const [specialPriceModalItems, setSpecialPriceModalItems] = useState<any[]>([]);
+  const [specialPriceModalItems, setSpecialPriceModalItems] = useState<SpecialPriceRow[]>([]);
   const [items, setItems] = useState<BillItem[]>(
     Array.isArray(initialActiveTab?.items) && initialActiveTab.items.length > 0 
       ? initialActiveTab.items 
@@ -643,8 +783,7 @@ const Purchases: React.FC = () => {
   // emailSource: set when navigating from Mail page
   const emailSource = location.state?.emailSource || null;
   // Track which row has the price intel panel open (by item id)
-  const [] = useState<Record<string, boolean>>({});
-  
+    
   // Mapped distributors filter & state
   const [mappedDistributorIds, setMappedDistributorIds] = useState<Set<number>>(new Set());
   const [onlyMappedFilter, setOnlyMappedFilter] = useState(false);
@@ -702,6 +841,7 @@ const Purchases: React.FC = () => {
                (distributorSearch.toLowerCase().includes((d.name || '').toLowerCase()))
       );
       if (matched) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- auto-resolves distributor from prefill
         setSelectedDistributor(matched.id);
       }
     }
@@ -709,8 +849,8 @@ const Purchases: React.FC = () => {
   
   const [universalEditMedicineId, setUniversalEditMedicineId] = useState<number | null>(null);
   const [universalEditMode, setUniversalEditMode] = useState<'create' | 'edit'>('edit');
-  const [universalEditItem, setUniversalEditItem] = useState<any>(null);
-  const [universalEditOcrData, setUniversalEditOcrData] = useState<any>(null);
+  const [universalEditItem, setUniversalEditItem] = useState<UniversalEditSeed | null>(null);
+  const [universalEditOcrData, setUniversalEditOcrData] = useState<UniversalEditOcrPayload | null>(null);
   const [isUniversalModalOpen, setIsUniversalModalOpen] = useState(false);
   const [showSaveVerify, setShowSaveVerify] = useState(false);
   const [saveVerifyData, setSaveVerifyData] = useState<SaveVerificationData | null>(null);
@@ -742,18 +882,22 @@ const Purchases: React.FC = () => {
   const mappingConfigRef = useRef(mappingConfig);
   const editPurchaseIdRef = useRef(editPurchaseId);
 
-  distributorSearchRef.current = distributorSearch;
-  grnNoRef.current = grnNo;
-  invoiceDateRef.current = invoiceDate;
-  globalCdPerRef.current = globalCdPer;
-  extraCreditRef.current = extraCredit;
-  cnAmountRef.current = cnAmount;
-  cnNumberRef.current = cnNumber;
-  reconcileExpiryReturnIdRef.current = reconcileExpiryReturnId;
-  sourceFilenameRef.current = sourceFilename;
-  sourceFileHeadersRef.current = sourceFileHeaders;
-  mappingConfigRef.current = mappingConfig;
-  editPurchaseIdRef.current = editPurchaseId;
+  // E6 refs: updated unconditionally every render via effect (compiler-safe)
+  useEffect(() => {
+    writeRef(distributorSearchRef, distributorSearch);
+    writeRef(grnNoRef, grnNo);
+    writeRef(invoiceDateRef, invoiceDate);
+    writeRef(globalCdPerRef, globalCdPer);
+    writeRef(extraCreditRef, extraCredit);
+    writeRef(cnAmountRef, cnAmount);
+    writeRef(cnNumberRef, cnNumber);
+    writeRef(reconcileExpiryReturnIdRef, reconcileExpiryReturnId);
+    writeRef(sourceFilenameRef, sourceFilename);
+    writeRef(sourceFileHeadersRef, sourceFileHeaders);
+    writeRef(mappingConfigRef, mappingConfig);
+    writeRef(editPurchaseIdRef, editPurchaseId);
+  });
+
 
   // Sync current active inputs into tabs array
   // E6: reduced from 15 dependencies to the 4 that are load-bearing
@@ -860,14 +1004,14 @@ const Purchases: React.FC = () => {
 
   const addNewTab = () => {
     const nextNum = tabs.length + 1;
-    const newId = 'bill_' + Date.now();
+    const newId = newBillId();
     const newTab = {
       id: newId,
       name: `Bill ${nextNum}`,
       selectedDistributor: null,
       distributorSearch: '',
       invoiceNo: '',
-      grnNo: `P-${Math.floor(100 + Math.random()*900)}`,
+      grnNo: newGrnNo(),
       invoiceDate: getTodayString(),
       globalCdPer: '',
       extraCredit: '',
@@ -922,7 +1066,7 @@ const Purchases: React.FC = () => {
         selectedDistributor: null,
         distributorSearch: '',
         invoiceNo: '',
-        grnNo: `P-${Math.floor(100 + Math.random()*900)}`,
+        grnNo: newGrnNo(),
         invoiceDate: getTodayString(),
         globalCdPer: '',
         extraCredit: '',
@@ -934,7 +1078,7 @@ const Purchases: React.FC = () => {
         sourceFileHeaders: [],
         mappingConfig: {}
       }]);
-      setGrnNo(`P-${Math.floor(100 + Math.random()*900)}`);
+      setGrnNo(newGrnNo());
       return;
     }
 
@@ -955,29 +1099,29 @@ const Purchases: React.FC = () => {
       setSourceFilename(fallback.sourceFilename || '');
       setSourceFileHeaders(fallback.sourceFileHeaders || []);
       setMappingConfig(fallback.mappingConfig || {});
-      setActiveTabId(fallback.id);
+      setActiveTabId(fallback.id!);
     }
     setTabs(filtered.map((t, idx) => ({
       ...t,
-      name: t.name.startsWith('Bill ') ? `Bill ${idx + 1}` : t.name
+      name: (t.name || '').startsWith('Bill ') ? `Bill ${idx + 1}` : t.name
     })));
   };
 
-  const savePurchaseRef = useRef<any>(null);
-  const addNewItemRef = useRef<any>(null);
+  const savePurchaseRef = useRef<(() => Promise<void>) | null>(null);
+  const addNewItemRef = useRef<(() => void) | null>(null);
   const activeSearchRef = useRef<HTMLDivElement>(null);
 
+  const [searchResults, setSearchResults] = useState<Medicine[]>([]);
+  const [activeSearchIndex, setActiveSearchIndex] = useState<number | null>(null);
+  const [searchHighlightIndex, setSearchHighlightIndex] = useState(-1);
   useOnClickOutside(activeSearchRef, () => {
     setActiveSearchIndex(null);
     setSearchResults([]);
     setSearchHighlightIndex(-1);
   });
 
-  useEffect(() => {
-    savePurchaseRef.current = savePurchase;
-    addNewItemRef.current = addNewItem;
-  });
 
+  /* eslint-disable react-hooks/immutability -- closures resolve at event time */
   // Keyboard shortcut listeners (e.g. 'Alt+E' or 'F8' for quick edit medicine)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -986,21 +1130,21 @@ const Purchases: React.FC = () => {
       // Ctrl + S: Save Purchase Bill
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
         e.preventDefault();
-        savePurchaseRef.current();
+        savePurchaseRef.current?.();
         return;
       }
 
       // Alt + A: Add New Item
       if (e.altKey && e.key.toLowerCase() === 'a') {
         e.preventDefault();
-        addNewItemRef.current();
+        addNewItemRef.current?.();
         return;
       }
 
       // Escape: Close Overlays / Modals
       if (e.key === 'Escape') {
         setShowUploadModal(false);
-        setShowDistributorModal(false);
+            setShowDistributorModal(false);
         setIsUniversalModalOpen(false);
         setPanelOpen(false);
       }
@@ -1040,6 +1184,7 @@ const Purchases: React.FC = () => {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
+  /* eslint-enable react-hooks/immutability */
 
   function createEmptyItem(): BillItem {
     return {
@@ -1067,27 +1212,15 @@ const Purchases: React.FC = () => {
   }
 
   // Helper to get date N days ago in YYYY-MM-DD format
-  const getNDaysAgo = (n: number) => {
-    return getNDaysAgoString(n);
-  };
-
+  
   // History list filter states
-  const [filterDistributor] = useState('');
-  const [filterInvoice] = useState('');
-  const [filterStartDate] = useState(getNDaysAgo(13));
-  const [filterEndDate] = useState(getTodayString());
-  const [filterMinAmount] = useState('');
-  const [filterMaxAmount] = useState('');
 
   const [saving, setSaving] = useState(false);
   const savingStartedAtRef = useRef<number>(0);
   const savingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [hoveredPriceRow, setHoveredPriceRow] = useState<string | null>(null);
   const [, setLastSavedInvoiceNo] = useState('');
-  const [, setLastSavedItems] = useState<any[]>([]);
-  const [searchResults, setSearchResults] = useState<Medicine[]>([]);
-  const [activeSearchIndex, setActiveSearchIndex] = useState<number | null>(null);
-  const [searchHighlightIndex, setSearchHighlightIndex] = useState(-1);
+  const [, setLastSavedItems] = useState<{ name?: string; batch?: string }[]>([]);
   const searchResultsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -1102,7 +1235,7 @@ const Purchases: React.FC = () => {
   // Old batches dropdown state; history rows themselves live in the module-level
   // medicineHistoryCache. activeBatchRequestRef drops stale dropdown responses.
   const [activeBatchRowIndex, setActiveBatchRowIndex] = useState<number | null>(null);
-  const [rowBatchesList, setRowBatchesList] = useState<any[]>([]);
+  const [rowBatchesList, setRowBatchesList] = useState<MedicineBatchHistoryRow[]>([]);
   const [rowBatchesLoading, setRowBatchesLoading] = useState(false);
   const [batchHighlightIndex, setBatchHighlightIndex] = useState(-1);
   const activeBatchRequestRef = useRef<string>('');
@@ -1131,10 +1264,8 @@ const Purchases: React.FC = () => {
   });
   const [savingDistributor, setSavingDistributor] = useState(false);
   const [activeMedicineIndex, setActiveMedicineIndex] = useState<number | null>(null);
-  const [] = useState<string[]>([]);
-  const [] = useState(false);
-
-  const selectBatch = (rowIndex: number, batch: any) => {
+    
+  const selectBatch = (rowIndex: number, batch: MedicineBatchHistoryRow) => {
     setItems(prev => {
       const updated = [...prev];
       const target = updated[rowIndex];
@@ -1203,15 +1334,16 @@ const Purchases: React.FC = () => {
   const openAddMedicineModal = (index: number) => {
     setActiveMedicineIndex(index);
     const it = items[index];
-    const extracted = (it as any)?._extracted_data || {};
-    const medMfg = it?.manufacturer || extracted.manufacturer || '';
-    const medHsn = (it as any)?.hsn_code || extracted.hsn_code || '';
-    const medMrp = it?.mrp || extracted.mrp || '';
-    const medRate = it?.rate || extracted.rate || '';
-    const medSellPrice = it?.sell_price || (medMrp ? medMrp : '');
+    const extracted = it._extracted_data || {} as { manufacturer?: string; hsn_code?: string; mrp?: number | string; rate?: number | string; sell_price?: number | string; cgst_per?: number | string; sgst_per?: number | string; name?: string };
+    const medMfg: string = it?.manufacturer || extracted.manufacturer || '';
+    const medHsn: string = it.hsn_code || extracted.hsn_code || '';
+    const pickNumStr = (a: unknown, b: unknown): number | string => (a ? (a as number | string) : b ? (b as number | string) : '');
+    const medMrp = pickNumStr(it?.mrp, extracted.mrp);
+    const medRate = pickNumStr(it?.rate, extracted.rate);
+    const medSellPrice: number | string = it?.sell_price || (medMrp ? medMrp : '');
     const medCgst = (it?.cgst_per !== undefined && it?.cgst_per !== '') ? it.cgst_per : (extracted.cgst_per !== undefined ? extracted.cgst_per : 6);
     const medSgst = (it?.sgst_per !== undefined && it?.sgst_per !== '') ? it.sgst_per : (extracted.sgst_per !== undefined ? extracted.sgst_per : 6);
-    const medName = it?.medicine_name || it?.original_name || extracted.name || '';
+    const medName: string = it?.medicine_name || it?.original_name || String(extracted.name || '');
 
     if (it?.medicine_id) {
       setUniversalEditMedicineId(it.medicine_id);
@@ -1221,33 +1353,33 @@ const Purchases: React.FC = () => {
         mrp: it.mrp,
         rate: it.rate,
         sell_price: it.sell_price,
-        pack_size: it.pack_size || '',
+        pack_size: (it.pack_size || '') as number | null,
         manufacturer: medMfg,
         hsn_code: medHsn,
         cgst_per: Number(medCgst) || 6,
         sgst_per: Number(medSgst) || 6,
-        quantity: it.qty,
+        quantity: it.qty as number | null,
         batch_no: it.batch_no
-      });
+      } as UniversalEditSeed);
       setUniversalEditOcrData(null);
     } else {
       setUniversalEditMedicineId(null);
       setUniversalEditMode('create');
       setUniversalEditItem({
         name: medName,
-        generic_name: (it as any)?.generic_name || '',
+        generic_name: (it.generic_name as string | undefined) || '',
         manufacturer: medMfg,
-        marketed_by: (it as any)?.marketed_by || medMfg,
-        pack_unit: (it as any)?.pack_unit || 'Tablet',
-        strength: (it as any)?.strength || '',
-        pack_size: (it as any)?.pack_size || '',
+        marketed_by: (it.marketed_by as string | undefined) || medMfg,
+        pack_unit: (it.pack_unit as string | undefined) || 'Tablet',
+        strength: (it.strength as string | undefined) || '',
+        pack_size: (it.pack_size || '') as number | null,
         cgst_per: Number(medCgst) || 6,
         sgst_per: Number(medSgst) || 6,
         hsn_code: medHsn,
-        mrp: medMrp,
-        rate: medRate,
-        sell_price: medSellPrice,
-      });
+        mrp: medMrp as number | string | null,
+        rate: medRate as number | string | null,
+        sell_price: medSellPrice as number | string | null,
+      } as UniversalEditSeed);
       setUniversalEditOcrData({
         potentialName: medName,
         manufacturer: medMfg,
@@ -1265,8 +1397,8 @@ const Purchases: React.FC = () => {
   };
 
   // Enrichment Drawer States
-  const [selectedEnrichedItem, setSelectedEnrichedItem] = useState<any>(null);
-  const [enrichedData, setEnrichedData] = useState<any>(null);
+  const [selectedEnrichedItem, setSelectedEnrichedItem] = useState<BillItem | null>(null);
+  const [enrichedData, setEnrichedData] = useState<EnrichedDetails | null>(null);
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
 
@@ -1281,13 +1413,13 @@ const Purchases: React.FC = () => {
     setEnrichedData(null);
 
     api.getEnrichedMedicine(item.medicine_id)
-      .then((res: any) => {
+      .then((res: { success?: boolean; enrichment?: EnrichedDetails }) => {
         if (res.success) {
-          setEnrichedData(res.enrichment);
+          setEnrichedData(res.enrichment ?? null);
         }
         setDetailsLoading(false);
       })
-      .catch((err: any) => {
+      .catch((err: unknown) => {
         console.error('Error fetching enrichment data:', err);
         setDetailsLoading(false);
       });
@@ -1306,7 +1438,7 @@ const Purchases: React.FC = () => {
       if (editDistributorId) {
         const response = await apiClient.put(`/distributors/${editDistributorId}`, newDistributor);
         const saved = response.data.data || response.data;
-        queryClient.setQueryData(['distributors'], (old: any) => {
+        queryClient.setQueryData(['distributors'], (old: unknown) => {
           if (Array.isArray(old)) {
             return old.map(d => d.id === editDistributorId ? saved : d);
           }
@@ -1319,7 +1451,7 @@ const Purchases: React.FC = () => {
       } else {
         const response = await apiClient.post('/distributors', newDistributor);
         const saved = response.data.data || response.data;
-        queryClient.setQueryData(['distributors'], (old: any) => {
+        queryClient.setQueryData(['distributors'], (old: unknown) => {
           if (Array.isArray(old)) {
             return [...old, saved];
           }
@@ -1338,16 +1470,16 @@ const Purchases: React.FC = () => {
       setNewDistributor({ name: '', phone: '', email: '', address: '', state_code: '' });
       setEditDistributorId(null);
       setShowDistributorModal(false);
-    } catch (error: any) {
+    } catch (error) {
       console.error('Error saving distributor:', error);
-      const errMsg = error.response?.data?.error || error.response?.data?.message || 'Failed to save distributor';
+      const errMsg = (error as LocalApiError).response?.data?.error || (error as LocalApiError).response?.data?.message || 'Failed to save distributor';
       alert(errMsg);
     } finally {
       setSavingDistributor(false);
     }
   };
 
-  const searchTimeoutRef = React.useRef<any>(null);
+  const searchTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Pre-hydrate master catalog in background on mount
   // B4: non-essential background warm-up; staggered along with the other
@@ -1368,7 +1500,7 @@ const Purchases: React.FC = () => {
     }
   }, [deferredFetchesReady]);
 
-  const searchMedicines = useCallback((term: string, index: number) => {
+  const searchMedicines = (term: string, index: number) => {
     if (searchTimeoutRef.current) {
       clearTimeout(searchTimeoutRef.current);
     }
@@ -1394,19 +1526,19 @@ const Purchases: React.FC = () => {
     // Step 2: Asynchronous backend query to update and merge master catalog
     searchTimeoutRef.current = setTimeout(async () => {
       try {
-        const response = await api.catalogSearch(cleanTerm);
+        const response = await api.catalogSearch(cleanTerm) as CatalogSearchRow[] | null;
         if (Array.isArray(response) && response.length > 0) {
           // Merge newly fetched items into cachedMasterCatalog
           const seen = new Set(cachedMasterCatalog.map(m => m.id));
           for (const item of response) {
             if (!seen.has(item.id)) {
               seen.add(item.id);
-              cachedMasterCatalog.push(item);
+              cachedMasterCatalog.push(item as Medicine);
             }
           }
           const compact = getCompactInventoryCache();
-          const compactMap = new Map(compact.map((ci: any) => [(ci.medicine_id || ci.id), ci]));
-          const enrichedResponse = response.map((med: any) => {
+          const compactMap = new Map(compact.map(ci => [(ci.medicine_id || ci.id), ci]));
+          const enrichedResponse = response.map(med => {
             const cItem = compactMap.get(med.id);
             return {
               ...med,
@@ -1417,20 +1549,20 @@ const Purchases: React.FC = () => {
             };
           });
           // In-stock inventory first; master-database entries grouped after.
-          enrichedResponse.sort((a: any, b: any) => {
+          enrichedResponse.sort((a, b) => {
             const aStock = (((a.stock_qty as number) || 0) + ((a.loose_qty as number) || 0)) > 0 ? 1 : 0;
             const bStock = (((b.stock_qty as number) || 0) + ((b.loose_qty as number) || 0)) > 0 ? 1 : 0;
             if (aStock !== bStock) return bStock - aStock;
             return String(a.name || '').localeCompare(String(b.name || ''));
           });
-          setSearchResults(enrichedResponse);
+          setSearchResults(enrichedResponse as Medicine[]);
           setSearchHighlightIndex(-1);
         }
       } catch (error) {
         console.error('Error searching medicines:', error);
       }
     }, 300);
-  }, []);
+  };
 
   useEffect(() => {
     return () => {
@@ -1659,8 +1791,8 @@ const Purchases: React.FC = () => {
     item.gstTouched = false; // fresh selection → history GST may prefill again
     item.cgst_per = (medicine.cgst_per !== undefined && medicine.cgst_per !== null && medicine.cgst_per !== 0) ? medicine.cgst_per : 6;
     item.sgst_per = (medicine.sgst_per !== undefined && medicine.sgst_per !== null && medicine.sgst_per !== 0) ? medicine.sgst_per : 6;
-    item.stock_qty = (medicine as any).stock_qty || 0;
-    item.loose_qty = (medicine as any).loose_qty || 0;
+    item.stock_qty = medicine.stock_qty || 0;
+    item.loose_qty = medicine.loose_qty || 0;
     item.scheme_paid = medicine.scheme_paid;
     item.scheme_free = medicine.scheme_free;
     item.amount = calculateItemAmount(item);
@@ -1710,13 +1842,13 @@ const Purchases: React.FC = () => {
   };
 
   const calculateItemAmount = (item: BillItem): number => {
-    const qty = parseFloat(item.qty as any) || 0;
-    const rate = parseFloat(item.rate as any) || 0;
-    const cd_rs = parseFloat(item.cd_rs as any) || 0;
-    const cd_per = parseFloat(item.cd_per as any) || 0;
-    const additional_discount = parseFloat(item.additional_discount as any) || 0;
-    const cgst_per = parseFloat(item.cgst_per as any) || 0;
-    const sgst_per = parseFloat(item.sgst_per as any) || 0;
+    const qty = parseFloat(String(item.qty)) || 0;
+    const rate = parseFloat(String(item.rate)) || 0;
+    const cd_rs = parseFloat(String(item.cd_rs)) || 0;
+    const cd_per = parseFloat(String(item.cd_per)) || 0;
+    const additional_discount = parseFloat(String(item.additional_discount)) || 0;
+    const cgst_per = parseFloat(String(item.cgst_per)) || 0;
+    const sgst_per = parseFloat(String(item.sgst_per)) || 0;
 
     const baseAmount = qty * rate;
     const discountAmount = cd_rs + additional_discount + (baseAmount * cd_per / 100);
@@ -1731,6 +1863,7 @@ const Purchases: React.FC = () => {
     if (location.state?.prefilledPurchase) {
       const { editPurchaseId, distributor_id, distributorName, invoiceNo: prefInvoiceNo, date: prefDate, items: prefilledItems, globalCdPer: prefGlobalCdPer, totalAmount: prefTotalAmount, cnAmount: prefCnAmount, cnNumber: prefCnNumber, reconcileExpiryReturnId: prefReconcileExpiryReturnId, source_filename, source_file_headers, mapping_config } = location.state.prefilledPurchase;
       
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- mail-prefill hydrates bill draft
       if (editPurchaseId) setEditPurchaseId(editPurchaseId);
       if (distributor_id) setSelectedDistributor(distributor_id);
       if (prefInvoiceNo) setInvoiceNo(prefInvoiceNo);
@@ -1796,14 +1929,14 @@ const Purchases: React.FC = () => {
             let subtotal = 0;
             let totalCgst = 0;
             let totalSgst = 0;
-            currentItems.forEach((item: any) => {
-              const qty = parseFloat(item.qty as any) || 0;
-              const rate = parseFloat(item.rate as any) || 0;
-              const cd_rs = parseFloat(item.cd_rs as any) || 0;
-              const cd_per = parseFloat(item.cd_per as any) || 0;
-              const additional_discount = parseFloat(item.additional_discount as any) || 0;
-              const cgst_per = parseFloat(item.cgst_per as any) || 0;
-              const sgst_per = parseFloat(item.sgst_per as any) || 0;
+            currentItems.forEach(item => {
+              const qty = parseFloat(String(item.qty)) || 0;
+              const rate = parseFloat(String(item.rate)) || 0;
+              const cd_rs = parseFloat(String(item.cd_rs)) || 0;
+              const cd_per = parseFloat(String(item.cd_per)) || 0;
+              const additional_discount = parseFloat(String(item.additional_discount)) || 0;
+              const cgst_per = parseFloat(String(item.cgst_per)) || 0;
+              const sgst_per = parseFloat(String(item.sgst_per)) || 0;
 
               const baseAmount = qty * rate;
               const discountAmount = cd_rs + additional_discount + (baseAmount * cd_per / 100);
@@ -1899,56 +2032,56 @@ const Purchases: React.FC = () => {
                 }
 
                 // 2. Fallback to catalog search for EXACT matches or FUZZY matches
-                let searchResults = [];
+                let searchResults: CatalogSearchRow[] = [];
                 try {
-                  searchResults = await api.catalogSearch(mName);
-                } catch (e) {
+                  searchResults = (await api.catalogSearch(mName)) as CatalogSearchRow[];
+                } catch {
                   searchResults = [];
                 }
 
                 const matchedList = searchResults || [];
-                let bestMatch = null;
+                let bestMatch: CatalogSearchRow | null = null;
 
                 // Check for exact match first
                 if (matchedList.length > 0) {
-                  bestMatch = matchedList.find((m: any) => m.name && m.name.toLowerCase() === mName.toLowerCase());
+                  bestMatch = matchedList.find(m => m.name && m.name.toLowerCase() === mName.toLowerCase()) ?? null;
                 }
 
                 // If no exact match, calculate similarities and find the best one >= 0.60
                 if (!bestMatch && matchedList.length > 0) {
-                  const scored = matchedList.map((m: any) => ({
+                  const scored = matchedList.map(m => ({
                     item: m,
                     score: calculateSimilarity(mName, m.name)
-                  })).filter((s: any) => s.score >= 0.60);
+                  })).filter(s => s.score >= 0.60);
 
                   if (scored.length > 0) {
-                    scored.sort((a: any, b: any) => b.score - a.score);
-                    bestMatch = scored[0].item;
+                    scored.sort((a, b) => b.score - a.score);
+                    bestMatch = scored[0]!.item;
                   }
                 }
 
                 // If still no match, try searching for the first word/token of length >= 3
                 if (!bestMatch) {
-                  const parts = mName.split(/[\s\-]+/);
+                  const parts = mName.split(/[\s-]+/);
                   let tokens = parts[0];
                   const genericPrefixes = ['tab', 'tabs', 'cap', 'caps', 'inj', 'syp', 'susp', 'tablet', 'capsule', 'injection', 'syrup', 'drop', 'drops', 'ointment', 'cream', 'gel'];
                   if (tokens && (genericPrefixes.includes(tokens.toLowerCase()) || tokens.length < 3) && parts.length > 1) {
                     tokens = parts[1];
                   }
                   if (tokens && tokens.length >= 3) {
-                    let tokenResults = [];
+                    let tokenResults: CatalogSearchRow[] = [];
                     try {
-                      tokenResults = await api.catalogSearch(tokens);
-                    } catch (e) {}
+                      tokenResults = (await api.catalogSearch(tokens)) as CatalogSearchRow[];
+                    } catch {}
 
-                    const scored = (tokenResults || []).map((m: any) => ({
+                    const scored = (tokenResults || []).map(m => ({
                       item: m,
                       score: calculateSimilarity(mName, m.name)
-                    })).filter((s: any) => s.score >= 0.60);
+                    })).filter(s => s.score >= 0.60);
 
                     if (scored.length > 0) {
-                      scored.sort((a: any, b: any) => b.score - a.score);
-                      bestMatch = scored[0].item;
+                      scored.sort((a, b) => b.score - a.score);
+                      bestMatch = scored[0]!.item;
                     }
                   }
                 }
@@ -1991,14 +2124,14 @@ const Purchases: React.FC = () => {
       // Clean up the location state so it doesn't populate again on component updates/re-renders
       navigate(location.pathname, { replace: true, state: {} });
     }
-  }, [location.state, distributors, navigate, location.pathname]);
+  }, [location.state, distributors, navigate, location.pathname, emailSource?.date]);
 
-  const updateItem = (index: number, field: keyof BillItem, value: any) => {
+  const updateItem = (index: number, field: keyof BillItem, value: unknown) => {
     const newItems = [...items];
     const item = newItems[index];
 
     if (field === 'batch_no') {
-      (item as any)[field] = value;
+      (item as Record<string, unknown>)[field] = value;
       // Same-batch autofill resolves locally from the one-shot history cache —
       // zero per-keystroke network calls (contract: same batch ⇒ same rate/MRP/
       // expiry; GST only when the user hasn't manually set it; qty never touched).
@@ -2008,8 +2141,8 @@ const Purchases: React.FC = () => {
       }
     } else if (field === 'qty' || field === 'free_qty' || field === 'rate' || field === 'mrp' ||
         field === 'cgst_per' || field === 'sgst_per' || field === 'cd_rs' || field === 'cd_per' || field === 'additional_discount') {
-      const parsedVal = parseFloat(value);
-      (item as any)[field] = value === '' ? '' : (isNaN(parsedVal) ? 0 : parsedVal);
+      const parsedVal = parseFloat(String(value));
+      (item as Record<string, unknown>)[field] = value === '' ? '' : (isNaN(parsedVal) ? 0 : parsedVal);
       
       // Auto match SGST and CGST
       if (field === 'sgst_per') {
@@ -2020,15 +2153,15 @@ const Purchases: React.FC = () => {
         item.gstTouched = true;
       }
     } else if (field === 'expiry_date') {
-      (item as any)[field] = formatExpiryToMMYY(value);
+      (item as Record<string, unknown>)[field] = formatExpiryToMMYY(String(value));
     } else {
-      (item as any)[field] = value;
+      (item as Record<string, unknown>)[field] = value;
     }
 
     if (field === 'qty' && item.scheme_paid > 0) {
-      const qty = parseFloat(item.qty as any) || 0;
+      const qty = parseFloat(String(item.qty)) || 0;
       const expectedFree = Math.floor(qty / item.scheme_paid) * item.scheme_free;
-      const freeQty = parseFloat(item.free_qty as any) || 0;
+      const freeQty = parseFloat(String(item.free_qty)) || 0;
       if (freeQty > expectedFree) {
         setSchemeMatchStatus(prev => ({
           ...prev,
@@ -2080,13 +2213,13 @@ const Purchases: React.FC = () => {
     let totalSgst = 0;
 
     items.forEach(item => {
-      const qty = parseFloat(item.qty as any) || 0;
-      const rate = parseFloat(item.rate as any) || 0;
-      const cd_rs = parseFloat(item.cd_rs as any) || 0;
-      const cd_per = parseFloat(item.cd_per as any) || 0;
-      const additional_discount = parseFloat(item.additional_discount as any) || 0;
-      const cgst_per = parseFloat(item.cgst_per as any) || 0;
-      const sgst_per = parseFloat(item.sgst_per as any) || 0;
+      const qty = parseFloat(String(item.qty)) || 0;
+      const rate = parseFloat(String(item.rate)) || 0;
+      const cd_rs = parseFloat(String(item.cd_rs)) || 0;
+      const cd_per = parseFloat(String(item.cd_per)) || 0;
+      const additional_discount = parseFloat(String(item.additional_discount)) || 0;
+      const cgst_per = parseFloat(String(item.cgst_per)) || 0;
+      const sgst_per = parseFloat(String(item.sgst_per)) || 0;
 
       const baseAmount = qty * rate;
       const discountAmount = cd_rs + additional_discount + (baseAmount * cd_per / 100);
@@ -2101,8 +2234,8 @@ const Purchases: React.FC = () => {
       totalSgst += sgstAmount;
     });
 
-    const cnVal = parseFloat(cnAmount as any) || 0;
-    const extraDiscVal = parseFloat(extraCredit as any) || 0;
+    const cnVal = parseFloat(String(cnAmount)) || 0;
+    const extraDiscVal = parseFloat(String(extraCredit)) || 0;
     const grandTotal = Math.max(0, subtotal + totalCgst + totalSgst - cnVal - extraDiscVal);
 
     return {
@@ -2121,7 +2254,7 @@ const Purchases: React.FC = () => {
     distIdToSave: number | null;
     distNameToSave: string;
     finalInvoiceNo: string;
-    validItems: any[];
+    validItems: BillItem[];
     cleanInvoiceDate: string;
   };
 
@@ -2162,7 +2295,7 @@ const Purchases: React.FC = () => {
 
     let finalInvoiceNo = (invoiceNo || '').trim();
     if (!finalInvoiceNo) {
-      finalInvoiceNo = `INV-${Date.now().toString().slice(-6)}`;
+      finalInvoiceNo = generateInvoiceNo();
       setInvoiceNo(finalInvoiceNo);
     }
 
@@ -2209,7 +2342,7 @@ const Purchases: React.FC = () => {
   const savePurchase = async () => {
     // If already saving but stuck >5s, force-reset and allow retry
     if (saving) {
-      if (Date.now() - savingStartedAtRef.current > 5000) {
+      if (nowMs() - savingStartedAtRef.current > 5000) {
         setSaving(false);
         if (savingTimeoutRef.current) clearTimeout(savingTimeoutRef.current);
       } else {
@@ -2231,14 +2364,15 @@ const Purchases: React.FC = () => {
           unmatched.map(it => String(it.medicine_name || it.name || it.medicine || '').trim()),
           bill.distIdToSave
         );
-        const results: any[] = res?.results || [];
+        interface MatchResult { medicine_id?: number; matched_name?: string; match_type?: string; confidence?: number }
+        const results = (res as { results?: MatchResult[] })?.results || [];
         setItems([...items]); // validItems entries are references into items — flush mutations to render
-        results.forEach((r: any, k: number) => {
+        results.forEach((r, k: number) => {
           const src = unmatched[k];
           if (!src || !r?.medicine_id) return;
           src.medicine_id = r.medicine_id;
           if (r.matched_name && !(src.medicine_name || src.name)) src.medicine_name = r.matched_name;
-          if (WEAK_MATCH_TYPES.has(r.match_type)) {
+          if (r.match_type !== undefined && WEAK_MATCH_TYPES.has(r.match_type)) {
             fuzzyMatches.push({
               name: String(src.original_name || src.medicine_name || src.name || ''),
               matchedName: String(r.matched_name || ''),
@@ -2273,7 +2407,7 @@ const Purchases: React.FC = () => {
 
   const confirmVerifiedSave = async () => {
     if (saving) {
-      if (Date.now() - savingStartedAtRef.current > 5000) {
+      if (nowMs() - savingStartedAtRef.current > 5000) {
         setSaving(false);
         if (savingTimeoutRef.current) clearTimeout(savingTimeoutRef.current);
       } else {
@@ -2289,7 +2423,7 @@ const Purchases: React.FC = () => {
     const { distIdToSave, distNameToSave, finalInvoiceNo, validItems, cleanInvoiceDate } = bill;
     setShowSaveVerify(false);
     setSaving(true);
-    savingStartedAtRef.current = Date.now();
+    savingStartedAtRef.current = nowMs();
     // Safety net: auto-reset after 35s no matter what
     if (savingTimeoutRef.current) clearTimeout(savingTimeoutRef.current);
     savingTimeoutRef.current = setTimeout(() => { setSaving(false); }, 35000);
@@ -2316,8 +2450,8 @@ const Purchases: React.FC = () => {
             medicine: medName,
             medicine_name: medName,
             original_name: item.original_name || medName,
-            manufacturer: item.manufacturer || (item as any)._extracted_data?.manufacturer || '',
-            hsn_code: (item as any).hsn_code || (item as any)._extracted_data?.hsn_code || '',
+            manufacturer: item.manufacturer || item._extracted_data?.manufacturer || '',
+            hsn_code: item.hsn_code || item._extracted_data?.hsn_code || '',
             batch_no: item.batch_no || item.batch || '',
             expiry_date: item.expiry_date || item.expiry || '',
             qty: parseFloat(String(item.qty !== undefined ? item.qty : item.quantity || 0)) || 0,
@@ -2373,12 +2507,13 @@ const Purchases: React.FC = () => {
       }));
 
       toastEvent.trigger(`✅ Purchase bill ${savedInvoiceNo} saved successfully!`, 'success');
-      if (typeof (window as any).refreshStagedCounts === 'function') {
-        (window as any).refreshStagedCounts(true);
+      const winApi = window as unknown as { refreshStagedCounts?: (force?: boolean) => void };
+      if (typeof winApi.refreshStagedCounts === 'function') {
+        winApi.refreshStagedCounts(true);
       }
       window.dispatchEvent(new CustomEvent('app-purchases-updated'));
       
-      const nextGrn = `P-${Math.floor(100 + Math.random()*900)}`;
+      const nextGrn = newGrnNo();
       setItems([createEmptyItem()]);
       setSelectedDistributor(null);
       setDistributorSearch('');
@@ -2408,15 +2543,15 @@ const Purchases: React.FC = () => {
 
       // Refresh local POS inventory search cache
       api.getCompactInventory().catch(() => {});
-    } catch (error: any) {
+    } catch (error) {
       console.error('Error saving purchase:', error);
-      const unres = error.response?.data?.unresolved_items;
+      const unres = (error as LocalApiError).response?.data?.unresolved_items as Array<{ name?: string }> | undefined;
       if (Array.isArray(unres) && unres.length > 0) {
-        const names = unres.map((u: any) => `"${u?.name || 'Item'}"`).join(', ');
+        const names = unres.map((u: { name?: string }) => `"${u?.name || 'Item'}"`).join(', ');
         toastEvent.trigger(`Resolve ${unres.length} medicine(s) before saving: ${names}. Link each via search or ✨ Register.`, 'error', '/purchases');
         alert(`${unres.length} medicine(s) on this bill are not linked to a master record: ${names}. Use search or ✨ Register New Medicine on those rows, then save again.`);
       } else {
-        const errMsg = error.response?.data?.error || error.response?.data?.message || error.message || 'Failed to save purchase';
+        const errMsg = (error as LocalApiError).response?.data?.error || (error as LocalApiError).response?.data?.message || (error as LocalApiError).message || 'Failed to save purchase';
         toastEvent.trigger(errMsg, 'error', '/purchases');
         alert(errMsg);
       }
@@ -2437,12 +2572,18 @@ const Purchases: React.FC = () => {
         headers: { 'Content-Type': undefined },
       });
 
-      const parsedItems = response.data.data;
+      interface ParsedUploadRow {
+        name?: string; qty?: number | string; quantity?: number | string; free_qty?: number | string;
+        price?: number | string; rate?: number | string; batch_no?: string; expiry_date?: string;
+        mrp?: number | string; cgst_per?: number | string; sgst_per?: number | string;
+        hsn_code?: string; cd_per?: number | string; cd_rs?: number | string; additional_discount?: number | string;
+      }
+      const parsedItems = response.data.data as ParsedUploadRow[];
       const parsedGlobalCdPer = response.data.global_cd_per || '';
-      let newItems = parsedItems.map((item: any) => ({
+      let newItems = parsedItems.map((item): BillItem => ({
         ...createEmptyItem(),
-        medicine_name: item.name,
-        original_name: item.name,
+        medicine_name: item.name ?? '',
+        original_name: item.name ?? '',
         qty: item.qty || item.quantity || '',
         free_qty: item.free_qty || '',
         rate: item.price || item.rate || '',
@@ -2481,10 +2622,10 @@ const Purchases: React.FC = () => {
           }
 
           // 2. Fallback to catalog search for EXACT matches
-          const res = await api.catalogSearch(mName);
+          const res = (await api.catalogSearch(mName)) as CatalogSearchRow[];
           const matchedList = res || [];
           if (matchedList.length > 0) {
-            const match = matchedList.find((m: any) => m.name && m.name.toLowerCase() === mName.toLowerCase());
+            const match = matchedList.find(m => m.name && m.name.toLowerCase() === mName.toLowerCase());
             if (match) {
               newItems[i].medicine_id = match.id;
               newItems[i].medicine_name = match.name;
@@ -2508,7 +2649,7 @@ const Purchases: React.FC = () => {
         }
       }
 
-      newItems.forEach((item: any) => {
+      newItems.forEach(item => {
         item.amount = calculateItemAmount(item);
       });
 
@@ -2535,7 +2676,7 @@ const Purchases: React.FC = () => {
 
       if (response.data.distributor_name) {
         setDistributorSearch(response.data.distributor_name);
-        const match = distributors.find((d: any) => d.name && d.name.toLowerCase() === response.data.distributor_name.toLowerCase());
+        const match = distributors.find(d => d.name && d.name.toLowerCase() === response.data.distributor_name.toLowerCase());
         if (match) {
           setSelectedDistributor(match.id);
         } else {
@@ -2548,14 +2689,14 @@ const Purchases: React.FC = () => {
         let subtotal = 0;
         let totalCgst = 0;
         let totalSgst = 0;
-        newItems.forEach((item: any) => {
-          const qty = parseFloat(item.qty as any) || 0;
-          const rate = parseFloat(item.rate as any) || 0;
-          const cd_rs = parseFloat(item.cd_rs as any) || 0;
-          const cd_per = parseFloat(item.cd_per as any) || 0;
-          const additional_discount = parseFloat(item.additional_discount as any) || 0;
-          const cgst_per = parseFloat(item.cgst_per as any) || 0;
-          const sgst_per = parseFloat(item.sgst_per as any) || 0;
+        newItems.forEach(item => {
+          const qty = parseFloat(String(item.qty)) || 0;
+          const rate = parseFloat(String(item.rate)) || 0;
+          const cd_rs = parseFloat(String(item.cd_rs)) || 0;
+          const cd_per = parseFloat(String(item.cd_per)) || 0;
+          const additional_discount = parseFloat(String(item.additional_discount)) || 0;
+          const cgst_per = parseFloat(String(item.cgst_per)) || 0;
+          const sgst_per = parseFloat(String(item.sgst_per)) || 0;
 
           const baseAmount = qty * rate;
           const discountAmount = cd_rs + additional_discount + (baseAmount * cd_per / 100);
@@ -2738,7 +2879,7 @@ const Purchases: React.FC = () => {
               return (
                 <div
                   key={t.id}
-                  onClick={() => switchTab(t.id)}
+                  onClick={() => switchTab(t.id!)}
                   className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border font-semibold text-xs transition-all select-none cursor-pointer flex-shrink-0 whitespace-nowrap ${
                     isActive 
                       ? 'bg-primary/20 border-primary text-primary font-bold' 
@@ -2748,7 +2889,7 @@ const Purchases: React.FC = () => {
                   <Package size={12} className={isActive ? 'text-primary' : 'text-muted'} />
                   <span>{displayName} ({count})</span>
                   <span 
-                    onClick={(e) => closeTab(t.id, e)}
+                    onClick={(e) => closeTab(t.id!, e)}
                     className="hover:bg-white/15 rounded-full p-0.5 ml-1 transition-all cursor-pointer flex items-center justify-center text-muted hover:text-text"
                     title="Close Bill"
                   >
@@ -3102,7 +3243,7 @@ const Purchases: React.FC = () => {
                     type="button"
                     onClick={() => {
                       setCnNumber(ret.return_no || `CN-${ret.id}`);
-                      setCnAmount(ret.expected_credit_amount);
+                      setCnAmount(ret.expected_credit_amount ?? '');
                       setReconcileExpiryReturnId(ret.id);
                       setShowCreditNotesPanel(false);
                     }}
@@ -3182,14 +3323,14 @@ const Purchases: React.FC = () => {
                 </thead>
                 <tbody>
                   {items.map((item, index) => {
-                    const qtyVal = parseFloat(item.qty as any) || 0;
-                    const rateVal = parseFloat(item.rate as any) || 0;
-                    const mrpVal = parseFloat(item.mrp as any) || 0;
-                    const cdRsVal = parseFloat(item.cd_rs as any) || 0;
-                    const cdPerVal = parseFloat(item.cd_per as any) || 0;
-                    const addDiscVal = parseFloat(item.additional_discount as any) || 0;
-                    const cgstPerVal = parseFloat(item.cgst_per as any) || 0;
-                    const sgstPerVal = parseFloat(item.sgst_per as any) || 0;
+                    const qtyVal = parseFloat(String(item.qty)) || 0;
+                    const rateVal = parseFloat(String(item.rate)) || 0;
+                    const mrpVal = parseFloat(String(item.mrp)) || 0;
+                    const cdRsVal = parseFloat(String(item.cd_rs)) || 0;
+                    const cdPerVal = parseFloat(String(item.cd_per)) || 0;
+                    const addDiscVal = parseFloat(String(item.additional_discount)) || 0;
+                    const cgstPerVal = parseFloat(String(item.cgst_per)) || 0;
+                    const sgstPerVal = parseFloat(String(item.sgst_per)) || 0;
                     const baseAmount = qtyVal * rateVal;
                     const discountAmount = cdRsVal + addDiscVal + (baseAmount * cdPerVal / 100);
                     const taxableAmount = baseAmount - discountAmount;
@@ -3219,12 +3360,12 @@ const Purchases: React.FC = () => {
                                   Mfg: {item.manufacturer}
                                 </span>
                               )}
-                              {(item as any).hsn_code && (
+                              {item.hsn_code && (
                                 <span 
                                   className="text-[9px] bg-purple-500/10 border border-purple-500/20 text-purple-400 px-1 py-0.2 rounded font-mono font-medium"
-                                  title={`HSN: ${(item as any).hsn_code}`}
+                                  title={`HSN: ${item.hsn_code}`}
                                 >
-                                  HSN: {(item as any).hsn_code}
+                                  HSN: {item.hsn_code}
                                 </span>
                               )}
                             </div>
@@ -3369,9 +3510,9 @@ const Purchases: React.FC = () => {
                                 Mfg: {item.manufacturer}
                               </span>
                             )}
-                            {!hasOriginalName && (item as any).hsn_code && (
-                              <span className="text-[9px] bg-purple-500/10 border border-purple-500/20 text-purple-400 px-1 py-0.2 rounded font-mono font-medium" title={`HSN: ${(item as any).hsn_code}`}>
-                                HSN: {(item as any).hsn_code}
+                            {!hasOriginalName && item.hsn_code && (
+                              <span className="text-[9px] bg-purple-500/10 border border-purple-500/20 text-purple-400 px-1 py-0.2 rounded font-mono font-medium" title={`HSN: ${item.hsn_code}`}>
+                                HSN: {item.hsn_code}
                               </span>
                             )}
                           </div>
@@ -3423,8 +3564,8 @@ const Purchases: React.FC = () => {
                                       <div className="font-medium truncate flex flex-wrap items-center gap-1.5">
                                         <span>{medicine.name}</span>
                                         {(() => {
-                                          const sq = (medicine as any).stock_qty;
-                                          const lq = (medicine as any).loose_qty || 0;
+                                          const sq = medicine.stock_qty;
+                                          const lq = medicine.loose_qty || 0;
                                           // No stock fields at all → master-database-only entry
                                           if (sq === undefined) {
                                             return (
@@ -3446,9 +3587,9 @@ const Purchases: React.FC = () => {
                                             </span>
                                           );
                                         })()}
-                                        {(medicine as any).pharmarack_rate && (medicine as any).pharmarack_rate < (medicine.mrp || 99999) && (
+                                        {(medicine.pharmarack_rate) && (medicine.pharmarack_rate < (medicine.mrp || 99999)) && (
                                            <span className="text-[10px] px-1.5 py-0.5 rounded font-mono font-semibold bg-amber-500/15 text-amber-400 border border-amber-500/30">
-                                             ⚡ Pharmarack Rate: ₹{(medicine as any).pharmarack_rate} ({(medicine as any).pharmarack_distributor || 'Mapped Distributor'})
+                                             ⚡ Pharmarack Rate: ₹{(medicine.pharmarack_rate)} ({medicine.pharmarack_distributor || 'Mapped Distributor'})
                                            </span>
                                          )}
                                       </div>
@@ -3550,7 +3691,7 @@ const Purchases: React.FC = () => {
                     {/* Old Batches Dropdown */}
                     {activeBatchRowIndex === index && (item.medicine_id || item.medicine_name) && (() => {
                       const currentBatchVal = item.batch_no || '';
-                      const filteredBatches = (rowBatchesList || []).filter((b: any) => {
+                      const filteredBatches = (rowBatchesList || []).filter(b => {
                         if (!currentBatchVal || !currentBatchVal.trim()) return true;
                         return String(b.batch_no).toLowerCase().includes(String(currentBatchVal).toLowerCase().trim());
                       });
@@ -3580,7 +3721,7 @@ const Purchases: React.FC = () => {
                                 <div className="text-[10px] text-muted/70 mt-0.5">Type new batch number directly</div>
                               </div>
                             ) : (
-                              filteredBatches.map((b: any, bIdx: number) => {
+                              filteredBatches.map((b, bIdx) => {
                                 const isHighlighted = bIdx === batchHighlightIndex;
                                 return (
                                   <button
@@ -3833,9 +3974,9 @@ const Purchases: React.FC = () => {
                               mrp: item.mrp,
                               rate: item.rate,
                               sell_price: item.sell_price,
-                              pack_size: item.pack_size || '',
+                              pack_size: (item.pack_size ?? '') as number | null,
                               batch_no: item.batch_no,
-                              quantity: item.qty
+                              quantity: item.qty as number | null
                             });
                             setUniversalEditMedicineId(item.medicine_id);
                             setUniversalEditMode('edit');
@@ -3896,14 +4037,14 @@ const Purchases: React.FC = () => {
           <div className="flex flex-col items-center justify-center py-2 px-3 gap-0.5">
             <span className="text-[10px] font-bold text-purple-400 uppercase tracking-widest">CN Applied</span>
             <span className="text-base font-bold text-red-400" title={cnNumber ? `CN Ref: ${cnNumber}` : undefined}>
-              -₹{(parseFloat(cnAmount as any) || 0).toFixed(2)}
+              -₹{(parseFloat(String(cnAmount)) || 0).toFixed(2)}
             </span>
           </div>
-          {(parseFloat(extraCredit as any) || 0) > 0 && (
+          {(parseFloat(String(extraCredit)) || 0) > 0 && (
             <div className="flex flex-col items-center justify-center py-2 px-3 gap-0.5">
               <span className="text-[10px] font-bold text-amber-400 uppercase tracking-widest">Add. Disc</span>
               <span className="text-base font-bold text-red-400">
-                -₹{(parseFloat(extraCredit as any) || 0).toFixed(2)}
+                -₹{(parseFloat(String(extraCredit)) || 0).toFixed(2)}
               </span>
             </div>
           )}
@@ -4217,7 +4358,7 @@ const Purchases: React.FC = () => {
               item.medicine_id = saved.id || item.medicine_id;
               item.medicine_name = saved.name || item.medicine_name;
               item.manufacturer = saved.manufacturer || item.manufacturer;
-              (item as any).hsn_code = saved.hsn_code || (item as any).hsn_code;
+              item.hsn_code = saved.hsn_code || item.hsn_code;
               if (saved.mrp !== undefined && saved.mrp !== null && saved.mrp !== '') item.mrp = parseFloat(saved.mrp) || item.mrp;
               if (saved.rate !== undefined && saved.rate !== null && saved.rate !== '') item.rate = parseFloat(saved.rate) || item.rate;
               if (saved.sell_price !== undefined) item.sell_price = saved.sell_price;
