@@ -3907,16 +3907,17 @@ const POS = () => {
                             {statusBadge}
                             {item.scanImage && (
                               <div className="relative group/thumb shrink-0 mr-2 select-none animate-in fade-in duration-200">
+                                {/* ponytail: data URLs gain nothing from loading=lazy; combined with
+                                    KeepAliveOutlet display:none it left thumbnails blank until interaction */}
                                 <img
                                   src={item.scanImage}
                                   alt="Scan thumbnail"
-                                  loading="lazy"
                                   decoding="async"
                                   className="w-7 h-7 object-cover rounded-lg border border-border/60 hover:border-primary/60 transition-all cursor-zoom-in shadow-sm"
                                   onClick={() => setZoomedImage(item.scanImage)}
                                 />
                                 <div className="absolute left-0 bottom-full mb-2 hidden group-hover/thumb:block z-[100] bg-bg2 border border-border rounded-xl p-2 shadow-2xl w-48 animate-in fade-in duration-150">
-                                  <img src={item.scanImage} alt="Scan preview" loading="lazy" decoding="async" className="w-full h-auto rounded-lg object-contain" />
+                                  <img src={item.scanImage} alt="Scan preview" decoding="async" className="w-full h-auto rounded-lg object-contain" />
                                   <div className="text-[8px] text-muted text-center mt-1 font-semibold">Click to enlarge</div>
                                 </div>
                               </div>

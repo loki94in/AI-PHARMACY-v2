@@ -282,6 +282,10 @@ app.use(express.static(frontendDist, {
   setHeaders: (res, filePath) => {
     if (filePath.includes('assets') || /\.(js|css|woff2?)$/i.test(filePath)) {
       res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    } else if (/\.html$/i.test(filePath)) {
+      // Post-deploy clients must revalidate the shell; a cached day-old index.html
+      // references pruned hashed chunks and breaks assets until a hard refresh.
+      res.setHeader('Cache-Control', 'no-cache');
     }
   }
 }));
@@ -297,6 +301,7 @@ app.use((req, res, next) => {
 
   const indexPath = path.join(frontendDist, 'index.html');
   if (fs.existsSync(indexPath)) {
+    res.setHeader('Cache-Control', 'no-cache');
     return res.sendFile(indexPath);
   }
   res.status(503).send(`

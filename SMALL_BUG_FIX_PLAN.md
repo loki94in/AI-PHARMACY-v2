@@ -7,6 +7,39 @@
 
 ## Fixed
 
+### [Fixed] P2-02 — POS cart scan thumbnails blank in list view; load only after minutes or on click/hover
+
+| Field | Content |
+|-------|---------|
+| **What the user saw** | On the deployed website, AI-Camera scan thumbnails next to cart medicines rendered empty and only appeared minutes later (or instantly when opened/quick-viewed via the zoom modal). |
+| **Root cause** | Two compounding issues: (1) `loading="lazy"` on the POS cart thumbnail `<img>`s (frontend/src/pages/POS/index.tsx) — the ONLY lazy images in the app. KeepAliveOutlet keeps every visited page mounted but hidden with `display:none`; Chromium never fetches lazy images inside hidden subtrees, so they loaded only on a later scroll/layout pass (minutes later). Base64 data URLs gain nothing from lazy loading anyway (no network request to defer). The zoom modal showed instantly because it had no `loading="lazy"`. (2) Deployed-site aggravators: legacy `frontend/public/sw.js` still shipped into `dist/` with a cache-first rule over every same-origin GET including `/uploads/*` images, while `main.tsx` unregistered workers WITHOUT clearing Cache Storage (`ai-pharmacy-v1`) — stale/poisoned entries served blanks then background-revalidated. Also `express.static(frontendDist, { maxAge: '1d' })` cached `index.html` for up to a day, so post-deploy clients could run a stale shell referencing pruned hashed chunks. |
+| **How it was fixed** | Removed `loading="lazy"` from both cart thumbnail `<img>`s (kept `decoding="async"`). Deleted `frontend/public/sw.js` so it stops deploying; extended the main.tsx unregister block to also purge all Cache Storage entries (heals already-deployed clients). server.ts static mount + SPA fallback now send `Cache-Control: no-cache` for `.html` while hashed assets keep `immutable` 1-year caching. |
+| **Priority** | P2 |
+| **What not to touch** | KeepAliveOutlet display:none mechanism itself (binding SPA contract), zoom modal, hover-preview markup, `/uploads` static serving, AICamera capture pipeline (base64 size hardening deliberately deferred as YAGNI until quota errors are observed). |
+| **Verified by** | Frontend build clean (`tsc -b && vite build`, 4.97 s); zero `loading="lazy"` remaining in frontend/src; rebuilt `dist/` contains NO `sw.js`; backend `tsc --noEmit` clean; eslint on touched files clean except pre-existing HEAD debt (POS 3893/3895 verified identical at HEAD); isolated Express harness replicating the exact static+fallback code paths against real `frontend/dist`: `/sw.js`→404, `/`→200 no-cache, `/pos`→200 no-cache, `/missing.png`→404 Asset not found, `/assets/*` chunk→immutable 1y. |
+
+### [Fixed] P2-01 — Bulk expiry-return approval always fails with ReferenceError (`distributorId` undefined)
+
+| Field | Content |
+|-------|---------|
+| **What the user saw** | `POST /api/returns/expiry-reviews/bulk-approve` returned 500 and rolled back whenever any selected review passed the stock check — bulk "Approve All" from the Expiry Return Review page could never complete. |
+| **Root cause** | `bulk-approve` handler (src/routes/returns.ts) referenced an undeclared variable `distributorId` in its `INSERT INTO returns ... VALUES (?, 'purchase', ?, ?, ..., ?)` parameter list. TypeScript would flag it as `Cannot find name`, but the route file reached runtime via tsx without full type enforcement; at runtime it threw `ReferenceError: distributorId is not defined` inside the transaction, triggering ROLLBACK + generic 500. |
+| **How it was fixed** | The loop now resolves the distributor explicitly via the same lazy lookup as single approve (latest purchase line for medicine_id+batch_no → distributor), uses that value for the return record, credit-note tracking (`trackExpiryReturn`) and persists it onto the review row. |
+| **Priority** | P2 |
+| **What not to touch** | Single-review `/expiry-reviews/:id/approve` flow unchanged beyond sharing the identical lazy-resolution query; scan deliberately stays join-free — distributor resolution belongs at approval time only. |
+| **Verified by** | `tests/returnLossIntegrity.test.ts` test 6 (bulk-approve custom percentage → 200 + exact credit note) and `tests/expiryReturnReview.test.ts` test 5 both pass; backend `tsc --noEmit` clean. |
+
+### [Fixed] P1-04 — Duplicate WhatsApp messages delivered (same queue item sent twice within seconds)
+
+| Field | Content |
+|-------|---------|
+| **What the user saw** | Customers received identical WhatsApp messages twice within seconds: special-order arrival WA to shilpa chickne delivered 2× at 10:18:42 (two distinct real WhatsApp IDs, one queue item #185), and refill-collection WA to CHANDRAANT SUTAR delivered 2× at ~15:55 (confirmed visually on WhatsApp Web; outbox table only recorded one). Audit also found same-second double-sends for 3 email-arrival alerts and 1 distributor-invoice alert. |
+| **Root cause** | Two races of the same class — guard state registered only AFTER an awaited operation completed: (1) `processQueueInternal()` (src/services/whatsappQueueWorker.ts) checked `isProcessing`, then `await isWhatsAppExplicitlyDisabled()` (DB read), THEN set `isProcessing=true`. Two concurrent entry points (`forceNext()` fired fire-and-forget by two rapid `enqueueArrivalWhatsApp` calls when both orders were marked Ready in one request, plus the 10 s scheduler tick) both passed the stale check during that await gap and ran parallel send loops over the same pending items → same item physically transmitted twice before either pass marked it 'sent'. (2) `sendMessage()` (src/whatsappClient.ts) registered `recentSendsCache` only after the awaited dispatch succeeded, so near-simultaneous duplicate calls both passed the 30 s suppression check. |
+| **How it was fixed** | (1) The single-flight lock is now claimed synchronously immediately after the check, BEFORE any await; the disabled-check moved inside the existing try/finally so every early return still resets the lock. Parallel processor passes are now impossible. (2) `recentSendsCache.set(sendKey, nowTs)` now happens in-flight BEFORE dispatching; the pre-existing catch already deletes the key on failure so legitimate retries remain unblocked; post-send re-set on the WA-Web path kept as harmless refresh. |
+| **Priority** | P1 |
+| **What not to touch** | Queue-level same-day dedupe + `skipDedupe` resend semantics unchanged; outbox verification / crash-recovery paths untouched; direct-sender call sites (emailService etc.) untouched — they are protected by fix (2). Outbox-capture gaps (delivered-but-unrecorded twins) are a separate recording issue, intentionally not addressed here. |
+| **Verified by** | `tsc --noEmit` clean (backend); DB evidence matched root cause exactly (queue had ONE SOFIRASH item yet TWO delivered IDs same second; lock await-gap present at the time); code review confirms no remaining await between lock check and set and cache registration precedes all dispatch paths (WA-Web line ~1057 refresh, Business line ~1134, catch-delete ~1138 preserved). |
+
 ### [Fixed] P1-03 — Boot-window distributor WhatsApp alerts failing permanently ("WhatsApp session is not connected")
 
 | Field | Content |
