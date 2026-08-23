@@ -16,6 +16,7 @@ import { InfiniteTable } from '../../components/InfiniteTable';
 import { VirtualRow } from '../../components/VirtualRow';
 import { InfiniteScrollStatus } from '../../components/InfiniteScrollStatus';
 import { exportToCSV, exportToPDF } from '../../utils/export';
+import { printCurrentBill } from '../../utils/printBill';
 
 interface SaleItem {
   id: number;
@@ -1199,7 +1200,7 @@ const Sells = () => {
                     </div>
                   </div>
                   <button
-                    onClick={() => window.print()}
+                    onClick={() => printCurrentBill(`Invoice-${viewInvoice.invoice_no}-${viewInvoice.customer_name || 'Walk-in'}`)}
                     className="px-3.5 py-2 bg-primary/20 hover:bg-primary text-primary hover:text-text rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 border border-primary/30 shrink-0 cursor-pointer"
                     title="Print the complete saved bill (customer, doctor, items with batch/MRP/qty)"
                   >

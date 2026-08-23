@@ -75,7 +75,9 @@ export async function request<T = any>(
 
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(`API ${res.status}: ${body}`);
+    const err = new Error(`API ${res.status}: ${body}`) as Error & { httpStatus?: number };
+    err.httpStatus = res.status;
+    throw err;
   }
 
   return res.json();

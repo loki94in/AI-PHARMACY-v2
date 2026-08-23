@@ -2,6 +2,7 @@ import express from 'express';
 import { dbManager } from '../database/connection.js';
 import { inventoryCache } from '../services/inventoryCache.js';
 import { parsePackSizeFromPackaging } from '../utils/packaging.js';
+import { normalizeMedicineName } from '../utils/nameNormalizer.js';
 
 const router = express.Router();
 
@@ -223,7 +224,6 @@ router.post('/medicines', async (req, res) => {
 
   if (!name || !name.trim()) return res.status(400).json({ error: 'Medicine name is required' });
   try {
-    const { normalizeMedicineName } = await import('../utils/nameNormalizer.js');
     const adjustedName = normalizeMedicineName(name.trim(), manufacturer || '');
     const finalPackSize = parseInt(pack_size, 10) || parsePackSizeFromPackaging(packaging) || null;
     const db = await dbManager.getConnection();

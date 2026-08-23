@@ -10,6 +10,7 @@ export * from './api/gmail';
 export * from './api/orders';
 export * from './api/refills';
 export * from './api/scanBill';
+export * from './api/scan';
 export * from './api/admin';
 export * from './api/notifications';
 export * from './api/sync';

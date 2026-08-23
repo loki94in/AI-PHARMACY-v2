@@ -42,3 +42,33 @@ export async function generateInvoiceBarcodeData(invoiceNo: string, dateStr?: st
     code128DataUrl,
   };
 }
+
+export interface ProductBarcodeData {
+  qrText: string;
+  code128Text: string;
+  qrBuffer: Buffer;
+  code128Buffer: Buffer;
+}
+
+export async function generateProductBarcodeData(name: string, batch?: string): Promise<ProductBarcodeData> {
+  const cleanName = (name || 'Unknown').trim();
+  const cleanBatch = (batch || 'N/A').trim();
+  // Both codes carry the same real product identity text — no invented data.
+  const codeText = `${cleanName}|${cleanBatch}`;
+
+  const qrBuffer = await QRCode.toBuffer(codeText, { width: 160, margin: 1 });
+
+  const canvas = createCanvas(360, 70);
+  JsBarcode(canvas, codeText, {
+    format: 'CODE128',
+    width: 1.6,
+    height: 46,
+    displayValue: false,
+    margin: 4,
+    background: '#ffffff',
+    lineColor: '#000000',
+  });
+  const code128Buffer = canvas.toBuffer('image/png');
+
+  return { qrText: codeText, code128Text: codeText, qrBuffer, code128Buffer };
+}

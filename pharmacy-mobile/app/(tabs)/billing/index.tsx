@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { router } from 'expo-router';
 import * as Notifications from 'expo-notifications';
 import { colors, spacing, typography, radius, shadows } from '../../../lib/theme';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -35,6 +36,8 @@ import {
   RecentSale,
   SalePayload,
   getOfflineSalesQueue,
+  clearOfflineSalesQueue,
+  removeQueuedSaleAt,
   getDeviceIdentity,
 } from '../../../lib/api';
 import { useFocusEffect } from '@react-navigation/native';
@@ -191,6 +194,47 @@ export default function BillingScreen() {
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const handleDiscardPendingBill = (index: number) => {
+    const b = pendingBills[index];
+    if (!b) return;
+    Alert.alert(
+      'Discard Pending Bill?',
+      `${b.patient_name || 'Walk-in'} · ${b.items?.length || 0} item(s)\n\nThis bill will be removed from this phone and will NOT be saved to the PC.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Discard',
+          style: 'destructive',
+          onPress: async () => {
+            await removeQueuedSaleAt(index);
+            setPendingBills(await getOfflineSalesQueue());
+            showToast('Pending bill discarded — it will not sync to the PC');
+          },
+        },
+      ]
+    );
+  };
+
+  const handleDiscardAllPending = () => {
+    if (pendingBills.length === 0) return;
+    Alert.alert(
+      'Discard All Pending Bills?',
+      `${pendingBills.length} bill(s) will be removed from this phone and will NOT be saved to the PC.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Discard All',
+          style: 'destructive',
+          onPress: async () => {
+            await clearOfflineSalesQueue();
+            setPendingBills([]);
+            showToast('All pending bills discarded');
+          },
+        },
+      ]
+    );
+  };
 
   const refreshPendingOrders = async () => {
     setRefreshingPending(true);
@@ -748,8 +792,16 @@ export default function BillingScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* View Phone Bills + Product List Buttons */}
+        {/* Scan + View Phone Bills + Product List Buttons */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+          <TouchableOpacity
+            style={styles.salesHistoryHeaderBtn}
+            onPress={() => router.push('/scan' as never)}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="barcode-outline" size={14} color={colors.primary} />
+            <Text style={styles.salesHistoryHeaderText}>Scan</Text>
+          </TouchableOpacity>
           <TouchableOpacity
             style={styles.salesHistoryHeaderBtn}
             onPress={() => setShowProductList(true)}
@@ -1287,9 +1339,12 @@ export default function BillingScreen() {
               <View style={styles.pendingSyncBlock}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 4 }}>
                   <Ionicons name="cloud-upload-outline" size={12} color={colors.warning} />
-                  <Text style={styles.pendingSyncTitle}>
+                  <Text style={[styles.pendingSyncTitle, { flex: 1 }]}>
                     PENDING SYNC ({pendingBills.length}) — saved on this phone
                   </Text>
+                  <TouchableOpacity onPress={handleDiscardAllPending} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                    <Text style={{ color: colors.danger, fontWeight: '800', fontSize: 10 }}>DISCARD ALL</Text>
+                  </TouchableOpacity>
                 </View>
                 {pendingBills.map((b, i) => (
                   <View key={`pend-${i}`} style={styles.pendingRow}>
@@ -1301,6 +1356,13 @@ export default function BillingScreen() {
                         {b.sale_date ? new Date(b.sale_date).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''}
                       </Text>
                     </View>
+                    <TouchableOpacity
+                      onPress={() => handleDiscardPendingBill(i)}
+                      style={{ paddingHorizontal: 10, paddingVertical: 8 }}
+                      hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                    >
+                      <Ionicons name="trash-outline" size={15} color={colors.danger} />
+                    </TouchableOpacity>
                     <View style={styles.pendingChip}>
                       <Text style={styles.pendingChipText}>WAITING</Text>
                     </View>

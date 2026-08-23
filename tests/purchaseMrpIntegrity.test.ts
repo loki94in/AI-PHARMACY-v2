@@ -3,7 +3,9 @@ import { jest } from '@jest/globals';
 jest.unstable_mockModule('../src/whatsappClient.js', () => ({
   __esModule: true,
   sendMessage: jest.fn(() => Promise.resolve(true)),
-  initClient: jest.fn(() => Promise.resolve(true))
+  initClient: jest.fn(() => Promise.resolve(true)),
+  waitForWhatsAppReady: jest.fn(() => Promise.resolve(true)),
+  hasSavedSession: jest.fn(() => true)
 }));
 
 jest.unstable_mockModule('../src/telegramBot.js', () => ({

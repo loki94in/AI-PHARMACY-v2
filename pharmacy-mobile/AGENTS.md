@@ -44,6 +44,10 @@ Shared non-API helpers live in `lib/helpers.ts` (`sanitizePhoneInput`, `formatDa
 1. **Instant reconnect drain**: `app/_layout.tsx` registers a single `@react-native-community/netinfo` listener. Any network reconnect triggers an immediate health-check + `syncOfflineSalesAndRefresh()` — do not add extra polling intervals elsewhere. The one 15s interval in root layout is the only safety-net poll.
 2. **Queues replayed by sync** (all in `lib/api.ts`, AsyncStorage-backed): `offline_sales_queue` → POST /sales/sync, `offline_purchases_queue` → /purchases/sync, `offline_stock_updates` → /inventory/sync, `offline_special_orders_queue` → POST /orders, `offline_order_status_queue` → POST /orders/:id/status, `offline_bill_photos_queue` → OCR upload → saved as scanned drafts. Failed items stay queued with warnings surfaced via toast; never silently dropped.
 3. **No invented business data**: offline temp invoices compute GST from each medicine's real `cgst_per`/`sgst_per` carried in the cached inventory (backend `/inventory` exposes them). Never hardcode tax rates, phone numbers, or item names.
+4. **Rejected sales are NEVER queued (phantom-bill fix, added 2026-08)**: `createSale` re-throws every 4xx (`err.httpStatus < 500` attached by `client.ts request()`) so the Billing Alert shows the PC's real reason — no TEMP-MOB fake success, no local stock deduction, no WhatsApp fallback task for refused sales. The offline queue path is reserved for network failures and 5xx ambiguity only. Never revert to a blanket catch that queues API rejections — that manufactured phantom bills on the PC.
+5. **Replay idempotency**: every offline-queued sale carries a `client_ref` (stamped in `queueOfflineSale` as `<device_uuid>-<ts>`); the PC `/sales/sync` records refs in its `sync_client_refs` table inside the same transaction and skips already-seen ones, so response-lost replays can never duplicate an invoice. Keep stamping new queue entries.
+6. **Pending-sync discard (user-only purge)**: the Phone Bills drawer renders each PENDING SYNC row with a trash Discard button plus DISCARD ALL (destructive confirm via `removeQueuedSaleAt` / `clearOfflineSalesQueue`). Discarding removes the bill from the phone permanently — it must never sync afterwards. No background job may clear sale queues on its own.
+7. **All synced sales are PC-finalized drafts (owner decision, added 2026-08)**: `/sales/sync` ignores any admin-mode flag and stages EVERY phone bill as a pending draft; the real invoice exists only after a human opens it in the PC POS and saves it. Phone UI must never claim a queued/synced bill is "completed" — offline temp invoices stay `TEMP-MOB-*` references until the PC finalizes them. Do not request or reintroduce direct-commit sync behavior from the app side.
 
 ## Billing Screen Contracts (added 2026-08)
 
@@ -56,6 +60,14 @@ Shared non-API helpers live in `lib/helpers.ts` (`sanitizePhoneInput`, `formatDa
 ## Inventory Cache Contract
 
 - `getInventory()` fetches `/inventory?limit=0` (full list) for cache building, tolerates both `{data:[...]}` and array responses, and maps MRP/GST/pack_size into `SearchMedicineResult`. The Product List panel, batch pickers, and offline search all read this cache — keep it complete and current.
+
+## Barcode / QR Scan-to-Identify Contract (added 2026-08)
+
+- **Scan screen** (`app/scan/index.tsx`, linked from More menu and the Billing header "Scan" button): full-screen `CameraView` decoding qr + code128 + ean/upc/code39. On decode it calls `resolveScan(text)` → `GET /api/scan/resolve` and renders a result sheet — sell bill (invoice/customer/total), purchase bill (bill/distributor/total), or medicine batches with per-row **Add** buttons.
+- **Medicine → cart hand-off reuses the existing `billing_cart_add_queue` key** (read-modify-write, then navigate to billing; Billing drains on focus). Never write a parallel hand-off channel.
+- **Attach-to-medicine flow** (unknown manufacturer codes): when resolve returns `not_found` with `attachable: true`, the sheet shows a medicine search (≥2-char gating via barrel `searchMedicine`) — selecting one calls `attachBarcode()` → `POST /scan/attach-barcode`, storing the code as `medicines.item_code` for reverse lookup. A 409 conflict surfaces the medicine that already owns the code. Manual user click only.
+- Add button is shown only for in-stock rows (quantity + loose > 0); expired rows still identify but show real expiry via `formatDateIN`. No fabricated stock/MRP values.
+- Camera permission flow, torch toggle, and scan-lock (skip frames while a resolve request is in flight) mirror the proven `ServerSetup.tsx` pattern.
 
 ## Purchase Bill Scanning Contract (added 2026-08)
 

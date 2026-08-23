@@ -7,6 +7,28 @@
 
 ## Fixed
 
+### [Fixed] P1-06 — Mobile app saves random/unwanted phantom bills on the PC after reconnect ("login")
+
+| Field | Content |
+|-------|---------|
+| **What the user saw** | After opening/reconnecting the mobile app, unwanted "random" bills materialized on the PC (Sells history / staged Phone Sales) that nobody completed at the counter. |
+| **Root cause** | Three compounding defects: (1) `createSale` in pharmacy-mobile/lib/api/sales.ts caught EVERY failure — including hard PC rejections like `API 400: Insufficient stock` — and queued the refused sale into `offline_sales_queue` anyway, deducting local stock, firing a WhatsApp fallback task, and returning a fabricated `TEMP-MOB-*` success invoice to the UI. On next reconnect the sync engine faithfully replayed those rejected bills onto the PC. (2) `POST /sales/sync` had zero idempotency: if the response was lost after the PC committed, the phone kept the queue and re-sent it → duplicate invoices. (3) The billing drawer's PENDING SYNC list offered no way to discard poisoned entries already stuck on the phone. |
+| **How it was fixed** | Mobile `client.ts` now attaches `httpStatus` to thrown API errors; `createSale` re-throws all 4xx rejections immediately (real reason shown in Alert, nothing queued/fabricated) and keeps the offline path ONLY for network failures / 5xx ambiguity. Queued sales are stamped with a `client_ref` idempotency key; backend `/sales/sync` creates `sync_client_refs` table and skips already-seen refs inside the same transaction (replay-safe, rollback-safe). Billing drawer gained per-bill trash Discard + DISCARD ALL (with destructive confirm) so existing junk can be purged without syncing. |
+| **Priority** | P1 |
+| **What not to touch** | The offline-first queue design itself (NetInfo reconnect drain + 15s safety poll), admin direct-commit vs staged approval split in `/sales/sync`, WhatsApp fallback tasks for GENUINE offline sales, cart persistence contract. |
+| **Verified by** | Backend `npx tsc --noEmit` clean; mobile `npx tsc --noEmit` clean; code-path review: 4xx now throws before any queue/local-stock/WA side effects; dedupe runs inside BEGIN/COMMIT so rolled-back batches leave no ref behind. |
+
+### [Fixed] P1-05 — Printed/saved bill PDF is completely blank; saved filename always generic "AI PHARMACY OS"
+
+| Field | Content |
+|-------|---------|
+| **What the user saw** | Clicking Print Bill (POS post-sale modal or Sells history view modal) and saving as PDF produced an empty `AI PHARMACY OS.pdf` with no invoice content, and the suggested filename never contained the patient name or invoice number. |
+| **Root cause** | The `@media print` rules in frontend/src/index.css used the fragile visibility hack (`body * { visibility: hidden }` + absolute-positioned un-hide). The POS `#printable-bill` div lived INSIDE the modal card under a `fixed … backdrop-blur-md fade-in` overlay — backdrop-filter/transform ancestors change the abs-positioning containing block and overflow-hidden ancestors clip it, so nothing rendered on the printed page; printing while no printable div was mounted guaranteed a blank sheet too. Filename came from static `document.title` ("AI PHARMACY OS", frontend/index.html) which nothing updated before `window.print()`. |
+| **How it was fixed** | New helper frontend/src/utils/printBill.ts (`printCurrentBill(fileNameBase)`): sanitizes and sets `document.title` (Chrome uses it as Save-as-PDF default), adds `printing-bill` class to `<body>`, prints, restores everything on `afterprint`. CSS rewritten to deterministic display-based hiding gated on that class: `body.printing-bill > *:not([data-print-root]) { display:none }` + `[data-print-root] { display:block; position:static }`. Both printable bills moved out of modal/page trees into their own `createPortal(…, document.body)` with `data-print-root` (POS/index.tsx, Sells/index.tsx). Print buttons now pass `Invoice-{no}-{patient}` (falls back to `Walk-in`). Side benefit: Compliance "Print Register" no longer prints blank (old CSS hid everything for it too); also fixed invalid `borderBottom: '1px border-dotted #ccc'` inline style on the POS bill row separator while relocating that block. |
+| **Priority** | P1 |
+| **What not to touch** | KeepAliveOutlet, SSE freshness mappings, barcode generation endpoints (server-side PDFs unaffected), Compliance page code, the pre-existing lint debt lines in POS/Sells (documented exempt in frontend/AGENTS.md). |
+| **Verified by** | `tsc -b` clean after all edits; eslint on new util zero violations (POS/Sells pre-existing HEAD debt unchanged in kind — only relocated `(item: any)` line); portal structure confirmed via read-back (direct `<body>` children, correct JSX nesting). |
+
 ### [Fixed] P2-02 — POS cart scan thumbnails blank in list view; load only after minutes or on click/hover
 
 | Field | Content |

@@ -259,6 +259,7 @@ app.use('/api', (req, res, next) => {
 // Agent 2 (CRM & Utilities) Routers
 app.use('/api/crm', lazyRoute(() => import('./routes/crm.js')));
 app.use('/api/utilities', lazyRoute(() => import('./routes/utilities.js')));
+app.use('/api/scan', lazyRoute(() => import('./routes/scan.js'), 'hot'));
 app.use('/api/security', lazyRoute(() => import('./routes/security.js')));
 app.use('/api/email', lazyRoute(() => import('./routes/email.js')));
 app.use('/api/verification', lazyRoute(() => import('./routes/verification.js')));

@@ -15,7 +15,7 @@ import fs from 'fs';
 import PDFDocument from 'pdfkit';
 import QRCode from 'qrcode';
 
-import { generateInvoiceBarcodeData } from '../services/barcodeService.js';
+import { generateInvoiceBarcodeData, generateProductBarcodeData } from '../services/barcodeService.js';
 
 import {
   createBackup,
@@ -108,44 +108,56 @@ router.post('/barcode', async (req, res) => {
     
     doc.pipe(stream);
     
-    doc.fontSize(18).text('Medicine QR Code Labels', { align: 'center', underline: true });
-    doc.moveDown(1.5);
-    
-    // Grid layout for labels: 3 labels per row
+    // Compact pharmacy sticker layout (~51mm x 27mm) sized to fit small
+    // medicine boxes/packs — name+batch text, QR, and Code128 on every label.
+    doc.fontSize(13).text('Medicine Barcode Stickers (QR + Code128)', { align: 'center' });
+    doc.moveDown(0.5);
+
     let x = 40;
-    let y = 100;
-    const labelWidth = 160;
-    const labelHeight = 150;
-    const padding = 15;
-    
+    let y = 60;
+    const labelWidth = 145;
+    const labelHeight = 80;
+    const padding = 12;
+
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
-      const qrText = `PRODUCT:${item.name || 'Unknown'}|BATCH:${item.batch || 'N/A'}`;
-      const qrBuffer = await QRCode.toBuffer(qrText, { width: 120, margin: 1 });
-      
-      // Draw a boundary box for the label
-      doc.rect(x, y, labelWidth, labelHeight).strokeColor('#e2e8f0').stroke();
-      
-      // Add text inside label
-      doc.fillColor('#1e293b').fontSize(10).text(item.name || 'Unknown', x + 10, y + 10, { width: labelWidth - 20, height: 25, ellipsis: true });
-      doc.fillColor('#64748b').fontSize(8).text(`Batch: ${item.batch || 'N/A'}`, x + 10, y + 35);
-      
-      // Embed QR image
-      doc.image(qrBuffer, x + (labelWidth - 90) / 2, y + 50, { width: 90, height: 90 });
-      
+      const productCodes = await generateProductBarcodeData(item.name, item.batch);
+
+      // Draw a boundary box for the sticker (cut guide)
+      doc.rect(x, y, labelWidth, labelHeight).strokeColor('#cbd5e1').lineWidth(0.5).stroke();
+
+      // Name + batch text (left column, beside the QR)
+      doc.fillColor('#1e293b').fontSize(7.5).text(item.name || 'Unknown', x + 4, y + 4, {
+        width: 92,
+        height: 22,
+        ellipsis: true,
+        lineGap: 0,
+      });
+      doc.fillColor('#475569').fontSize(6.5).text(`Batch: ${item.batch || 'N/A'}`, x + 4, y + 30, {
+        width: 92,
+        ellipsis: true,
+        lineGap: 0,
+      });
+
+      // QR (top-right corner of the sticker)
+      doc.image(productCodes.qrBuffer, x + 101, y + 4, { width: 40, height: 40 });
+
+      // Code128 strip along the bottom of the sticker
+      doc.image(productCodes.code128Buffer, x + 4, y + 48, { width: 137, height: 26 });
+
       // Advance to next position
       x += labelWidth + padding;
-      if (x + labelWidth > doc.page.width - 40) {
+      if (x + labelWidth > doc.page.width - 30) {
         x = 40;
         y += labelHeight + padding;
-        if (y + labelHeight > doc.page.height - 40) {
+        if (y + labelHeight > doc.page.height - 30) {
           doc.addPage();
           x = 40;
           y = 50;
         }
       }
     }
-    
+
     doc.end();
     
     stream.on('finish', () => {

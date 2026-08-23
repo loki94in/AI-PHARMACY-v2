@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { useDeferredEffect } from '../../hooks/useDeferredEffect';
+import {} from '../../hooks/useDeferredEffect';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Download, Edit, Camera, CheckCircle, Mail, Package, TrendingDown, X, Plus, BookOpen, AlertTriangle, ShieldAlert, Factory, RefreshCw, ExternalLink, QrCode, Printer } from 'lucide-react';
+import { Edit, Camera, CheckCircle, Mail, Package, X, Plus, BookOpen, AlertTriangle, ShieldAlert, Factory, RefreshCw, ExternalLink } from 'lucide-react';
 import { useOnClickOutside } from '../../hooks/useOnClickOutside';
 import { api, apiClient, getCompactInventoryCache } from '../../services/api';
 import { useApiQuery } from '../../hooks/useApiQuery';
@@ -12,9 +12,9 @@ import { UniversalMedicineEditModal } from '../../components/UniversalMedicineEd
 import { PurchaseSaveVerificationModal, type SaveVerificationData } from '../../components/PurchaseSaveVerificationModal';
 import { calculateSimilarity } from '../../utils/fuzzy';
 import { invalidateAfterStockWrite } from '../../utils/cacheInvalidation';
-import { getLocalDateString, getTodayString, getNDaysAgoString, toDateInputValue } from '../../utils/date';
+import { getTodayString, getNDaysAgoString, toDateInputValue } from '../../utils/date';
 import { toastEvent } from '../../services/events';
-import { sanitizePhoneInput } from '../../utils/phone';
+import {} from '../../utils/phone';
 import { PhoneInputWithBadge } from '../../components/PhoneInputWithBadge';
 import { SaveBillSpecialPriceModal } from '../../components/SaveBillSpecialPriceModal';
 import { isValidDistributorName } from '../../utils/distributorValidator';
@@ -503,7 +503,7 @@ const sanitizeMonth = (mStr: string): string => {
 
 const formatExpiryToMMYY = (val: string): string => {
   if (!val) return '';
-  let cleaned = val.trim().replace(/\s+/g, '');
+  const cleaned = val.trim().replace(/\s+/g, '');
 
   // Handle ISO YYYY-MM-DD
   if (/^\d{4}-\d{2}-\d{2}/.test(cleaned)) {
@@ -643,7 +643,7 @@ const Purchases: React.FC = () => {
   // emailSource: set when navigating from Mail page
   const emailSource = location.state?.emailSource || null;
   // Track which row has the price intel panel open (by item id)
-  const [openIntelPanels, setOpenIntelPanels] = useState<Record<string, boolean>>({});
+  const [] = useState<Record<string, boolean>>({});
   
   // Mapped distributors filter & state
   const [mappedDistributorIds, setMappedDistributorIds] = useState<Set<number>>(new Set());
@@ -1072,19 +1072,19 @@ const Purchases: React.FC = () => {
   };
 
   // History list filter states
-  const [filterDistributor, setFilterDistributor] = useState('');
-  const [filterInvoice, setFilterInvoice] = useState('');
-  const [filterStartDate, setFilterStartDate] = useState(getNDaysAgo(13));
-  const [filterEndDate, setFilterEndDate] = useState(getTodayString());
-  const [filterMinAmount, setFilterMinAmount] = useState('');
-  const [filterMaxAmount, setFilterMaxAmount] = useState('');
+  const [filterDistributor] = useState('');
+  const [filterInvoice] = useState('');
+  const [filterStartDate] = useState(getNDaysAgo(13));
+  const [filterEndDate] = useState(getTodayString());
+  const [filterMinAmount] = useState('');
+  const [filterMaxAmount] = useState('');
 
   const [saving, setSaving] = useState(false);
   const savingStartedAtRef = useRef<number>(0);
   const savingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [hoveredPriceRow, setHoveredPriceRow] = useState<string | null>(null);
-  const [lastSavedInvoiceNo, setLastSavedInvoiceNo] = useState('');
-  const [lastSavedItems, setLastSavedItems] = useState<any[]>([]);
+  const [, setLastSavedInvoiceNo] = useState('');
+  const [, setLastSavedItems] = useState<any[]>([]);
   const [searchResults, setSearchResults] = useState<Medicine[]>([]);
   const [activeSearchIndex, setActiveSearchIndex] = useState<number | null>(null);
   const [searchHighlightIndex, setSearchHighlightIndex] = useState(-1);
@@ -1131,8 +1131,8 @@ const Purchases: React.FC = () => {
   });
   const [savingDistributor, setSavingDistributor] = useState(false);
   const [activeMedicineIndex, setActiveMedicineIndex] = useState<number | null>(null);
-  const [mfgSuggestions, setMfgSuggestions] = useState<string[]>([]);
-  const [showMfgSuggestions, setShowMfgSuggestions] = useState(false);
+  const [] = useState<string[]>([]);
+  const [] = useState(false);
 
   const selectBatch = (rowIndex: number, batch: any) => {
     setItems(prev => {
@@ -1906,7 +1906,7 @@ const Purchases: React.FC = () => {
                   searchResults = [];
                 }
 
-                let matchedList = searchResults || [];
+                const matchedList = searchResults || [];
                 let bestMatch = null;
 
                 // Check for exact match first
@@ -2222,7 +2222,7 @@ const Purchases: React.FC = () => {
 
     const { validItems } = bill;
     const unmatched = validItems.filter(it => !it.medicine_id);
-    let fuzzyMatches: SaveVerificationData['fuzzyMatches'] = [];
+    const fuzzyMatches: SaveVerificationData['fuzzyMatches'] = [];
     let autoLinkedCount = 0;
 
     if (unmatched.length > 0) {
@@ -2426,8 +2426,6 @@ const Purchases: React.FC = () => {
     }
   };
 
-  const handleSave = savePurchase;
-
   const handleFileUpload = async () => {
     if (!uploadedFile) return;
 
@@ -2602,30 +2600,6 @@ const Purchases: React.FC = () => {
       alert('Failed to parse invoice file');
     }
   };
-
-  const filteredHistory = purchaseHistory.filter(purchase => {
-    const matchesDistributor = !filterDistributor.trim() || 
-      (purchase.distributor_name && purchase.distributor_name.toLowerCase().includes(filterDistributor.toLowerCase()));
-      
-    const matchesInvoice = !filterInvoice.trim() || 
-      (purchase.invoice_no && purchase.invoice_no.toLowerCase().includes(filterInvoice.toLowerCase()));
-      
-    const matchesDateRange = (() => {
-      if (!purchase.date) return false;
-      const pDate = purchase.date.substring(0, 10);
-      const start = filterStartDate || '0000-00-00';
-      const end = filterEndDate || '9999-99-99';
-      return pDate >= start && pDate <= end;
-    })();
-      
-    const matchesMinAmount = !filterMinAmount || 
-      purchase.total_amount >= Number(filterMinAmount);
-      
-    const matchesMaxAmount = !filterMaxAmount || 
-      purchase.total_amount <= Number(filterMaxAmount);
-      
-    return !!(matchesDistributor && matchesInvoice && matchesDateRange && matchesMinAmount && matchesMaxAmount);
-  });
 
   const captureScreen = async () => {
     try {

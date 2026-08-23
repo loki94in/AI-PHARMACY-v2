@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef, lazy, Suspense, useMemo, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { useDeferredEffect } from '../../hooks/useDeferredEffect';
+import {} from '../../hooks/useDeferredEffect';
 import { useOnClickOutside } from '../../hooks/useOnClickOutside';
 import { createPortal } from 'react-dom';
-import { Search, ShoppingCart, Trash2, CheckCircle, Camera, Plus, X, Phone, Calendar, UserCheck, Edit, Loader2, Send, Zap, Printer, MessageSquare, FileText, Sparkles } from 'lucide-react';
+import { Search, ShoppingCart, Trash2, CheckCircle, Camera, Plus, X, Phone, Calendar, UserCheck, Edit, Loader2, Send, Zap, Printer, MessageSquare, FileText } from 'lucide-react';
 import AICamera from '../../components/AICamera';
 import { api, apiClient, getCompactInventoryCache, isCompactInventoryCacheReady, type SpecialOrder } from '../../services/api';
 import { useApiQuery } from '../../hooks/useApiQuery';
@@ -861,6 +861,7 @@ const POS = () => {
   const [lastSavedWasWhatsAppSent, setLastSavedWasWhatsAppSent] = useState(false);
   const [editingInvoiceId, setEditingInvoiceId] = useState<number | null>(() => Number(editSaleFromState?.id) || null);
   const [editingInvoiceNo, setEditingInvoiceNo] = useState<string | null>(() => editSaleFromState?.invoice_no || editSaleFromState?.id || null);
+  const [finalizingStagedSale, setFinalizingStagedSale] = useState<{ id: number } | null>(null);
   // ponytail: stores refill IDs from CRM prefill; cleared after bill save (fulfill call)
   const pendingRefillIdsRef = useRef<number[]>([]);
   const pendingDirectSaveRef = useRef<boolean>(false);
@@ -870,7 +871,7 @@ const POS = () => {
   const [isManualDoctor, setIsManualDoctor] = useState(initialActiveTab.isManualDoctor || false);
   const [selectedDoctorId, setSelectedDoctorId] = useState<number | null>(initialActiveTab.selectedDoctorId || null);
   const [doctorSuggestions, setDoctorSuggestions] = useState<any[]>([]);
-  const [doctorComboSuggestions, setDoctorComboSuggestions] = useState<any[]>([]);
+  const [, setDoctorComboSuggestions] = useState<any[]>([]);
   const [showSearchDropdown, setShowSearchDropdown] = useState(false);
   
   // Doctor Modal state
@@ -1842,7 +1843,6 @@ const POS = () => {
   }, [searchTerm, searchResults]);
 
   // Local autocomplete (replaces React Query useApiQuery to eliminate layout shift and latency)
-  const isSearchLoading = false;
 
   useEffect(() => {
     const handler = () => {
@@ -2137,41 +2137,6 @@ const POS = () => {
     }
   };
 
-  const addMedicineById = async (medicineId: number) => {
-    const compactInventory = getCompactInventoryCache();
-    const batches = compactInventory.filter(item => item.medicine_id === medicineId);
-    if (batches.length > 0) {
-      const grouped = groupBatches(batches.map(item => ({
-        ...item,
-        medicine_name: item.name,
-        quantity: item.stock_qty,
-        alternatives: []
-      })));
-      if (grouped.length > 0) {
-        fetchDetailsAndAddToCart(grouped[0]);
-        return;
-      }
-    }
-
-    try {
-      const details = await api.getMedicineQuickDetails(medicineId);
-      addToCart({
-        id: Date.now(),
-        medicine_id: medicineId,
-        name: details.name,
-        batch: details.batch_no || '',
-        expiry: details.expiry_date || '',
-        mrp: details.mrp || 0,
-        costPrice: details.cost_price || details.purchase_price || 0,
-        salts: details.api_reference || details.hsn_code || '',
-        packSize: parsePackSizeFromPackaging(details.packaging) || details.pack_size || 1,
-        quantity: 0
-      });
-    } catch (err) {
-      console.error('Failed to add medicine by ID:', err);
-    }
-  };
-
   const fetchDetailsAndAddToCart = async (item: any) => {
     const autoDisc = (item.sell_price && item.mrp && Number(item.sell_price) > 0 && Number(item.mrp) > 0 && Number(item.sell_price) < Number(item.mrp))
       ? parseFloat((((Number(item.mrp) - Number(item.sell_price)) / Number(item.mrp)) * 100).toFixed(2))
@@ -2390,7 +2355,7 @@ const POS = () => {
       // Standard mapping for other fields
       return prevCart.map(item => {
         if (item.id !== id) return item;
-        let updatedItem = { ...item, [field]: value };
+        const updatedItem = { ...item, [field]: value };
 
         if (field === 'discount') {
           const numDisc = Math.min(100, Math.max(0, Number(value) || 0));
@@ -2737,6 +2702,17 @@ const POS = () => {
 
       // Refresh the local inventory cache so POS search shows the reduced stock immediately
       api.getCompactInventory().catch(() => {});
+
+      if (finalizingStagedSale) {
+        const consumedDraft = finalizingStagedSale;
+        setFinalizingStagedSale(null);
+        api.consumeStagedSale(consumedDraft.id, { invoice_no: invoiceNo })
+          .then(() => {
+            stagedQueueService.removeById(consumedDraft.id);
+            toastEvent.trigger(`Phone draft #${consumedDraft.id} finalized as bill #${invoiceNo}`, 'info');
+          })
+          .catch(() => {});
+      }
       
       const isWaSent = Boolean(sendWhatsApp) && !!phoneToUse.trim();
 
@@ -2822,7 +2798,7 @@ const POS = () => {
       setNewDoctorRegNo(matchedDoc.reg_no || matchedDoc.registration_number || '');
     } else {
       setEditingDoctorId(null);
-      let cleanName = doctor.replace(/^Dr\.\s*/i, '').replace(/\s*\([^)]*\)\s*$/, '').trim();
+      const cleanName = doctor.replace(/^Dr\.\s*/i, '').replace(/\s*\([^)]*\)\s*$/, '').trim();
       setNewDoctorName(cleanName);
       setNewDoctorSpecialty('');
       setNewDoctorPhone('');
@@ -2937,13 +2913,22 @@ const POS = () => {
     }));
 
     toastEvent.trigger(`⚡ Loaded staged order for ${stagedItem.patient_name || 'Customer'} into POS`, 'success');
+    setFinalizingStagedSale({ id: stagedItem.id });
   };
 
+  const lastStagedLoadRef = useRef<{ id: number; index: number } | null>(null);
+
   useEffect(() => {
-    const current = stagedQueueService.getCurrentItem();
-    if (current) {
+    const maybeLoadCurrentStaged = () => {
+      const current = stagedQueueService.getCurrentItem();
+      if (!current) return;
+      const state = stagedQueueService.getQueueState();
+      if (lastStagedLoadRef.current && lastStagedLoadRef.current.id === current.id && lastStagedLoadRef.current.index === state.currentIndex) return;
+      lastStagedLoadRef.current = { id: current.id, index: state.currentIndex };
       handleLoadStagedItemIntoPOS(current);
-    }
+    };
+    maybeLoadCurrentStaged();
+    return stagedQueueService.subscribe(maybeLoadCurrentStaged);
   }, []);
 
   return (
@@ -2973,6 +2958,23 @@ const POS = () => {
                 className="px-2.5 py-1 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 rounded-lg text-amber-300 text-[10px] font-extrabold uppercase tracking-wider transition-all cursor-pointer"
               >
                 Cancel Edit
+              </button>
+            </div>
+          )}
+
+          {/* Phone Draft Banner */}
+          {finalizingStagedSale && !editingInvoiceId && (
+            <div className="bg-sky/10 border border-sky/30 text-sky px-3.5 py-2 rounded-xl flex items-center justify-between gap-2 text-xs font-bold shrink-0 shadow-md">
+              <div className="flex items-center gap-2 min-w-0">
+                <Phone size={15} className="shrink-0" />
+                <span className="truncate">Finalizing phone draft #{finalizingStagedSale.id} — verify against live stock, then save to create the real bill</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setFinalizingStagedSale(null)}
+                className="px-2.5 py-1 bg-sky/20 hover:bg-sky/30 border border-sky/40 rounded-lg text-[10px] font-extrabold uppercase tracking-wider transition-all cursor-pointer shrink-0"
+              >
+                Detach
               </button>
             </div>
           )}
@@ -3891,11 +3893,8 @@ const POS = () => {
                     // Color 1 (Theme Normal): Registered in Local Inventory with active stock & batch
                     // Color 2 (Amber Tint): Exists in Master Catalog, but NOT in active local inventory (0 stock)
                     // Color 3 (Purple Tint): Completely new / manual / unmapped item
-                    const hasLocalStock = !!item.inventory_id && ((item.availableStock || 0) > 0 || (item.availableLooseStock || 0) > 0 || !!item.batch);
-                    const isMasterDbOnly = !hasLocalStock && (!!item.medicine_id || (typeof item.id === 'number' && item.id < 1000000000));
-                    const isUnmappedNew = !hasLocalStock && !isMasterDbOnly && !item.isEmptyRow;
 
-                    let rowStatusClass = "border-b border-border/30 hover:bg-bg2/40";
+                    const rowStatusClass = "border-b border-border/30 hover:bg-bg2/40";
                     let statusBadge = null;
 
                     if (!item.isEmptyRow) {

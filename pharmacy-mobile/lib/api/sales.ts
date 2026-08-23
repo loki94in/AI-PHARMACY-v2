@@ -32,10 +32,17 @@ export interface SalePayload {
   /** Attribution: stamped automatically when queued offline (which phone sold this) */
   sold_from_device?: string;
   device_uuid?: string;
+  /** Idempotency key stamped at queue time so PC /sales/sync replays can never duplicate a bill */
+  client_ref?: string;
 }
 
 export async function queueOfflineSale(payload: SalePayload): Promise<void> {
   try {
+    if (!payload.client_ref) {
+      const { getDeviceIdentity } = await import('./client');
+      const identity = await getDeviceIdentity();
+      payload.client_ref = `${identity.uuid}-${Date.now()}`;
+    }
     const currentQueue = await getOfflineSalesQueue();
     currentQueue.push(payload);
     await AsyncStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(currentQueue));
@@ -62,6 +69,16 @@ export async function clearOfflineSalesQueue(): Promise<void> {
   }
 }
 
+export async function removeQueuedSaleAt(index: number): Promise<void> {
+  try {
+    const currentQueue = await getOfflineSalesQueue();
+    currentQueue.splice(index, 1);
+    await AsyncStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(currentQueue));
+  } catch (e) {
+    console.error('Failed to remove queued sale:', e);
+  }
+}
+
 export async function createSale(payload: SalePayload): Promise<{ success: boolean; invoice_no: string; total: number; tax: number }> {
   try {
     return await request<{ success: boolean; invoice_no: string; total: number; tax: number }>('/sales', {
@@ -69,7 +86,11 @@ export async function createSale(payload: SalePayload): Promise<{ success: boole
       body: JSON.stringify(payload),
     });
   } catch (err) {
-    console.log('Online checkout failed, queueing offline:', err);
+    const httpStatus = (err as { httpStatus?: number } | null)?.httpStatus;
+    if (typeof httpStatus === 'number' && httpStatus < 500) {
+      throw err;
+    }
+    console.log('Online checkout unavailable, queueing offline:', err);
     const { getDeviceIdentity } = await import('./client');
     const identity = await getDeviceIdentity();
     const offlinePayload = {

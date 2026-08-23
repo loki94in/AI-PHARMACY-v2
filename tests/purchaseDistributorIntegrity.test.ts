@@ -3,7 +3,14 @@ import { jest } from '@jest/globals';
 jest.unstable_mockModule('../src/whatsappClient.js', () => ({
   __esModule: true,
   sendMessage: jest.fn(() => Promise.resolve(true)),
-  initClient: jest.fn(() => Promise.resolve(true))
+  initClient: jest.fn(() => Promise.resolve(true)),
+  waitForWhatsAppReady: jest.fn(() => Promise.resolve(true)),
+  hasSavedSession: jest.fn(() => true),
+  getWhatsAppStatus: jest.fn(() => ({ ready: false, initializing: false, qr: null, phone: null, type: 'web' })),
+  isWhatsAppExplicitlyDisabled: jest.fn(() => Promise.resolve(false)),
+  hashMessageBody: jest.fn((body: string) => 'hash_' + body),
+  normalizeWhatsAppPhone: jest.fn((phone: string) => phone),
+  shouldRouteToBusiness: jest.fn(() => Promise.resolve(false))
 }));
 
 jest.unstable_mockModule('../src/telegramBot.js', () => ({
@@ -52,6 +59,8 @@ describe('Purchase Distributor Integrity Verification', () => {
     `, [JSON.stringify([
       { name: 'Cetirizine 10mg', batch_no: 'CET-03', expiry_date: '10/28', quantity: 10, cost_price: 15, mrp: 25 }
     ])]);
+    await db.run("INSERT INTO medicines (name, mrp, rate) VALUES ('Cetirizine 10mg', 25, 15)");
+    await db.run("INSERT INTO medicines (name, mrp, rate) VALUES ('Dolo 650mg', 30, 20)");
     await db.close();
 
     const { default: purchasesRouter } = await import('../src/routes/purchases.js');

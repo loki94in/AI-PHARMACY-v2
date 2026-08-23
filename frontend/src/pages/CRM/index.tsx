@@ -2,18 +2,16 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { apiClient, api } from '../../services/api';
-import type { SpecialOrder } from '../../services/api';
 import {
   RefreshCw, Send, Users, MessageSquare, Phone, Calendar,
   CheckCircle2, AlertCircle, Clock, Search, Repeat2, Bell,
-  MessageCircle, Check, Package, Mail, ExternalLink, LogOut, Zap, Copy, FileText, X, Plus, Trash2, Sliders, ChevronDown, Info, ClipboardList, ShoppingCart, AlertTriangle, Pencil, Edit2, RotateCcw, Loader2, Globe, Pill, PackagePlus
+  MessageCircle, Check, Package, Mail, ExternalLink, LogOut, Zap, Copy, FileText, X, Plus, Trash2, Sliders, ChevronDown, ClipboardList, ShoppingCart, AlertTriangle, Pencil, Edit2, RotateCcw, Globe, Pill
 } from 'lucide-react';
-import { toastEvent, specialOrdersEvent, liveCartAddEvent, refillEvent, messageSendEvent, whatsappQueueEvent } from '../../services/events';
+import { toastEvent, specialOrdersEvent, refillEvent, messageSendEvent, whatsappQueueEvent } from '../../services/events';
 import { usePageActive } from '../../lib/keepAlive/PageActiveContext';
 import { useOnClickOutside } from '../../hooks/useOnClickOutside';
-import { getTodayString, getNDaysAgoString, formatDisplayDate, toDateInputValue } from '../../utils/date';
+import { getTodayString, getNDaysAgoString, toDateInputValue } from '../../utils/date';
 import { PhoneInputWithBadge } from '../../components/PhoneInputWithBadge';
-import { isValid10DigitPhone } from '../../utils/phone';
 
 // ─── Module-level Cache (SPA Performance Contract) ──────────────────────
 let cachedRefillsData: RefillPatient[] = [];
@@ -82,6 +80,83 @@ interface AutomationLog {
   error?: string;
 }
 
+type RefillLanguage = 'en' | 'hi' | 'mr';
+
+type LocalApiError = { response?: { data?: { error?: string } }; message?: string };
+
+interface RefillFulfillmentRow {
+  fulfilled_at?: string;
+  created_at?: string;
+  medicine_name?: string;
+  quantity_fulfilled?: number;
+  linked_invoice_no?: string;
+  invoice_no?: string;
+  fulfilled_via?: string;
+  next_due_date?: string;
+}
+
+interface SalesHistoryItemLine {
+  id?: number;
+  medicine_id?: number;
+  name?: string;
+  medicine_name?: string;
+  inventory_id?: number;
+  batch_no?: string;
+  batch_number?: string;
+  expiry_date?: string;
+  quantity: number;
+  loose_qty?: number;
+  unit_price: number;
+  mrp?: number;
+  sell_price?: number | null;
+  discount_per?: number;
+  discount?: number;
+  pack_size?: number;
+}
+
+interface SalesHistoryInvoice {
+  id: number;
+  invoice_no?: string;
+  date?: string;
+  items?: SalesHistoryItemLine[];
+  item_count?: number;
+  payment_medium?: string;
+  payment_status?: string;
+  total_amount?: number;
+  customer_name?: string;
+  customer_phone?: string;
+  doctor_name?: string;
+}
+
+interface OcrParsedPayload {
+  items?: { name?: string; medicine_name?: string; text?: string }[];
+  text?: string;
+}
+
+interface MedicineSearchRow {
+  id: number;
+  name: string;
+  manufacturer?: string;
+  mrp?: number;
+  sell_price?: number;
+  last_purchase_mrp?: number;
+}
+
+interface PharmarackSearchResult {
+  name: string;
+  stock?: number;
+  distributor?: string;
+  rate?: number | null;
+  mrp?: number | null;
+  mapped?: boolean;
+  scheme?: string;
+  productId?: string | number;
+  storeId?: string | number;
+  productCode?: string;
+  company?: string;
+  packaging?: string;
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function formatTs(ts: number | string) {
@@ -95,7 +170,11 @@ function formatTs(ts: number | string) {
   return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
 }
 
-function formatDate(dateStr: string) {
+function futureDateLabel(daysAhead: number, opts: Intl.DateTimeFormatOptions): string {
+  return new Date(Date.now() + daysAhead * 86400000).toLocaleDateString('en-IN', opts);
+}
+
+function formatDate(dateStr: string | undefined) {
   if (!dateStr) return '';
   try {
     return new Date(dateStr).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
@@ -159,11 +238,11 @@ const RefillsSection: React.FC = () => {
   const [activeDetailTab, setActiveDetailTab] = useState<'prescriptions' | 'fulfillments' | 'invoices'>('prescriptions');
 
   // Sub-detail data states
-  const [fulfillments, setFulfillments] = useState<any[]>([]);
+  const [fulfillments, setFulfillments] = useState<RefillFulfillmentRow[]>([]);
   const [loadingFulfillments, setLoadingFulfillments] = useState(false);
-  const [invoices, setInvoices] = useState<any[]>([]);
+  const [invoices, setInvoices] = useState<SalesHistoryInvoice[]>([]);
   const [loadingInvoices, setLoadingInvoices] = useState(false);
-  const [viewInvoice, setViewInvoice] = useState<any | null>(null);
+  const [viewInvoice, setViewInvoice] = useState<SalesHistoryInvoice | null>(null);
   const [fulfillingId, setFulfillingId] = useState<number | null>(null);
   const [fulfillingAll, setFulfillingAll] = useState(false);
 
@@ -177,8 +256,8 @@ const RefillsSection: React.FC = () => {
   // Frequency state: preset vs custom
   const [freqMode, setFreqMode] = useState<'preset' | 'custom'>('preset');
   const [addInterval, setAddInterval] = useState(30);
-  const [customValue, setCustomValue] = useState(15);
-  const [customUnit, setCustomUnit] = useState<'days' | 'weeks' | 'months'>('days');
+  const [customValue] = useState(15);
+  const [customUnit] = useState<'days' | 'weeks' | 'months'>('days');
 
   const [medicineRows, setMedicineRows] = useState<MedicineRow[]>([emptyRow()]);
   const [submitting, setSubmitting] = useState(false);
@@ -227,7 +306,7 @@ const RefillsSection: React.FC = () => {
       setEditingPatient(existingPat);
       setAddPatientName(existingPat.patient_name);
       setAddPatientPhone(existingPat.patient_phone);
-      setAddLanguage((existingPat.language as any) || 'en');
+      setAddLanguage((existingPat.language as RefillLanguage) || 'en');
       const interval = existingPat.medicines[0]?.refill_interval_days || 30;
       setFreqMode('preset');
       setAddInterval(interval);
@@ -260,7 +339,7 @@ const RefillsSection: React.FC = () => {
     setEditingPatient(selectedPatient);
     setAddPatientName(selectedPatient.patient_name);
     setAddPatientPhone(selectedPatient.patient_phone);
-    setAddLanguage((selectedPatient.language as any) || 'en');
+    setAddLanguage((selectedPatient.language as RefillLanguage) || 'en');
     const interval = selectedPatient.medicines[0]?.refill_interval_days || 30;
     setFreqMode('preset');
     setAddInterval(interval);
@@ -298,7 +377,7 @@ const RefillsSection: React.FC = () => {
     setLoadingFulfillments(true);
     try {
       const identifier = phone || String(customerId);
-      const res = await apiClient.get<any[]>(`/refills/patient/${encodeURIComponent(identifier)}/history`);
+      const res = await apiClient.get<RefillFulfillmentRow[]>(`/refills/patient/${encodeURIComponent(identifier)}/history`);
       setFulfillments(Array.isArray(res.data) ? res.data : []);
     } catch {
       setFulfillments([]);
@@ -315,13 +394,13 @@ const RefillsSection: React.FC = () => {
     }
     setLoadingInvoices(true);
     try {
-      let res: any;
+      let res: Awaited<ReturnType<typeof apiClient.get<SalesHistoryInvoice[]>>> | null = null;
       if (customerId) {
-        res = await apiClient.get<any[]>(`/crm/${customerId}/history`).catch(() => null);
+        res = await apiClient.get<SalesHistoryInvoice[]>(`/crm/${customerId}/history`).catch(() => null);
       }
       if (!res || !Array.isArray(res.data) || res.data.length === 0) {
         if (phone) {
-          res = await apiClient.get<any[]>(`/crm/history-by-phone/${encodeURIComponent(phone)}`).catch(() => null);
+          res = await apiClient.get<SalesHistoryInvoice[]>(`/crm/history-by-phone/${encodeURIComponent(phone)}`).catch(() => null);
         }
       }
       setInvoices(Array.isArray(res?.data) ? res.data : []);
@@ -373,8 +452,8 @@ const RefillsSection: React.FC = () => {
       setEditingRefill(null);
       refillEvent.triggerRefresh();
       await load(true);
-    } catch (err: any) {
-      toastEvent.trigger(err.response?.data?.error || 'Failed to update frequency', 'error', '/crm');
+    } catch (err) {
+      toastEvent.trigger((err as LocalApiError).response?.data?.error || 'Failed to update frequency', 'error', '/crm');
     } finally {
       setUpdatingFreq(false);
     }
@@ -386,8 +465,8 @@ const RefillsSection: React.FC = () => {
       toastEvent.trigger(res.data?.message || `Refill ${currentIsActive ? 'paused' : 'resumed'}`, 'success', '/crm');
       refillEvent.triggerRefresh();
       await load(true);
-    } catch (err: any) {
-      toastEvent.trigger(err.response?.data?.error || 'Failed to toggle pause state', 'error', '/crm');
+    } catch (err) {
+      toastEvent.trigger((err as LocalApiError).response?.data?.error || 'Failed to toggle pause state', 'error', '/crm');
     }
   };
 
@@ -398,8 +477,8 @@ const RefillsSection: React.FC = () => {
       toastEvent.trigger('Refill schedule canceled and preserved in history', 'success', '/crm');
       refillEvent.triggerRefresh();
       await load(true);
-    } catch (err: any) {
-      toastEvent.trigger(err.response?.data?.error || 'Failed to cancel refill', 'error', '/crm');
+    } catch (err) {
+      toastEvent.trigger((err as LocalApiError).response?.data?.error || 'Failed to cancel refill', 'error', '/crm');
     }
   };
 
@@ -416,8 +495,8 @@ const RefillsSection: React.FC = () => {
       toastEvent.trigger(res.data?.message || `Refill schedule deleted for ${patient.patient_name}`, 'success', '/crm');
       refillEvent.triggerRefresh();
       await load(true);
-    } catch (err: any) {
-      toastEvent.trigger(err.response?.data?.error || 'Failed to delete refill schedule', 'error', '/crm');
+    } catch (err) {
+      toastEvent.trigger((err as LocalApiError).response?.data?.error || 'Failed to delete refill schedule', 'error', '/crm');
     }
   };
 
@@ -428,8 +507,8 @@ const RefillsSection: React.FC = () => {
       toastEvent.trigger(res.data?.message || `Deleted "${medicineName}" from refill schedule`, 'success', '/crm');
       refillEvent.triggerRefresh();
       await load(true);
-    } catch (err: any) {
-      toastEvent.trigger(err.response?.data?.error || 'Failed to delete refill item', 'error', '/crm');
+    } catch (err) {
+      toastEvent.trigger((err as LocalApiError).response?.data?.error || 'Failed to delete refill item', 'error', '/crm');
     }
   };
 
@@ -442,8 +521,8 @@ const RefillsSection: React.FC = () => {
       toastEvent.trigger(res.data?.message || `Completed refill occurrence for "${medicineName}"! Next due date scheduled.`, 'success', '/crm');
       refillEvent.triggerRefresh();
       await load(true);
-    } catch (err: any) {
-      toastEvent.trigger(err.response?.data?.error || 'Failed to mark refill fulfilled', 'error', '/crm');
+    } catch (err) {
+      toastEvent.trigger((err as LocalApiError).response?.data?.error || 'Failed to mark refill fulfilled', 'error', '/crm');
     } finally {
       setFulfillingId(null);
     }
@@ -459,8 +538,8 @@ const RefillsSection: React.FC = () => {
       toastEvent.trigger(res.data?.message || `All active refills fulfilled for ${patient.patient_name}!`, 'success', '/crm');
       refillEvent.triggerRefresh();
       await load(true);
-    } catch (err: any) {
-      toastEvent.trigger(err.response?.data?.error || 'Failed to fulfill patient refills', 'error', '/crm');
+    } catch (err) {
+      toastEvent.trigger((err as LocalApiError).response?.data?.error || 'Failed to fulfill patient refills', 'error', '/crm');
     } finally {
       setFulfillingAll(false);
     }
@@ -472,12 +551,13 @@ const RefillsSection: React.FC = () => {
       toastEvent.trigger(res.data?.message || 'Stock override toggled', 'success', '/crm');
       refillEvent.triggerRefresh();
       await load(true);
-    } catch (err: any) {
-      toastEvent.trigger(err.response?.data?.error || 'Failed to toggle override', 'error', '/crm');
+    } catch (err) {
+      toastEvent.trigger((err as LocalApiError).response?.data?.error || 'Failed to toggle override', 'error', '/crm');
     }
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- module-cache hydration loader, silent retries
     load();
     const unsub = refillEvent.subscribeRefresh(() => load(true));
     return () => unsub();
@@ -529,8 +609,8 @@ const RefillsSection: React.FC = () => {
       toastEvent.trigger(`WhatsApp reminder queued for ${phone}`, 'success', '/crm');
       whatsappQueueEvent.triggerUpdated();
       await load(true);
-    } catch (err: any) {
-      toastEvent.trigger(err.response?.data?.error || 'Failed to send reminder', 'error', '/crm');
+    } catch (err) {
+      toastEvent.trigger((err as LocalApiError).response?.data?.error || 'Failed to send reminder', 'error', '/crm');
     } finally { setSending(null); }
   };
 
@@ -596,8 +676,8 @@ const RefillsSection: React.FC = () => {
       } else {
         toastEvent.trigger(res?.error || 'Failed to add item to live cart', 'error', '/crm');
       }
-    } catch (err: any) {
-      toastEvent.trigger(err?.response?.data?.error || 'Failed to add to live cart', 'error', '/crm');
+    } catch (err) {
+      toastEvent.trigger((err as LocalApiError).response?.data?.error || 'Failed to add to live cart', 'error', '/crm');
     }
   };
 
@@ -634,10 +714,11 @@ const RefillsSection: React.FC = () => {
         stockMap.set(mId, cur + (item.stock_qty || item.quantity || 0) + (item.loose_quantity || 0));
       }
 
-      const res = await apiClient.get<any>('/medicines', { params: { search: clean, limit: 15 } });
-      const list = Array.isArray(res.data?.medicines) ? res.data.medicines : (Array.isArray(res.data) ? res.data : []);
+      const res = await apiClient.get<{ medicines?: MedicineSearchRow[] } | MedicineSearchRow[]>('/medicines', { params: { search: clean, limit: 15 } });
+      const resData = Array.isArray(res.data) ? res.data : res.data?.medicines;
+      const list = Array.isArray(resData) ? resData : [];
       if (list.length > 0) {
-        suggestions = list.map((m: any) => ({
+        suggestions = list.map((m): MedicineSuggestion => ({
           id: m.id,
           name: m.name,
           manufacturer: m.manufacturer,
@@ -646,7 +727,7 @@ const RefillsSection: React.FC = () => {
         }));
       } else {
         const lower = clean.toLowerCase();
-        const matched = compactCache.filter((c: any) => (c.name || c.medicine_name || '').toLowerCase().includes(lower));
+        const matched = compactCache.filter(c => (c.name || c.medicine_name || '').toLowerCase().includes(lower));
         const seen = new Map<number, MedicineSuggestion>();
         for (const m of matched) {
           const medId = m.medicine_id || m.id;
@@ -681,7 +762,7 @@ const RefillsSection: React.FC = () => {
     }
   };
 
-  const searchDebounceRef = useRef<{ [key: number]: any }>({});
+  const searchDebounceRef = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
 
   const handleMedicineSearch = (idx: number, term: string) => {
     setMedicineRows(prev => {
@@ -784,8 +865,8 @@ const RefillsSection: React.FC = () => {
       setMedicineRows([emptyRow()]);
       refillEvent.triggerRefresh();
       await load(true);
-    } catch (err: any) {
-      toastEvent.trigger(err.response?.data?.error || (editingPatient ? 'Failed to update refill' : 'Failed to add refill'), 'error', '/crm');
+    } catch (err) {
+      toastEvent.trigger((err as LocalApiError).response?.data?.error || (editingPatient ? 'Failed to update refill' : 'Failed to add refill'), 'error', '/crm');
     } finally { setSubmitting(false); }
   };
 
@@ -1466,7 +1547,7 @@ const RefillsSection: React.FC = () => {
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-border/30">
-                            {fulfillments.map((item: any, idx: number) => (
+                            {fulfillments.map((item, idx) => (
                               <tr key={idx} className="hover:bg-bg2/50">
                                 <td className="p-3 font-semibold text-text">
                                   {formatDate(item.fulfilled_at || item.created_at)}
@@ -1542,7 +1623,7 @@ const RefillsSection: React.FC = () => {
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-border/30">
-                            {invoices.map((inv: any) => (
+                            {invoices.map(inv => (
                               <tr key={inv.id} className="hover:bg-bg2/50">
                                 <td className="p-3 font-mono font-bold text-primary">
                                   {inv.invoice_no}
@@ -1552,7 +1633,7 @@ const RefillsSection: React.FC = () => {
                                 </td>
                                 <td className="p-3 font-medium text-text max-w-xs truncate">
                                   {inv.items && inv.items.length > 0
-                                    ? inv.items.map((i: any) => i.medicine_name).join(', ')
+                                    ? inv.items.map(i => i.medicine_name).join(', ')
                                     : `${inv.item_count || 1} item(s)`}
                                 </td>
                                 <td className="p-3">
@@ -2052,10 +2133,10 @@ const RefillsSection: React.FC = () => {
             <div className="p-3 bg-primary/10 border border-primary/20 rounded-xl text-xs text-primary font-semibold flex flex-col gap-1">
               <div className="flex items-center gap-2">
                 <Calendar size={14} />
-                <span>Calculated Next Due Date: <strong>{new Date(Date.now() + editIntervalVal * 86400000).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</strong></span>
+                <span>Calculated Next Due Date: <strong>{futureDateLabel(editIntervalVal, { day: '2-digit', month: 'short', year: 'numeric' })}</strong></span>
               </div>
               <div className="text-[11px] text-amber-400 pl-6">
-                <span>🔔 Auto 5-Day Lead Window Starts: <strong>{new Date(Date.now() + (editIntervalVal - 5) * 86400000).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}</strong></span>
+                <span>🔔 Auto 5-Day Lead Window Starts: <strong>{futureDateLabel(editIntervalVal - 5, { day: '2-digit', month: 'short' })}</strong></span>
               </div>
             </div>
 
@@ -2144,7 +2225,7 @@ const RefillsSection: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border/30">
-                      {viewInvoice.items?.map((item: any, idx: number) => {
+                      {viewInvoice.items?.map((item, idx) => {
                         const packSize = item.pack_size || 1;
                         const looseQty = item.loose_qty || 0;
                         const discPer = item.discount_per || 0;
@@ -2208,7 +2289,7 @@ const DistributorMessagesSection: React.FC = () => {
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [retrying, setRetrying] = useState<number | null>(null);
 
-  const searchDebounceRef = useRef<any>(null);
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleSearchChange = (term: string) => {
     setSearch(term);
@@ -2240,7 +2321,10 @@ const DistributorMessagesSection: React.FC = () => {
     finally { setLoading(false); }
   }, [typeFilter, statusFilter, debouncedSearch]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- module-cache hydration loader, filter-reactive
+    load();
+  }, [load]);
 
   const handleRetry = async (id: number) => {
     setRetrying(id);
@@ -2362,24 +2446,6 @@ const DistributorMessagesSection: React.FC = () => {
 // ═══════════════════════════════════════════════════════════════════════════════
 // WHATSAPP SECTION — embedded web.whatsapp.com iframe
 // ═══════════════════════════════════════════════════════════════════════════════
-
-function parseAllPhoneNumbers(...inputs: (string | undefined | null)[]): string[] {
-  const nums: string[] = [];
-  inputs.forEach(input => {
-    if (!input) return;
-    const parts = String(input).split(/[,/;\n]+/);
-    parts.forEach(p => {
-      const clean = p.replace(/\D/g, '');
-      if (clean.length >= 10) {
-        const formatted = clean.length === 10 ? `+91 ${clean}` : `+${clean}`;
-        if (!nums.includes(formatted)) {
-          nums.push(formatted);
-        }
-      }
-    });
-  });
-  return nums;
-}
 
 function formatPhoneNumber(numStr?: string): string {
   if (!numStr) return '';
@@ -2591,17 +2657,20 @@ const WhatsAppSection: React.FC = () => {
   const statusPollActive = usePageActive();
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- engine status bootstrap seeds states
     checkStatus();
     loadTemplates();
   }, [checkStatus, loadTemplates]);
 
   // Gate chat list behind WhatsApp ready — avoids cold-boot false-failure toasts
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- chat fetch gated on readiness
     if (isReady) loadChats();
   }, [isReady, loadChats]);
 
   useEffect(() => {
     if (!statusPollActive) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- visibility-gated status poll bootstrap
     checkStatus();
     if (isReady) loadChats();
   }, [checkStatus, loadChats, isReady, statusPollActive]);
@@ -2611,6 +2680,7 @@ const WhatsAppSection: React.FC = () => {
   // Load Thread Messages when activeChat changes (Every BOOT/mount)
   useEffect(() => {
     if (!activeChat) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- clears stale thread on close
       setMessages([]);
       setOcrResults({});
       return;
@@ -2635,7 +2705,7 @@ const WhatsAppSection: React.FC = () => {
             if (msg.scannedResult) {
               try {
                 const parsed = JSON.parse(msg.scannedResult);
-                const label = parsed?.items?.map((i: any) => i.name || i.medicine_name || i.text).filter(Boolean).join(', ')
+                const label = (parsed as OcrParsedPayload)?.items?.map(i => i.name || i.medicine_name || i.text).filter(Boolean).join(', ')
                   || parsed?.text?.substring(0, 120);
                 if (label) preloaded[msg.id] = label;
               } catch { /* ignore malformed JSON */ }
@@ -2700,7 +2770,7 @@ function isSameChat(chat: WaChatItem, targetChatId: string, resolvedNum?: string
       const { msgId, ocrResult } = data.payload || {};
       if (msgId && ocrResult) {
         try {
-          const label = ocrResult?.items?.map((i: any) => i.name || i.medicine_name || i.text).filter(Boolean).join(', ')
+          const label = (ocrResult as OcrParsedPayload)?.items?.map(i => i.name || i.medicine_name || i.text).filter(Boolean).join(', ')
             || ocrResult?.text?.substring(0, 120);
           if (label) setOcrResults(prev => ({ ...prev, [msgId]: label }));
         } catch { /* ignore */ }
@@ -2783,10 +2853,10 @@ function isSameChat(chat: WaChatItem, targetChatId: string, resolvedNum?: string
             .catch(() => {});
         }
       }, 400);
-    } catch (err: any) {
+    } catch (err) {
       // Remove optimistic message on failure so user knows the send failed
       setMessages(prev => prev.filter(m => m.id !== optimisticId));
-      toastEvent.trigger(err.response?.data?.error || 'Failed to send message', 'error', '/crm');
+      toastEvent.trigger((err as LocalApiError).response?.data?.error || 'Failed to send message', 'error', '/crm');
     } finally {
       setSending(false);
     }
@@ -2838,8 +2908,8 @@ function isSameChat(chat: WaChatItem, targetChatId: string, resolvedNum?: string
       setTmplBody('');
       setEditingTemplateId(null);
       await loadTemplates();
-    } catch (err: any) {
-      toastEvent.trigger(err.response?.data?.error || 'Failed to save template', 'error');
+    } catch (err) {
+      toastEvent.trigger((err as LocalApiError).response?.data?.error || 'Failed to save template', 'error');
     } finally {
       setSavingTmpl(false);
     }
@@ -2863,8 +2933,6 @@ function isSameChat(chat: WaChatItem, targetChatId: string, resolvedNum?: string
     setTmplCategory(t.category || 'General');
     setTmplBody(t.body);
   };
-
-  const [viewMode, setViewMode] = useState<'live_web' | 'crm_chats'>('live_web');
 
   // Filtered Chats
   const filteredChats = chats.filter(c => {
@@ -2915,8 +2983,8 @@ function isSameChat(chat: WaChatItem, targetChatId: string, resolvedNum?: string
               try {
                 toastEvent.trigger('Launching live WhatsApp Web Chrome window...', 'info');
                 await apiClient.post('/messaging/login-window');
-              } catch (err: any) {
-                toastEvent.trigger(err?.response?.data?.error || 'Failed to launch WhatsApp window', 'error');
+              } catch (err) {
+                toastEvent.trigger((err as LocalApiError).response?.data?.error || 'Failed to launch WhatsApp window', 'error');
               }
             }}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold transition-all shadow-sm active:scale-95"
@@ -2934,8 +3002,8 @@ function isSameChat(chat: WaChatItem, targetChatId: string, resolvedNum?: string
                   await apiClient.post('/messaging/logout');
                   toastEvent.trigger('WhatsApp logged out successfully. You can now scan a new QR code.', 'success');
                   checkStatus();
-                } catch (err: any) {
-                  toastEvent.trigger(err?.response?.data?.error || 'Failed to log out of WhatsApp', 'error');
+                } catch (err) {
+                  toastEvent.trigger((err as LocalApiError).response?.data?.error || 'Failed to log out of WhatsApp', 'error');
                 }
               }
             }}
@@ -2985,9 +3053,9 @@ function isSameChat(chat: WaChatItem, targetChatId: string, resolvedNum?: string
                     toastEvent.trigger('Initializing WhatsApp connection...', 'info');
                     await apiClient.post('/messaging/connect');
                     checkStatus();
-                  } catch (err: any) {
+                  } catch (err) {
                     setInitializing(false);
-                    toastEvent.trigger(err?.response?.data?.error || 'Failed to connect WhatsApp', 'error');
+                    toastEvent.trigger((err as LocalApiError).response?.data?.error || 'Failed to connect WhatsApp', 'error');
                   }
                 }}
                 className="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl text-xs font-bold transition-all shadow-sm active:scale-95 flex items-center gap-2 mt-1"
@@ -3004,9 +3072,9 @@ function isSameChat(chat: WaChatItem, targetChatId: string, resolvedNum?: string
                   setInitializing(true);
                   await apiClient.post('/messaging/connect');
                   checkStatus();
-                } catch (err: any) {
+                } catch (err) {
                   setInitializing(false);
-                  toastEvent.trigger(err?.response?.data?.error || 'Failed to connect', 'error');
+                  toastEvent.trigger((err as LocalApiError).response?.data?.error || 'Failed to connect', 'error');
                 }
               }}
               className="flex items-center gap-2 px-4 py-2 bg-bg3 border border-border rounded-xl text-xs font-bold text-text hover:bg-bg transition-all active:scale-95"
@@ -3018,8 +3086,8 @@ function isSameChat(chat: WaChatItem, targetChatId: string, resolvedNum?: string
                 try {
                   toastEvent.trigger('Launching WhatsApp login window…', 'info');
                   await apiClient.post('/messaging/login-window');
-                } catch (err: any) {
-                  toastEvent.trigger(err?.response?.data?.error || 'Failed to launch login window', 'error');
+                } catch (err) {
+                  toastEvent.trigger((err as LocalApiError).response?.data?.error || 'Failed to launch login window', 'error');
                 }
               }}
               className="flex items-center gap-2 px-4 py-2 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20 rounded-xl text-xs font-bold transition-all shadow-sm active:scale-95"
@@ -3034,8 +3102,8 @@ function isSameChat(chat: WaChatItem, targetChatId: string, resolvedNum?: string
                     await apiClient.post('/messaging/logout');
                     toastEvent.trigger('WhatsApp session cleared successfully.', 'success');
                     checkStatus();
-                  } catch (err: any) {
-                    toastEvent.trigger(err?.response?.data?.error || 'Failed to clear WhatsApp session', 'error');
+                  } catch (err) {
+                    toastEvent.trigger((err as LocalApiError).response?.data?.error || 'Failed to clear WhatsApp session', 'error');
                   }
                 }
               }}
@@ -3640,7 +3708,7 @@ const SpecialOrdersSection: React.FC = () => {
   const [editRequester, setEditRequester] = useState('');
   const [editPhone, setEditPhone] = useState('');
   const [shakePhone, setShakePhone] = useState(false);
-  const [shakeEditPhone, setShakeEditPhone] = useState(false);
+  const [, setShakeEditPhone] = useState(false);
   const [editQty, setEditQty] = useState<number | ''>(1);
   const [editAdvancePayment, setEditAdvancePayment] = useState<number | ''>('');
   const [editPriority, setEditPriority] = useState('Normal');
@@ -3653,7 +3721,7 @@ const SpecialOrdersSection: React.FC = () => {
   const [editFormSubmitting, setEditFormSubmitting] = useState(false);
 
   // Pharmarack Search States
-  const [prSearchResults, setPrSearchResults] = useState<any[]>([]);
+  const [prSearchResults, setPrSearchResults] = useState<PharmarackSearchResult[]>([]);
   const [showPrDropdown, setShowPrDropdown] = useState(false);
   const [loadingPr, setLoadingPr] = useState(false);
 
@@ -3678,6 +3746,7 @@ const SpecialOrdersSection: React.FC = () => {
 
   useEffect(() => {
     if (!manualToDate) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- resets date filter on clear
       setDateTo(getTodayString());
     }
   }, [manualToDate]);
@@ -3686,6 +3755,7 @@ const SpecialOrdersSection: React.FC = () => {
   useEffect(() => {
     if (isSelectingPrRef.current) return;
     if (!product.trim()) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- clears dropdown when input empties
       setPrSearchResults([]);
       setShowPrDropdown(false);
       return;
@@ -3697,7 +3767,7 @@ const SpecialOrdersSection: React.FC = () => {
       try {
         const results = await api.searchPharmarack(product);
         if (isSelectingPrRef.current) return;
-        setPrSearchResults(results || []);
+        setPrSearchResults(Array.isArray(results) ? (results as PharmarackSearchResult[]) : []);
         setShowPrDropdown(results && results.length > 0);
       } catch (err) {
         console.error('Pharmarack query failed:', err);
@@ -3709,7 +3779,7 @@ const SpecialOrdersSection: React.FC = () => {
     return () => clearTimeout(timer);
   }, [product]);
 
-  const handleSelectPharmarackItem = (item: any) => {
+  const handleSelectPharmarackItem = (item: PharmarackSearchResult) => {
     isSelectingPrRef.current = true;
     setProduct(item.name);
     setSelectedDistributor(item.distributor || '');
@@ -3743,6 +3813,7 @@ const SpecialOrdersSection: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- module-cache hydration loader, event-refresh
     loadOrders();
     const handleRefresh = () => {
       loadOrders();
@@ -3762,8 +3833,8 @@ const SpecialOrdersSection: React.FC = () => {
       toastEvent.trigger(`Arrival WhatsApp sent to ${order.requester}!`, 'success', '/crm');
       whatsappQueueEvent.triggerUpdated();
       await loadOrders();
-    } catch (err: any) {
-      toastEvent.trigger(err?.response?.data?.error || err?.message || 'Failed to send arrival notification', 'error', '/crm');
+    } catch (err) {
+      toastEvent.trigger((err as LocalApiError).response?.data?.error || (err as LocalApiError).message || 'Failed to send arrival notification', 'error', '/crm');
     } finally {
       setNotifyingId(null);
     }
@@ -3778,8 +3849,8 @@ const SpecialOrdersSection: React.FC = () => {
       toastEvent.trigger(`Booking WhatsApp resent to ${order.requester}!`, 'success', '/crm');
       whatsappQueueEvent.triggerUpdated();
       await loadOrders();
-    } catch (err: any) {
-      toastEvent.trigger(err?.response?.data?.error || err?.message || 'Failed to resend booking message', 'error', '/crm');
+    } catch (err) {
+      toastEvent.trigger((err as LocalApiError).response?.data?.error || (err as LocalApiError).message || 'Failed to resend booking message', 'error', '/crm');
     } finally {
       setResendingId(null);
     }
@@ -3835,7 +3906,7 @@ const SpecialOrdersSection: React.FC = () => {
             await api.resendSpecialOrderBooking(order.id);
             toastEvent.trigger(`Booking WhatsApp sent to ${order.requester || 'Customer'}!`, 'success', '/crm');
             whatsappQueueEvent.triggerUpdated();
-          } catch (waErr: any) {
+          } catch (waErr) {
             console.warn('Failed to send booking WhatsApp on add to cart:', waErr);
           }
         }
@@ -3845,8 +3916,8 @@ const SpecialOrdersSection: React.FC = () => {
       } else {
         toastEvent.trigger(res?.error || 'Failed to add item to cart', 'error', '/crm');
       }
-    } catch (err: any) {
-      toastEvent.trigger(err?.response?.data?.error || 'Failed to add to cart', 'error', '/crm');
+    } catch (err) {
+      toastEvent.trigger((err as LocalApiError).response?.data?.error || 'Failed to add to cart', 'error', '/crm');
     } finally {
       setAddingCartId(null);
     }
@@ -3886,7 +3957,7 @@ const SpecialOrdersSection: React.FC = () => {
       } else {
         toastEvent.trigger(response.error || 'Failed to convert to recurring refill.', 'error', '/crm');
       }
-    } catch (err: any) {
+    } catch (err) {
       console.error('Error converting order to refill:', err);
       toastEvent.trigger('Failed to convert order to recurring refill.', 'error', '/crm');
     } finally {
@@ -4000,8 +4071,8 @@ const SpecialOrdersSection: React.FC = () => {
       isSelectingPrRef.current = false;
       await loadOrders();
       specialOrdersEvent.triggerUpdated();
-    } catch (err: any) {
-      toastEvent.trigger(err?.response?.data?.error || 'Failed to log special request', 'error', '/crm');
+    } catch (err) {
+      toastEvent.trigger((err as LocalApiError).response?.data?.error || 'Failed to log special request', 'error', '/crm');
     } finally {
       setFormSubmitting(false);
     }
@@ -4072,9 +4143,9 @@ const SpecialOrdersSection: React.FC = () => {
       setEditingOrder(null);
       await loadOrders();
       specialOrdersEvent.triggerUpdated();
-    } catch (err: any) {
+    } catch (err) {
       console.error('Failed to update special order request:', err);
-      toastEvent.trigger(err?.response?.data?.error || 'Failed to update special order request', 'error', '/crm');
+      toastEvent.trigger((err as LocalApiError).response?.data?.error || 'Failed to update special order request', 'error', '/crm');
     } finally {
       setEditFormSubmitting(false);
     }
@@ -4887,7 +4958,7 @@ const CustomerCreditSection: React.FC = () => {
     }
     return null;
   });
-  const [customerInvoices, setCustomerInvoices] = useState<any[]>([]);
+  const [customerInvoices, setCustomerInvoices] = useState<SalesHistoryInvoice[]>([]);
   const [loadingInvoices, setLoadingInvoices] = useState(false);
   const [loading, setLoading] = useState(cachedCreditCustomers.length === 0);
   const [search, setSearch] = useState('');
@@ -4897,12 +4968,12 @@ const CustomerCreditSection: React.FC = () => {
   const [payAmount, setPayAmount] = useState('');
   const [collectingPayment, setCollectingPayment] = useState(false);
   const [sendingId, setSendingId] = useState<number | null>(null);
-  const [viewInvoice, setViewInvoice] = useState<any | null>(null);
+  const [viewInvoice, setViewInvoice] = useState<SalesHistoryInvoice | null>(null);
 
   const loadCustomerInvoices = useCallback(async (customerId: number) => {
     setLoadingInvoices(true);
     try {
-      const res = await apiClient.get<any[]>(`/crm/${customerId}/history`);
+      const res = await apiClient.get<SalesHistoryInvoice[]>(`/crm/${customerId}/history`);
       setCustomerInvoices(Array.isArray(res.data) ? res.data : []);
     } catch {
       toastEvent.trigger('Failed to load customer purchase bills', 'error', '/crm');
@@ -4939,12 +5010,12 @@ const CustomerCreditSection: React.FC = () => {
     if (cachedCreditCustomers.length === 0) {
       setLoading(true);
     }
-    const previousId = selectedCustomerIdRef.current || cachedSelectedCustomerId;
+    const previousId = cachedSelectedCustomerId;
     try {
       const [res, invoicesRes] = await Promise.all([
         apiClient.get<CreditCustomerItem[]>('/crm/credit-customers'),
         previousId
-          ? apiClient.get<any[]>(`/crm/${previousId}/history`).catch(() => null)
+          ? apiClient.get<SalesHistoryInvoice[]>(`/crm/${previousId}/history`).catch(() => null)
           : Promise.resolve(null)
       ]);
       const data = Array.isArray(res.data) ? res.data : [];
@@ -4969,6 +5040,7 @@ const CustomerCreditSection: React.FC = () => {
   }, [loadCustomerInvoices]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- module-cache hydration loader
     loadCreditCustomers();
   }, [loadCreditCustomers]);
 
@@ -4989,8 +5061,8 @@ const CustomerCreditSection: React.FC = () => {
       await apiClient.post(`/crm/credit-customers/${cust.id}/send-reminder`, {});
       toastEvent.trigger(`Manual credit reminder sent to ${cust.name}`, 'success', '/crm');
       whatsappQueueEvent.triggerUpdated();
-    } catch (err: any) {
-      toastEvent.trigger(err.response?.data?.error || 'Failed to send WhatsApp reminder', 'error', '/crm');
+    } catch (err) {
+      toastEvent.trigger((err as LocalApiError).response?.data?.error || 'Failed to send WhatsApp reminder', 'error', '/crm');
     } finally {
       setSendingId(null);
     }
@@ -5010,8 +5082,8 @@ const CustomerCreditSection: React.FC = () => {
       setPayingId(null);
       setPayAmount('');
       await loadCreditCustomers();
-    } catch (err: any) {
-      toastEvent.trigger(err.response?.data?.error || 'Failed to process payment', 'error', '/crm');
+    } catch (err) {
+      toastEvent.trigger((err as LocalApiError).response?.data?.error || 'Failed to process payment', 'error', '/crm');
     } finally {
       setCollectingPayment(false);
     }
@@ -5404,7 +5476,7 @@ const CustomerCreditSection: React.FC = () => {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-border/30">
-                        {customerInvoices.map((inv: any) => (
+                        {customerInvoices.map(inv => (
                           <tr key={inv.id} className="hover:bg-bg/50 transition-colors">
                             <td className="p-2.5 text-muted">{formatDate(inv.date)}</td>
                             <td className="p-2.5 font-bold">
@@ -5441,7 +5513,7 @@ const CustomerCreditSection: React.FC = () => {
                                 <button
                                   onClick={async () => {
                                     try {
-                                      const full = await api.getSale(inv.id);
+                                      const full = await api.getSale(inv.id) as { items?: SalesHistoryItemLine[]; doctor_name?: string };
                                       const items = Array.isArray(full.items) ? full.items : [];
                                       navigate('/pos', {
                                         state: {
@@ -5451,7 +5523,7 @@ const CustomerCreditSection: React.FC = () => {
                                             selectedCustomerId: selectedCustomer.id,
                                             doctorName: full.doctor_name || inv.doctor_name || '',
                                             refillPatient: true,
-                                            medicines: items.map((it: any) => ({
+                                            medicines: items.map(it => ({
                                               medicineId: it.medicine_id,
                                               medicineName: it.medicine_name || it.name,
                                               inventory_id: it.inventory_id,
@@ -5469,7 +5541,7 @@ const CustomerCreditSection: React.FC = () => {
                                         }
                                       });
                                       toastEvent.trigger(`Transferring repeat prescription for ${selectedCustomer.name} to POS...`, 'info', '/pos');
-                                    } catch (err) {
+                                    } catch {
                                       toastEvent.trigger('Failed to load bill items for POS', 'error');
                                     }
                                   }}
@@ -5560,7 +5632,7 @@ const CustomerCreditSection: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border/30">
-                      {viewInvoice.items?.map((item: any, idx: number) => {
+                      {viewInvoice.items?.map((item, idx) => {
                         const packSize = item.pack_size || 1;
                         const looseQty = item.loose_qty || 0;
                         const discPer = item.discount_per || 0;

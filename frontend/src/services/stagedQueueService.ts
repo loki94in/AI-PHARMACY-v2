@@ -89,6 +89,20 @@ export const stagedQueueService = {
 
   clearQueue: clearQueueImpl,
 
+  removeById: (id: number) => {
+    const idx = activeQueue.findIndex(item => item.id === id);
+    if (idx === -1) return;
+    activeQueue = activeQueue.filter((_, i) => i !== idx);
+    if (activeQueue.length === 0) {
+      clearQueueImpl();
+      return;
+    }
+    if (currentIndex >= activeQueue.length) {
+      currentIndex = activeQueue.length - 1;
+    }
+    emitUpdate();
+  },
+
   approveCurrentAndNext: async () => {
     const current = getCurrentItemImpl();
     if (!current) return null;

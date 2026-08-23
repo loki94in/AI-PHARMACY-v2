@@ -8,6 +8,7 @@ import { clearServerUrl, getServerUrl, disconnectGoogleAuthServer } from '../../
 import * as WebBrowser from 'expo-web-browser';
 
 const menuItems = [
+  { icon: 'barcode-outline', label: 'Scan Code', desc: 'Scan medicine barcode/QR or sell-bill code', route: '/scan', color: colors.success },
   { icon: 'phone-portrait-outline', label: 'Devices', desc: 'See connected phones, rename this device', route: '/devices', color: colors.primary },
   { icon: 'receipt-outline', label: 'Purchases', desc: 'History + scan paper bills with OCR', route: '/(tabs)/purchases', color: colors.warning },
   { icon: 'camera-outline', label: 'AI Camera', desc: 'Scan medicine packaging', route: '/camera', color: '#F59E0B' },

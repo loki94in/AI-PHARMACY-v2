@@ -11,10 +11,20 @@ This directory contains the Express.js server logic, database interactions, rout
 ## CRM /patients Enrichment Contract (added 2026-08)
 - `GET /api/crm/patients` rows additionally carry `purchase_count`, `last_sale_date`, and `active_refill` (chunked ≤500-id indexed queries against `sales_invoices` / `patient_refills`). Enrichment failures degrade silently to unenriched rows — never drop the patient list. POS consumes these for the 🔁 Refill chip and returning-patient labels.
 
+## Barcode Generation Surface (added 2026-08)
+
+- **`GET /api/scan/resolve?text=`** (`routes/scan.ts`, registered 'hot'): read-only scanner resolver for the mobile Scan screen. Resolution order — (1) sale invoice by `invoice_no = left OR id = left` on the pre-`|` segment, (2) purchase bill by `invoice_no = left`, (3) medicine by exact `medicines.item_code` when the text is numeric, (4) medicine by name prefix + optional batch suffix. Returns discriminated `{ type: 'sale_invoice' | 'purchase_bill' | 'medicine' | 'not_found' }`. Keep it READ-ONLY and keep this order — bill labels always contain a `|date` suffix; EAN scans never do.
+
+- **`GET /api/purchases/bill-barcode/:purchaseId`**: returns `{ billNo, barcodeText, qrDataUrl, code128DataUrl, pdfUrl }` for a purchase bill — QR + Code128 via shared `barcodeService.generateInvoiceBarcodeData(invoice_no, date)`, plus a printable 350x220 PDF label. Encodes the real distributor invoice number; when `invoice_no` is empty it falls back to the traceable row key `PURCHASE-<id>` (never an invented code). 404 on unknown id.
+- **`POST /api/utilities/barcode`** (product labels): compact pharmacy STICKER grid (~51×27 mm, 24/page A4) — every label carries name+batch text, QR, and Code128 encoding the same real `NAME|BATCH` text (`barcodeService.generateProductBarcodeData`). No EAN fabrication; missing batch stays `N/A`. Sells history is invoice-level barcodes ONLY; product stickers belong to Purchase History.
+- **`POST /api/scan/attach-barcode`** `{code, medicine_id}`: user-clicked action from the app scanner that stores a manufacturer-printed barcode/QR text into `medicines.item_code`. Rejects 409 when another medicine already owns the code. Never auto-run from workers; resolver (`GET /scan/resolve`) matches `item_code` EXACTLY for any scanned text before falling back to name-prefix, so attached codes reverse-identify instantly.
+- Ownership: Sells history is invoice-level barcodes ONLY (per-product label UI was removed there). Product-label printing belongs to Purchase History.
+
 ## Strict Purchase Medicine Resolution (added 2026-08)
+
 No purchase ingestion route may silently create `medicines` master rows. Master registration is user-driven only (POST `/medicines` via the Universal editor); inventory is created solely inside verified purchase transactions.
 
-- **`POST /purchases/manual`**: per line, resolution order is explicit `medicine_id` → `resolveMedicineNameMultiTier` → `ocr_corrections`. If still unresolved, the line is collected and the whole transaction ROLLBACKs with `400 { unresolved_items: [{name}] }`. The former silent full-record auto-INSERT was removed. Do not reintroduce it.
+- **`POST /purchases/manual`**: per line, resolution order is explicit `medicine_id` → `resolveMedicineNameMultiTier` → `ocr_corrections`. A client-supplied `medicine_id` that validates against `medicines` SHORT-CIRCUITS the resolver entirely (verified-id fast path, added 2026-08-23: the multi-tier Tier-1 `LOWER(name)=?` full-scans 291k rows at ~45-85ms/line; skipping it for verified ids drops a 20-line bill body from ~1.7s to ~50ms). Resolver + OCR fallback run only for unlinked lines. If still unresolved, the line is collected and the whole transaction ROLLBACKs with `400 { unresolved_items: [{name}] }`. The former silent full-record auto-INSERT was removed. Do not reintroduce it.
 - **`POST /staged/:id/approve`** and **`POST /reconciliation/reissue`**: same strict chain; the old alias → `%LIKE%` containment → bare `INSERT INTO medicines (name)` fallback was removed. Unresolved lines abort with ROLLBACK + `400 {unresolved_items}`. A client-supplied `item.medicine_id` always wins when it exists.
 - **`POST /purchases/match-items`**: read-only batch resolver (`{names[], distributor_id}` → `{input, medicine_id, matched_name, confidence, match_type}`) used by StagedReviewModal and Purchase save verification. One round-trip, max 200 names, NEVER creates records. Use it instead of N per-line autocomplete calls.
 - Email/telegram/mobile-sync ingestion only ever writes pending `staged_purchases`; approval remains a human-only UI action. Keep it that way.
@@ -115,6 +125,13 @@ The engine provides a single, unified approach to medicine availability and alte
 - `src/telegramBot.ts`: uses engine for out-of-stock alternative suggestions
 - `src/routes/sales.ts`: existing batched alternatives approach preserved (compatible)
 - `src/routes/catalog.ts`: catalog enrichment pipeline preserved (compatible)
+
+## Mobile Sale Sync Staging Contract (added 2026-08)
+
+- **`POST /sales/sync` ALWAYS stages** — the former `adminMode` direct-commit branch was REMOVED by owner decision: phone-app bills are DRAFTS only (`staged_sales`, status `pending`), never auto-committed real invoices. Do not reintroduce any server-side path that turns a synced phone sale directly into a `sales_invoices` row; the human loop is mandatory.
+- The real bill is created exclusively when the pharmacist opens the draft in POS (staged floating widget / Review-in-POS queue → `handleLoadStagedItemIntoPOS`) and saves via the normal POS flow. On save, POS calls **`POST /sales/staged/:id/consume`** which flips the draft to `status='converted'` and stores `converted_invoice_no` (lazily ensured column). Approve (server-side commit) and Reject endpoints remain for the StagedReviewModal flow.
+- Idempotency: sync payloads may carry `client_ref`; refs recorded in `sync_client_refs` inside the same transaction make replays duplicate-safe.
+- `GET /sales/staged` (no param) returns pending only; Phone Sales page and badge counts read it — keep converted/rejected rows out of that default filter.
 
 ## Special Order Arrival & Fulfillment Flow (added 2026-08)
 

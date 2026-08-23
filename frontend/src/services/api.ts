@@ -1227,6 +1227,7 @@ export const api = {
   createStagedSale: (data: StagedSaleCreatePayload) => apiClient.post('/sales/staged', data).then(res => res.data),
   approveStagedSale: (id: number, data: StagedSaleApprovalPayload) => apiClient.post(`/sales/staged/${id}/approve`, data).then(res => res.data),
   rejectStagedSale: (id: number) => apiClient.post(`/sales/staged/${id}/reject`).then(res => res.data),
+  consumeStagedSale: (id: number, data?: { invoice_no?: string }) => apiClient.post(`/sales/staged/${id}/consume`, data || {}).then(res => res.data),
   getStagedPurchases: () => apiClient.get('/purchases/staged').then(res => res.data),
   approveStagedPurchase: (id: number, data: StagedPurchaseApprovalPayload) => apiClient.post(`/purchases/staged/${id}/approve`, data).then(res => res.data),
   rejectStagedPurchase: (id: number) => apiClient.post(`/purchases/staged/${id}/reject`).then(res => res.data),

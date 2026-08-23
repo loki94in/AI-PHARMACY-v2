@@ -2416,22 +2416,36 @@ async function ensureStagedDeviceColumns(db: Database): Promise<void> {
     if (!names.has('device_uuid')) {
       await db.run('ALTER TABLE staged_sales ADD COLUMN device_uuid TEXT');
     }
+    if (!names.has('converted_invoice_no')) {
+      await db.run('ALTER TABLE staged_sales ADD COLUMN converted_invoice_no TEXT');
+    }
     stagedDeviceColumnsReady = true;
   } catch (err) {
     console.warn('[SalesSync] staged_sales device column ensure failed:', err);
   }
 }
 
+let syncDedupeTableReady = false;
+async function ensureSyncClientRefs(db: Database): Promise<void> {
+  if (syncDedupeTableReady) return;
+  await db.run(`CREATE TABLE IF NOT EXISTS sync_client_refs (
+    client_ref TEXT PRIMARY KEY,
+    synced_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+  )`);
+  syncDedupeTableReady = true;
+}
+
 router.post('/sync', async (req, res) => {
   let db;
   try {
-    const { sales = [], adminMode = false, deviceName = '', device_uuid = '' } = req.body;
+    const { sales = [], deviceName = '', device_uuid = '' } = req.body;
     if (!Array.isArray(sales)) {
       return res.status(400).json({ error: 'Sales array required for synchronization' });
     }
 
     db = await dbManager.getConnection();
     await ensureStagedDeviceColumns(db);
+    await ensureSyncClientRefs(db);
     await db.run('BEGIN TRANSACTION');
 
     let stagedCount = 0;
@@ -2439,101 +2453,20 @@ router.post('/sync', async (req, res) => {
       const { items = [], patient_name = '', patient_phone = '', discount = 0, sale_date = new Date().toISOString() } = sale;
       if (!Array.isArray(items) || items.length === 0) continue;
 
-      if (adminMode) {
-        // Direct commit for Admin Remote Operations
-        // (per-bill override wins over batch-level device fields)
-        const billDeviceName = sale.sold_from_device || deviceName || 'Unknown Device';
-        const billDeviceUuid = sale.device_uuid || device_uuid || '';
-        let customerId = null;
-        if (patient_name) {
-          const cleanPhone = patient_phone || '';
-          const existing = await db.get('SELECT id FROM customers WHERE name = ? AND phone = ?', [patient_name, cleanPhone]);
-          if (existing) {
-            customerId = existing.id;
-          } else {
-            const custResult = await db.run(
-              'INSERT INTO customers (name, phone, address) VALUES (?, ?, ?)',
-              [patient_name, cleanPhone, '']
-            );
-            customerId = custResult.lastID;
-          }
-        }
-
-        let subtotal = 0;
-        for (const item of items) {
-          const { quantity = 0, unit_price = 0, loose_qty = 0, pack_size = 1, discount_per = 0 } = item;
-          const q = Number(quantity);
-          const l = Number(loose_qty);
-          const pSize = Number(pack_size || 1);
-          const d = Number(discount_per);
-          const uPrice = Number(unit_price);
-          const dPrice = uPrice * (1 - d / 100);
-          subtotal += (q * dPrice) + (l * (dPrice / pSize));
-        }
-
-        const taxRate = 0.05;
-        const total = Math.round(subtotal - Number(discount));
-        const tax = Number((total * taxRate / (1 + taxRate)).toFixed(2));
-        const invoice_no = await generateInvoiceNo(db);
-        const invoiceDateValue = sale_date ? new Date(sale_date).toISOString() : new Date().toISOString();
-
-        const result = await db.run(
-          'INSERT INTO sales_invoices (invoice_no, customer_id, total_amount, tax_amount, payment_medium, payment_status, date, discount, subtotal) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-          [invoice_no, customerId, total, tax, 'CASH', 'PAID', invoiceDateValue, Number(discount), subtotal]
-        );
-        const invoiceId = result.lastID;
-
-        const syncInventoryIds = items.map((it: any) => it.inventory_id).filter(Boolean);
-        const syncStockMap = new Map<number, any>();
-        if (syncInventoryIds.length > 0) {
-          const placeholders = syncInventoryIds.map(() => '?').join(',');
-          const rows = await db.all(
-            `SELECT im.id as inventory_id, im.quantity, im.loose_quantity, COALESCE(m.pack_size, 1) as pack_size, m.name as db_medicine_name
-             FROM inventory_master im JOIN medicines m ON im.medicine_id = m.id WHERE im.id IN (${placeholders})`,
-            syncInventoryIds
-          );
-          for (const r of rows) syncStockMap.set(r.inventory_id, r);
-        }
-
-        for (const item of items) {
-          const { inventory_id, quantity, unit_price, loose_qty = 0, discount_per = 0 } = item;
-          const currentStock = syncStockMap.get(inventory_id);
-          if (!currentStock) {
-            throw new Error(`Inventory item ID ${inventory_id} does not exist during direct sync.`);
-          }
-          const pSize = currentStock.pack_size;
-          const soldTotalUnits = Number(quantity) * pSize + Number(loose_qty);
-          const availableTotalUnits = currentStock.quantity * pSize + currentStock.loose_quantity;
-          if (availableTotalUnits < soldTotalUnits) {
-            throw new Error(`Insufficient stock for "${currentStock.db_medicine_name || 'Medicine'}" during device sync. Available: ${currentStock.quantity} strips & ${currentStock.loose_quantity} loose. Requested: ${Number(quantity)} strips & ${Number(loose_qty)} loose.`);
-          }
-
-          await db.run(
-            'INSERT INTO sale_items (invoice_id, inventory_id, quantity, unit_price, loose_qty, discount_per) VALUES (?, ?, ?, ?, ?, ?)',
-            [invoiceId, inventory_id, Number(quantity), Number(unit_price), Number(loose_qty), Number(discount_per)]
-          );
-          const newStock = applyStockDelta(
-            { quantity: currentStock.quantity, loose_quantity: currentStock.loose_quantity },
-            -Number(quantity), -Number(loose_qty), pSize
-          );
-          await db.run('UPDATE inventory_master SET quantity = ?, loose_quantity = ? WHERE id = ?', [newStock.quantity, newStock.loose_quantity, inventory_id]);
-          syncStockMap.set(inventory_id, { ...currentStock, quantity: newStock.quantity, loose_quantity: newStock.loose_quantity });
-        }
-        await db.run(
-          'INSERT INTO action_logs (action_type, description) VALUES (?, ?)',
-          ['MOBILE_SALE_SYNC', `Invoice ${invoice_no} synced from device "${billDeviceName}"${billDeviceUuid ? ` (${billDeviceUuid})` : ''} — ₹${total}`]
-        );
-        stagedCount++;
-      } else {
-        // Normal staged sync for non-admin staff
-        const billDeviceName = sale.sold_from_device || deviceName || 'Unknown Device';
-        const billDeviceUuid = sale.device_uuid || device_uuid || '';
-        await db.run(
-          `INSERT INTO staged_sales (patient_name, patient_phone, discount, sale_date, items_json, sold_from_device, device_uuid) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-          [patient_name, patient_phone, Number(discount), sale_date, JSON.stringify(items), billDeviceName, billDeviceUuid]
-        );
-        stagedCount++;
+      const clientRef = typeof sale.client_ref === 'string' ? sale.client_ref.trim().slice(0, 128) : '';
+      if (clientRef) {
+        const seen = await db.get('SELECT 1 FROM sync_client_refs WHERE client_ref = ?', [clientRef]);
+        if (seen) continue;
+        await db.run('INSERT INTO sync_client_refs (client_ref) VALUES (?)', [clientRef]);
       }
+
+      const billDeviceName = sale.sold_from_device || deviceName || 'Unknown Device';
+      const billDeviceUuid = sale.device_uuid || device_uuid || '';
+      await db.run(
+        `INSERT INTO staged_sales (patient_name, patient_phone, discount, sale_date, items_json, sold_from_device, device_uuid) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [patient_name, patient_phone, Number(discount), sale_date, JSON.stringify(items), billDeviceName, billDeviceUuid]
+      );
+      stagedCount++;
     }
     await db.run('COMMIT');
     inventoryCache.invalidate();
@@ -2683,6 +2616,27 @@ router.post('/staged/:id/reject', async (req, res) => {
     res.json({ success: true });
   } catch (error: any) {
     res.status(500).json({ error: error.message || 'Failed to reject staged sale' });
+  }
+});
+
+// Mark a staged sale as converted after the pharmacist saved the real bill in POS
+router.post('/staged/:id/consume', async (req, res) => {
+  const { id } = req.params;
+  const invoiceNo = typeof req.body?.invoice_no === 'string' ? req.body.invoice_no.slice(0, 64) : null;
+  let db;
+  try {
+    db = await dbManager.getConnection();
+    await ensureStagedDeviceColumns(db);
+    const result = await db.run(
+      `UPDATE staged_sales SET status = 'converted', converted_invoice_no = ? WHERE id = ? AND status = 'pending'`,
+      [invoiceNo, id]
+    );
+    if (result.changes === 0) {
+      return res.status(404).json({ error: 'Staged sale not found or already processed' });
+    }
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || 'Failed to consume staged sale' });
   }
 });
 

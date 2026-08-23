@@ -25,6 +25,7 @@ import { getSummaryCache, rebuildPurchaseSummaryCache, triggerBackgroundSummaryR
 import { isValidDistributorName } from '../utils/nameNormalizer.js';
 import { extractDateFromText } from '../utils/dateExtractor.js';
 import { applyPurchaseDelta } from '../services/medicineSalesMetricsService.js';
+import { generateInvoiceBarcodeData } from '../services/barcodeService.js';
 
 
 
@@ -829,6 +830,10 @@ router.post('/manual', async (req, res) => {
   let db;
   try {
     db = await dbManager.getConnection();
+    // Stall telemetry: if a save ever feels slow, this pinpoints the phase
+    // (lock-wait on BEGIN vs statement cost vs COMMIT fsync).
+    const saveT0 = Date.now();
+    let beginMs = 0;
 
     // 1. Resolve distributor info before opening transaction
     let distId = distributor_id ? parseInt(String(distributor_id), 10) : null;
@@ -898,7 +903,12 @@ router.post('/manual', async (req, res) => {
       return res.status(400).json({ error: 'Invoice date is required. Please verify and enter the actual invoice date before saving.' });
     }
 
+    const beginT0 = Date.now();
     await db.run('BEGIN TRANSACTION');
+    beginMs = Date.now() - beginT0;
+    if (beginMs > 500) {
+      console.warn(`[Purchases] Slow BEGIN (${beginMs}ms) — likely SQLite write-lock contention from a background worker`);
+    }
 
     if (!distId && distName) {
       await db.run('INSERT OR IGNORE INTO distributors (name) VALUES (?)', [distName]);
@@ -1014,11 +1024,15 @@ router.post('/manual', async (req, res) => {
         const dbMed = await db.get('SELECT name FROM medicines WHERE id = ?', [medId]);
         if (dbMed) {
           medName = dbMed.name;
+          // Verified fast path: the client-supplied medicine_id won the batched
+          // match + human review modal, so it ALWAYS wins here. Skip the
+          // multi-tier resolver — its Tier-1 `LOWER(name)=?` full-scans all
+          // 291k medicines (~45ms/line) and made large verified bills crawl.
         } else {
           medId = null;
         }
       }
-      
+
       if (medName) {
         // ponytail: deferred to setImmediate — not needed before COMMIT
         masterMedItems.push({
@@ -1031,29 +1045,31 @@ router.post('/manual', async (req, res) => {
           hsn_code: item.hsn_code || undefined
         });
 
-        const cleanName = medName.trim();
-        const resObj = await medicineService.resolveMedicineNameMultiTier(db, cleanName, distId);
-        if (resObj?.medicineId) {
-          medId = resObj.medicineId;
-        } else {
-          // Check OCR corrections mapping (resolves to an existing master row only)
-          const ocrRow = await db.get('SELECT correct FROM ocr_corrections WHERE LOWER(ocr) = LOWER(?)', [cleanName]).catch(() => null);
-          if (ocrRow?.correct) {
-            const targetMed = await db.get('SELECT id FROM medicines WHERE LOWER(name) = LOWER(?)', [ocrRow.correct.trim()]);
-            if (targetMed?.id) medId = targetMed.id;
-          }
-        }
         if (!medId) {
-          // Strict human-verification contract: never silently register a new medicine.
-          // The user must link this line to an existing medicine or register it via
-          // the Universal Medicine editor before the bill can be saved.
-          unresolvedMedicines.push({ name: cleanName });
+          const cleanName = medName.trim();
+          const resObj = await medicineService.resolveMedicineNameMultiTier(db, cleanName, distId);
+          if (resObj?.medicineId) {
+            medId = resObj.medicineId;
+          } else {
+            // Check OCR corrections mapping (resolves to an existing master row only)
+            const ocrRow = await db.get('SELECT correct FROM ocr_corrections WHERE LOWER(ocr) = LOWER(?)', [cleanName]).catch(() => null);
+            if (ocrRow?.correct) {
+              const targetMed = await db.get('SELECT id FROM medicines WHERE LOWER(name) = LOWER(?)', [ocrRow.correct.trim()]);
+              if (targetMed?.id) medId = targetMed.id;
+            }
+          }
+          if (!medId) {
+            // Strict human-verification contract: never silently register a new medicine.
+            // The user must link this line to an existing medicine or register it via
+            // the Universal Medicine editor before the bill can be saved.
+            unresolvedMedicines.push({ name: cleanName });
+          }
         }
 
         // Register distributor alias; reconcile deferred to background (ponytail: non-critical before response)
         if (medId) {
-          await medicineService.registerDistributorAlias(db, distId, cleanName, medId);
-          reconcileNames.push(cleanName);
+          await medicineService.registerDistributorAlias(db, distId, medName.trim(), medId);
+          reconcileNames.push(medName.trim());
         }
       }
 
@@ -1151,8 +1167,11 @@ router.post('/manual', async (req, res) => {
       });
     }
 
+    const commitT0 = Date.now();
     await db.run('COMMIT');
+    const commitMs = Date.now() - commitT0;
     inventoryCache.invalidate();
+    console.log(`[Purchases] Bill ${appInvoiceNo} saved: ${items.length} lines in ${Date.now() - saveT0}ms (begin ${beginMs}ms, commit ${commitMs}ms)`);
 
     // P1 push events (API_OPTIMIZATION plan): invoice saved → inventory created/updated
     try {
@@ -1802,6 +1821,142 @@ router.get('/last-purchase', async (req, res) => {
     });
   } catch (error) {
     console.error('Last purchase lookup error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Get all historical batches for a medicine (from inventory and past purchases)
+router.get('/medicine-batches', async (req, res) => {
+  let db;
+  try {
+    const medicineIdParam = req.query.medicine_id as string;
+    const name = (req.query.name as string || '').trim();
+
+    if (!medicineIdParam && !name) {
+      return res.json([]);
+    }
+
+    db = await dbManager.getConnection();
+    let medicineIds: number[] = [];
+
+    if (medicineIdParam) {
+      medicineIds = [parseInt(medicineIdParam, 10)];
+    } else {
+      const prefixRows = await db.all(
+        'SELECT id FROM medicines WHERE name LIKE ? LIMIT 5',
+        [`${name}%`]
+      );
+      medicineIds = prefixRows.map((m: any) => m.id);
+      if (medicineIds.length === 0) {
+        const infixRows = await db.all(
+          'SELECT id FROM medicines WHERE name LIKE ? LIMIT 5',
+          [`%${name}%`]
+        );
+        medicineIds = infixRows.map((m: any) => m.id);
+      }
+    }
+
+    if (medicineIds.length === 0) {
+      return res.json([]);
+    }
+
+    const placeholders = medicineIds.map(() => '?').join(',');
+
+    // 1. Fetch from purchase_items (includes distributor & date)
+    const purchaseRows = await db.all(`
+      SELECT 
+        pi.batch_no,
+        pi.expiry_date,
+        pi.cost_price as rate,
+        pi.mrp,
+        pi.cgst_per,
+        pi.sgst_per,
+        pi.quantity,
+        d.name as distributor_name,
+        p.date as purchase_date
+      FROM purchase_items pi
+      JOIN purchases p ON pi.purchase_id = p.id
+      LEFT JOIN distributors d ON p.distributor_id = d.id
+      WHERE pi.medicine_id IN (${placeholders}) AND pi.batch_no IS NOT NULL AND TRIM(pi.batch_no) != ''
+      ORDER BY p.date DESC, pi.id DESC
+    `, medicineIds);
+
+    // 2. Fetch from inventory_master (current active/inactive stock batches)
+    const inventoryRows = await db.all(`
+      SELECT 
+        im.batch_no,
+        im.expiry_date,
+        im.cost_price as rate,
+        im.mrp,
+        m.cgst_per,
+        m.sgst_per,
+        im.quantity,
+        NULL as distributor_name,
+        NULL as purchase_date,
+        im.id as inventory_id
+      FROM inventory_master im
+      JOIN medicines m ON im.medicine_id = m.id
+      WHERE im.medicine_id IN (${placeholders}) AND im.batch_no IS NOT NULL AND TRIM(im.batch_no) != ''
+      ORDER BY im.id DESC
+    `, medicineIds);
+
+    // 3. Deduplicate by batch_no (normalized uppercase/trimmed)
+    const batchMap = new Map<string, any>();
+
+    for (const row of purchaseRows) {
+      const bKey = String(row.batch_no || '').trim().toUpperCase();
+      if (!bKey) continue;
+      if (!batchMap.has(bKey)) {
+        batchMap.set(bKey, {
+          batch_no: String(row.batch_no).trim(),
+          expiry_date: row.expiry_date || '',
+          rate: Number(row.rate || 0),
+          mrp: Number(row.mrp || 0),
+          cgst_per: row.cgst_per !== undefined && row.cgst_per !== null ? Number(row.cgst_per) : null,
+          sgst_per: row.sgst_per !== undefined && row.sgst_per !== null ? Number(row.sgst_per) : null,
+          quantity: Number(row.quantity || 0),
+          distributor_name: row.distributor_name || null,
+          purchase_date: row.purchase_date || null
+        });
+      }
+    }
+
+    for (const row of inventoryRows) {
+      const bKey = String(row.batch_no || '').trim().toUpperCase();
+      if (!bKey) continue;
+      if (!batchMap.has(bKey)) {
+        batchMap.set(bKey, {
+          batch_no: String(row.batch_no).trim(),
+          expiry_date: row.expiry_date || '',
+          rate: Number(row.rate || 0),
+          mrp: Number(row.mrp || 0),
+          cgst_per: row.cgst_per !== undefined && row.cgst_per !== null ? Number(row.cgst_per) : null,
+          sgst_per: row.sgst_per !== undefined && row.sgst_per !== null ? Number(row.sgst_per) : null,
+          quantity: Number(row.quantity || 0),
+          distributor_name: null,
+          purchase_date: null
+        });
+      } else {
+        const existing = batchMap.get(bKey);
+        if (row.quantity > 0) {
+          existing.quantity = Number(row.quantity);
+        }
+        if (!existing.expiry_date && row.expiry_date) {
+          existing.expiry_date = row.expiry_date;
+        }
+        if (!existing.rate && row.rate) {
+          existing.rate = Number(row.rate);
+        }
+        if (!existing.mrp && row.mrp) {
+          existing.mrp = Number(row.mrp);
+        }
+      }
+    }
+
+    const result = Array.from(batchMap.values());
+    res.json(result);
+  } catch (error) {
+    console.error('Medicine batches lookup error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -3201,6 +3356,92 @@ router.get('/reconciliation/bounced', async (req, res) => {
   } catch (error: any) {
     console.error('Manual bounced alerts error:', error);
     res.status(500).json({ error: error.message || 'Internal server error' });
+  }
+});
+
+// Purchase bill scannable QR + Code128 barcode and printable PDF label
+router.get('/bill-barcode/:purchaseId', async (req, res) => {
+  const purchaseId = Number(req.params.purchaseId);
+  if (!Number.isInteger(purchaseId) || purchaseId <= 0) {
+    return res.status(400).json({ error: 'Valid purchase id is required' });
+  }
+
+  try {
+    const db = await dbManager.getConnection();
+    const purchase = await db.get(
+      'SELECT id, invoice_no, date, total_amount, distributor_id FROM purchases WHERE id = ?',
+      [purchaseId]
+    );
+    if (!purchase) {
+      return res.status(404).json({ error: 'Purchase not found' });
+    }
+
+    let distributorName = '';
+    if (purchase.distributor_id) {
+      const dist = await db.get('SELECT name FROM distributors WHERE id = ?', [purchase.distributor_id]);
+      distributorName = dist?.name || '';
+    }
+
+    // Encode the real bill reference; fall back to the row's primary key when
+    // the distributor invoice number was never captured (traceable to the record).
+    const billNo = (purchase.invoice_no || '').toString().trim() || `PURCHASE-${purchase.id}`;
+    const barcodeData = await generateInvoiceBarcodeData(billNo, purchase.date ? String(purchase.date) : undefined);
+
+    const settingsRows = await db.all('SELECT key, value FROM app_settings');
+    const settings: Record<string, string> = {};
+    settingsRows.forEach(r => { settings[r.key] = r.value; });
+    const shopName = settings.shop_name || 'AI PHARMACY OS';
+    const shopPhone = settings.shop_phone || '';
+
+    const { default: PDFDocument } = await import('pdfkit');
+    const uploadsDir = path.resolve(getAppDataDir(), 'uploads');
+    if (!fs.existsSync(uploadsDir)) {
+      fs.mkdirSync(uploadsDir, { recursive: true });
+    }
+
+    const doc = new PDFDocument({ size: [350, 220], margin: 15 });
+    const sanitizeNo = billNo.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const pdfPath = path.join(uploadsDir, `barcode_purchase_bill_${sanitizeNo}_${Date.now()}.pdf`);
+    const stream = fs.createWriteStream(pdfPath);
+    doc.pipe(stream);
+
+    doc.font('Helvetica-Bold').fontSize(14).fillColor('#0284c7').text(shopName, { align: 'center' });
+    if (shopPhone) {
+      doc.font('Helvetica').fontSize(8).fillColor('#64748b').text(`Ph: ${shopPhone}`, { align: 'center' });
+    }
+    doc.moveDown(0.5);
+
+    doc.font('Helvetica-Bold').fontSize(10).fillColor('#0f172a').text(`Purchase Bill: ${billNo}`, { align: 'center' });
+    const metaParts = [
+      purchase.date ? `Date: ${new Date(purchase.date).toLocaleDateString()}` : null,
+      distributorName || null,
+      `Total: ₹${Number(purchase.total_amount || 0).toFixed(2)}`
+    ].filter(Boolean);
+    if (metaParts.length > 0) {
+      doc.font('Helvetica').fontSize(8).fillColor('#475569').text(metaParts.join(' | '), { align: 'center' });
+    }
+    doc.moveDown(0.5);
+
+    const startY = doc.y;
+    doc.image(barcodeData.qrBuffer, 25, startY, { width: 85, height: 85 });
+    doc.image(barcodeData.code128Buffer, 125, startY + 10, { width: 200, height: 60 });
+    doc.fontSize(7).fillColor('#94a3b8').text(`Scan Code128 or QR for purchase lookup (${barcodeData.barcodeText})`, 15, 195, { align: 'center' });
+    doc.end();
+
+    stream.on('finish', () => {
+      res.json({
+        success: true,
+        billNo,
+        barcodeText: barcodeData.barcodeText,
+        qrDataUrl: barcodeData.qrDataUrl,
+        code128DataUrl: barcodeData.code128DataUrl,
+        pdfUrl: `/uploads/${path.basename(pdfPath)}`
+      });
+    });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error('Purchase bill barcode generation error:', error);
+    res.status(500).json({ error: 'Failed to generate purchase bill barcode: ' + message });
   }
 });
 
