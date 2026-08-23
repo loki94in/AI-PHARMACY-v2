@@ -133,9 +133,10 @@ export default function Settings() {
         </div>
       </div>
 
-      {/* Active Tab Workspace Panel */}
+      {/* Active Tab Workspace Panel — paints cached settings instantly; the
+          spinner shows only when NO cached snapshot exists (true cold load). */}
       <div className="flex-1 bg-bg border border-border rounded-2xl p-5 shadow-sm">
-        {loadingSettings ? (
+        {loadingSettings && (!rawSettings || Object.keys(rawSettings).length === 0) ? (
           <div className="flex items-center justify-center py-12">
             <RefreshCw size={24} className="animate-spin text-primary mr-2" />
             <span className="text-xs font-semibold text-muted">Hydrating pharmacy configuration settings...</span>

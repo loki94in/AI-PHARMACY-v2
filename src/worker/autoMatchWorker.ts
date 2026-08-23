@@ -1,5 +1,6 @@
 import { dbManager } from '../database/connection.js';
 import { overlapDetectionService } from '../services/overlapDetectionService.js';
+import { activityTracker } from '../utils/activityTracker.js';
 
 export class AutoMatchWorker {
   private timer: NodeJS.Timeout | null = null;
@@ -29,15 +30,21 @@ export class AutoMatchWorker {
 
   async runScan() {
     if (this.isRunning) return;
+    // P3 gated worker: skip ticks while the user is idle >30 min; the scan
+    // resumes automatically on the next tick after wake.
+    if (activityTracker.isIdle()) return;
     this.isRunning = true;
     try {
       const db = await dbManager.getConnection();
-      
-      // Find all pending special orders
+
+      // One reconcile per case: orders that already have an overlap record are
+      // never re-processed by this safety-net scan (once calculated, no
+      // recalculation). Purchase-save arrival detection stays event-driven.
       const pendingOrders = await db.all(
         `SELECT s.id, s.product, s.medicine_name, s.qty, s.requester, s.phone
          FROM special_orders s
-         WHERE s.status IN ('CREATED', 'PENDING', 'IN_TRANSIT', 'Pending', 'Ordered')`
+         WHERE s.status IN ('CREATED', 'PENDING', 'IN_TRANSIT', 'Pending', 'Ordered')
+           AND NOT EXISTS (SELECT 1 FROM order_overlaps o WHERE o.special_order_id = s.id)`
       );
 
       if (!pendingOrders || pendingOrders.length === 0) {

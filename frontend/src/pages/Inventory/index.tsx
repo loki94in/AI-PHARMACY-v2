@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, lazy, Suspense } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApiQuery } from '../../hooks/useApiQuery';
+import { usePageActive } from '../../lib/keepAlive/PageActiveContext';
 import { useQueryClient } from '@tanstack/react-query';
 import { PackageSearch, Plus, Minus, RefreshCw, X, AlertTriangle, ShieldAlert, BookOpen, Factory, Edit, Save, Loader2, Columns3, Check, Download, ShoppingCart } from 'lucide-react';
 import { api, type InventoryItem, type SpecialOrder } from '../../services/api';
@@ -276,9 +277,14 @@ const Inventory = () => {
   
   const [universalEditMedicineId, setUniversalEditMedicineId] = useState<number | null>(null);
 
+  // Visibility-gated: a hidden kept-alive Inventory page must not fire this
+  // query on warm-mount or background invalidations.
+  const isPageVisible = usePageActive();
+
   const { data: specialOrders = [] } = useApiQuery<SpecialOrder[]>(
     'pos-special-orders',
-    () => api.getOrders().then(data => Array.isArray(data) ? data.filter(o => o.status === 'Pending' || o.status === 'Ordered') : [])
+    () => api.getOrders().then(data => Array.isArray(data) ? data.filter(o => o.status === 'Pending' || o.status === 'Ordered') : []),
+    { enabled: isPageVisible }
   );
 
   // Debounced column filter states for server search

@@ -5,6 +5,56 @@ import { dbManager } from '../database/connection.js';
 import { enhancedSimilarity } from './productNameFilterService.js';
 import { tokenRefreshScheduler } from './tokenRefreshScheduler.js';
 
+// ── Periodic sync cron (owner rule 2026-08: credential-gated registration) ──
+// The 35-min background catalog sync is registered ONLY while a Pharmarack
+// session token exists. A store that never logs into Pharmarack gets zero cron
+// wakes. Saving a token arms it (idempotent); logout disarms it.
+let catalogSyncTask: any = null;
+
+export async function ensureCatalogSyncCron(): Promise<void> {
+  if (process.env.DISABLE_BACKGROUND_WORKERS !== 'false') return;
+  if (catalogSyncTask) return;
+  try {
+    const db = await dbManager.getConnection();
+    const tokenRow = await db.get("SELECT value FROM app_settings WHERE key = 'pharmarack_session_token'");
+    if (!tokenRow?.value) return;
+
+    const { getBackendFetchMode } = await import('./dataFetchControl.js');
+    const { activityTracker } = await import('../utils/activityTracker.js');
+    const cron = (await import('node-cron')).default;
+
+    catalogSyncTask = cron.schedule('*/35 * * * *', async () => {
+      try {
+        const mode = await getBackendFetchMode('bg.catalogSync', 'auto');
+        if (mode === 'off') {
+          console.log('[Catalog Cache] Periodic sync is disabled (mode=off)');
+          return;
+        }
+        if (mode === 'manual' && activityTracker.isIdle()) {
+          console.log('[Catalog Cache] Periodic sync skipped (mode=manual, system is idle)');
+          return;
+        }
+
+        const result = await syncCatalog();
+        console.log(`[Catalog Cache] Periodic sync complete: ${result.synced} products, ${result.errors} errors`);
+      } catch (err) {
+        console.error('[Catalog Cache] Periodic sync cron failed:', err);
+      }
+    });
+    console.log('[Catalog Cache] Periodic sync cron registered (every 35 min, Pharmarack session active).');
+  } catch (err) {
+    console.warn('[Catalog Cache] Could not register periodic sync cron:', err);
+  }
+}
+
+export function stopCatalogSyncCron(): void {
+  if (catalogSyncTask) {
+    try { catalogSyncTask.stop(); } catch (_) {}
+    catalogSyncTask = null;
+    console.log('[Catalog Cache] Periodic sync cron stopped (Pharmarack session cleared).');
+  }
+}
+
 export interface CatalogProduct {
   name: string;
   mrp: number | null;

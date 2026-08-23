@@ -607,30 +607,52 @@ server.on('error', (err: any) => {
         const { initBackupScheduler } = await import('./services/backupService.js');
         await initBackupScheduler().catch(err => { bootWorkerFailures++; console.error('[Boot:Phase3] Failed to init backup scheduler:', err); });
 
-        // Doctor reporting service
-        const { startDoctorReportingScheduler } = await import('./services/doctorReportingService.js');
-        startDoctorReportingScheduler();
+        // Doctor reporting service — registered ONLY when its trigger is enabled
+        // (owner rule 2026-08: no feature configured → no timer at all).
+        try {
+          const drRow = await db.get("SELECT value FROM app_settings WHERE key = 'trigger_doctor_report_enabled'");
+          if (drRow?.value === 'true') {
+            const { startDoctorReportingScheduler } = await import('./services/doctorReportingService.js');
+            startDoctorReportingScheduler();
+            console.log('[Boot:Phase3] Doctor reporting scheduler started (trigger enabled).');
+          }
+        } catch (err) {
+          bootWorkerFailures++;
+          console.error('[Boot:Phase3] Doctor reporting gate check failed:', err);
+        }
 
         // Push notification service listener
         import('./services/pushNotificationService.js').catch(err => { bootWorkerFailures++; console.error('[Boot:Phase3] Push service load failed:', err); });
 
-        // Distributor dispatch reminder worker
-        import('./services/distributorDispatchReminderWorker.js').then(m => m.startDistributorDispatchReminderWorker()).catch(err => { bootWorkerFailures++; console.error('[Boot:Phase3] Distributor reminder worker start failed:', err); });
+        // Distributor dispatch reminder worker — registered ONLY when its
+        // trigger is enabled; triggerSchedulerService stops/starts it live on
+        // settings changes.
+        try {
+          const drwRow = await db.get("SELECT value FROM app_settings WHERE key = 'trigger_dispatch_reminder_enabled'");
+          if (drwRow?.value === 'true') {
+            const { startDistributorDispatchReminderWorker } = await import('./services/distributorDispatchReminderWorker.js');
+            startDistributorDispatchReminderWorker();
+            console.log('[Boot:Phase3] Distributor dispatch reminder worker started (trigger enabled).');
+          }
+        } catch (err) {
+          bootWorkerFailures++;
+          console.error('[Boot:Phase3] Distributor reminder worker start failed:', err);
+        }
 
-        // WhatsApp Queue Worker (self-gating on whatsapp_enabled + automation_enabled)
-        import('./services/whatsappQueue.js').then(m => m.whatsappQueue.startWorker()).catch(err => { bootWorkerFailures++; console.error('[Boot:Phase3] WhatsApp queue worker start failed:', err); });
+        // WhatsApp queue: boot-time crash recovery ONLY (lazy loop — owner rule
+        // 2026-08). The poll loop itself starts on first enqueue / explicit enable.
+        import('./services/whatsappQueueWorker.js').then(m => m.whatsappQueueWorker.cleanupOldSentItems()).catch(err => { bootWorkerFailures++; console.error('[Boot:Phase3] WhatsApp queue recovery failed:', err); });
 
         // ── Phase 4: Headless browser subsystems & asynchronous workers (staggered) ──
         console.log('[Boot:Phase4] Staging headless browser & external service schedulers...');
 
-        // T+2s: Pharmarack session refresh, messaging queue & order fulfillment
+        // T+2s: Pharmarack session refresh & order fulfillment. messagingQueue
+        // is lazy now (owner rule 2026-08): its poll loop starts on first
+        // pending queueMessage()/retryMessage() — zero ticks when unused.
         setTimeout(async () => {
           try {
             const { tokenRefreshScheduler } = await import('./services/tokenRefreshScheduler.js');
             tokenRefreshScheduler.start();
-
-            const { messagingQueue } = await import('./services/messagingQueue.js');
-            messagingQueue.start();
 
             const { orderFulfillmentService } = await import('./services/orderFulfillmentService.js');
             orderFulfillmentService.start();
@@ -739,26 +761,17 @@ async function setupCrons(db: any) {
 
   const cron = (await import('node-cron')).default;
 
-  // Periodic Pharmarack catalog sync every 35 minutes (WhatsApp OCR Pipeline)
-  cron.schedule('*/35 * * * *', async () => {
-    try {
-      const mode = await getBackendFetchMode('bg.catalogSync', 'auto');
-      if (mode === 'off') {
-        console.log('[Catalog Cache] Periodic sync is disabled (mode=off)');
-        return;
-      }
-      if (mode === 'manual' && activityTracker.isIdle()) {
-        console.log('[Catalog Cache] Periodic sync skipped (mode=manual, system is idle)');
-        return;
-      }
-
-      const { pharmarackCatalogCache } = await import('./services/pharmarackCatalogCache.js');
-      const result = await pharmarackCatalogCache.syncCatalog();
-      console.log(`[Catalog Cache] Periodic sync complete: ${result.synced} products, ${result.errors} errors`);
-    } catch (err) {
-      console.error('[Catalog Cache] Periodic sync cron failed:', err);
-    }
-  });
+  // Periodic Pharmarack catalog sync every 35 minutes — registered ONLY when a
+  // Pharmarack session token exists (owner rule 2026-08: credential-gated).
+  // Saving a token arms it; logout disarms it (ensureCatalogSyncCron/
+  // stopCatalogSyncCron in pharmarackCatalogCache.ts).
+  try {
+    const { ensureCatalogSyncCron } = await import('./services/pharmarackCatalogCache.js');
+    await ensureCatalogSyncCron();
+  } catch (err) {
+    bootWorkerFailures++;
+    console.error('[Boot] Failed to evaluate catalog sync cron registration:', err);
+  }
 
   // Pharmarack daily batch dispatch: runs every minute during the 11 AM hour.
   cron.schedule('* 11 * * *', async () => {

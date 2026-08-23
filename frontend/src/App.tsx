@@ -2,6 +2,7 @@ import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { pageImports } from './lib/pageImports';
 import { KeepAliveOutlet, type KeepAliveRoute } from './lib/keepAlive/KeepAliveOutlet';
+import { prewarmRoute } from './lib/keepAlive/routePool';
 import { queryClient } from './lib/queryClient';
 import { api } from './services/api';
 import { getTodayString, getNDaysAgoString } from './utils/date';
@@ -152,6 +153,42 @@ function App() {
       clearTimeout(timer);
       batchTimers.forEach((t) => clearTimeout(t));
       clearTimeout(dataTimer);
+    };
+  }, []);
+
+  useEffect(() => {
+    // Idle warm-mount (root AGENTS.md SPA contract): progressively pre-mount
+    // high-traffic pages HIDDEN so their first switch behaves like POS (which
+    // mounts at boot as the landing page). Each step fires only while the user
+    // is idle (>45s without input) and the tab is visible; page-level data
+    // fetching still honors its own useFetchMode / data_fetch_control gates.
+    const WARMUP_PATHS = ['/dashboard', '/inventory', '/crm', '/mail', '/purchases', '/settings'];
+    let lastInteraction = Date.now();
+    let idx = 0;
+    let timer: ReturnType<typeof setTimeout>;
+    const markInteraction = () => { lastInteraction = Date.now(); };
+    const step = () => {
+      if (idx >= WARMUP_PATHS.length) return;
+      const idleFor = Date.now() - lastInteraction;
+      if (document.visibilityState === 'visible' && idleFor > 45_000) {
+        prewarmRoute(WARMUP_PATHS[idx]);
+        idx += 1;
+        timer = setTimeout(step, 8000);
+      } else {
+        timer = setTimeout(step, 5000);
+      }
+    };
+    window.addEventListener('pointerdown', markInteraction, { passive: true });
+    window.addEventListener('pointermove', markInteraction, { passive: true });
+    window.addEventListener('keydown', markInteraction);
+    window.addEventListener('wheel', markInteraction, { passive: true });
+    timer = setTimeout(step, 20_000);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('pointerdown', markInteraction);
+      window.removeEventListener('pointermove', markInteraction);
+      window.removeEventListener('keydown', markInteraction);
+      window.removeEventListener('wheel', markInteraction);
     };
   }, []);
 

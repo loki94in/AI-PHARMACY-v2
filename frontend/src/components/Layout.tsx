@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo, memo } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
@@ -117,7 +117,9 @@ interface LocalApiErrorShape {
 // ──────────────────────────────────────────────
 // Sidebar
 // ──────────────────────────────────────────────
-const Sidebar = ({
+// memo: chrome is isolated from navigation re-renders — Sidebar subscribes to
+// the router itself so the active highlight updates without Layout re-renders.
+const Sidebar = memo(({
   stagedSalesCount = 0,
   stagedPurchasesCount = 0,
   onOpenReview,
@@ -131,6 +133,7 @@ const Sidebar = ({
   onClose?: () => void;
 }) => {
   const queryClient = useQueryClient();
+  const routeLoc = useLocation();
   const hoverPrefetchControl = useFetchMode('layout.hoverPrefetch');
   const menuItems = [
     { path: '/pos', label: 'Sales / POS', icon: <ShoppingCart size={18} /> },
@@ -229,9 +232,9 @@ const Sidebar = ({
             {menuItems.map((item) => {
               const isActive = (() => {
                 const [basePath, queryStr] = item.path.split('?');
-                if (location.pathname !== basePath) return false;
+                if (routeLoc.pathname !== basePath) return false;
                 const targetTab = queryStr ? new URLSearchParams(queryStr).get('tab') : null;
-                const currentTab = new URLSearchParams(location.search).get('tab');
+                const currentTab = new URLSearchParams(routeLoc.search).get('tab');
                 if (targetTab) {
                   return currentTab === targetTab;
                 } else {
@@ -344,7 +347,7 @@ const Sidebar = ({
       </div>
     </>
   );
-};
+});
 
 // ──────────────────────────────────────────────
 // Flash Toast — small pop at top-center
@@ -854,7 +857,7 @@ const LiveHeaderClock = () => {
 // ──────────────────────────────────────────────
 // Topbar
 // ──────────────────────────────────────────────
-const Topbar = ({
+const Topbar = memo(({
   theme,
   setTheme,
   notifications,
@@ -1124,11 +1127,19 @@ const Topbar = ({
   }, [fetchServicesStatus, fetchWhatsAppQueueStatus, compactCacheLoaded]);
 
   // WhatsApp queue status: event-driven. Poll ONLY while the queue is actively
-  // sending (3s), otherwise refresh via queue events / focus / SSE — zero idle calls.
+  // sending (3s) AND the window is visible; hidden windows pause polling and
+  // refresh once on return-to-visible plus via queue events / focus / SSE.
   useEffect(() => {
     if (!compactCacheLoaded) return;
     fetchWhatsAppQueueStatus();
-    const qInterval = isQueueActive ? setInterval(fetchWhatsAppQueueStatus, 3000) : null;
+    const qInterval = isQueueActive && document.visibilityState === 'visible'
+      ? setInterval(fetchWhatsAppQueueStatus, 3000)
+      : null;
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible' && isQueueActive) fetchWhatsAppQueueStatus();
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
 
     const unsubOpen = whatsappQueueEvent.subscribeOpen(() => {
       onOpenWaQueue?.();
@@ -1147,6 +1158,7 @@ const Topbar = ({
 
     return () => {
       if (qInterval) clearInterval(qInterval);
+      document.removeEventListener('visibilitychange', handleVisibility);
       unsubOpen();
       unsubUpdated();
       window.removeEventListener('sse-wa-queue-updated', handleSseQueue);
@@ -1246,6 +1258,9 @@ const Topbar = ({
   useEffect(() => {
     if (upcomingTriggers.length === 0) return;
     const tick = setInterval(() => {
+      // Hidden window: pause countdown churn and the throttled network refetch;
+      // the visibilitychange handler resyncs from the server on return.
+      if (document.visibilityState !== 'visible') return;
       setUpcomingTriggers(prev =>
         prev.map(t => ({ ...t, secondsUntilRun: Math.max(0, t.secondsUntilRun - 1) }))
           .filter(t => t.secondsUntilRun > 0)
@@ -1260,7 +1275,20 @@ const Topbar = ({
         }
       }
     }, 1000);
-    return () => clearInterval(tick);
+    const handleTriggerVisibility = () => {
+      // Resync countdowns from the server on return-to-visible (same 60s lock).
+      if (document.visibilityState !== 'visible') return;
+      const now = Date.now();
+      if (now - triggersRefetchLockRef.current > 60000) {
+        triggersRefetchLockRef.current = now;
+        fetchUpcomingTriggers();
+      }
+    };
+    document.addEventListener('visibilitychange', handleTriggerVisibility);
+    return () => {
+      clearInterval(tick);
+      document.removeEventListener('visibilitychange', handleTriggerVisibility);
+    };
   }, [upcomingTriggers.length, upcomingTriggers, fetchUpcomingTriggers]);
 
   // Consolidate Active Header Notification Carousel Items
@@ -1922,12 +1950,12 @@ const Topbar = ({
       </header>
     </>
   );
-};
+});
 
 // ──────────────────────────────────────────────
 // Quick Assist Sidebar
 // ──────────────────────────────────────────────
-const QuickAssistSidebar = ({
+const QuickAssistSidebar = memo(({
   expanded,
   setExpanded,
   refills,
@@ -2949,23 +2977,28 @@ const QuickAssistSidebar = ({
                             <SendIcon size={10} /> Send WhatsApp
                           </>
                         )}
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-};
+          </button>
+                     </div>
+                   </div>
+                 );
+               })}
+             </div>
+           )}
+         </div>
+       </div>
+     </div>
+   );
+ });
 
 // Module-level cache for staged counts to prevent redundant database fetches on page switches (G4)
 let cachedStagedSalesCount: number | null = null;
 let cachedStagedPurchasesCount: number | null = null;
 let lastStagedCountsFetchTime = 0;
+
+// Stable empty-array identities — memoized QuickAssistSidebar props must not
+// churn (new [] each render) while the queries are still resolving.
+const NO_SPECIAL_ORDERS: SpecialOrder[] = [];
+const NO_REFILLS: Refill[] = [];
 
 // ──────────────────────────────────────────────
 // Layout (holds notification state globally)
@@ -3084,7 +3117,7 @@ export const Layout = ({
     return () => { cancelled = true; };
   }, [compactCacheLoaded]);
 
-  const { data: specialOrdersList = [], refetch: refetchSpecialOrders } = useApiQuery<SpecialOrder[]>(
+  const { data: specialOrdersList = NO_SPECIAL_ORDERS, refetch: refetchSpecialOrders } = useApiQuery<SpecialOrder[]>(
     'orders',
     async () => {
       const data = await api.getOrders();
@@ -3093,7 +3126,7 @@ export const Layout = ({
     { staleTime: 30000, enabled: compactCacheLoaded }
   );
 
-  const { data: refillsList = [], refetch: refetchRefills } = useApiQuery<Refill[]>(
+  const { data: refillsList = NO_REFILLS, refetch: refetchRefills } = useApiQuery<Refill[]>(
     'refills',
     async () => {
       const data = await api.getRefills();
@@ -3384,14 +3417,27 @@ export const Layout = ({
     });
   }, []);
 
+  // Stable chrome callbacks — memoized Sidebar/Topbar/QuickAssist bail out on
+  // navigation re-renders only if every prop keeps its identity.
+  const openStagedReview = useCallback(() => setShowStagedReview(true), []);
+  const closeMobileNav = useCallback(() => setMobileNavOpen(false), []);
+  const openConnectModal = useCallback(() => setShowConnectModal(true), []);
+  const openWaQueuePopover = useCallback(() => setShowWaQueuePopover(true), []);
+  const openMobileNav = useCallback(() => setMobileNavOpen(true), []);
+  const handleQuickAssistActionComplete = useCallback(() => {
+    fetchStagedNotifications();
+    refetchSpecialOrders();
+    refetchRefills();
+  }, [fetchStagedNotifications, refetchSpecialOrders, refetchRefills]);
+
   return (
     <div className="flex h-screen overflow-hidden bg-bg text-text selection:bg-primary/30">
       <Sidebar
         stagedSalesCount={pendingStagedSalesCount}
         stagedPurchasesCount={pendingStagedPurchasesCount}
-        onOpenReview={() => setShowStagedReview(true)}
+        onOpenReview={openStagedReview}
         mobileOpen={mobileNavOpen}
-        onClose={() => setMobileNavOpen(false)}
+        onClose={closeMobileNav}
       />
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
         {!isSystemReady && (
@@ -3411,10 +3457,10 @@ export const Layout = ({
           onClearAll={handleClearAll}
           onClearOne={handleClearOne}
           onMarkRead={handleMarkRead}
-          onOpenStagedReview={() => setShowStagedReview(true)}
-          onOpenConnectModal={() => setShowConnectModal(true)}
-          onOpenWaQueue={() => setShowWaQueuePopover(true)}
-          onMenuClick={() => setMobileNavOpen(true)}
+          onOpenStagedReview={openStagedReview}
+          onOpenConnectModal={openConnectModal}
+          onOpenWaQueue={openWaQueuePopover}
+          onMenuClick={openMobileNav}
           compactCacheLoaded={compactCacheLoaded}
         />
         <div className="flex-1 flex flex-row overflow-hidden relative min-h-0">
@@ -3428,17 +3474,13 @@ export const Layout = ({
             refills={refillsList}
             notifications={stagedNotifications}
             specialOrders={specialOrdersList}
-            onActionComplete={() => {
-              fetchStagedNotifications();
-              refetchSpecialOrders();
-              refetchRefills();
-            }}
+            onActionComplete={handleQuickAssistActionComplete}
           />
         </div>
 
         {/* Real-Time Connected Mobile Devices Status Footer Bar */}
         <ConnectedDevicesFooterBar
-          onOpenConnectModal={() => setShowConnectModal(true)}
+          onOpenConnectModal={openConnectModal}
         />
 
         {/* Global Modals */}

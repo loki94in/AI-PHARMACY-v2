@@ -1,5 +1,5 @@
 // AI Learning & Automation Command Center
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { usePageActive } from '../../lib/keepAlive/PageActiveContext';
 import {
@@ -320,14 +320,8 @@ const Learning: React.FC = () => {
 
   const queryClient = useQueryClient();
 
-  // ponytail: Stagger initial mount fetches
-  const [, setShowSecondaryData] = useState(false);
-  useEffect(() => {
-    const timer = setTimeout(() => setShowSecondaryData(true), 400);
-    return () => clearTimeout(timer);
-  }, []);
-
-  // Doctors Query with module caching
+  // Doctors Query with module caching — visibility-gated so a hidden kept-alive
+  // Learning page never refetches the doctor directory on background stock writes.
   const { data: doctorsList = cachedDoctorsList, isLoading: loadingDoctors, refetch: refetchDoctors } = useApiQuery<LocalDoctorRow[]>(
     'crm-doctors',
     async () => {
@@ -337,6 +331,7 @@ const Learning: React.FC = () => {
       return data;
     },
     {
+      enabled: isPageVisible,
       staleTime: 300000,
       refetchOnWindowFocus: false
     }
@@ -391,8 +386,12 @@ const Learning: React.FC = () => {
   );
 
   useEffect(() => {
+    // Gated by pageActive: hidden Learning never refetches on settings/
+    // distributor events — the refresh runs when the page is next shown.
+    if (!isPageVisible) return;
     const handleUpdate = () => {
-      cachedProfiles = [];
+      // Keep cachedProfiles intact during the refetch — wiping it first blanked
+      // the hydrated list and defeated the cache-first fallback paint.
       Object.keys(cachedProfileDetailsMap).forEach((key) => delete cachedProfileDetailsMap[Number(key)]);
       refetchProfiles();
     };
@@ -406,7 +405,7 @@ const Learning: React.FC = () => {
       window.removeEventListener('settings-updated', handleUpdate);
       window.removeEventListener('contacts-updated', handleUpdate);
     };
-  }, [refetchProfiles]);
+  }, [refetchProfiles, isPageVisible]);
 
   // Selected Profile detail query
   const { data: selectedProfileDetail } = useApiQuery<ProfileDetail | null>(
@@ -617,11 +616,11 @@ const Learning: React.FC = () => {
   };
 
   const correctionsArray = Array.isArray(corrections) ? corrections : [];
-  const doctorsListArray = Array.isArray(doctorsList) ? doctorsList : [];
-  const profilesList = Array.isArray(rawProfiles) ? rawProfiles : [];
+  const doctorsListArray = useMemo(() => (Array.isArray(doctorsList) ? doctorsList : []), [doctorsList]);
+  const profilesList = useMemo(() => (Array.isArray(rawProfiles) ? rawProfiles : []), [rawProfiles]);
 
-  // Filtered Doctors
-  const filteredDoctors = doctorsListArray.filter((d) => {
+  // Filtered Doctors (memoized — re-runs only when the list or search term changes)
+  const filteredDoctors = useMemo(() => doctorsListArray.filter((d) => {
     const q = (doctorSearch || globalSearch).toLowerCase().trim();
     if (!q) return true;
     return (
@@ -630,10 +629,10 @@ const Learning: React.FC = () => {
       (d.specialty && d.specialty.toLowerCase().includes(q)) ||
       (d.clinic && d.clinic.toLowerCase().includes(q))
     );
-  });
+  }), [doctorsListArray, doctorSearch, globalSearch]);
 
   // Filtered Profiles (supports name, phone, email, mapped Pharmarack store names & normalized matching)
-  const filteredProfiles = profilesList.filter(p => {
+  const filteredProfiles = useMemo(() => profilesList.filter(p => {
     const q = (profileSearchQuery || globalSearch).toLowerCase().trim();
     if (!q) return true;
     const cleanQNorm = q.replace(/[^a-z0-9]/g, '');
@@ -649,7 +648,7 @@ const Learning: React.FC = () => {
       (cleanQNorm && cleanDistNorm && (cleanDistNorm.includes(cleanQNorm) || cleanQNorm.includes(cleanDistNorm))) ||
       (normQ && normDist && (normDist.includes(normQ) || normQ.includes(normDist)))
     );
-  });
+  }), [profilesList, profileSearchQuery, globalSearch]);
 
   // Check if distributor has an active placed order today
   const hasOrderToday = (p: LearningProfileSummary) => {

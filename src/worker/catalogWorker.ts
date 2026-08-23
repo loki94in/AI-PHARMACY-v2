@@ -17,6 +17,15 @@ const __dirname = path.dirname(__filename);
 
 const getDbPath = () => process.env.DB_PATH || path.resolve(__dirname, '..', '..', 'data', 'app.db');
 
+// Owner rule 2026-08 (empty-catalog poll stretch) — module-level state shared
+// between the exported nudge hook and the job-poll closure at the file bottom.
+let catalogEmptyHistoryScans = 0;
+let catalogNudgeRequested = false;
+/** Instant-poll hook for job producers (upload route / requeue). In-process only. */
+export function nudgeCatalogJobPoller(): void {
+  catalogNudgeRequested = true;
+}
+
 // The catalog worker runs in-process with the HTTP server in packaged installs
 // (see workerSupervisor.ts — SQLite lock contention made forking it out worse).
 // XLSX.readFile()+sheet_to_json() are synchronous, CPU-bound calls that would
@@ -1062,6 +1071,11 @@ export async function startWorker() {
   // ponytail: concurrency lock to avoid CPU/memory leak
   // P3 gated worker (API_OPTIMIZATION plan): registry key `bg.catalogWorkerLoop`
   // + idle backoff — 10s poll while active, 60s when user idle >30 min, off = stop.
+  // Owner rule 2026-08: while the catalog_jobs table has NEVER held a job
+  // (store never imports catalogs), the poll stretches to 60s even when the
+  // user is active. The first real upload nudges an instant scan via
+  // nudgeCatalogJobPoller() — instant in packaged in-process mode; in forked
+  // dev mode pickup degrades to ≤60s for that first import only.
   const jobPollTick = async () => {
     let delay = 10000;
     try {
@@ -1071,6 +1085,11 @@ export async function startWorker() {
       if (mode === 'off') return; // stay off until next process start
       if (activityTracker.isIdle()) delay = 60000;
     } catch (_) {}
+    if (catalogEmptyHistoryScans >= 3) delay = Math.max(delay, 60000);
+    if (catalogNudgeRequested) {
+      catalogNudgeRequested = false;
+      delay = 250;
+    }
     setTimeout(jobPollRun, delay);
   };
 
@@ -1094,6 +1113,12 @@ export async function startWorker() {
           console.log(`[Worker] Found pending job ${job.id}, triggering runCatalogImport.`);
           await runCatalogImport(job.id);
         }
+      }
+      const totalJobs = await db.get('SELECT COUNT(*) as c FROM catalog_jobs');
+      if (totalJobs && Number(totalJobs.c) > 0) {
+        catalogEmptyHistoryScans = 0;
+      } else {
+        catalogEmptyHistoryScans++;
       }
     } catch (err) {
       console.error('Worker polling interval error:', err);

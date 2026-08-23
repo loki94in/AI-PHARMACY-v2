@@ -78,8 +78,19 @@ class WhatsAppQueueWorker {
   }
 
   constructor() {
-    // Start background processing loop
-    this.startWorkerLoop();
+    // Lazy loop (owner rule 2026-08): the poller no longer auto-starts at
+    // construction. It boots on FIRST real use — enqueue(), forceNext(),
+    // triggerProcessing(), explicit enablement via the legacy facade, or a
+    // scheduled future send — so a store that never uses WhatsApp runs zero
+    // queue ticks. Crash-recovery of interrupted sends still happens once at
+    // boot via server.ts calling cleanupOldSentItems() directly.
+  }
+
+  /** Idempotently start the background poll loop on first real use. */
+  public ensureLoopStarted(): void {
+    if (!this.isLoopRunning) {
+      void this.startWorkerLoop();
+    }
   }
 
   private schemaEnsured = false;
@@ -156,6 +167,7 @@ class WhatsAppQueueWorker {
 
   /** Immediately process the next pending queue item without waiting for the delay countdown */
   public async forceNext(): Promise<boolean> {
+    this.ensureLoopStarted();
     const db = await dbManager.getConnection();
     const now = Date.now();
     // Update any future scheduled_at on the oldest pending item to now
@@ -240,6 +252,8 @@ class WhatsAppQueueWorker {
   ): Promise<number> {
     const db = await dbManager.getConnection();
     await this.ensureSchema(db);
+    // Lazy-start the poll loop on first enqueue (owner rule: no WhatsApp usage → no ticks).
+    this.ensureLoopStarted();
     const cleanPhone = normalizeWhatsAppPhone(number);
     const now = Date.now();
 
@@ -378,9 +392,14 @@ class WhatsAppQueueWorker {
       }
     }
 
-    // Trigger processing if scheduled time is now or past
+    // Trigger processing if scheduled time is now or past; otherwise arm a
+    // one-shot timer so a delayed send still fires without needing the poll
+    // loop to be running (lazy loop — owner rule 2026-08).
     if (scheduledAt <= now) {
       this.triggerProcessing();
+    } else {
+      const delay = Math.min(scheduledAt - now, 2147483647);
+      setTimeout(() => this.triggerProcessing(), delay);
     }
     return result.lastID || 0;
   }
@@ -416,6 +435,8 @@ class WhatsAppQueueWorker {
 
   /** Trigger queue processing loop */
   public triggerProcessing(): void {
+    // Lazy-start: any external kick (enqueue/forceNext/retry/resend) boots the loop.
+    this.ensureLoopStarted();
     if (!this.isProcessing) {
       this.processQueue().catch(err => {
         console.error('[WhatsAppQueueWorker] Process error:', err);

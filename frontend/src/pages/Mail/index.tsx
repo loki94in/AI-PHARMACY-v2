@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useDeferredEffect } from '../../hooks/useDeferredEffect';
 import { getTodayString, toDateInputValue } from '../../utils/date';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -30,6 +30,7 @@ interface EmailRecord {
   from: string;
   subject: string;
   body: string;
+  bodySnippet?: string;
   date?: string;
   attachments?: Record<string, unknown>[];
   distributorName?: string;
@@ -190,6 +191,7 @@ const Mail = () => {
   } | null;
 
   const inboxRefreshControl = useFetchMode('mail.inboxRefresh');
+  const pageActive = usePageActive();
 
   const [emails, setEmails] = useState<EmailRecord[]>(() => cachedEmails);
   const [loading, setLoading] = useState(() => cachedEmails.length === 0);
@@ -221,10 +223,16 @@ const Mail = () => {
   }, []);
 
   useEffect(() => {
+    // Gated by pageActive: a hidden kept-alive Mail page never refetches on
+    // window focus — the refresh runs when the page is next shown instead.
+    if (!pageActive) return;
     refreshPendingReviews();
-    window.addEventListener('focus', refreshPendingReviews);
-    return () => window.removeEventListener('focus', refreshPendingReviews);
-  }, [refreshPendingReviews]);
+    const handleFocus = () => {
+      if (document.visibilityState === 'visible') refreshPendingReviews();
+    };
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
+  }, [refreshPendingReviews, pageActive]);
 
   const dismissReview = useCallback((id: number) => {
     setPendingReviews(prev => {
@@ -284,6 +292,9 @@ const Mail = () => {
   }, []);
 
   useEffect(() => {
+    // Gated by pageActive: hidden Mail never re-checks IMAP status on window
+    // focus/visibility — the check runs when the page is next shown instead.
+    if (!pageActive) return;
     checkImapStatus();
     const handleSettingsUpdate = () => checkImapStatus();
 
@@ -308,7 +319,7 @@ const Mail = () => {
       window.removeEventListener('focus', handleSettingsUpdate);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [checkImapStatus]);
+  }, [checkImapStatus, pageActive]);
 
   // Asynchronously fetch attachment text preview for PDF, CSV, Excel, and TXT files
   useEffect(() => {
@@ -443,13 +454,12 @@ const Mail = () => {
       .catch(() => {});
   }, []);
 
-  // On mount: load local DB instantly.
+  // On mount: load local DB instantly (single snippet-sized request — also
+  // pre-hydrates the module cache during idle warm-mount).
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- cache-first local DB paint per SPA contract
     loadLocalInbox();
   }, [loadLocalInbox]);
-
-  const pageActive = usePageActive();
 
   // P1 "events, not timers": the inbox list re-reads ONLY when new mail actually
   // arrives (SSE `email_new` push) or on focus — no 15s polling of unchanged data.
@@ -516,11 +526,32 @@ const Mail = () => {
       })
       .catch((err) => console.error('Error fetching attachments:', err))
       .finally(() => setLoadingAttachments(false));
+
+    // Lazy full-body fetch: the inbox list ships snippets only, so the reading
+    // pane pulls the real body for THIS email on open (cached in module state).
+    if (!email.body) {
+      api
+        .getEmailBody(email.id)
+        .then(({ body }) => {
+          if (!body) return;
+          const hydrated = { ...email, body };
+          setSelectedEmail(prev => (prev && prev.id === email.id ? hydrated : prev));
+          cachedSelectedEmail = cachedSelectedEmail?.id === email.id ? hydrated : cachedSelectedEmail;
+          setEmails(prev => {
+            const next = prev.map(e => (e.id === email.id ? { ...e, body } : e));
+            cachedEmails = next;
+            return next;
+          });
+        })
+        .catch((err) => console.error('Error fetching email body:', err));
+    }
   };
 
   const [statusTabFilter, setStatusTabFilter] = useState<'all' | 'new' | 'opened' | 'saved'>('all');
 
-  const filteredEmails = emails.filter(email => {
+  // useMemo: the search pass (incl. snippet scan) must not re-run on every
+  // unrelated render of this long-lived kept-alive page.
+  const filteredEmails = useMemo(() => emails.filter(email => {
     const status = getEmailStatus(email);
     if (statusTabFilter === 'new' && status !== 'new') return false;
     if (statusTabFilter === 'opened' && status !== 'opened') return false;
@@ -531,10 +562,11 @@ const Mail = () => {
     return (
       email.from.toLowerCase().includes(term) ||
       email.subject.toLowerCase().includes(term) ||
+      (email.bodySnippet && email.bodySnippet.toLowerCase().includes(term)) ||
       (email.body && email.body.toLowerCase().includes(term)) ||
       (email.distributorName && email.distributorName.toLowerCase().includes(term))
     );
-  });
+  }), [emails, statusTabFilter, searchTerm]);
 
   // Auto-select first matching email if prefilled search is active
   useEffect(() => {
@@ -956,7 +988,7 @@ const Mail = () => {
                       </div>
                       <h4 className="text-xs font-bold text-sky truncate">{email.subject}</h4>
                       <p className="text-[11px] text-muted truncate">
-                        {email.body || '(No preview)'}
+                        {email.bodySnippet || email.body || '(No preview)'}
                       </p>
                     </div>
                   </button>

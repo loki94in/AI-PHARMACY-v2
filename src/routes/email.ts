@@ -77,9 +77,24 @@ router.get('/inbox', async (req, res) => {
   }
 });
 
-// GET /api/email/status — check IMAP configuration status
-router.get('/status', async (_req, res) => {
+// GET /api/email/:id/body — lazy full-body fetch for the reading pane.
+// The inbox list intentionally ships snippets only to keep its payload small.
+router.get('/:id/body', async (req, res) => {
+  const uid = parseInt(req.params.id);
+  if (isNaN(uid)) {
+    return res.status(400).json({ error: 'Invalid email UID (must be a number)' });
+  }
   try {
+    const body = await emailService.getEmailBody(uid);
+    res.json({ uid, body });
+  } catch (error) {
+    console.error('Fetch email body error:', error);
+    res.status(500).json({ error: 'Failed to fetch email body' });
+  }
+});
+
+// GET /api/email/status — check IMAP configuration status
+router.get('/status', async (_req, res) => {  try {
     const status = await emailService.getImapStatus();
     res.json(status);
   } catch (error: any) {

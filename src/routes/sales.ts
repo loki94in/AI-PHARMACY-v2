@@ -2640,6 +2640,50 @@ router.post('/staged/:id/consume', async (req, res) => {
   }
 });
 
+// Read-only credit summary for printable bills: open invoices + balance + next refill due
+router.get('/credit-dues', async (req, res) => {
+  const customerId = Number(req.query.customer_id) || 0;
+  const phone = typeof req.query.phone === 'string' ? req.query.phone.trim() : '';
+  const refillId = Number(req.query.refill_id) || 0;
+  try {
+    const db = await dbManager.getConnection();
+    let rows: Array<{ invoice_no: string; total_amount: number; date: string }> = [];
+    if (customerId) {
+      rows = await db.all(
+        `SELECT invoice_no, total_amount, date FROM sales_invoices
+         WHERE customer_id = ? AND payment_status != 'PAID'
+           AND (payment_medium = 'CREDIT' OR payment_status IN ('UNPAID', 'PENDING'))
+         ORDER BY date ASC`,
+        [customerId]
+      );
+    } else if (phone) {
+      rows = await db.all(
+        `SELECT si.invoice_no, si.total_amount, si.date FROM sales_invoices si
+         JOIN customers c ON si.customer_id = c.id
+         WHERE c.phone = ? AND si.payment_status != 'PAID'
+           AND (si.payment_medium = 'CREDIT' OR si.payment_status IN ('UNPAID', 'PENDING'))
+         ORDER BY si.date ASC`,
+        [phone]
+      );
+    }
+    let nextRefillDue: string | null = null;
+    if (refillId) {
+      const rf = await db.get(
+        `SELECT next_refill_date FROM patient_refills WHERE id = ? AND is_active = 1`,
+        [refillId]
+      );
+      nextRefillDue = rf?.next_refill_date || null;
+    }
+    res.json({
+      dues: rows,
+      balance: rows.reduce((sum, r) => sum + Number(r.total_amount || 0), 0),
+      next_refill_due: nextRefillDue
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || 'Failed to load credit dues' });
+  }
+});
+
 // Get Purchase-Weighted (70% Purchase / 30% Sales) & Low-Stock Safety Reorder Suggestions
 router.get('/reorder-suggestions', async (_req, res) => {
   try {

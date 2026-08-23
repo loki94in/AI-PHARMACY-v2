@@ -113,6 +113,9 @@ router.post('/catalog/job/:id/resume', async (req, res) => {
     await db.run("UPDATE catalog_jobs SET status = 'pending' WHERE id = ?", jobId);
     await dbManager.close();
 
+    // Nudge the (possibly stretched) job poller so a resumed import starts fast.
+    import('../worker/catalogWorker.js').then(m => m.nudgeCatalogJobPoller()).catch(() => {});
+
     const { eventService } = await import('../services/eventService.js');
     eventService.broadcast('catalog_job_update', { 
       id: jobId, 

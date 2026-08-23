@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { memo, useState, useEffect, useCallback } from 'react';
 import { Smartphone, QrCode, Wifi, WifiOff, Edit2, Save, X } from 'lucide-react';
 import { api } from '../services/api';
 
@@ -15,9 +15,10 @@ interface ConnectedDevicesFooterBarProps {
   onOpenConnectModal: () => void;
 }
 
-export const ConnectedDevicesFooterBar: React.FC<ConnectedDevicesFooterBarProps> = ({
+// memo: footer chrome re-renders only on its own device/WA state, never on navigation
+export const ConnectedDevicesFooterBar = memo(function ConnectedDevicesFooterBar({
   onOpenConnectModal,
-}) => {
+}: ConnectedDevicesFooterBarProps) {
   const [devices, setDevices] = useState<RegisteredDevice[]>([]);
   const [editingToken, setEditingToken] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
@@ -48,7 +49,6 @@ export const ConnectedDevicesFooterBar: React.FC<ConnectedDevicesFooterBarProps>
   }, []);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- async device/WA status subscription, no sync setState
     fetchDevicesStatus();
     fetchWhatsAppStatus();
     // P1 "events, not timers": slow fallback refresh ONLY while the tab is
@@ -210,4 +210,4 @@ export const ConnectedDevicesFooterBar: React.FC<ConnectedDevicesFooterBarProps>
       </div>
     </footer>
   );
-};
+});

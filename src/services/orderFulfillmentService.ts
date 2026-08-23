@@ -23,8 +23,13 @@ export class OrderFulfillmentService {
     // Run immediately on boot
     this.checkRefillsAndGenerateOrders();
 
-    // Check every hour
-    this.intervalId = setInterval(() => {
+    // Check every hour. P3 gated worker: skip ticks while the user is idle
+    // >30 min; evaluation resumes automatically on the next tick after wake.
+    this.intervalId = setInterval(async () => {
+      try {
+        const { activityTracker } = await import('../utils/activityTracker.js');
+        if (activityTracker.isIdle()) return;
+      } catch (_) {}
       this.checkRefillsAndGenerateOrders();
     }, 60 * 60 * 1000);
   }

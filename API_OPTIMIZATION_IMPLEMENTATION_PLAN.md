@@ -72,18 +72,19 @@ Measured today with zero user activity:
 ### 5.2 Backend jobs — gating changes
 | Job | Location | Today | Change |
 |---|---|---|---|
-| WA queue worker | `services/whatsappQueue.ts:50-52`, `whatsappQueueWorker.ts:418-435` | 30 s / 10 s loop | Active user: unchanged. Idle >30 min AND queue empty: tick once per 15 min |
-| Messaging queue | `services/messagingQueue.ts:25-27` | 30 s | Same idle policy |
+| WA queue worker | `services/whatsappQueue.ts`, `whatsappQueueWorker.ts` | 30 s / 10 s loop | ✅ DONE+ (2026-08-23): idle backoff kept AND loop made fully lazy — zero ticks until first enqueue/forceNext/trigger; boot = crash-recovery only |
+| Messaging queue | `services/messagingQueue.ts` | 30 s | ✅ DONE+ (2026-08-23): idle backoff kept AND poll now lazy-starts on first pending queueMessage/retryMessage |
 | Device monitor | `routes/notifications.ts:503` | 10 s setInterval | Registry gate `bg.deviceMonitor` (new key, default manual) + ×6 idle backoff |
 | catalogWorker poll | `worker/catalogWorker.ts:1065-1141` | 10 s | Wire documented-but-unread key `bg.catalogWorkerLoop`; ×6 idle backoff |
 | inventoryCache rebuild | `services/inventoryCache.ts:34-36` | 10 min | Wire documented-but-unread key `bg.inventoryCache` (already in registry) |
-| orderFulfillment refill evaluator | `services/orderFulfillmentService.ts:26-28` | 1 h | Add idle gate (skip when idle; catch-up on wake) |
-| autoMatch worker | `worker/autoMatchWorker.ts:18-20` | 15 min | Add idle gate |
+| orderFulfillment refill evaluator | `services/orderFulfillmentService.ts:26-28` | 1 h | ✅ DONE (2026-08-23): idle gate added (skip when idle; catch-up on wake) |
+| autoMatch worker | `worker/autoMatchWorker.ts:18-20` | 15 min | ✅ DONE (2026-08-23): idle gate + one-reconcile-per-order guard (`NOT EXISTS order_overlaps`) — once calculated, never reprocessed |
 | doctorReporting check | `services/doctorReportingService.ts:130-132` | hourly | Registry gate + idle skip |
-| medicineSalesMetrics reconcile | `services/medicineSalesMetricsService.ts:206-215` | nightly 03:00 | Leave (nightly, cheap) |
-| Email IMAP pull | `services/emailService.ts:1154-1227` | user-set (default 5 min) | UNCHANGED — necessary. Emits `email_new` when mail arrives |
+| medicineSalesMetrics reconcile | `services/medicineSalesMetricsService.ts` | nightly 03:00 | ✅ CHANGED (2026-08-23, owner rule): nightly full-recalc cron REMOVED. Metrics stay fresh via live per-line deltas only; full reconcile runs once at first-ever boot (deferred T+60s, empty-table check) and on explicit Settings trigger — no automatic recalculation-all |
+| Email IMAP pull | `services/emailService.ts` | user-set (default 5 min) | UNCHANGED — already credential-gated (no credentials → no sockets/timers). Emits `email_new` when mail arrives |
+| Pharmarack catalog-sync cron | `server.ts setupCrons` | every 35 min | ✅ DONE (2026-08-23): credential-gated — registered ONLY while `pharmarack_session_token` exists; token save arms, logout disarms |
 | Pharmarack token refresh | `services/tokenRefreshScheduler.ts:244-497` | 20 min ± jitter | REMOVE idle hard-skip (:334-341) → runs also when idle (keeps session alive overnight). Keep mode gate `bg.pharmarackTokenRefresh` |
-| Catalog sync cron / daily scans / nightly backup | `server.ts:659-687`, `triggerSchedulerService.ts` | off/manual-idle | UNCHANGED (already correct) |
+| Daily scans / nightly backup | `triggerSchedulerService.ts` | off/manual-idle | UNCHANGED (already correct) |
 
 ### 5.3 Credential/session facts
 | Item | Detail |

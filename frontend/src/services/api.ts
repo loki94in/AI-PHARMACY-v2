@@ -677,6 +677,18 @@ export interface StagedSaleCreatePayload {
   items: readonly unknown[];
 }
 
+export interface CreditDueRow {
+  invoice_no: string;
+  total_amount: number;
+  date?: string;
+}
+
+export interface CreditDuesSummary {
+  dues: CreditDueRow[];
+  balance: number;
+  next_refill_due: string | null;
+}
+
 export interface ReorderSuggestion {
   medicineId: number;
   medicineName: string;
@@ -909,6 +921,7 @@ export const api = {
   
   getEmailStatus: () => apiClient.get('/email/status').then(res => res.data),
   getEmailInbox: (limit: number = 50, since?: string) => apiClient.get('/email/inbox', { params: { limit, since } }).then(res => res.data),
+  getEmailBody: (emailId: number) => apiClient.get(`/email/${emailId}/body`).then(res => res.data as { uid: number; body: string }),
   getEmailAttachments: () => apiClient.get('/email/attachments').then(res => res.data),
   getEmailAttachmentsById: (emailId: number) => apiClient.get(`/email/${emailId}/attachments`).then(res => res.data),
   parseAttachment: (filename: string, importData: boolean = true) => apiClient.post('/email/attachments/parse', { filename, importData }).then(res => res.data),
@@ -976,13 +989,14 @@ export const api = {
   patchAllowLooseSale: (id: number, allow_loose_sale: number | boolean) => apiClient.patch(`/medicines/${id}/allow-loose-sale`, { allow_loose_sale: allow_loose_sale ? 1 : 0 }).then(res => res.data),
 
   getMedicinePriceHistory: (name: string) => apiClient.get('/purchases/price-history', { params: { name } }).then(res => res.data),
-  searchPharmarack: (q: string, storeId?: string | number, isMapped?: boolean) => 
-    apiClient.get('/pharmarack/search', { 
-      params: { 
-        q, 
+  searchPharmarack: (q: string, storeId?: string | number, isMapped?: boolean, signal?: AbortSignal) =>
+    apiClient.get('/pharmarack/search', {
+      params: {
+        q,
         ...(storeId !== undefined && storeId !== null ? { storeId } : {}),
         ...(isMapped !== undefined && isMapped !== null ? { isMapped } : {})
-      } 
+      },
+      ...(signal ? { signal } : {})
     }).then(res => res.data),
   addPharmarackCart: (items: Array<{ 
     productId: string | number; 
@@ -1228,6 +1242,14 @@ export const api = {
   approveStagedSale: (id: number, data: StagedSaleApprovalPayload) => apiClient.post(`/sales/staged/${id}/approve`, data).then(res => res.data),
   rejectStagedSale: (id: number) => apiClient.post(`/sales/staged/${id}/reject`).then(res => res.data),
   consumeStagedSale: (id: number, data?: { invoice_no?: string }) => apiClient.post(`/sales/staged/${id}/consume`, data || {}).then(res => res.data),
+  getCreditDues: (params: { customerId?: number | null; phone?: string; refillId?: number | null }) =>
+    apiClient.get<CreditDuesSummary>('/sales/credit-dues', {
+      params: {
+        ...(params.customerId ? { customer_id: params.customerId } : {}),
+        ...(params.phone ? { phone: params.phone } : {}),
+        ...(params.refillId ? { refill_id: params.refillId } : {})
+      }
+    }).then(res => res.data),
   getStagedPurchases: () => apiClient.get('/purchases/staged').then(res => res.data),
   approveStagedPurchase: (id: number, data: StagedPurchaseApprovalPayload) => apiClient.post(`/purchases/staged/${id}/approve`, data).then(res => res.data),
   rejectStagedPurchase: (id: number) => apiClient.post(`/purchases/staged/${id}/reject`).then(res => res.data),

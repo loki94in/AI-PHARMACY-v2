@@ -405,6 +405,7 @@ router.post('/login-window', async (req, res) => {
   try {
     const db = await dbManager.getConnection();
     await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('pharmarack_session_token', '')");
+    import('../services/pharmarackCatalogCache.js').then(m => m.stopCatalogSyncCron()).catch(() => {});
   } catch (err) {
     console.error('Error clearing old session token:', err);
   }
@@ -565,6 +566,7 @@ router.post('/login-window', async (req, res) => {
           console.log('Extracted Pharmarack Session Token from request headers!');
           const db = await dbManager.getConnection();
           await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('pharmarack_session_token', ?)", [extractedToken]);
+          import('../services/pharmarackCatalogCache.js').then(m => m.ensureCatalogSyncCron()).catch(() => {});
           await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('pharmarack_mode', 'Live')");
           if (lastUsername) {
             await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('pharmarack_username', ?)", [lastUsername]);
@@ -583,6 +585,7 @@ router.post('/login-window', async (req, res) => {
           if (extractedToken) {
             const db = await dbManager.getConnection();
             await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('pharmarack_session_token', ?)", [extractedToken]);
+            import('../services/pharmarackCatalogCache.js').then(m => m.ensureCatalogSyncCron()).catch(() => {});
             await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('pharmarack_mode', 'Live')");
             if (lastUsername) {
               await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('pharmarack_username', ?)", [lastUsername]);
@@ -664,6 +667,7 @@ router.post('/login-window', async (req, res) => {
             
             const db = await dbManager.getConnection();
             await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('pharmarack_session_token', ?)", [sessionVal]);
+            import('../services/pharmarackCatalogCache.js').then(m => m.ensureCatalogSyncCron()).catch(() => {});
             await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('pharmarack_mode', 'Live')");
             if (lastUsername) {
               await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('pharmarack_username', ?)", [lastUsername]);
@@ -713,8 +717,40 @@ interface ServerCartCacheEntry {
   ts: number;
 }
 let serverCartCache: ServerCartCacheEntry | null = null;
+
+// Short-TTL micro-cache for the raw GetUserCartDetails probe. The Live Cart
+// modal and session checks hit this upstream endpoint 3x per open
+// (live-cart-summary + session-status + /cart fallback); a 10 s TTL collapses
+// them into ONE upstream request. Every cart mutation path already calls
+// invalidatePharmarackCartCache(), so real cart changes are never hidden.
+interface UserCartProbeEntry { ts: number; ok: boolean; status: number; data: any }
+let userCartProbeCache: UserCartProbeEntry | null = null;
+const USER_CART_PROBE_TTL_MS = 10_000;
+
+async function probeUserCartDetails(timeoutMs: number): Promise<UserCartProbeEntry> {
+  const now = Date.now();
+  if (userCartProbeCache && now - userCartProbeCache.ts < USER_CART_PROBE_TTL_MS) {
+    return userCartProbeCache;
+  }
+  const response = await fetchPharmarack('https://pharmretail-api.pharmarack.com/cart/api/v1/GetUserCartDetails', {
+    method: 'GET',
+    signal: AbortSignal.timeout(timeoutMs)
+  });
+  let data: any = null;
+  if (response.ok) {
+    data = await response.json().catch(() => null);
+  }
+  const entry: UserCartProbeEntry = { ts: Date.now(), ok: response.ok, status: response.status, data };
+  // Cache successes and definitive auth outcomes; transient network/5xx stays uncached.
+  if (response.ok || response.status === 401 || response.status === 403) {
+    userCartProbeCache = entry;
+  }
+  return entry;
+}
+
 export const invalidatePharmarackCartCache = () => {
   serverCartCache = null;
+  userCartProbeCache = null;
 };
 
 // Core live-cart loader shared by GET /cart and the boot warm-up (startup-sync fix) so
@@ -943,13 +979,48 @@ router.post('/cart/add', async (req, res) => {
         }
       }
 
-      // If productCode or productId is missing/0, query OpenSearch API on-the-fly to resolve exact PrProductId
+      // If productCode or productId is missing/0, resolve exact PrProductId.
+      // Fast path first: a recent autocomplete/search for the SAME product name
+      // already carries the real ids — reuse it instead of paying another
+      // OpenSearch round trip (exact normalized-name match only, never guessed).
       const hasValidId = Boolean(item.productId) && Number(item.productId) > 0;
       const hasValidCode = Boolean(item.productCode);
       if ((!hasValidId || !hasValidCode) && token) {
         try {
           let cleanKeyword = (item.productName || item.product || item.name || '').trim();
           cleanKeyword = cleanKeyword.replace(/\s*\([^)]*\)\s*$/, '').trim();
+          const norm = (s: unknown) => String(s || '').toLowerCase().replace(/\s+/g, ' ').replace(/\s*\([^)]*\)\s*$/, '').trim();
+          const wantName = norm(cleanKeyword);
+          const wantStore = String(item.storeName || '').toLowerCase().trim();
+          if (wantName) {
+            let best: any = null;
+            let bestIsStoreMatch = false;
+            for (const [_, cacheEntry] of searchCache.entries()) {
+              for (const p of (cacheEntry.data || [])) {
+                const nShort = norm(p.shortName || p.name);
+                const nFull = norm(p.fullName || p.name);
+                if (nShort !== wantName && nFull !== wantName) continue;
+                const storeMatch = !wantStore || String(p.distributor || '').toLowerCase().includes(wantStore);
+                if (!best || (storeMatch && !bestIsStoreMatch)) {
+                  best = p;
+                  bestIsStoreMatch = storeMatch;
+                }
+                if (bestIsStoreMatch) break;
+              }
+              if (bestIsStoreMatch) break;
+            }
+            if (best) {
+              item.productId = Number(best.productId || item.productId || 0);
+              item.storeId = Number(best.storeId || item.storeId || 0);
+              item.productCode = best.productCode || item.productCode || '';
+              item.storeName = best.distributor || item.storeName || '';
+              item.company = best.company || item.company || '';
+              item.mrp = Number(best.mrp || item.mrp || 0);
+              item.rate = Number(best.rate || item.rate || 0);
+              continue;
+            }
+          }
+
           if (cleanKeyword) {
             const searchPayload = {
               SearchKeyword: cleanKeyword,
@@ -1550,13 +1621,10 @@ router.get('/live-cart-summary', async (req, res) => {
     let cartDistributors: any[] = [];
     if (token) {
       try {
-        const response = await fetchPharmarack('https://pharmretail-api.pharmarack.com/cart/api/v1/GetUserCartDetails', {
-          method: 'GET',
-          signal: AbortSignal.timeout(20000)
-        });
+        const probe = await probeUserCartDetails(20000);
 
-        if (response.ok) {
-          const cartData: any = await response.json().catch(() => null);
+        if (probe.ok) {
+          const cartData: any = probe.data;
           let rawList: any[] = [];
           if (cartData) {
             if (Array.isArray(cartData)) {
@@ -1728,42 +1796,21 @@ router.get('/auto-verify', async (req, res) => {
     let reason = 'EXPIRED';
     let message = 'Session expired';
 
-    const endpoints = [
-      'https://pharmretail-api.pharmarack.com/cart/api/v1/GetUserCartDetails'
-    ];
-
-    for (const url of endpoints) {
-      try {
-        const response = await fetch(url, {
-          method: 'GET',
-          headers: {
-            'Authorization': token.startsWith('Bearer ') ? token : `Bearer ${token}`,
-            'Content-Type': 'application/json',
-            'devicetype': 'web',
-            'Accept': 'application/json, text/plain, */*',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Referer': 'https://retailers.pharmarack.com/',
-            'Origin': 'https://retailers.pharmarack.com'
-          },
-          signal: AbortSignal.timeout(6000)
-        });
-
-        if (response.ok) {
-          healthy = true;
-          break;
-        } else {
-          if (response.status === 401 || response.status === 403) {
-            reason = 'EXPIRED';
-            message = 'Session expired or invalid token';
-          } else {
-            reason = 'SERVER_ERROR';
-            message = `Server returned status ${response.status}`;
-          }
-        }
-      } catch (err: any) {
-        reason = 'NETWORK_ERROR';
-        message = err.message || 'Network timeout/connection error';
+    try {
+      // Shared TTL-cached probe (also silently retries with a refreshed token on 401/403)
+      const probe = await probeUserCartDetails(6000);
+      if (probe.ok) {
+        healthy = true;
+      } else if (probe.status === 401 || probe.status === 403) {
+        reason = 'EXPIRED';
+        message = 'Session expired or invalid token';
+      } else {
+        reason = 'SERVER_ERROR';
+        message = `Server returned status ${probe.status}`;
       }
+    } catch (err: any) {
+      reason = 'NETWORK_ERROR';
+      message = err.message || 'Network timeout/connection error';
     }
 
     const db = await dbManager.getConnection();
@@ -1794,42 +1841,21 @@ router.get('/session-status', async (req, res) => {
     let reason = 'EXPIRED';
     let message = 'Session expired';
 
-    const endpoints = [
-      'https://pharmretail-api.pharmarack.com/cart/api/v1/GetUserCartDetails'
-    ];
-
-    for (const url of endpoints) {
-      try {
-        const response = await fetch(url, {
-          method: 'GET',
-          headers: {
-            'Authorization': token.startsWith('Bearer ') ? token : `Bearer ${token}`,
-            'Content-Type': 'application/json',
-            'devicetype': 'web',
-            'Accept': 'application/json, text/plain, */*',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Referer': 'https://retailers.pharmarack.com/',
-            'Origin': 'https://retailers.pharmarack.com'
-          },
-          signal: AbortSignal.timeout(6000)
-        });
-
-        if (response.ok) {
-          healthy = true;
-          break;
-        } else {
-          if (response.status === 401 || response.status === 403) {
-            reason = 'EXPIRED';
-            message = 'Session expired or invalid token';
-          } else {
-            reason = 'SERVER_ERROR';
-            message = `Server returned status ${response.status}`;
-          }
-        }
-      } catch (err: any) {
-        reason = 'NETWORK_ERROR';
-        message = err.message || 'Network timeout/connection error';
+    try {
+      // Shared TTL-cached probe (also silently retries with a refreshed token on 401/403)
+      const probe = await probeUserCartDetails(6000);
+      if (probe.ok) {
+        healthy = true;
+      } else if (probe.status === 401 || probe.status === 403) {
+        reason = 'EXPIRED';
+        message = 'Session expired or invalid token';
+      } else {
+        reason = 'SERVER_ERROR';
+        message = `Server returned status ${probe.status}`;
       }
+    } catch (err: any) {
+      reason = 'NETWORK_ERROR';
+      message = err.message || 'Network timeout/connection error';
     }
 
     return res.json({ healthy, mode: 'Live', reason: healthy ? undefined : reason, message: healthy ? 'Session active' : message });
@@ -1846,6 +1872,7 @@ router.post('/logout', async (req, res) => {
     await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('pharmarack_username', '')");
     await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('pharmarack_password', '')");
     await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('pharmarack_session_token', '')");
+    import('../services/pharmarackCatalogCache.js').then(m => m.stopCatalogSyncCron()).catch(() => {});
     await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('pharmarack_mode', 'Live')");
 
     const pharmarackProfilePath = path.resolve(getAppDataDir(), 'data', 'pharmarack_profile');

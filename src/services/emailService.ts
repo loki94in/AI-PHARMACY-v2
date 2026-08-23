@@ -2968,6 +2968,22 @@ export class EmailService {
   }
 
   /**
+   * Reads ONE email's full body from the local DB — lazy fetch for the reading
+   * pane so the inbox list payload stays snippet-sized.
+   */
+  public async getEmailBody(uid: number): Promise<string> {
+    try {
+      await ensureSchema(getDbPath());
+      const db = await dbManager.getConnection();
+      const row = await db.get('SELECT body FROM emails WHERE uid = ?', [uid]);
+      return row?.body || '';
+    } catch (err) {
+      console.error('[Mail] getEmailBody error:', err);
+      return '';
+    }
+  }
+
+  /**
    * Reads the local `emails` table and returns the latest N emails (offline-capable).
    */
   public async getLocalInbox(limit: number = 30, since?: string): Promise<Array<any>> {
@@ -3007,8 +3023,10 @@ export class EmailService {
         uid: row.uid,
         from: row.from_addr,
         subject: row.subject,
-        body: row.body || '',
-        bodySnippet: (row.body || '').substring(0, 100) + '...',
+        // List payload ships SNIPPETS ONLY — full body is lazy-fetched per
+        // opened email via GET /api/email/:id/body (reading pane).
+        body: '',
+        bodySnippet: (row.body || '').replace(/\s+/g, ' ').trim().substring(0, 140),
         date: row.date,
         isSeen: row.is_seen === 1,
         isSaved: row.is_saved === 1,

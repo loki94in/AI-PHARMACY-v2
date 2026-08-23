@@ -439,6 +439,7 @@ export class TokenRefreshScheduler {
         this.lastError = null;
         const db = await dbManager.getConnection();
         await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('pharmarack_session_token', ?)", [holder.token]);
+        import('./pharmarackCatalogCache.js').then(m => m.ensureCatalogSyncCron()).catch(() => {});
         await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('pharmarack_mode', 'Live')");
         await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('pharmarack_session_status', 'active')");
         return holder.token;

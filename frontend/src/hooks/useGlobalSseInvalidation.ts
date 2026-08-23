@@ -14,8 +14,8 @@ import { useQueryClient } from '@tanstack/react-query';
 
 // SSE event type -> react-query cache keys to invalidate
 const SSE_QUERY_MAP: Record<string, string[][]> = {
-  sale_created: [['dashboard'], ['reports'], ['sales'], ['invoices'], ['sells-list']],
-  invoice_saved: [['purchases'], ['purchase-history'], ['purchase-history-list'], ['inventory'], ['inventory-list'], ['dashboard'], ['reports']],
+  sale_created: [['dashboard'], ['reports'], ['sales'], ['invoices'], ['sells-list'], ['investigation-list']],
+  invoice_saved: [['purchases'], ['purchase-history'], ['purchase-history-list'], ['inventory'], ['inventory-list'], ['dashboard'], ['reports'], ['investigation-list']],
   return_created: [['returns'], ['returns-history'], ['customer-returns'], ['pending-returns'], ['inventory'], ['inventory-list'], ['dashboard'], ['reports']],
   inventory_changed: [['inventory'], ['inventory-list'], ['compact-inventory'], ['pos-inventory'], ['expiry']],
   expiry_list_changed: [['expiry'], ['expiry-reviews']],
@@ -24,8 +24,8 @@ const SSE_QUERY_MAP: Record<string, string[][]> = {
   email_new: [['mail-inbox'], ['mail']],
   dispatch_updated: [['dispatch-orders'], ['delivery-boys'], ['distributor-reminders']],
   catalog_job_done: [['catalog-jobs'], ['medicines']],
-  sales_sync: [['sells-list']],
-  purchases_sync: [['purchase-history-list']],
+  sales_sync: [['sells-list'], ['investigation-list']],
+  purchases_sync: [['purchase-history-list'], ['investigation-list']],
 };
 
 // SSE event type -> DOM CustomEvents dispatched for non-react-query consumers
@@ -52,6 +52,15 @@ const SSE_CUSTOM_EVENTS: Record<string, string[]> = {
   google_verification_required: ['sse-google-verification'],
   google_verification_solved: ['sse-google-verification'],
 };
+
+// Chrome-owned queries rendered OUTSIDE KeepAliveOutlet pages (Layout /
+// Topbar / QuickAssistSidebar) have no PageQueryTracker to refresh them on
+// page activation, so these keep the classic immediate-refetch behavior.
+const CHROME_INSTANT_KEYS: string[][] = [
+  ['orders'],
+  ['refills'],
+  ['settings'],
+];
 
 // Minimal shape of a parsed SSE frame; payload fields stay free-form so
 // CustomEvent consumers can read domain-specific properties off `detail`.
@@ -86,7 +95,16 @@ export function useGlobalSseInvalidation(enabled: boolean = true) {
         const last = lastInvalidated.current[type] || 0;
         if (now - last < 1500) return; // dedupe bursts
         lastInvalidated.current[type] = now;
-        queryKeys.forEach(key => queryClient.invalidateQueries({ queryKey: key }));
+        queryKeys.forEach(key => {
+          // Deferred-SSE contract: hidden kept-alive pages only get MARKED
+          // STALE here (refetchType: 'none') — their PageQueryTracker silently
+          // refreshes them on next activation, so one backend write can never
+          // fan out into simultaneous refetches across every visited page.
+          void queryClient.invalidateQueries({ queryKey: key, refetchType: 'none' });
+        });
+        CHROME_INSTANT_KEYS.forEach(key => {
+          void queryClient.refetchQueries({ queryKey: key, stale: true });
+        });
       }
       (SSE_CUSTOM_EVENTS[type] || []).forEach(evtName => {
         // detail carries the full parsed SSE frame so page-level listeners

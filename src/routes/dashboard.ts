@@ -13,53 +13,49 @@ const router = express.Router();
 router.get('/', async (_req, res) => {
   try {
     const db = await dbManager.getConnection();
-    // Simple aggregates
-    const salesTodayRow = await db.get(`SELECT IFNULL(SUM(total_amount),0) as total FROM sales_invoices WHERE date(date) = date('now')`);
-    const lowStockCount = await db.get(`SELECT COUNT(*) as cnt FROM inventory_master WHERE quantity < 5`);
-    const pendingTasksCount = await db.get(`SELECT COUNT(*) as cnt FROM action_logs WHERE action_type = 'AUTOMATION_ALERT'`);
-    const alerts = await db.all(`
-      SELECT id, description, created_at FROM action_logs 
-      WHERE action_type = 'AUTOMATION_ALERT'
-      ORDER BY created_at DESC
-      LIMIT 10
-    `);
-        const storageLocationsCount = await db.get(`SELECT COUNT(*) as cnt FROM storage_locations WHERE is_active = 1`);
-    const pendingSpecialOrdersCount = await db.get(`SELECT COUNT(*) as cnt FROM special_orders WHERE status = 'pending'`);
-    const activeDeliveryBoysCount = await db.get(`SELECT COUNT(*) as cnt FROM delivery_boys WHERE is_active = 1`);
-    const purchasesTodayRow = await db.get(`SELECT IFNULL(SUM(total_amount),0) as total FROM purchases WHERE date(date) = date('now')`);
-
-    // Fetch top 5 recent sales
-    const recentSales = await db.all(`
-      SELECT si.id, si.invoice_no, si.total_amount, si.payment_medium, si.payment_status, si.date,
-             c.name as customer_name
-      FROM sales_invoices si
-      LEFT JOIN customers c ON si.customer_id = c.id
-      ORDER BY si.date DESC, si.id DESC
-      LIMIT 5
-    `);
-
-    // Fetch top 5 recent communications/emails
-    let recentCommunications: any[] = [];
-    try {
-      recentCommunications = await db.all(`
+    // All aggregates run in parallel — endpoint latency is the slowest query,
+    // not the sum of ten sequential round trips.
+    const [salesTodayRow, lowStockCount, pendingTasksCount, alerts, storageLocationsCount, pendingSpecialOrdersCount, activeDeliveryBoysCount, purchasesTodayRow, recentSales, recentCommunications] = await Promise.all([
+      db.get(`SELECT IFNULL(SUM(total_amount),0) as total FROM sales_invoices WHERE date(date) = date('now')`),
+      db.get(`SELECT COUNT(*) as cnt FROM inventory_master WHERE quantity < 5`),
+      db.get(`SELECT COUNT(*) as cnt FROM action_logs WHERE action_type = 'AUTOMATION_ALERT'`),
+      db.all(`
+        SELECT id, description, created_at FROM action_logs
+        WHERE action_type = 'AUTOMATION_ALERT'
+        ORDER BY created_at DESC
+        LIMIT 10
+      `),
+      db.get(`SELECT COUNT(*) as cnt FROM storage_locations WHERE is_active = 1`),
+      db.get(`SELECT COUNT(*) as cnt FROM special_orders WHERE status = 'pending'`),
+      db.get(`SELECT COUNT(*) as cnt FROM delivery_boys WHERE is_active = 1`),
+      db.get(`SELECT IFNULL(SUM(total_amount),0) as total FROM purchases WHERE date(date) = date('now')`),
+      // Fetch top 5 recent sales
+      db.all(`
+        SELECT si.id, si.invoice_no, si.total_amount, si.payment_medium, si.payment_status, si.date,
+               c.name as customer_name
+        FROM sales_invoices si
+        LEFT JOIN customers c ON si.customer_id = c.id
+        ORDER BY si.date DESC, si.id DESC
+        LIMIT 5
+      `),
+      // Fetch top 5 recent communications/emails
+      db.all(`
         SELECT 'email' as type, subject as title, from_addr as recipient_or_sender, date as created_at
         FROM emails
         ORDER BY date DESC
         LIMIT 5
-      `);
-    } catch {
-      recentCommunications = [];
-    }
+      `).catch(() => [])
+    ]);
 
     res.json({
-      todaySales: salesTodayRow.total,
-      lowStock: lowStockCount.cnt,
-      pendingTasks: pendingTasksCount.cnt,
+      todaySales: salesTodayRow?.total || 0,
+      lowStock: lowStockCount?.cnt || 0,
+      pendingTasks: pendingTasksCount?.cnt || 0,
       storageLocations: storageLocationsCount?.cnt || 0,
       pendingSpecialOrders: pendingSpecialOrdersCount?.cnt || 0,
       activeDeliveryBoys: activeDeliveryBoysCount?.cnt || 0,
       todayPurchases: purchasesTodayRow?.total || 0,
-      alerts,
+      alerts: alerts || [],
       recentSales: recentSales || [],
       recentCommunications: recentCommunications || []
     });

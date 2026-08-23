@@ -70,9 +70,12 @@ export class MessagingQueue {
     );
 
     console.log(`[MessagingQueue] Queued message to ${recipientName} (${formattedPhone}) - ID: ${result.lastID} (Status: ${status})`);
-    
-    // Only trigger queue processing if not staged
+
+    // Only trigger queue processing if not staged. Lazy loop (owner rule
+    // 2026-08): the 30s safety-net poll starts on first pending message — a
+    // store that never queues messages runs zero ticks.
     if (status === 'pending') {
+      this.start();
       this.processQueue().catch(err => console.error('[MessagingQueue] Async process fail:', err));
     }
     
@@ -163,6 +166,7 @@ export class MessagingQueue {
 
     if (result.changes && result.changes > 0) {
       console.log(`[MessagingQueue] Marked message ID ${id} for retry.`);
+      this.start();
       this.processQueue().catch(err => console.error('[MessagingQueue] Async process fail:', err));
       return true;
     }

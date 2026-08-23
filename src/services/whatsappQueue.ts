@@ -15,9 +15,17 @@ import { whatsappQueueWorker } from './whatsappQueueWorker.js';
  * burned CPU and caused double-processing contention for zero benefit.
  */
 export class WhatsappQueue {
-  /** No-op: kept so existing boot/trigger call sites keep working. */
+  /**
+   * Explicit-enablement entry point (Settings trigger / boot).
+   * Performs crash-recovery of interrupted sends and lazy-starts the canonical
+   * worker's poll loop. With the lazy-loop owner rule (2026-08) the loop no
+   * longer self-starts at construction — a store that never uses WhatsApp
+   * runs zero queue ticks.
+   */
   async startWorker(): Promise<void> {
-    console.log('[WhatsApp Queue] Processing handled by canonical gated worker (whatsappQueueWorker).');
+    await whatsappQueueWorker.cleanupOldSentItems();
+    whatsappQueueWorker.ensureLoopStarted();
+    console.log('[WhatsApp Queue] Canonical gated worker loop ensured (lazy-start).');
   }
 }
 

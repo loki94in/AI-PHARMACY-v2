@@ -1,4 +1,3 @@
-import cron from 'node-cron';
 import { dbManager } from '../database/connection.js';
 
 let schemaEnsured = false;
@@ -202,30 +201,28 @@ export async function reconcileAllMedicineSalesMetrics(db: any, windowMonths: nu
   }
 }
 
-// Register the nightly reconcile at module load
-cron.schedule('0 3 * * *', async () => {
-  try {
-    const db = await dbManager.getConnection();
-    const windowMonths = await getReorderWindowMonths(db);
-    await reconcileAllMedicineSalesMetrics(db, windowMonths);
-    console.log('[MedicineSalesMetrics] Nightly reconcile complete.');
-  } catch (err) {
-    console.error('[MedicineSalesMetrics] Nightly reconcile failed:', err);
-  }
-});
+// Owner rule (2026-08): once calculated, metrics are NEVER fully recalculated
+// automatically. Freshness comes exclusively from the live per-line deltas
+// (applySaleDelta / applyPurchaseDelta). Full reconcile runs ONLY when:
+//   - the table is still empty (one-time initial backfill below, deferred to
+//     T+60s so it never competes with the boot-critical schema/pre-warm path), or
+//   - the user explicitly triggers it from Settings (manual reconcile endpoints).
+// The former nightly 03:00 DELETE-all + recompute cron was removed.
 
-// Startup backfill: populate immediately on first run instead of waiting for 3am.
-(async () => {
-  try {
-    const db = await dbManager.getConnection();
-    await ensureMedicineSalesMetricsSchema(db);
-    const row = await db.get('SELECT COUNT(*) as c FROM medicine_sales_metrics');
-    if (!row || Number(row.c) === 0) {
-      const windowMonths = await getReorderWindowMonths(db);
-      await reconcileAllMedicineSalesMetrics(db, windowMonths);
-      console.log('[MedicineSalesMetrics] Initial backfill complete.');
+// One-time initial backfill, deferred off the boot-critical window.
+setTimeout(() => {
+  (async () => {
+    try {
+      const db = await dbManager.getConnection();
+      await ensureMedicineSalesMetricsSchema(db);
+      const row = await db.get('SELECT COUNT(*) as c FROM medicine_sales_metrics');
+      if (!row || Number(row.c) === 0) {
+        const windowMonths = await getReorderWindowMonths(db);
+        await reconcileAllMedicineSalesMetrics(db, windowMonths);
+        console.log('[MedicineSalesMetrics] Initial backfill complete.');
+      }
+    } catch (err) {
+      console.error('[MedicineSalesMetrics] Initial backfill failed:', err);
     }
-  } catch (err) {
-    console.error('[MedicineSalesMetrics] Initial backfill failed:', err);
-  }
-})();
+  })();
+}, 60_000);

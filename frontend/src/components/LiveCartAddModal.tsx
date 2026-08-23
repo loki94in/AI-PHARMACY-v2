@@ -914,19 +914,26 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
       if (searchAbortControllerRef.current) {
         searchAbortControllerRef.current.abort();
       }
-      searchAbortControllerRef.current = new AbortController();
+      const controller = new AbortController();
+      searchAbortControllerRef.current = controller;
 
       if (!cachedResults) {
         setSearchLoading(true);
       }
 
       try {
-        // Search Pharmarack catalog only (no local inventory cross-check)
-        const prData = await api.searchPharmarack(cleanQuery).catch((err: unknown): LocalPrSearchOutcome => {
+        // Search Pharmarack catalog only (no local inventory cross-check).
+        // AbortController is actually wired now — superseded keystrokes cancel
+        // their in-flight request instead of racing the latest one.
+        const prData = await api.searchPharmarack(cleanQuery, undefined, undefined, controller.signal).catch((err: unknown): LocalPrSearchOutcome | null => {
+          if (controller.signal.aborted) return null; // superseded — discard silently
           const apiErr = err as LocalApiError;
           const errMsg = apiErr?.response?.data?.error || 'Connection error, please check internet or reconnect';
           return { isError: true, message: errMsg };
-        }) as LocalPrSearchOutcome;
+        }) as LocalPrSearchOutcome | null;
+
+        // Stale-response guard: a newer keystroke already owns the dropdown.
+        if (searchAbortControllerRef.current !== controller || controller.signal.aborted) return;
 
         const mergedList: SuggestionMedicine[] = [];
 
@@ -993,7 +1000,10 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
       } catch (err) {
         console.error('Error searching Pharmarack catalog:', err);
       } finally {
-        setSearchLoading(false);
+        // Only the owning request may clear the shared spinner
+        if (searchAbortControllerRef.current === controller) {
+          setSearchLoading(false);
+        }
       }
     }, 300);
 
@@ -1145,18 +1155,18 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
       if (activeSourceOrderId) {
         try {
           await api.updateOrder(activeSourceOrderId, { status: 'Ordered' });
-          await fetchPendingOrders();
         } catch (e) {
           console.warn('Failed to update source order status:', e);
         }
       }
-      if (activeSourceRefillId) {
-        try {
-          await fetchPendingRefills();
-        } catch (e) {
-          console.warn('Failed to refresh source refill status:', e);
-        }
-      }
+
+      // Parallel close-out: cart preview refresh, source-list refreshes and
+      // form reset no longer run as a serial waterfall after the upstream add.
+      await Promise.allSettled([
+        fetchCart(),
+        activeSourceOrderId ? fetchPendingOrders() : Promise.resolve(),
+        activeSourceRefillId ? fetchPendingRefills() : Promise.resolve()
+      ]);
       
       // Reset form and keep open
       setProduct('');
@@ -1175,9 +1185,6 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
       setSelectedCompany('');
       setSelectedPackaging('');
       setSelectedMedicineName('');
-      
-      // Refresh cart preview immediately
-      await fetchCart();
 
       // Focus back to search input so user can add another medicine
       setTimeout(() => {

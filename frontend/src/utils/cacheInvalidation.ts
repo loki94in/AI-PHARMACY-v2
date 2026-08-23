@@ -4,6 +4,12 @@ import { clearInfiniteScrollCache } from '../hooks/useInfiniteScroll';
 /**
  * Invalidates all relevant query lists and purges infinite scroll caches
  * after a write/mutation to stock, sales, returns, or purchases occurs.
+ *
+ * Deferred-freshness contract: writes only MARK queries stale
+ * (refetchType: 'none'). The visible page's PageQueryTracker refetches its own
+ * queries instantly; hidden kept-alive pages refresh on next activation.
+ * Never reintroduce eager refetchQueries({type:'active'}) here — it fans one
+ * write out into simultaneous refetches across every visited page.
  */
 export function invalidateAfterStockWrite(queryClient: QueryClient) {
   clearInfiniteScrollCache();
@@ -28,24 +34,13 @@ export function invalidateAfterStockWrite(queryClient: QueryClient) {
   ];
 
   keys.forEach(key => {
-    queryClient.invalidateQueries({ queryKey: [key] });
+    queryClient.invalidateQueries({ queryKey: [key], refetchType: 'none' });
   });
 
   // Dispatch custom window event for real-time live update listeners
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('stock-write-completed'));
   }
-
-  // Explicitly remove stale infinite query caches for sells and inventory
-  queryClient.removeQueries({ queryKey: ['sells-list'] });
-  queryClient.removeQueries({ queryKey: ['inventory-list'] });
-
-  // Silently background-refetch all currently-mounted (active) stale queries immediately.
-  // Unmounted pages will refetch on next visit while showing cached data — no wipe, no spinner.
-  queryClient.refetchQueries({ queryKey: ['pos-special-orders'] }).catch(() => {});
-  queryClient.refetchQueries({ queryKey: ['pos-common-combinations'] }).catch(() => {});
-  queryClient.refetchQueries({ queryKey: ['crm-doctors'] }).catch(() => {});
-  queryClient.refetchQueries({ type: 'active', stale: true }).catch(() => {});
 
   // Silently reload client-side compact inventory cache in the background
   import('../services/api.js')
@@ -71,15 +66,13 @@ export function invalidateAfterPriceWrite(queryClient: QueryClient) {
   ];
 
   keys.forEach(key => {
-    queryClient.invalidateQueries({ queryKey: [key] });
+    queryClient.invalidateQueries({ queryKey: [key], refetchType: 'none' });
   });
 
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('price-updated'));
     window.dispatchEvent(new CustomEvent('stock-write-completed'));
   }
-
-  queryClient.refetchQueries({ type: 'active', stale: true }).catch(() => {});
 
   import('../services/api.js')
     .then(({ api }) => {

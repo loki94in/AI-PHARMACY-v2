@@ -90,7 +90,8 @@ router.post('/upload', upload.single('file'), async (req, res) => {
 
     // Trigger analysis asynchronously inline to speed it up
     import('../worker/catalogWorker.js')
-      .then(({ runCatalogAnalysis }) => {
+      .then(({ runCatalogAnalysis, nudgeCatalogJobPoller }) => {
+        nudgeCatalogJobPoller();
         runCatalogAnalysis(jobId).catch(err => console.error('Background catalog analysis failed:', err));
       })
       .catch(err => console.error('Failed to load runCatalogAnalysis from worker:', err));
