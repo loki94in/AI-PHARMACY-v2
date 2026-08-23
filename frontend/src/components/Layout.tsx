@@ -142,6 +142,7 @@ const Sidebar = ({
     { path: '/reports', label: 'Reports', icon: <LayoutDashboard size={18} /> },
     { path: '/pharmarack-cart', label: 'Pharmarack Cart', icon: <ShoppingCart size={18} /> },
     { path: '/investigation', label: 'Investigation Center', icon: <PackageSearch size={18} /> },
+    { path: '/compliance', label: 'H1 Compliance', icon: <FileText size={18} /> },
     { path: '/composition-queue', label: 'Composition Queue', icon: <Beaker size={18} /> },
     { path: '/learning', label: 'AI Learning', icon: <Brain size={18} /> },
     { path: '/dispatch', label: 'Dispatch', icon: <Truck size={18} /> },
@@ -2012,48 +2013,6 @@ const QuickAssistSidebar = ({
     }
   };
 
-  const handleSendGroupSpecialOrder = async (group: { requester: string; phone: string; items: Array<{ id: number; product: string; qty: number; status: string }> }) => {
-    const pendingItems = group.items.filter(i => i.status === 'Pending');
-    const targetItems = pendingItems.length > 0 ? pendingItems : group.items;
-    const itemIds = targetItems.map(i => i.id);
-
-    setProcessingOrderIds(prev => {
-      const next = new Set(prev);
-      itemIds.forEach(id => next.add(id));
-      return next;
-    });
-
-    try {
-      const itemsStr = targetItems.map(i => `• ${i.product} (Qty: ${i.qty})`).join('\n');
-      const msg = `🏬 *QUICK SPECIAL ORDER — AI PHARMACY*\n\n📋 *Requested By:* ${group.requester} ${group.phone ? `(${group.phone})` : ''}\n\n📦 *Requested Items:*\n${itemsStr}\n\n*Please confirm receipt & order dispatch.*`;
-
-      if (group.phone) {
-        await api.enqueueSingleWhatsApp({
-          number: group.phone,
-          message: msg,
-          type: 'special_order',
-          targetName: group.requester
-        });
-        whatsappQueueEvent.triggerUpdated();
-      }
-
-      await Promise.all(targetItems.map(i => apiClient.post(`/orders/${i.id}/status`, { status: 'Ordered' })));
-      toastEvent.trigger(`Marked ${targetItems.length} request(s) for ${group.requester} as Ordered & queued WhatsApp!`, 'success');
-      queryClient.invalidateQueries({ queryKey: ['orders'] });
-      specialOrdersEvent.triggerUpdated();
-      window.dispatchEvent(new CustomEvent('refresh-special-orders'));
-      onActionComplete();
-    } catch (e: unknown) {
-      console.error('Failed to send group special order:', e);
-      toastEvent.trigger('Failed to update special request status', 'error');
-    } finally {
-      setProcessingOrderIds(prev => {
-        const next = new Set(prev);
-        itemIds.forEach(id => next.delete(id));
-        return next;
-      });
-    }
-  };
 
   const handleUpdateGroupStatus = async (
     group: { requester: string; phone?: string; items: Array<{ id: number; product: string; qty: number }> },
@@ -2804,21 +2763,30 @@ const QuickAssistSidebar = ({
                         : 'bg-amber-500/[0.04] border-amber-500/20'
                     }`}
                   >
-                    {/* Requester Header (Click to toggle expansion / fold & unfold) */}
+                    {/* Header (Click to toggle expansion / fold & unfold) */}
                     <div
                       onClick={() => toggleSpecialOrderKey(group.key)}
                       className="flex items-start justify-between gap-1.5 min-w-0 cursor-pointer select-none"
                     >
                       <div className="flex flex-col min-w-0 flex-1">
                         <div className="flex items-center gap-1.5 min-w-0">
-                          <span className="font-bold text-xs text-text truncate">{group.requester}</span>
-                          <span className="px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-400 text-[9px] font-bold shrink-0">
-                            {group.items.length} item{group.items.length > 1 ? 's' : ''}
+                          <span className="font-bold text-xs text-text truncate" title={group.items[0]?.product || 'Special Medicine'}>
+                            {group.items[0]?.product || 'Special Medicine'}
                           </span>
+                          {group.items.length > 1 ? (
+                            <span className="px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-400 text-[9px] font-bold shrink-0">
+                              +{group.items.length - 1} more
+                            </span>
+                          ) : (
+                            <span className="px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-400 text-[9px] font-mono font-bold shrink-0">
+                              Qty: {group.items[0]?.qty || 1}
+                            </span>
+                          )}
                         </div>
-                        {group.phone && (
-                          <span className="text-[10px] text-muted truncate">{group.phone}</span>
-                        )}
+                        <div className="flex items-center gap-1 text-[10px] text-muted truncate">
+                          <span className="truncate">{group.requester}</span>
+                          {group.phone && <span>• {group.phone}</span>}
+                        </div>
                       </div>
                       <div className="flex items-center gap-1.5 shrink-0">
                         <span
@@ -2893,12 +2861,12 @@ const QuickAssistSidebar = ({
                         <>
                           <button
                             disabled={isProcessing}
-                            onClick={() => handleSendGroupSpecialOrder(group)}
+                            onClick={() => handleUpdateGroupStatus(group, 'Ordered')}
                             className="flex-1 py-1 px-2 rounded bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-[10px] font-bold tracking-wide uppercase transition-colors flex items-center justify-center gap-1 shadow-sm cursor-pointer whitespace-nowrap min-w-0"
-                            title="Send WhatsApp Order for these special requests"
+                            title="Mark all requests as Ordered"
                           >
-                            {isProcessing ? <Loader2 size={11} className="animate-spin" /> : <SendIcon size={11} />}
-                            Send Order
+                            {isProcessing ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
+                            Mark Ordered
                           </button>
                           <button
                             disabled={isProcessing}

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState } from 'react';
 import {
   TrendingDown,
   TrendingUp,
@@ -13,6 +13,7 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { api } from '../services/api';
+import { useApiQuery } from '../hooks/useApiQuery';
 
 interface PriceRecord {
   date: string;
@@ -51,43 +52,18 @@ export const PriceIntelPanel: React.FC<PriceIntelPanelProps> = ({
   defaultExpanded = false,
 }) => {
   const [expanded, setExpanded] = useState(defaultExpanded);
-  const [loading, setLoading] = useState(false);
-  const [records, setRecords] = useState<PriceRecord[]>([]);
-  const [loaded, setLoaded] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
-  const fetchHistory = useCallback(async () => {
-    if (!medicineName || medicineName.length < 2) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await api.getMedicinePriceHistory(medicineName);
-      const data: PriceRecord[] = res?.data || [];
-      setRecords(data);
-    } catch (_err) {
-      setError('Could not load price history.');
-    } finally {
-      setLoading(false);
-      setLoaded(true);
-    }
-  }, [medicineName]);
-
-  // Fetch when expanded for the first time
-  useEffect(() => {
-    if (expanded && !loaded) {
-      fetchHistory();
-    }
-  }, [expanded, loaded, fetchHistory]);
-
-  // Re-fetch when medicine name changes
-  useEffect(() => {
-    setLoaded(false);
-    setRecords([]);
-    setError(null);
-    if (expanded) {
-      fetchHistory();
-    }
-  }, [medicineName]); // eslint-disable-line react-hooks/exhaustive-deps
+  const canFetch = !!medicineName && medicineName.length >= 2;
+  // Fetch when expanded for the first time; per-name query keys reset on medicine change
+  const { data: historyRes, isFetching, isSuccess, isError } = useApiQuery<{ data?: PriceRecord[] }>(
+    ['medicine-price-history', medicineName],
+    () => api.getMedicinePriceHistory(medicineName),
+    { enabled: expanded && canFetch }
+  );
+  const records: PriceRecord[] = historyRes?.data || [];
+  const loading = isFetching;
+  const loaded = isSuccess || isError;
+  const error = isError ? 'Could not load price history.' : null;
 
   if (!medicineName || medicineName.length < 2) return null;
 

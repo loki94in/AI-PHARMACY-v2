@@ -75,6 +75,7 @@ interface BillItem {
   mrp: number | string;
   cgst_per: number | string;
   sgst_per: number | string;
+  gstTouched?: boolean; // user manually set GST on this line → history autofill must not overwrite
   cd_rs: number | string;
   cd_per: number | string;
   additional_discount: number | string;
@@ -975,6 +976,7 @@ const Purchases: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const savingStartedAtRef = useRef<number>(0);
   const savingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const batchLookupTimersRef = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
   const [hoveredPriceRow, setHoveredPriceRow] = useState<string | null>(null);
   const [lastSavedInvoiceNo, setLastSavedInvoiceNo] = useState('');
   const [lastSavedItems, setLastSavedItems] = useState<any[]>([]);
@@ -1432,6 +1434,7 @@ const Purchases: React.FC = () => {
     item.manufacturer = medicine.manufacturer;
     item.mrp = medicine.mrp;
     item.rate = medicine.rate;
+    item.gstTouched = false; // fresh selection → history GST may prefill again
     item.cgst_per = (medicine.cgst_per !== undefined && medicine.cgst_per !== null && medicine.cgst_per !== 0) ? medicine.cgst_per : 6;
     item.sgst_per = (medicine.sgst_per !== undefined && medicine.sgst_per !== null && medicine.sgst_per !== 0) ? medicine.sgst_per : 6;
     item.stock_qty = (medicine as any).stock_qty || 0;
@@ -1454,7 +1457,8 @@ const Purchases: React.FC = () => {
       api.createMedicineAlias(item.original_name, medicine.id).catch(e => console.error('Failed to create alias:', e));
     }
 
-    // Last purchase lookup: runs in background, patches only if fields are empty and never overwrites GST
+    // Last purchase lookup: patches empty fields; carries the medicine's LAST GST
+    // into the row unless the user already set GST manually on this line.
     api.getLastPurchase(medicine.name, medicine.id, selectedDistributor || undefined)
       .then(response => {
         if (response && response.found) {
@@ -1467,6 +1471,10 @@ const Purchases: React.FC = () => {
             if (!target.expiry_date && response.expiry_date) target.expiry_date = formatExpiryToMMYY(response.expiry_date);
             if ((!target.rate || target.rate === 0) && response.rate) target.rate = response.rate;
             if ((!target.mrp || target.mrp === 0) && response.mrp) target.mrp = response.mrp;
+            if (!target.gstTouched) {
+              if (response.cgst_per !== undefined && response.cgst_per !== null && Number(response.cgst_per) > 0) target.cgst_per = response.cgst_per;
+              if (response.sgst_per !== undefined && response.sgst_per !== null && Number(response.sgst_per) > 0) target.sgst_per = response.sgst_per;
+            }
             target.amount = calculateItemAmount(target);
             return updated;
           });
@@ -1723,31 +1731,37 @@ const Purchases: React.FC = () => {
 
     if (field === 'batch_no') {
       (item as any)[field] = value;
-      if (item.medicine_id && value && typeof value === 'string' && value.trim().length >= 1) {
+      const firedMedicineId = item.medicine_id;
+      const firedName = item.medicine_name;
+      const firedDistId = selectedDistributor || undefined;
+      // Debounced SAME-BATCH purchase-history lookup ("same batch → same rate/mrp/GST").
+      // Never touches qty/free_qty. GST is patched only when the user hasn't manually set it.
+      if (firedMedicineId && value && typeof value === 'string' && value.trim().length >= 1) {
         const batchVal = value.trim();
-        api.getBatchInfo(item.medicine_id, batchVal)
-          .then(batchRes => {
-            if (batchRes && batchRes.found) {
-              setItems(prevItems => {
-                const updated = [...prevItems];
-                const target = updated[index];
-                if (target) {
-                  if (batchRes.rate) target.rate = batchRes.rate;
-                  if (batchRes.mrp) target.mrp = batchRes.mrp;
-                  if (batchRes.expiry_date) target.expiry_date = formatExpiryToMMYY(batchRes.expiry_date);
-                  if ((target.cgst_per === '' || target.cgst_per === undefined) && batchRes.cgst_per !== undefined && batchRes.cgst_per !== null) {
-                    target.cgst_per = batchRes.cgst_per;
-                  }
-                  if ((target.sgst_per === '' || target.sgst_per === undefined) && batchRes.sgst_per !== undefined && batchRes.sgst_per !== null) {
-                    target.sgst_per = batchRes.sgst_per;
+        if (batchLookupTimersRef.current[index]) clearTimeout(batchLookupTimersRef.current[index]);
+        batchLookupTimersRef.current[index] = setTimeout(() => {
+          api.getLastPurchase(firedName || '', firedMedicineId, firedDistId, batchVal)
+            .then(response => {
+              if (response && response.found) {
+                setItems(prevItems => {
+                  const updated = [...prevItems];
+                  const target = updated[index];
+                  // Stale guard: row's medicine or batch changed since we fired
+                  if (!target || target.medicine_id !== firedMedicineId || String(target.batch_no || '').trim().toLowerCase() !== batchVal.toLowerCase()) return prevItems;
+                  if (response.rate) target.rate = response.rate;
+                  if (response.mrp) target.mrp = response.mrp;
+                  if (response.expiry_date) target.expiry_date = formatExpiryToMMYY(response.expiry_date);
+                  if (!target.gstTouched) {
+                    if (response.cgst_per !== undefined && response.cgst_per !== null && Number(response.cgst_per) > 0) target.cgst_per = response.cgst_per;
+                    if (response.sgst_per !== undefined && response.sgst_per !== null && Number(response.sgst_per) > 0) target.sgst_per = response.sgst_per;
                   }
                   target.amount = calculateItemAmount(target);
-                }
-                return updated;
-              });
-            }
-          })
-          .catch(e => console.log('Batch lookup catch:', e));
+                  return updated;
+                });
+              }
+            })
+            .catch(e => console.log('Batch history lookup catch:', e));
+        }, 300);
       }
     } else if (field === 'qty' || field === 'free_qty' || field === 'rate' || field === 'mrp' || 
         field === 'cgst_per' || field === 'sgst_per' || field === 'cd_rs' || field === 'cd_per' || field === 'additional_discount') {
@@ -1757,8 +1771,10 @@ const Purchases: React.FC = () => {
       // Auto match SGST and CGST
       if (field === 'sgst_per') {
         item.cgst_per = item.sgst_per;
+        item.gstTouched = true;
       } else if (field === 'cgst_per') {
         item.sgst_per = item.cgst_per;
+        item.gstTouched = true;
       }
     } else if (field === 'expiry_date') {
       (item as any)[field] = formatExpiryToMMYY(value);

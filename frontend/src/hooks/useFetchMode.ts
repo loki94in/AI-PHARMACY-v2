@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { apiClient } from '../services/api';
 import { SETTINGS_QUERY_KEY } from '../utils/settingsSync';
 import { DEFAULT_FETCH_MODES, type FetchMode } from '../services/dataFetchControl';
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback } from 'react';
 
 // Shared in-memory cache for manual override activations, so if key is activated,
 // it stays active across mounts of the same page/component session.
@@ -22,11 +22,12 @@ export function useFetchMode(key: string) {
 
   const [localOverride, setLocalOverride] = useState(() => manualOverrides.has(key));
 
-  useEffect(() => {
-    if (manualOverrides.has(key)) {
-      setLocalOverride(true);
-    }
-  }, [key]);
+  // Re-resolve the override from the module cache when the key changes (render-time adjustment)
+  const [prevKey, setPrevKey] = useState(key);
+  if (prevKey !== key) {
+    setPrevKey(key);
+    setLocalOverride(manualOverrides.has(key));
+  }
 
   // Resolve the current mode for this key
   let mode: FetchMode = DEFAULT_FETCH_MODES[key] || 'auto';

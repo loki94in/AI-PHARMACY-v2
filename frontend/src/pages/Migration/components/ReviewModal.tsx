@@ -204,16 +204,21 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
     }
   }, []);
 
-  useEffect(() => {
+  // Seed modal state from the selected file when it opens (render-time adjustment)
+  const [prevOpen, setPrevOpen] = useState(isOpen);
+  const [prevFile, setPrevFile] = useState(fileEntry);
+  if (isOpen !== prevOpen || fileEntry !== prevFile) {
+    setPrevOpen(isOpen);
+    setPrevFile(fileEntry);
     if (isOpen && fileEntry) {
       setMappings(fileEntry.mapping || {});
       setPhase(fileEntry.initialPhase || 'review');
       setErrorMessage(null);
       setStagingConflicts([]);
     }
-  }, [isOpen, fileEntry]);
+  }
 
-  const runValidation = async (currentMappings: Record<string, string>) => {
+  const runValidation = useCallback(async (currentMappings: Record<string, string>) => {
     setValidating(true);
     try {
       const result = await api.preMigrationAnalyze(
@@ -234,7 +239,7 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
     } finally {
       setValidating(false);
     }
-  };
+  }, [fileEntry]);
 
   useEffect(() => {
     if (isOpen && fileEntry && Object.keys(mappings).length > 0) {
@@ -243,7 +248,7 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
       }, 300);
       return () => clearTimeout(delayDebounce);
     }
-  }, [mappings, isOpen]);
+  }, [mappings, isOpen, fileEntry, runValidation]);
 
   const handleMappingChange = (header: string, targetCol: string) => {
     const updated = { ...mappings, [header]: targetCol };

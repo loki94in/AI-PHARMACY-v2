@@ -33,7 +33,10 @@ interface AICameraProps {
 const AICamera: React.FC<AICameraProps> = ({ onScanResult, onClose }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [stream, setStream] = useState<MediaStream | null>(null);
+  const [, setStream] = useState<MediaStream | null>(null);
+  // Mirror of the live stream so the unmount cleanup can stop tracks even
+  // though the effect body captured no render-time stream value.
+  const streamRef = useRef<MediaStream | null>(null);
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -43,6 +46,7 @@ const AICamera: React.FC<AICameraProps> = ({ onScanResult, onClose }) => {
         video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
       });
       setStream(mediaStream);
+      streamRef.current = mediaStream;
       if (videoRef.current) {
         videoRef.current.srcObject = mediaStream;
       }
@@ -52,15 +56,14 @@ const AICamera: React.FC<AICameraProps> = ({ onScanResult, onClose }) => {
     }
   };
 
-  const stopCamera = () => {
-    if (stream) {
-      stream.getTracks().forEach(track => track.stop());
-    }
-  };
-
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async camera permission/device init
     startCamera();
-    return () => stopCamera();
+    return () => {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+      }
+    };
   }, []);
 
   const captureAndAnalyze = async () => {

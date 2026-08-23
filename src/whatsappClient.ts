@@ -969,6 +969,12 @@ export async function sendMessage(
       continue;
     }
 
+    // Register in-flight BEFORE dispatching: the previous post-send-only registration let
+    // two near-simultaneous calls for the same recipient+body both pass the check above
+    // while the first was still awaiting delivery, double-delivering the message.
+    // The catch below deletes the key on failure so legitimate retries stay unblocked.
+    recentSendsCache.set(sendKey, nowTs);
+
     let success = false;
     let messageId = `msg_out_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
 

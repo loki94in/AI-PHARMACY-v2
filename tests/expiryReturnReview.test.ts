@@ -349,4 +349,50 @@ describe('Task 4: Expiry Return Review & Removal of Automatic Returns', () => {
 
     await db.close();
   });
+
+  test('8. Scan does NOT re-flag rejected reviews with unchanged quantity, but re-flags when stock changes', async () => {
+    const { open } = await import('sqlite');
+    const sqlite3 = await import('sqlite3');
+    const db = await open({ filename: dbPath, driver: sqlite3.default.Database });
+
+    const medRes = await db.run("INSERT INTO medicines (name, mrp) VALUES ('Reject Dedupe Med', 30.0)");
+    const medId = medRes.lastID;
+    const invRes = await db.run(
+      "INSERT INTO inventory_master (medicine_id, batch_no, expiry_date, quantity, cost_price, mrp) VALUES (?, 'REJ-DUP-1', '05/20', 7, 15.0, 30.0)",
+      [medId]
+    );
+    const invId = invRes.lastID;
+
+    // First scan flags the expired batch as pending
+    await scanAndCreateExpiryReviews(db as any);
+    let reviews = await db.all('SELECT * FROM expiry_return_reviews WHERE inventory_id = ?', [invId]);
+    expect(reviews.length).toBe(1);
+    expect(reviews[0].status).toBe('pending');
+
+    // Pharmacist rejects it
+    const rejRes = await request(app)
+      .post(`/api/returns/expiry-reviews/${reviews[0].id}/reject`)
+      .send({ notes: 'Keep in quarantine' });
+    expect(rejRes.status).toBe(200);
+
+    // Second scan: same batch, same quantity -> must NOT re-create a review
+    await scanAndCreateExpiryReviews(db as any);
+    reviews = await db.all('SELECT * FROM expiry_return_reviews WHERE inventory_id = ?', [invId]);
+    expect(reviews.length).toBe(1);
+    expect(reviews[0].status).toBe('rejected');
+
+    // Stock changes afterwards (e.g. customer-return restock) -> re-flagged
+    await db.run('UPDATE inventory_master SET quantity = quantity + 5 WHERE id = ?', [invId]);
+    await scanAndCreateExpiryReviews(db as any);
+    reviews = await db.all('SELECT * FROM expiry_return_reviews WHERE inventory_id = ? ORDER BY id', [invId]);
+    expect(reviews.length).toBe(2);
+    expect(reviews[1].status).toBe('pending');
+    expect(reviews[1].quantity).toBe(12);
+
+    // Inventory untouched throughout
+    const invFinal = await db.get('SELECT quantity FROM inventory_master WHERE id = ?', [invId]);
+    expect(invFinal.quantity).toBe(12);
+
+    await db.close();
+  });
 });

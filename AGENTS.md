@@ -399,3 +399,14 @@ To prevent unexpected or automated WhatsApp/SMS messages being sent to patients 
      - **POS / Sales Invoice**: Invoices are dispatched only when the user explicitly checks or enables the WhatsApp toggle at the point of sale.
 3. **No Background Worker Auto-Dispatch to Patients**:
    - Background crons, inventory listeners, queue workers, and purchase reconcilers are strictly prohibited from dispatching patient messages autonomously.
+
+---
+
+## Medicine Master-Name Import Contract (added 2026-08)
+
+`scripts/importMedicineNames.mjs` enriches the master `medicines` catalog with NAMES ONLY from the retailer system exports:
+
+- **Sources**: `retailerdb_backup_*.sql.zip` (actually a GZIP'd PostgreSQL `pg_dump`; parses the `COPY public.medicine (...)` stdin block, `medicine_name` column index resolved from the header) and root `medicines.csv` (`medicine_name` column). Both stay gitignored raw inputs.
+- **Inserts**: `INSERT INTO medicines (name, source) VALUES (?, 'master_reference')` only — MRP/tax/manufacturer remain schema defaults until a real purchase invoice or user edit fills them. No inventory_master writes, no other tables touched.
+- **Dedupe**: whitespace-collapsed case-insensitive comparison on BOTH candidate and DB side; re-runs are idempotent. Do not weaken this to plain `LOWER(TRIM(name))` — that reintroduces spacing-variant duplicates (782 had to be purged after the 2026-08-22 run).
+- **Run**: `node scripts/importMedicineNames.mjs [--dry-run]`. 2026-08-22 result: 286,389 → 291,878 rows (+5,489 unique names); legacy duplicate groups pre-dating the import were deliberately left untouched.

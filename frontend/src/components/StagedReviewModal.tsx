@@ -99,9 +99,9 @@ export const StagedReviewModal: React.FC<Props> = ({ onClose, onActionComplete }
 
   const itemNameOf = (it: LocalStagedItem): string => String(it?.name || it?.medicine_name || '').trim();
 
+  // Refresh entry used by user-action paths: gates loading/errors explicitly
+  // (the mount path relies on the initial loading=true / error=null state).
   const loadStagedData = async () => {
-    setLoading(true);
-    setError(null);
     try {
       const [stagedSales, stagedPurchases, distList] = await Promise.all([
         api.getStagedSales(),
@@ -120,7 +120,14 @@ export const StagedReviewModal: React.FC<Props> = ({ onClose, onActionComplete }
     }
   };
 
+  const reloadStagedData = async () => {
+    setLoading(true);
+    setError(null);
+    await loadStagedData();
+  };
+
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async staged-data load on modal mount
     loadStagedData();
   }, []);
 
@@ -342,7 +349,7 @@ export const StagedReviewModal: React.FC<Props> = ({ onClose, onActionComplete }
         });
       }
       setSelectedTx(null);
-      await loadStagedData();
+      await reloadStagedData();
       onActionComplete();
     } catch (err) {
       const e = err as LocalApiError;
@@ -364,7 +371,7 @@ export const StagedReviewModal: React.FC<Props> = ({ onClose, onActionComplete }
         await api.rejectStagedPurchase(id);
       }
       setSelectedTx(null);
-      await loadStagedData();
+      await reloadStagedData();
       onActionComplete();
     } catch (err) {
       const e = err as LocalApiError;

@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Database, RefreshCw, Play, Clock, HardDrive, AlertCircle, Loader2, CheckCircle2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { api } from '../../../services/api';
+import { useApiQuery } from '../../../hooks/useApiQuery';
 
 export interface LocalBackup {
   name: string;
@@ -20,32 +21,23 @@ interface LocalBackupPanelProps {
 type LocalApiError = { response?: { data?: { error?: string } }; message?: string };
 
 export const LocalBackupPanel: React.FC<LocalBackupPanelProps> = ({ onRunMigration }) => {
-  const [backups, setBackups] = useState<LocalBackup[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [startingPath, setStartingPath] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
-  const fetchBackups = async () => {
-    setLoading(true);
-    setError(null);
-    try {
+  const { data, isFetching, error: queryError, refetch } = useApiQuery<LocalBackup[], Error>(
+    ['local-backups'],
+    async () => {
       const res = await api.getLocalBackups();
       if (res.success) {
-        setBackups(res.backups || []);
-      } else {
-        setError(res.error || 'Failed to scan local backup folders');
+        return res.backups || [];
       }
-    } catch (err) {
-      const e = err as LocalApiError;
-      setError(e.message || 'Error connecting to local backup scanner');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchBackups();
-  }, []);
+      throw new Error(res.error || 'Failed to scan local backup folders');
+    },
+  );
+  const backups = data || [];
+  const loading = isFetching;
+  const error = queryError?.message || actionError;
+  const fetchBackups = () => refetch();
 
   const formatFileSize = (bytes: number) => {
     if (bytes === 0) return '0 B';
@@ -72,12 +64,13 @@ export const LocalBackupPanel: React.FC<LocalBackupPanelProps> = ({ onRunMigrati
 
   const handleRun = async (backup: LocalBackup) => {
     setStartingPath(backup.fullPath);
+    setActionError(null);
     try {
       await api.runLocalBackupMigration(backup.fullPath, backup.name);
       onRunMigration(backup);
     } catch (err) {
       const e = err as LocalApiError;
-      setError(e.message || 'Failed to start local backup migration');
+      setActionError(e.message || 'Failed to start local backup migration');
     } finally {
       setStartingPath(null);
     }

@@ -67,41 +67,4 @@ router.post('/bulk-update', async (req, res) => {
   }
 });
 
-// Fetch saved medicines for a purchase invoice to set sell prices and stock levels
-router.get('/by-invoice/:invoiceNo', async (req, res) => {
-  let db;
-  try {
-    const { invoiceNo } = req.params;
-    if (!invoiceNo) {
-      return res.status(400).json({ error: 'invoiceNo is required' });
-    }
-
-    db = await dbManager.getConnection();
-    const rows = await db.all(`
-      SELECT DISTINCT 
-        m.id as medicine_id, 
-        m.name as medicine_name, 
-        COALESCE(pi.cost_price, m.rate, 0) as rate, 
-        COALESCE(pi.mrp, m.mrp, 0) as mrp, 
-        m.sell_price,
-        im.reorder_level,
-        im.max_stock_level
-      FROM purchases p
-      JOIN purchase_items pi ON p.id = pi.purchase_id
-      JOIN medicines m ON pi.medicine_id = m.id
-      LEFT JOIN inventory_master im ON m.id = im.medicine_id
-      WHERE LOWER(TRIM(COALESCE(p.app_invoice_no, ''))) = LOWER(TRIM(?)) OR LOWER(TRIM(COALESCE(p.invoice_no, ''))) = LOWER(TRIM(?))
-    `, [invoiceNo, invoiceNo]);
-
-    res.json({
-      success: true,
-      invoiceNo,
-      saved_medicines: rows || []
-    });
-  } catch (error: any) {
-    console.error('Error fetching sell price medicines by invoice:', error);
-    res.status(500).json({ error: error.message || 'Failed to fetch items for invoice' });
-  }
-});
-
 export default router;

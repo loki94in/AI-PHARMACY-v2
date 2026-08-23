@@ -74,13 +74,25 @@ const Reports = () => {
     });
   };
 
-  useEffect(() => {
+  // Preset the range when the expiry tab is opened (render-time adjustment)
+  const [prevTab, setPrevTab] = useState(activeTab);
+  if (prevTab !== activeTab) {
+    setPrevTab(activeTab);
     if (activeTab === 'expiry') {
       setFromDate(getTodayString());
       setToDate(getNDaysAgoString(-365));
       setManualToDate(true);
     }
-  }, [activeTab]);
+  }
+
+  // Snap back to today when manual-date mode is switched off
+  const [prevManualToDate, setPrevManualToDate] = useState(manualToDate);
+  if (prevManualToDate !== manualToDate) {
+    setPrevManualToDate(manualToDate);
+    if (!manualToDate) {
+      setToDate(getTodayString());
+    }
+  }
 
   const setPresetRange = (preset: '30d' | '1y' | 'all' | 'expiry365') => {
     if (preset === '30d') {
@@ -259,12 +271,6 @@ const Reports = () => {
       setSendingWhatsapp(false);
     }
   };
-
-  useEffect(() => {
-    if (!manualToDate) {
-      setToDate(getTodayString());
-    }
-  }, [manualToDate]);
 
   const handleFromDateChange = (val: string) => {
     if (val && val < '2020-01-01') {

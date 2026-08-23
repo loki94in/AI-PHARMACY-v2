@@ -179,22 +179,14 @@ function StoreProfileTab({ rawSettings, refetchSettings }: { rawSettings: Record
   const queryClient = useQueryClient();
 
   // Storage Locations state
-  const [storageLocations, setStorageLocations] = useState<StorageLocation[]>([]);
+  const storageLocQuery = useApiQuery<StorageLocation[]>(
+    ['storage-locations'],
+    () => apiClient.get('/settings/storage-locations').then(res => res.data || []),
+  );
+  const storageLocations = storageLocQuery.data || [];
+  const fetchStorageLocations = () => storageLocQuery.refetch();
   const [storageLocForm, setStorageLocForm] = useState({ name: '', code: '', type: 'rack', description: '', is_default: false, is_active: true });
   const [editingLocId, setEditingLocId] = useState<number | null>(null);
-
-  const fetchStorageLocations = useCallback(async () => {
-    try {
-      const res = await apiClient.get('/settings/storage-locations');
-      setStorageLocations(res.data || []);
-    } catch (err) {
-      console.warn('Failed to fetch storage locations:', err);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchStorageLocations();
-  }, [fetchStorageLocations]);
 
   const handleResetStoreProfile = () => {
     setFormData({
@@ -776,6 +768,7 @@ function IntegrationsCredentialsTab({ rawSettings, refetchSettings, isVisible }:
   }, [isVisible]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- SSE/focus-driven WA status subscription
     fetchWaStatus();
     const handleSse = () => fetchWaStatus();
     window.addEventListener('sse-wa-status-changed', handleSse);
@@ -1603,7 +1596,7 @@ function TriggerSchedulesTab({ rawSettings, refetchSettings }: { rawSettings: Re
 
     // 5. Auto Expiry Return Memos
     triggerExpiryReturnEnabled: rawSettings.trigger_expiry_return_enabled !== 'false',
-    triggerExpiryReturnDays: rawSettings.trigger_expiry_return_days || '18,19,20',
+    triggerExpiryReturnIntervalDays: rawSettings.trigger_expiry_return_interval_days || '15',
 
     // 6. Pharmarack Token Refresher
     triggerPharmarackRefreshEnabled: rawSettings.trigger_pharmarack_refresh_enabled !== 'false',
@@ -1648,7 +1641,7 @@ function TriggerSchedulesTab({ rawSettings, refetchSettings }: { rawSettings: Re
         trigger_backup_enabled: formData.triggerBackupEnabled ? 'true' : 'false',
         trigger_backup_time: formData.triggerBackupTime,
         trigger_expiry_return_enabled: formData.triggerExpiryReturnEnabled ? 'true' : 'false',
-        trigger_expiry_return_days: formData.triggerExpiryReturnDays,
+        trigger_expiry_return_interval_days: formData.triggerExpiryReturnIntervalDays,
         trigger_pharmarack_refresh_enabled: formData.triggerPharmarackRefreshEnabled ? 'true' : 'false',
         trigger_pharmarack_refresh_interval_min: formData.triggerPharmarackRefreshIntervalMin,
         trigger_whatsapp_queue_enabled: formData.triggerWhatsappQueueEnabled ? 'true' : 'false',
@@ -1902,14 +1895,16 @@ function TriggerSchedulesTab({ rawSettings, refetchSettings }: { rawSettings: Re
               <div className="w-9 h-5 bg-bg3 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-500"></div>
             </label>
           </div>
-          <p className="text-[11px] text-muted">Automatically detects expired batches on selected days and creates pending items for pharmacist review (requires manual approval before stock deduction).</p>
+          <p className="text-[11px] text-muted">Scans in-stock inventory only (never sold or already-returned batches) for expired batches and creates pending items for pharmacist review. Requires manual approval before stock deduction.</p>
           <div className="flex items-center gap-2">
-            <label className="text-[11px] font-semibold text-text whitespace-nowrap">Days of Month:</label>
+            <label className="text-[11px] font-semibold text-text whitespace-nowrap">Interval (days):</label>
             <input
-              type="text"
-              placeholder="18,19,20"
-              value={formData.triggerExpiryReturnDays}
-              onChange={(e) => setFormData({ ...formData, triggerExpiryReturnDays: e.target.value })}
+              type="number"
+              min="1"
+              max="365"
+              placeholder="15"
+              value={formData.triggerExpiryReturnIntervalDays}
+              onChange={(e) => setFormData({ ...formData, triggerExpiryReturnIntervalDays: e.target.value })}
               className="w-full px-2.5 py-1 text-xs bg-bg border border-border rounded-lg text-text focus:outline-none focus:border-primary"
             />
           </div>

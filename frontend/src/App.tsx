@@ -41,8 +41,7 @@ const PharmarackCart = lazy(pageImports['/pharmarack-cart']);
 const InvestigationCenter = lazy(pageImports['/investigation']);
 const PhoneSales = lazy(pageImports['/phone-sales']);
 const DispatchPage = lazy(pageImports['/dispatch']);
-const CompliancePage = lazy(() => import('./pages/Compliance'));
-const SellPriceConfig = lazy(pageImports['/sell-price-config']);
+const CompliancePage = lazy(pageImports['/compliance']);
 const Learning = lazy(pageImports['/learning']);
 const AuditCenter = lazy(pageImports['/audit']);
 
@@ -68,7 +67,6 @@ const pageRoutes: KeepAliveRoute[] = [
   { path: '/dispatch', element: <DispatchPage /> },
   { path: '/database', element: <DatabasePage /> },
   { path: '/composition-queue', element: <CompositionQueue /> },
-  { path: '/sell-price-config', element: <SellPriceConfig /> },
   { path: '/learning', element: <Learning /> },
   { path: '/audit', element: <AuditCenter /> },
 ];

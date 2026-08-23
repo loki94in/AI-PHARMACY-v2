@@ -1073,9 +1073,9 @@ router.post('/manual', async (req, res) => {
       // Insert purchase_items
       await db.run(`
         INSERT INTO purchase_items 
-        (purchase_id, medicine_id, batch_no, expiry_date, quantity, free_qty, cost_price, mrp, cgst_per, cgst_value, sgst_per, sgst_value, cd_value)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `, [purchaseId, medId, rawBatch, rawExpiry || null, rawQty, rawFreeQty, rawRate, rawMrp || 0, rawCgst, cgstVal, rawSgst, sgstVal, lineDisc]);
+        (purchase_id, medicine_id, batch_no, expiry_date, quantity, free_qty, cost_price, mrp, cgst_per, cgst_value, sgst_per, sgst_value, cd_value, hsn_code)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `, [purchaseId, medId, rawBatch, rawExpiry || null, rawQty, rawFreeQty, rawRate, rawMrp || 0, rawCgst, cgstVal, rawSgst, sgstVal, lineDisc, item.hsn_code || null]);
 
       // sell_price filled in batch SELECT after loop (ponytail: replaces N per-item round-trips)
       savedItems.push({
@@ -1542,9 +1542,9 @@ async function handleUpdatePurchaseFull(req: express.Request, res: express.Respo
 
       await db.run(`
         INSERT INTO purchase_items 
-        (purchase_id, medicine_id, batch_no, expiry_date, quantity, free_qty, cost_price, mrp, cgst_per, cgst_value, sgst_per, sgst_value, cd_value)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `, [id, medId, rawBatch, rawExpiry || null, rawQty, rawFreeQty, rawRate, rawMrp || 0, rawCgst, cgstVal, rawSgst, sgstVal, lineDisc]);
+        (purchase_id, medicine_id, batch_no, expiry_date, quantity, free_qty, cost_price, mrp, cgst_per, cgst_value, sgst_per, sgst_value, cd_value, hsn_code)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `, [id, medId, rawBatch, rawExpiry || null, rawQty, rawFreeQty, rawRate, rawMrp || 0, rawCgst, cgstVal, rawSgst, sgstVal, lineDisc, (item as any).hsn_code || (item as any).hsn || null]);
 
       // Fetch current sell_price for saved_items
       const medRow = await db.get('SELECT sell_price FROM medicines WHERE id = ?', [medId]);
@@ -1718,6 +1718,8 @@ router.get('/last-purchase', async (req, res) => {
     // medicine_id allows skipping the expensive name LIKE scan entirely
     const medicineIdParam = req.query.medicine_id as string;
     const distributorId = req.query.distributor_id as string;
+    // Optional same-batch narrowing ("same batch → same rate/mrp/GST" autofill)
+    const batchNo = (req.query.batch_no as string || '').trim();
     if (!name && !medicineIdParam) {
       return res.status(400).json({ error: 'Medicine name or id is required' });
     }
@@ -1767,6 +1769,11 @@ router.get('/last-purchase', async (req, res) => {
       params.push(parseInt(distributorId));
     }
 
+    if (batchNo) {
+      query += ' AND pi.batch_no COLLATE NOCASE = ?';
+      params.push(batchNo);
+    }
+
     query += ' ORDER BY p.date DESC LIMIT 1';
 
     const lastPurchase = await db.get(query, params);
@@ -1784,6 +1791,7 @@ router.get('/last-purchase', async (req, res) => {
       cost_price: lastPurchase.cost_price,
       rate: lastPurchase.cost_price,
       mrp: lastPurchase.mrp,
+      hsn_code: lastPurchase.hsn_code || null,
       cgst_per: lastPurchase.cgst_per,
       sgst_per: lastPurchase.sgst_per,
       quantity: lastPurchase.quantity,
@@ -1854,6 +1862,7 @@ router.get('/price-history', async (req, res) => {
         pi.mrp,
         pi.quantity,
         pi.free_qty,
+        pi.hsn_code,
         pi.cgst_per,
         pi.sgst_per,
         pi.igst_per,
@@ -1949,6 +1958,7 @@ router.post('/batch-last-purchase', async (req, res) => {
         expiry_date: row.expiry_date,
         cost_price: row.cost_price,
         mrp: row.mrp,
+        hsn_code: row.hsn_code || null,
         cgst_per: row.cgst_per,
         sgst_per: row.sgst_per,
         quantity: row.quantity,
@@ -1963,6 +1973,96 @@ router.post('/batch-last-purchase', async (req, res) => {
     res.json(results);
   } catch (error) {
     console.error('Batch last purchase error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// History prefill for new-medicine registration: best historical match from
+// approved purchase bills, falling back to pending staged email invoices.
+// READ-ONLY — never creates records. All returned values come from real
+// parsed invoice data with provenance; missing fields stay null.
+router.get('/history-prefill', async (req, res) => {
+  let db;
+  try {
+    const name = String(req.query.name || '').trim();
+    if (name.length < 3) {
+      return res.status(400).json({ error: 'Medicine name (min 3 chars) is required' });
+    }
+    db = await dbManager.getConnection();
+
+    // Tiered candidate scoping — prefix range scan first, infix only as fallback
+    let medicineIds: number[] = (await db.all('SELECT id FROM medicines WHERE name LIKE ? LIMIT 5', [`${name}%`])).map((m: any) => m.id);
+    if (medicineIds.length === 0) {
+      medicineIds = (await db.all('SELECT id FROM medicines WHERE name LIKE ? LIMIT 5', [`%${name}%`])).map((m: any) => m.id);
+    }
+
+    // 1) Approved bill (committed truth) — most recent line for these candidates
+    let best: Record<string, any> | null = null;
+    if (medicineIds.length > 0) {
+      const ph = medicineIds.map(() => '?').join(',');
+      const row = await db.get(`
+        SELECT pi.hsn_code, pi.cgst_per, pi.sgst_per, pi.igst_per, pi.mrp, pi.cost_price as rate,
+               m.name as matched_name,
+               p.invoice_no, p.date as invoice_date,
+               d.name as distributor_name
+        FROM purchase_items pi
+        JOIN purchases p ON pi.purchase_id = p.id
+        JOIN medicines m ON pi.medicine_id = m.id
+        JOIN distributors d ON p.distributor_id = d.id
+        WHERE pi.medicine_id IN (${ph})
+        ORDER BY p.date DESC LIMIT 1
+      `, medicineIds);
+      if (row && (row.hsn_code || row.cgst_per || row.sgst_per || row.mrp || row.rate)) {
+        best = {
+          source: 'purchase_bill',
+          hsn_code: row.hsn_code || null,
+          cgst_per: row.cgst_per ?? null,
+          sgst_per: row.sgst_per ?? null,
+          mrp: row.mrp ?? null,
+          rate: row.rate ?? null,
+          matched_name: row.matched_name,
+          distributor_name: row.distributor_name,
+          provenance: `Invoice ${row.invoice_no || '—'} · ${row.distributor_name} · ${row.invoice_date || ''}`.trim()
+        };
+      }
+    }
+
+    // 2) Fallback: pending staged email invoices (parsed but not yet approved)
+    if (!best) {
+      try {
+        const pendingRows = await db.all(
+          `SELECT id, distributor_name, invoice_no, date, items_json FROM staged_purchases WHERE status = 'pending' ORDER BY id DESC LIMIT 50`
+        );
+        const wanted = name.toLowerCase();
+        outer: for (const srow of pendingRows) {
+          let items: any[] = [];
+          try { items = JSON.parse(srow.items_json || '[]'); } catch (_) { continue; }
+          for (const it of items) {
+            const n = String(it.name || it.medicine_name || '').trim().toLowerCase();
+            if (!n) continue;
+            if (n === wanted || n.startsWith(wanted) || n.includes(wanted)) {
+              best = {
+                source: 'pending_email',
+                hsn_code: String(it.hsn_code || '').trim() || null,
+                cgst_per: it.cgst_per ?? null,
+                sgst_per: it.sgst_per ?? null,
+                mrp: it.mrp ?? null,
+                rate: it.cost_price ?? it.rate ?? null,
+                matched_name: String(it.name || it.medicine_name || '').trim(),
+                distributor_name: srow.distributor_name || null,
+                provenance: `Pending email invoice ${srow.invoice_no || '—'} · ${srow.distributor_name || ''} · ${srow.date || ''}`.trim()
+              };
+              break outer;
+            }
+          }
+        }
+      } catch (_) { /* staged lookup is best-effort */ }
+    }
+
+    if (!best) return res.json({ found: false });
+    return res.json({ found: true, ...best });
+  } catch (error) {
+    console.error('History prefill error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -2960,9 +3060,9 @@ router.post('/reconciliation/reissue', async (req, res) => {
       // Insert purchase_items
       await db.run(`
         INSERT INTO purchase_items 
-        (purchase_id, medicine_id, batch_no, expiry_date, quantity, free_qty, cost_price, mrp, cgst_per, cgst_value, sgst_per, sgst_value, cd_value)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, 0)
-      `, [purchaseId, medId, rawBatch, rawExpiry, qty, freeQty, rate, mrp]);
+        (purchase_id, medicine_id, batch_no, expiry_date, quantity, free_qty, cost_price, mrp, cgst_per, cgst_value, sgst_per, sgst_value, cd_value, hsn_code)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, 0, ?)
+      `, [purchaseId, medId, rawBatch, rawExpiry, qty, freeQty, rate, mrp, (item as any).hsn_code || null]);
 
       // Update inventory_master (reissue)
       const totalQty = qty + freeQty;
@@ -3319,6 +3419,7 @@ router.post('/staged/:id/approve', async (req, res) => {
       const cgstPer = Number(item.cgst_per || 0);
       const sgstPer = Number(item.sgst_per || 0);
       const cdValue = Number(item.cd_value || 0);
+      const hsnCode = String(item.hsn_code || '').trim() || null;
 
       const taxable = qty * rate;
       const cgstVal = taxable * (cgstPer / 100);
@@ -3326,9 +3427,9 @@ router.post('/staged/:id/approve', async (req, res) => {
 
       await db.run(`
         INSERT INTO purchase_items 
-        (purchase_id, medicine_id, batch_no, expiry_date, quantity, free_qty, cost_price, mrp, cgst_per, cgst_value, sgst_per, sgst_value, cd_value)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `, [purchaseId, medId, rawBatch, rawExpiry, qty, freeQty, rate, mrp, cgstPer, cgstVal, sgstPer, sgstVal, cdValue]);
+        (purchase_id, medicine_id, batch_no, expiry_date, quantity, free_qty, cost_price, mrp, cgst_per, cgst_value, sgst_per, sgst_value, cd_value, hsn_code)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `, [purchaseId, medId, rawBatch, rawExpiry, qty, freeQty, rate, mrp, cgstPer, cgstVal, sgstPer, sgstVal, cdValue, hsnCode]);
 
       // Update stock level
       const totalQty = qty + freeQty;

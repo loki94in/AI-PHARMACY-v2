@@ -133,6 +133,7 @@ export default function PhoneSales() {
   const hasLiveDevice = devices.some(d => d.is_online);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- P1 cache-first load + live-device gated poller
     fetchStagedSales();
     fetchDeviceData();
     if (!pageActive || !hasLiveDevice) return;

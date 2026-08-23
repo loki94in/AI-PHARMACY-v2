@@ -19,6 +19,11 @@ No purchase ingestion route may silently create `medicines` master rows. Master 
 - **`POST /purchases/match-items`**: read-only batch resolver (`{names[], distributor_id}` → `{input, medicine_id, matched_name, confidence, match_type}`) used by StagedReviewModal and Purchase save verification. One round-trip, max 200 names, NEVER creates records. Use it instead of N per-line autocomplete calls.
 - Email/telegram/mobile-sync ingestion only ever writes pending `staged_purchases`; approval remains a human-only UI action. Keep it that way.
 
+## HSN Persistence & History Prefill (added 2026-08)
+- All four `INSERT INTO purchase_items` sites in `routes/purchases.ts` now carry `hsn_code` from the parsed invoice/manual line when present (manual save, purchase edit, email reissue, staged approve). Missing values stay NULL — never invent one.
+- `GET /purchases/last-purchase`, `/price-history` and `POST /batch-last-purchase` expose `hsn_code`; `GET /purchases/history-prefill?name=` returns the best single historical match (approved bills first, pending staged email invoices as fallback) with provenance — READ-ONLY, never creates records. Used by the Universal editor's "Found in past bills" confirm strip; keep it user-clicked Apply, no silent autofill.
+- `GET /purchases/last-purchase` also accepts an optional `batch_no` param (`pi.batch_no COLLATE NOCASE = ?`) that narrows to the newest line of the SAME batch — powers the Purchases-page "same batch → same rate/MRP/GST" autofill. Keep it read-only.
+
 ## Rules & Constraints
 - Keep database operations secure, avoiding direct raw query concatenation.
 - All new dependencies must be scanned using `scan_dependencies` before import.
@@ -33,6 +38,16 @@ Page-switch latency rules — verified against the live DB (251 MB, 37k inventor
 - **Indexes** (`database.ts`, fast-boot block): `idx_dispatch_orders_created (created_at DESC)` and `idx_special_orders_date (date DESC)` back bare-ORDER-BY list endpoints; new list endpoints must get a matching index or a status-prefixed composite that the actual ORDER BY can use.
 - **Purchases date filters** (`routes/purchases.ts` GET `/`): exact `date(p.date,'localtime') BETWEEN ...` expressions are ALWAYS paired with sargable superset bounds (`p.date >= datetime(?,'-1 day')` / `< datetime(?,'+2 days')`) so `idx_purchases_date_dist` prunes first. Preserve both when editing filters.
 - Axios GET transient-error retry (frontend `services/api.ts`) uses short exponential backoff (300/600/1200 ms); do not restore long flat waits.
+
+## Expiry Return Review Scan & `expiry_month` Index (added 2026-08)
+
+The expired-stock → pharmacist-gate pipeline is inventory-only and event-maintained. Do not regress:
+
+- **`inventory_master.expiry_month`** (TEXT `YYYY-MM`): trigger-maintained shadow of the mixed-format `expiry_date` column (`trg_inventory_expiry_month_ins/_upd` in `database.ts`, normalization mirrors `routes/compliance.ts`; unparseable formats stay NULL). Backfill + `idx_inventory_expiry_month` run on schema apply (v43). NEVER write route-level code that recomputes it, and keep new expiry write paths trigger-compatible (plain INSERT/UPDATE of `expiry_date` is enough).
+- **Scan scope contract** (`services/returnsService.ts scanAndCreateExpiryReviews`): reads ONLY in-stock rows (`quantity > 0 OR loose_quantity > 0`) via an indexed range on `expiry_month <= strftime('%Y-%m','now','localtime')` plus a NULL-bucket fallback verified by JS `isExpired()`. NO joins into purchases/orders/sales. Batches whose latest review is 'rejected' with unchanged quantity are never re-flagged; changed stock re-flags.
+- **Distributor resolution belongs at approval time** (`routes/returns.ts` single + bulk approve): one indexed lookup (latest purchase line for medicine_id+batch_no). The scan stores NULL distributor — do not move purchase-history joins back into the scan.
+- **Schedule**: every-N-days interval gate (`shouldRunScheduledExpiryReturnScan` / `last_expiry_return_scan_date` in `app_settings`, setting `trigger_expiry_return_interval_days`, default 15) checked by a daily 09:00 cron tick and the boot catch-up in `server.ts`. Off-day ticks cost ONE settings read. The old fixed days-of-month key `trigger_expiry_return_days` is retired.
+- **`deactivateExpiredInventory`** (`utils/inventoryActive.ts`) flips ONLY `is_active = 0`; quantities are preserved so the pharmacist gate can return expired stock. Never reintroduce quantity zeroing here — POS safety comes from the `is_active` filter alone.
 
 ## Self-Healing Crash Recovery (added 2026-06)
 

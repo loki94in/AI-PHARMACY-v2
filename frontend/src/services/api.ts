@@ -178,6 +178,10 @@ tryHydrateCompactCacheFromSession();
 // entries instead of firing a second concurrent request for the same endpoint.
 let waQueueStatusCache: { data: WhatsAppQueueStatus | null; at: number } | null = null;
 
+export const setWhatsAppQueueStatusCache = (data: WhatsAppQueueStatus | null): void => {
+  waQueueStatusCache = { data, at: Date.now() };
+};
+
 export const peekWhatsAppQueueStatusCache = (maxAgeMs = 2500): WhatsAppQueueStatus | null => {
   return waQueueStatusCache && Date.now() - waQueueStatusCache.at < maxAgeMs ? waQueueStatusCache.data : null;
 };
@@ -713,6 +717,19 @@ export interface BatchLastPurchaseResult {
   invoice_no?: string;
 }
 
+export interface HistoryPrefillResult {
+  found: boolean;
+  source?: 'purchase_bill' | 'pending_email';
+  hsn_code?: string | null;
+  cgst_per?: number | null;
+  sgst_per?: number | null;
+  mrp?: number | null;
+  rate?: number | null;
+  matched_name?: string;
+  distributor_name?: string | null;
+  provenance?: string;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 // API methods mapping
@@ -762,8 +779,6 @@ export const api = {
       }
       return res.data;
     }),
-  getSellPriceMedicinesByInvoice: (invoiceNo: string) =>
-    apiClient.get(`/sell-price/by-invoice/${encodeURIComponent(invoiceNo)}`).then(res => res.data),
   
   // Sales / POS
   getSalesHistory: () => apiClient.get('/sales/history').then(res => res.data),
@@ -805,16 +820,19 @@ export const api = {
   createManualPurchase: (data: PurchasePayload) => apiClient.post('/purchases/manual', data, { timeout: 30000 }).then(res => res.data),
   getDistributors: () => apiClient.get('/distributors').then(res => res.data),
   getPendingReturns: (distributorId: number) => apiClient.get(`/distributors/${distributorId}/pending-returns`).then(res => res.data),
-  getLastPurchase: (name: string, medicineId?: number, distributorId?: number) => {
-    const params: { name: string; medicine_id?: number; distributor_id?: number } = { name };
+  getLastPurchase: (name: string, medicineId?: number, distributorId?: number, batchNo?: string) => {
+    const params: { name: string; medicine_id?: number; distributor_id?: number; batch_no?: string } = { name };
     if (medicineId) params.medicine_id = medicineId;
     if (distributorId) params.distributor_id = distributorId;
+    if (batchNo && batchNo.trim()) params.batch_no = batchNo.trim();
     return apiClient.get('/purchases/last-purchase', { params }).then(res => res.data);
   },
   batchLastPurchase: (medicines: Array<{name: string}>, distributorId?: number) =>
     apiClient.post('/purchases/batch-last-purchase', { medicines, distributor_id: distributorId }).then(res => res.data),
   matchPurchaseItems: (names: string[], distributorId?: number | null) =>
     apiClient.post('/purchases/match-items', { names, distributor_id: distributorId }).then(res => res.data),
+  historyPrefill: (name: string) =>
+    apiClient.get<HistoryPrefillResult>('/purchases/history-prefill', { params: { name } }).then(res => res.data),
   catalogSearch: (q: string) => apiClient.get('/inventory/catalog-search', { params: { q } }).then(res => res.data),
   getBatchInfo: (medicineId: number, batchNo: string) => apiClient.get('/inventory/batch-info', { params: { medicine_id: medicineId, batch_no: batchNo } }).then(res => res.data),
   createMedicineAlias: (aliasName: string, medicineId: number) => apiClient.post('/inventory/medicines/alias', { alias_name: aliasName, medicine_id: medicineId }).then(res => res.data),
@@ -834,16 +852,10 @@ export const api = {
       headers: { 'Content-Type': undefined }
     }).then(r => r.data);
   },
-  analyzeMigrationFile: (fileName: string, skipLines: number = 0) => 
+  analyzeMigrationFile: (fileName: string, skipLines: number = 0) =>
     apiClient.post('/migration/analyze', { fileName, skipLines }).then(r => r.data),
-  analyzeZipFile: (fileName: string) =>
-    apiClient.post('/migration/analyze-zip', { fileName }).then(r => r.data),
-  analyzeExcelFile: (fileName: string, sheetIndex?: number, skipLines?: number) =>
-    apiClient.post('/migration/analyze-excel', { fileName, sheetIndex, skipLines }).then(r => r.data),
   preMigrationAnalyze: (fileName: string, skipLines: number = 0, sheetIndex: number = 0, userMapping?: unknown) =>
     apiClient.post('/migration/pre-migration-analyze', { fileName, skipLines, sheetIndex, userMapping }).then(r => r.data),
-  preMigrationSimulate: (fileName: string, dataType: string, mapping: unknown, skipLines: number = 0, sheetIndex: number = 0, filters?: unknown) =>
-    apiClient.post('/migration/pre-migration-simulate', { fileName, dataType, mapping, skipLines, sheetIndex, filters }).then(r => r.data),
   runMigration: (fileName: string, dataType: string, mapping: unknown, skipLines: number = 0, sheetIndex: number = 0, filters?: unknown, medicineActions?: unknown) =>
     apiClient.post('/migration/run', { fileName, dataType, mapping, skipLines, sheetIndex, filters, medicineActions }).then(r => r.data),
   runMigrationQueue: (tasks: readonly Record<string, unknown>[]) =>
@@ -852,31 +864,9 @@ export const api = {
   getMigrationSummary: () => apiClient.get('/migration/summary').then(r => r.data),
   getStagingSummary: () => apiClient.get('/migration/staging/summary').then(r => r.data),
   getStagingInventory: () => apiClient.get('/migration/staging/inventory').then(r => r.data),
-  updateStagingInventory: (id: number, data: Record<string, unknown>) => apiClient.put(`/migration/staging/inventory/${id}`, data).then(r => r.data),
-  deleteStagingInventory: (id: number) => apiClient.delete(`/migration/staging/inventory/${id}`).then(r => r.data),
   getStagingSales: () => apiClient.get('/migration/staging/sales').then(r => r.data),
-  updateStagingSales: (id: number, data: Record<string, unknown>) => apiClient.put(`/migration/staging/sales/${id}`, data).then(r => r.data),
-  deleteStagingSales: (id: number) => apiClient.delete(`/migration/staging/sales/${id}`).then(r => r.data),
   getStagingPurchases: () => apiClient.get('/migration/staging/purchases').then(r => r.data),
-  updateStagingPurchases: (id: number, data: Record<string, unknown>) => apiClient.put(`/migration/staging/purchases/${id}`, data).then(r => r.data),
-  deleteStagingPurchases: (id: number) => apiClient.delete(`/migration/staging/purchases/${id}`).then(r => r.data),
   getStagingReturns: () => apiClient.get('/migration/staging/returns').then(r => r.data),
-  updateStagingReturns: (id: number, data: Record<string, unknown>) => apiClient.put(`/migration/staging/returns/${id}`, data).then(r => r.data),
-  deleteStagingReturns: (id: number) => apiClient.delete(`/migration/staging/returns/${id}`).then(r => r.data),
-  getStagingSaleItems: (id: number) => apiClient.get(`/migration/staging/sales/${id}/items`).then(r => r.data),
-  updateStagingSaleItem: (invoiceId: number, itemId: number, data: Record<string, unknown>) => apiClient.put(`/migration/staging/sales/${invoiceId}/items/${itemId}`, data).then(r => r.data),
-  deleteStagingSaleItem: (invoiceId: number, itemId: number) => apiClient.delete(`/migration/staging/sales/${invoiceId}/items/${itemId}`).then(r => r.data),
-  addStagingSaleItem: (invoiceId: number, data: Record<string, unknown>) => apiClient.post(`/migration/staging/sales/${invoiceId}/items`, data).then(r => r.data),
-
-  getStagingPurchaseItems: (id: number) => apiClient.get(`/migration/staging/purchases/${id}/items`).then(r => r.data),
-  updateStagingPurchaseItem: (purchaseId: number, itemId: number, data: Record<string, unknown>) => apiClient.put(`/migration/staging/purchases/${purchaseId}/items/${itemId}`, data).then(r => r.data),
-  deleteStagingPurchaseItem: (purchaseId: number, itemId: number) => apiClient.delete(`/migration/staging/purchases/${purchaseId}/items/${itemId}`).then(r => r.data),
-  addStagingPurchaseItem: (purchaseId: number, data: Record<string, unknown>) => apiClient.post(`/migration/staging/purchases/${purchaseId}/items`, data).then(r => r.data),
-
-  getStagingReturnItems: (id: number) => apiClient.get(`/migration/staging/returns/${id}/items`).then(r => r.data),
-  updateStagingReturnItem: (returnId: number, itemId: number, data: Record<string, unknown>) => apiClient.put(`/migration/staging/returns/${returnId}/items/${itemId}`, data).then(r => r.data),
-  deleteStagingReturnItem: (returnId: number, itemId: number) => apiClient.delete(`/migration/staging/returns/${returnId}/items/${itemId}`).then(r => r.data),
-  addStagingReturnItem: (returnId: number, data: Record<string, unknown>) => apiClient.post(`/migration/staging/returns/${returnId}/items`, data).then(r => r.data),
   getStagingErrors: () => apiClient.get('/migration/staging/errors').then(r => r.data),
   getStagingAudits: (params?: { limit?: number; offset?: number }) => apiClient.get('/migration/staging/audits', { params }).then(r => r.data),
   getStagingAuditSummary: () => apiClient.get('/migration/staging/audit').then(r => r.data),

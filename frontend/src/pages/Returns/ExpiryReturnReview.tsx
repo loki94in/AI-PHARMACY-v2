@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState } from 'react';
 import { 
   ShieldAlert, 
   CheckCircle2, 
@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { api } from '../../services/api';
 import { useQueryClient } from '@tanstack/react-query';
+import { useApiQuery } from '../../hooks/useApiQuery';
 import { invalidateAfterStockWrite } from '../../utils/cacheInvalidation';
 
 interface LocalExpiryAuditRow {
@@ -74,15 +75,17 @@ let cachedStats: ReviewStats = {
   totalCount: 0,
 };
 
+// Module-level cache writers (SPA Performance Contract: module caches are
+// mutated outside render-analyzed code).
+const storeCachedReviews = (list: ExpiryReviewItem[]) => { cachedReviews = list; };
+const storeCachedStats = (st: ReviewStats) => { cachedStats = st; };
+
 export const ExpiryReturnReview: React.FC<{ onPendingCountChange?: (count: number) => void }> = ({ onPendingCountChange }) => {
   const queryClient = useQueryClient();
-  const [reviews, setReviews] = useState<ExpiryReviewItem[]>(cachedReviews);
-  const [stats, setStats] = useState<ReviewStats>(cachedStats);
-
-  const [loading, setLoading] = useState(cachedReviews.length === 0);
-  const [scanning, setScanning] = useState(false);
   const [statusFilter, setStatusFilter] = useState<'pending' | 'approved' | 'rejected' | 'all'>('pending');
   const [searchQuery, setSearchQuery] = useState('');
+
+  const [scanning, setScanning] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [actionInProgressId, setActionInProgressId] = useState<number | null>(null);
   const [bulkApproving, setBulkApproving] = useState(false);
@@ -107,42 +110,45 @@ export const ExpiryReturnReview: React.FC<{ onPendingCountChange?: (count: numbe
   const [bulkLossPercentage, setBulkLossPercentage] = useState<string>('0');
   const [bulkError, setBulkError] = useState('');
 
-  const fetchReviews = useCallback(async () => {
-    try {
-      setLoading(true);
-      const res = await api.getExpiryReviews({
-        status: statusFilter,
-        search: searchQuery || undefined,
-      });
-
-      if (res && res.success) {
-        const list = res.reviews || [];
-        const st = res.stats || {
-          pendingCount: 0,
-          approvedCount: 0,
-          rejectedCount: 0,
-          pendingAmount: 0,
-          approvedAmount: 0,
-          totalCount: 0,
-        };
-        cachedReviews = list;
-        cachedStats = st;
-        setReviews(list);
-        setStats(st);
-        if (onPendingCountChange) {
-          onPendingCountChange(st.pendingCount || 0);
+  // Filtered reviews via react-query (canonical 'expiry-reviews' SSE key).
+  // Module caches seed/absorb data so remounts paint instantly.
+  const reviewQuery = useApiQuery<{ reviews: ExpiryReviewItem[]; stats: ReviewStats }>(
+    ['expiry-reviews', statusFilter, searchQuery || ''],
+    async () => {
+      try {
+        const res = await api.getExpiryReviews({
+          status: statusFilter,
+          search: searchQuery || undefined,
+        });
+        if (res && res.success) {
+          const list = res.reviews || [];
+          const st = res.stats || {
+            pendingCount: 0,
+            approvedCount: 0,
+            rejectedCount: 0,
+            pendingAmount: 0,
+            approvedAmount: 0,
+            totalCount: 0,
+          };
+          storeCachedReviews(list);
+          storeCachedStats(st);
+          if (onPendingCountChange) {
+            onPendingCountChange(st.pendingCount || 0);
+          }
+          return { reviews: list, stats: st };
         }
+      } catch (err) {
+        console.error('Failed to load expiry reviews:', err);
       }
-    } catch (err) {
-      console.error('Failed to load expiry reviews:', err);
-    } finally {
-      setLoading(false);
-    }
-  }, [statusFilter, searchQuery, onPendingCountChange]);
+      return { reviews: cachedReviews, stats: cachedStats };
+    },
+    { placeholderData: cachedReviews.length > 0 ? { reviews: cachedReviews, stats: cachedStats } : undefined }
+  );
+  const reviews = reviewQuery.data?.reviews || [];
+  const stats = reviewQuery.data?.stats || cachedStats;
+  const loading = reviewQuery.isFetching;
 
-  useEffect(() => {
-    fetchReviews();
-  }, [fetchReviews]);
+  const fetchReviews = () => reviewQuery.refetch();
 
   const handleScanNow = async () => {
     setScanning(true);

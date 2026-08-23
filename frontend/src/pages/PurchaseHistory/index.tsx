@@ -191,8 +191,6 @@ const PurchaseHistory = () => {
 
   // Reconciliation States
   const [activeTab, setActiveTab] = useState<'history' | 'reconciliation'>('history');
-  const [reconciliationList, setReconciliationList] = useState<LocalReconRow[]>([]);
-  const [loadingRecon, setLoadingRecon] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<LocalReconRow | null>(null);
   const [reissuingUid, setReissuingUid] = useState<number | null>(null);
   const [viewPurchase, setViewPurchase] = useState<LocalViewedPurchase | null>(null);
@@ -260,25 +258,16 @@ const PurchaseHistory = () => {
     }
   };
 
-  const fetchHistory = async () => {
-    refetch();
-  };
-
-  const fetchReconciliation = async () => {
-    try {
-      setLoadingRecon(true);
-      const data = await api.getReconciliationList();
-      setReconciliationList(Array.isArray(data) ? data : []);
-    } catch (err) {
-      console.error('Error fetching reconciliation list:', err);
-    } finally {
-      setLoadingRecon(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchReconciliation();
-  }, []);
+  // Reconciliation list via react-query; refreshed by DOM stock/purchase events below
+  const {
+    data: reconciliationData,
+    isFetching: loadingRecon,
+    refetch: fetchReconciliation,
+  } = useApiQuery<LocalReconRow[]>(
+    ['purchase-reconciliation'],
+    () => api.getReconciliationList(),
+  );
+  const reconciliationList = reconciliationData || [];
 
   useEffect(() => {
     const handleUpdate = () => {
@@ -291,7 +280,7 @@ const PurchaseHistory = () => {
       window.removeEventListener('stock-write-completed', handleUpdate);
       window.removeEventListener('app-purchases-updated', handleUpdate);
     };
-  }, [refetch]);
+  }, [refetch, fetchReconciliation]);
 
   const handleReissue = async (uid: number) => {
     try {
@@ -704,7 +693,7 @@ const PurchaseHistory = () => {
                                   if (window.confirm('Are you sure you want to delete this purchase? This will reduce the stock in inventory.')) {
                                     api.deletePurchase(tx.id).then(() => {
                                       alert('Purchase deleted and stock reverted');
-                                      fetchHistory();
+                                      refetch();
                                     }).catch((err) => {
                                       alert('Failed to delete purchase: ' + (err.response?.data?.error || err.message));
                                     });
@@ -748,7 +737,7 @@ const PurchaseHistory = () => {
               </p>
             </div>
             <button
-              onClick={fetchReconciliation}
+              onClick={() => fetchReconciliation()}
               className="p-2 rounded-lg bg-bg3 hover:bg-glass-bg border border-glass-border text-text text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer"
             >
               <RefreshCw size={14} className={loadingRecon ? 'animate-spin' : ''} />

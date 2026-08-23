@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { 
   X, 
@@ -116,10 +116,10 @@ const getEffectiveRate = (rate: number, schemeStr: string | undefined, qty: numb
 export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   const [isOpen, setIsOpen] = useState(true);
   
-  const handleClose = () => {
+  const handleClose = useCallback(() => {
     setIsOpen(false);
     onClose();
-  };
+  }, [onClose]);
   
   // Staged Cart List
   const [cart, setCart] = useState<LocalStagedOrderItem[]>([]);
@@ -317,7 +317,7 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
+  }, [isOpen, onClose, handleClose]);
 
   // Handle outside clicks for autocomplete
   useEffect(() => {
@@ -335,6 +335,7 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
     if (isSelectingRef.current) return;
     const query = product.trim();
     if (query.length < 3) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- autocomplete <3-char gating reset (AGENTS.md)
       setSuggestions([]);
       setShowSuggestions(false);
       return;

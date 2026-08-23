@@ -34,6 +34,11 @@ axios.defaults.timeout = 20000;
 // and randomly 500 during the boot window.
 let schemaReady = false;
 
+// Boot timing baseline + best-effort counter of background worker start failures,
+// surfaced in one summary line ~T+10s so silent degradations are visible at a glance.
+const BOOT_T0 = performance.now();
+let bootWorkerFailures = 0;
+
 // Startup check disabled permanently
 
 /**
@@ -48,9 +53,11 @@ let schemaReady = false;
  * would fall through to a real runtime import that has nothing to resolve
  * against once everything is bundled into one file.
  */
-const registeredLazyRoutes: Array<() => Promise<any>> = [];
+type RouteTier = 'hot' | 'medium' | 'heavy';
 
-function lazyRoute(loader: () => Promise<{ default: express.Router }>): express.RequestHandler {
+const registeredLazyRoutes: Array<{ preload: () => Promise<any>; tier: RouteTier }> = [];
+
+function lazyRoute(loader: () => Promise<{ default: express.Router }>, tier: RouteTier = 'medium'): express.RequestHandler {
   let router: express.Router | null = null;
   let loadPromise: Promise<express.Router> | null = null;
   const preload = () => {
@@ -63,7 +70,7 @@ function lazyRoute(loader: () => Promise<{ default: express.Router }>): express.
     }
     return loadPromise;
   };
-  registeredLazyRoutes.push(preload);
+  registeredLazyRoutes.push({ preload, tier });
   return (req, res, next) => {
     if (process.env.NODE_ENV !== 'production') {
       loader().then(m => m.default(req, res, next)).catch(next);
@@ -74,12 +81,46 @@ function lazyRoute(loader: () => Promise<{ default: express.Router }>): express.
   };
 }
 
-// Background route pre-warming for instant response times in production / executable build
-setImmediate(() => {
-  Promise.allSettled(registeredLazyRoutes.map(fn => fn())).then(() => {
-    console.log('[Server] Background route pre-warming complete. All API routes cached in memory.');
-  });
-});
+/**
+ * Tiered background route pre-warm, started ONLY after the schema gate opens
+ * (Phase 1) so module compilation never competes with database DDL for the
+ * event loop.
+ *
+ * - hot: POS-critical routes, loaded immediately.
+ * - medium: everything else, in small staggered batches to flatten the CPU spike.
+ * - heavy: AI/OCR/migration modules that drag puppeteer/tesseract/onnx/xlsx-sized
+ *   dependency trees into RAM. Loaded one-by-one only while the shop PC is idle;
+ *   any earlier real request loads them on demand via the normal lazyRoute
+ *   fallback, so skipping them is always safe.
+ */
+let preWarmStarted = false;
+async function startTieredPreWarm(): Promise<void> {
+  if (preWarmStarted) return;
+  preWarmStarted = true;
+  const t0 = performance.now();
+  const loaders = (tier: RouteTier) => registeredLazyRoutes.filter(r => r.tier === tier).map(r => r.preload);
+
+  await Promise.allSettled(loaders('hot'));
+
+  const medium = loaders('medium');
+  for (let i = 0; i < medium.length; i += 5) {
+    await new Promise(resolve => setTimeout(resolve, 300));
+    void Promise.allSettled(medium.slice(i, i + 5));
+  }
+
+  console.log(`[Boot] Route pre-warm complete (hot+medium) in ${Math.round(performance.now() - t0)}ms.`);
+
+  const heavy = loaders('heavy');
+  let heavyIdx = 0;
+  const heavyTimer = setInterval(() => {
+    if (heavyIdx >= heavy.length) {
+      clearInterval(heavyTimer);
+      return;
+    }
+    if (!activityTracker.isIdle(5 * 60 * 1000)) return;
+    void heavy[heavyIdx++]().catch(() => {});
+  }, 15_000);
+}
 
 // Register process-level crash handler (logs to crash_log, exits(1) for watchdog restart)
 registerProcessGuardian();
@@ -221,29 +262,27 @@ app.use('/api/utilities', lazyRoute(() => import('./routes/utilities.js')));
 app.use('/api/security', lazyRoute(() => import('./routes/security.js')));
 app.use('/api/email', lazyRoute(() => import('./routes/email.js')));
 app.use('/api/verification', lazyRoute(() => import('./routes/verification.js')));
-app.use('/api/migration', lazyRoute(() => import('./routes/migration.js')));
-app.use('/api/settings', lazyRoute(() => import('./routes/settings.js')));
-app.use('/api/pharmarack', lazyRoute(() => import('./routes/pharmarack.js')));
+app.use('/api/migration', lazyRoute(() => import('./routes/migration.js'), 'heavy'));
+app.use('/api/settings', lazyRoute(() => import('./routes/settings.js'), 'hot'));
+app.use('/api/pharmarack', lazyRoute(() => import('./routes/pharmarack.js'), 'hot'));
 app.use('/api/dispatch', lazyRoute(() => import('./routes/dispatch.js')));
-app.use('/api/archive', lazyRoute(() => import('./routes/archive.js')));
-app.use('/api/learning', lazyRoute(() => import('./routes/learning.js')));
+app.use('/api/learning', lazyRoute(() => import('./routes/learning.js'), 'heavy'));
 app.use('/api/messaging', lazyRoute(() => import('./routes/messaging.js')));
-app.use('/api/aicamera', lazyRoute(() => import('./routes/aiCamera.js')));
-app.use('/api/telegram-prescription', lazyRoute(() => import('./routes/telegramPrescription.js')));
+app.use('/api/aicamera', lazyRoute(() => import('./routes/aiCamera.js'), 'heavy'));
+app.use('/api/telegram-prescription', lazyRoute(() => import('./routes/telegramPrescription.js'), 'heavy'));
 app.use('/api/refills', lazyRoute(() => import('./routes/refills.js')));
 app.use('/api/wa-business', lazyRoute(() => import('./routes/whatsappBusiness.js')));
 app.use('/api/automation', lazyRoute(() => import('./routes/automation.js')));
 app.use('/api/triggers', lazyRoute(() => import('./routes/triggers.js')));
 app.use('/api/system', lazyRoute(() => import('./routes/serviceStatus.js')));
 // Core API routes
-app.use('/api/sales', lazyRoute(() => import('./routes/sales.js')));
-app.use('/api/inventory', lazyRoute(() => import('./routes/inventory.js')));
-app.use('/api/dashboard', lazyRoute(() => import('./routes/dashboard.js')));
-app.use('/api/purchases', lazyRoute(() => import('./routes/purchases.js')));
+app.use('/api/sales', lazyRoute(() => import('./routes/sales.js'), 'hot'));
+app.use('/api/inventory', lazyRoute(() => import('./routes/inventory.js'), 'hot'));
+app.use('/api/dashboard', lazyRoute(() => import('./routes/dashboard.js'), 'hot'));
+app.use('/api/purchases', lazyRoute(() => import('./routes/purchases.js'), 'hot'));
 app.use('/api/sell-price', lazyRoute(() => import('./routes/sellPrice.js')));
 app.use('/api/returns', lazyRoute(() => import('./routes/returns.js')));
 app.use('/api/customer-returns', lazyRoute(() => import('./routes/customerReturns.js')));
-app.use('/api/credit-notes', lazyRoute(() => import('./routes/creditNotes.js')));
 app.use('/api/orders', lazyRoute(() => import('./routes/orders.js')));
 app.use('/api/quick-assistant', lazyRoute(() => import('./routes/quickAssistant.js')));
 app.use('/api/expiry', lazyRoute(() => import('./routes/expiry.js')));
@@ -253,13 +292,13 @@ app.use('/api/email-order-reviews', lazyRoute(() => import('./routes/emailOrderR
 // Generic /api routes
 app.use('/api', lazyRoute(() => import('./routes/upload.js')));
 app.use('/api', lazyRoute(() => import('./routes/catalog.js')));
-app.use('/api', lazyRoute(() => import('./routes/medicines.js')));
+app.use('/api', lazyRoute(() => import('./routes/medicines.js'), 'hot'));
 app.use('/api', lazyRoute(() => import('./routes/enrichment.js')));
 app.use('/api/contacts', lazyRoute(() => import('./routes/contacts.js')));
 app.use('/api', lazyRoute(() => import('./routes/distributors.js')));
-app.use('/api', lazyRoute(() => import('./routes/notifications.js')));
-app.use('/api/whatsapp/queue', lazyRoute(() => import('./routes/whatsappQueue.js')));
-app.use('/api/investigation', lazyRoute(() => import('./routes/investigation.js')));
+app.use('/api', lazyRoute(() => import('./routes/notifications.js'), 'hot'));
+app.use('/api/whatsapp/queue', lazyRoute(() => import('./routes/whatsappQueue.js'), 'hot'));
+app.use('/api/investigation', lazyRoute(() => import('./routes/investigation.js'), 'heavy'));
 app.use('/api/audit', lazyRoute(() => import('./routes/audit.js')));
 app.use('/api', lazyRoute(() => import('./routes/medicineAvailability.js')));
 
@@ -409,7 +448,7 @@ const PORT = config.port;
 // 'localhost' to ::1 (IPv6) while Vite proxy targets 127.0.0.1 (IPv4), causing ECONNREFUSED.
 const server = app.listen(PORT, '127.0.0.1', async () => {
   const serverUrl = `http://localhost:${PORT}`;
-  console.log(`Server is running on ${serverUrl}`);
+  console.log(`Server is running on ${serverUrl} (listening ${Math.round(performance.now() - BOOT_T0)}ms after module load)`);
 
   // Auto-open browser when launched from the packaged Windows executable (.exe)
   if (isPackagedApp() || process.env.AUTO_OPEN_BROWSER === 'true') {
@@ -456,14 +495,20 @@ server.on('error', (err: any) => {
   (async () => {
     try {
       // ── Phase 1: Database schema & WAL mode verification (Blocking) ─────────────
+      const phase1T0 = performance.now();
       console.log('[Boot:Phase1] Initializing database schema, indexes, and WAL mode...');
       await ensureSchema(DB_PATH);
       schemaReady = true;
-      console.log('[Boot:Phase1] Database schema ready — API requests unblocked.');
+      console.log(`[Boot:Phase1] Database schema ready in ${Math.round(performance.now() - phase1T0)}ms — API requests unblocked.`);
+
+      // Route pre-warm now starts here (not at module load) so V8 compile work
+      // never competes with database DDL for the event loop.
+      void startTieredPreWarm();
 
       const db = await dbManager.getConnection();
 
       // ── Phase 2: In-memory cache pre-warm ───────────────────────────────────────
+      const phase2T0 = performance.now();
       console.log('[Boot:Phase2] Pre-warming in-memory cache & reference dictionary...');
       const { inventoryCache } = await import('./services/inventoryCache.js');
       inventoryCache.initialize(db);
@@ -471,13 +516,16 @@ server.on('error', (err: any) => {
         .then(() => console.log('[Boot:Phase2] Compact inventory cache pre-built successfully.'))
         .catch(err => console.error('[Boot:Phase2] Inventory cache prebuild failed:', err));
 
-      try {
-        const { seedBundledReference } = await import('./worker/compositionEnricher.js');
-        const res = await seedBundledReference();
-        if (res.loaded > 0) console.log(`[Boot:Phase2] Seeded ${res.loaded} reference APIs into dictionary.`);
-      } catch (seedErr) {
-        console.warn('[Boot:Phase2] Bundled reference seed failed:', seedErr);
-      }
+      // Fire-and-forget (was awaited): seeding must not delay Phase 3 worker
+      // startup — failures are logged, nothing downstream depends on it here.
+      import('./worker/compositionEnricher.js')
+        .then(m => m.seedBundledReference())
+        .then(res => {
+          if (res.loaded > 0) console.log(`[Boot:Phase2] Seeded ${res.loaded} reference APIs into dictionary.`);
+        })
+        .catch(seedErr => console.warn('[Boot:Phase2] Bundled reference seed failed:', seedErr));
+
+      console.log(`[Boot:Phase2] Cache init + reference seed dispatched in ${Math.round(performance.now() - phase2T0)}ms.`);
 
       // Record unclean boot flag (flipped to 'true' on clean gracefulShutdown)
       try {
@@ -510,6 +558,7 @@ server.on('error', (err: any) => {
             const { checkAllRefills } = await import('./services/refillService.js');
             await checkAllRefills(db);
           } catch (refillErr) {
+            bootWorkerFailures++;
             console.error('[Boot:Phase3] Refill startup evaluation error:', refillErr);
           }
 
@@ -523,50 +572,52 @@ server.on('error', (err: any) => {
             try {
               const { checkOverdueCreditNotes } = await import('./services/creditNoteService.js');
               await checkOverdueCreditNotes(db);
-              
-              const dayOfMonth = new Date().getDate();
-              if (dayOfMonth === 18 || dayOfMonth === 19 || dayOfMonth === 20) {
-                console.log(`[Boot:Phase3] Today is the ${dayOfMonth}th. Running catch-up scan for expired stock pending pharmacist review...`);
-                const { scanAndCreateExpiryReviews } = await import('./services/returnsService.js');
+
+              // Expiry return review catch-up — same every-N-days gate as the
+              // scheduler (default 15), so a missed tick is recovered on boot.
+              const { shouldRunScheduledExpiryReturnScan, scanAndCreateExpiryReviews } = await import('./services/returnsService.js');
+              if (await shouldRunScheduledExpiryReturnScan(db)) {
+                console.log('[Boot:Phase3] Expiry return review scan due. Running inventory-only expired-stock scan...');
                 await scanAndCreateExpiryReviews(db);
               }
 
               await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('last_daily_check_date', ?)", [todayStr]);
             } catch (err) {
+              bootWorkerFailures++;
               console.error('[Boot:Phase3] Startup catch-up daily check failed:', err);
             }
           }
 
           // Expiry alerts & shortage reminder scans
           const { checkAndRunScheduledExpiryScan } = await import('./services/expiryAlertService.js');
-          await checkAndRunScheduledExpiryScan(90).catch(err => console.error('[Boot:Phase3] Expiry scan check failed:', err));
+          await checkAndRunScheduledExpiryScan(90).catch(err => { bootWorkerFailures++; console.error('[Boot:Phase3] Expiry scan check failed:', err); });
 
           const { checkShortageRequestsAndNotifyAdmin } = await import('./services/shortageReminderService.js');
-          checkShortageRequestsAndNotifyAdmin(db).catch(err => console.error('[Boot:Phase3] Shortage check failed:', err));
+          checkShortageRequestsAndNotifyAdmin(db).catch(err => { bootWorkerFailures++; console.error('[Boot:Phase3] Shortage check failed:', err); });
         } else {
           console.log('[Boot:Phase3] Background automation is disabled in Settings — skipping automatic startup workers.');
         }
 
         // Monthly reports check
         const { monthlyReportService } = await import('./services/monthlyReportService.js');
-        monthlyReportService.checkAndRunScheduledReports().catch(err => console.error('[Boot:Phase3] Monthly report check failed:', err));
+        monthlyReportService.checkAndRunScheduledReports().catch(err => { bootWorkerFailures++; console.error('[Boot:Phase3] Monthly report check failed:', err); });
 
         // Backup scheduler
         const { initBackupScheduler } = await import('./services/backupService.js');
-        await initBackupScheduler().catch(err => console.error('[Boot:Phase3] Failed to init backup scheduler:', err));
+        await initBackupScheduler().catch(err => { bootWorkerFailures++; console.error('[Boot:Phase3] Failed to init backup scheduler:', err); });
 
         // Doctor reporting service
         const { startDoctorReportingScheduler } = await import('./services/doctorReportingService.js');
         startDoctorReportingScheduler();
 
         // Push notification service listener
-        import('./services/pushNotificationService.js').catch(err => console.error('[Boot:Phase3] Push service load failed:', err));
+        import('./services/pushNotificationService.js').catch(err => { bootWorkerFailures++; console.error('[Boot:Phase3] Push service load failed:', err); });
 
         // Distributor dispatch reminder worker
-        import('./services/distributorDispatchReminderWorker.js').then(m => m.startDistributorDispatchReminderWorker()).catch(err => console.error('[Boot:Phase3] Distributor reminder worker start failed:', err));
+        import('./services/distributorDispatchReminderWorker.js').then(m => m.startDistributorDispatchReminderWorker()).catch(err => { bootWorkerFailures++; console.error('[Boot:Phase3] Distributor reminder worker start failed:', err); });
 
         // WhatsApp Queue Worker (self-gating on whatsapp_enabled + automation_enabled)
-        import('./services/whatsappQueue.js').then(m => m.whatsappQueue.startWorker()).catch(err => console.error('[Boot:Phase3] WhatsApp queue worker start failed:', err));
+        import('./services/whatsappQueue.js').then(m => m.whatsappQueue.startWorker()).catch(err => { bootWorkerFailures++; console.error('[Boot:Phase3] WhatsApp queue worker start failed:', err); });
 
         // ── Phase 4: Headless browser subsystems & asynchronous workers (staggered) ──
         console.log('[Boot:Phase4] Staging headless browser & external service schedulers...');
@@ -583,6 +634,7 @@ server.on('error', (err: any) => {
             const { orderFulfillmentService } = await import('./services/orderFulfillmentService.js');
             orderFulfillmentService.start();
           } catch (srvErr) {
+            bootWorkerFailures++;
             console.error('[Boot:Phase4] Failed to start T+2s services:', srvErr);
           }
         }, 2000);
@@ -593,12 +645,14 @@ server.on('error', (err: any) => {
             const { workerSupervisor } = await import('./worker/workerSupervisor.js');
             workerSupervisor.start();
           } catch (err) {
+            bootWorkerFailures++;
             console.error('[Boot:Phase4] Failed to start worker supervisor:', err);
           }
           try {
             const { startScispacySidecar } = await import('./services/scispacyClient.js');
             startScispacySidecar();
           } catch (err) {
+            bootWorkerFailures++;
             console.error('[Boot:Phase4] Failed to start scispaCy sidecar:', err);
           }
         }, 5000);
@@ -610,6 +664,7 @@ server.on('error', (err: any) => {
             await telegramBotService.initializeOrReloadBot();
             console.log('[Boot:Phase4] Telegram bot initialized');
           } catch (err) {
+            bootWorkerFailures++;
             console.error('[Boot:Phase4] Failed to initialize Telegram Bot:', err);
           }
         }, 8000);
@@ -622,9 +677,9 @@ server.on('error', (err: any) => {
             }
             if (m.hasSavedSession()) {
               console.log('[Boot:Phase4] Saved WhatsApp session detected. Auto-starting WhatsApp client (staggered T+45s)...');
-              await m.initClient().catch(err => console.error('[Boot:Phase4] Auto WhatsApp init failed:', err));
+              await m.initClient().catch(err => { bootWorkerFailures++; console.error('[Boot:Phase4] Auto WhatsApp init failed:', err); });
             }
-          }).catch(err => console.error('[Boot:Phase4] WhatsApp client module load failed:', err));
+          }).catch(err => { bootWorkerFailures++; console.error('[Boot:Phase4] WhatsApp client module load failed:', err); });
         }, 45_000);
 
         // Startup live-cart warm-up: resolves startupSyncCoordinator from real data at boot
@@ -646,6 +701,12 @@ server.on('error', (err: any) => {
 
       // Register crons
       setupCrons(db);
+
+      // One-line boot health summary, ~T+10s (covers the T+2/5/8s staggers).
+      // Later failures (WhatsApp T+45s, cart warm-up) still log their own errors.
+      setTimeout(() => {
+        console.log(`[Boot] Startup complete: ${((performance.now() - BOOT_T0) / 1000).toFixed(1)}s total, ${bootWorkerFailures} background worker start failure(s), ${registeredLazyRoutes.length} lazy routes registered.`);
+      }, 10_000);
 
     } catch (err) {
       if (err instanceof Error && err.message === 'DB_INTEGRITY_FAILURE') {
@@ -671,6 +732,7 @@ async function setupCrons(db: any) {
     const { triggerSchedulerService } = await import('./services/triggerSchedulerService.js');
     await triggerSchedulerService.initSchedules(db);
   } catch (err) {
+    bootWorkerFailures++;
     console.error('[Boot] Failed to initialize dynamic trigger scheduler:', err);
   }
 
@@ -725,6 +787,7 @@ async function setupCrons(db: any) {
       console.warn('[Boot] AutoMatchWorker initialization skipped:', amErr);
     }
   } catch (err) {
+    bootWorkerFailures++;
     console.warn('[Boot] WhatsApp intent service registration skipped:', err);
   }
 }

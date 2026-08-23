@@ -64,7 +64,6 @@ export function invalidateAfterPriceWrite(queryClient: QueryClient) {
   clearInfiniteScrollCache();
 
   const keys = [
-    'sell-price-config',
     'inventory-list',
     'database-medicines',
     'sells-list',

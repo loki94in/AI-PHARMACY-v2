@@ -86,7 +86,13 @@ export async function backfillInventoryActiveFlags(
   return changed;
 }
 
-/** Zero expired batches with stock and mark inactive. Safe to run on a schedule. */
+/**
+ * Mark expired batches with stock as inactive (unsellable). Quantities are
+ * deliberately PRESERVED: expired stock stays intact until a pharmacist
+ * explicitly approves/rejects it in the Expiry Return Review flow
+ * ("flag first, act only on explicit approval"). Zeroing here would destroy
+ * returnable stock behind the review gate's back. Safe to run on a schedule.
+ */
 export async function deactivateExpiredInventory(
   db: { all: (sql: string, params?: unknown[]) => Promise<any[]>; run: (sql: string, params?: unknown[]) => Promise<any> }
 ): Promise<number> {
@@ -94,14 +100,14 @@ export async function deactivateExpiredInventory(
     `SELECT id, quantity, loose_quantity, expiry_date FROM inventory_master
      WHERE COALESCE(is_active, 1) = 1 AND (quantity > 0 OR COALESCE(loose_quantity, 0) > 0)`
   );
-  let zeroed = 0;
+  let deactivated = 0;
   for (const row of rows) {
     if (!isExpiredForSale(row.expiry_date)) continue;
     await db.run(
-      'UPDATE inventory_master SET quantity = 0, loose_quantity = 0, is_active = 0 WHERE id = ?',
+      'UPDATE inventory_master SET is_active = 0 WHERE id = ?',
       [row.id]
     );
-    zeroed++;
+    deactivated++;
   }
-  return zeroed;
+  return deactivated;
 }

@@ -887,6 +887,26 @@ router.post('/expiry-reviews/:id/approve', async (req, res) => {
       return res.status(400).json({ error: 'Inventory stock is already zero or batch not found' });
     }
 
+    // Lazy distributor resolution (single indexed lookup at approval time — the
+    // scan deliberately carries no purchase-history joins): latest purchase line
+    // for this medicine+batch wins.
+    let distributorId: number | null = review.distributor_id || null;
+    if (!distributorId) {
+      const pur = await db.get<any>(
+        `SELECT p.distributor_id, d.name as distributor_name
+         FROM purchase_items pi
+         JOIN purchases p ON pi.purchase_id = p.id
+         LEFT JOIN distributors d ON d.id = p.distributor_id
+         WHERE pi.medicine_id = ? AND pi.batch_no = ? AND p.distributor_id IS NOT NULL
+         ORDER BY p.date DESC LIMIT 1`,
+        [review.medicine_id, review.batch_no]
+      );
+      if (pur?.distributor_id) {
+        distributorId = pur.distributor_id;
+        review.distributor_name = review.distributor_name || pur.distributor_name || null;
+      }
+    }
+
     await db.run('BEGIN TRANSACTION');
 
     // 1. Generate return number PR-XXX
@@ -957,7 +977,7 @@ router.post('/expiry-reviews/:id/approve', async (req, res) => {
     });
 
     // 5. Track Credit Note Reconciliation
-    if (review.distributor_id) {
+    if (distributorId) {
       if (
         loss_percentage === undefined ||
         loss_percentage === null ||
@@ -969,15 +989,15 @@ router.post('/expiry-reviews/:id/approve', async (req, res) => {
         return res.status(400).json({ error: 'Return percentage required: A valid loss_percentage between 0 and 100 is required to approve expiry return and calculate credit note expectation.' });
       }
       const { trackExpiryReturn } = await import('../services/creditNoteService.js');
-      await trackExpiryReturn(db, returnId as number, review.distributor_id, totalAmount, Number(loss_percentage));
+      await trackExpiryReturn(db, returnId as number, distributorId, totalAmount, Number(loss_percentage));
     }
 
-    // 6. Update Expiry Review Record Status
+    // 6. Update Expiry Review Record Status (persist resolved distributor for audit)
     await db.run(
       `UPDATE expiry_return_reviews
-       SET status = 'approved', reviewed_at = CURRENT_TIMESTAMP, reviewed_by = 'Pharmacist', return_id = ?, notes = ?
+       SET status = 'approved', reviewed_at = CURRENT_TIMESTAMP, reviewed_by = 'Pharmacist', return_id = ?, distributor_id = ?, notes = ?
        WHERE id = ?`,
-      [returnId, notes || review.notes || null, id]
+      [returnId, distributorId, notes || review.notes || null, id]
     );
 
     // 7. Audit Log
@@ -1103,6 +1123,25 @@ router.post('/expiry-reviews/bulk-approve', async (req, res) => {
 
       if (!invItem || invItem.quantity <= 0) continue;
 
+      // Lazy distributor resolution (same contract as single approve): latest
+      // purchase line for this medicine+batch wins; NULL skips credit tracking.
+      let distributorId: number | null = review.distributor_id || null;
+      if (!distributorId) {
+        const pur = await db.get<any>(
+          `SELECT p.distributor_id, d.name as distributor_name
+           FROM purchase_items pi
+           JOIN purchases p ON pi.purchase_id = p.id
+           LEFT JOIN distributors d ON d.id = p.distributor_id
+           WHERE pi.medicine_id = ? AND pi.batch_no = ? AND p.distributor_id IS NOT NULL
+           ORDER BY p.date DESC LIMIT 1`,
+          [review.medicine_id, review.batch_no]
+        );
+        if (pur?.distributor_id) {
+          distributorId = pur.distributor_id;
+          review.distributor_name = review.distributor_name || pur.distributor_name || null;
+        }
+      }
+
       const lastRet = await db.get("SELECT return_no FROM returns WHERE return_no LIKE 'PR-%' ORDER BY id DESC LIMIT 1");
       let nextNum = 1;
       if (lastRet && lastRet.return_no) {
@@ -1120,7 +1159,7 @@ router.post('/expiry-reviews/bulk-approve', async (req, res) => {
       const result = await db.run(
         `INSERT INTO returns (return_no, type, total_amount, distributor_id, reason, date, return_sub_type)
          VALUES (?, 'purchase', ?, ?, 'Approved Expiry Return', CURRENT_TIMESTAMP, 'expiry')`,
-        [returnNo, totalAmount, review.distributor_id || null]
+      [returnNo, totalAmount, distributorId]
       );
       const returnId = result.lastID;
 
@@ -1165,15 +1204,15 @@ router.post('/expiry-reviews/bulk-approve', async (req, res) => {
         transaction_id: returnId
       });
 
-      if (review.distributor_id) {
-        await trackExpiryReturn(db, returnId as number, review.distributor_id, totalAmount, Number(loss_percentage));
+      if (distributorId) {
+        await trackExpiryReturn(db, returnId as number, distributorId, totalAmount, Number(loss_percentage));
       }
 
       await db.run(
         `UPDATE expiry_return_reviews
-         SET status = 'approved', reviewed_at = CURRENT_TIMESTAMP, reviewed_by = 'Pharmacist', return_id = ?
+         SET status = 'approved', reviewed_at = CURRENT_TIMESTAMP, reviewed_by = 'Pharmacist', return_id = ?, distributor_id = ?
          WHERE id = ?`,
-        [returnId, reviewId]
+        [returnId, distributorId, reviewId]
       );
 
       await db.run(

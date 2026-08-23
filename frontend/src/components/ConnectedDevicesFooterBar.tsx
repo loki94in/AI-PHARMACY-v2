@@ -48,6 +48,7 @@ export const ConnectedDevicesFooterBar: React.FC<ConnectedDevicesFooterBarProps>
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async device/WA status subscription, no sync setState
     fetchDevicesStatus();
     fetchWhatsAppStatus();
     // P1 "events, not timers": slow fallback refresh ONLY while the tab is

@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React from 'react';
 import { api } from '../services/api';
+import { useApiQuery } from '../hooks/useApiQuery';
 import { Loader, AlertCircle } from 'lucide-react';
 
 interface PriceRecord {
@@ -20,29 +21,16 @@ interface HoverPriceIntelTableProps {
 }
 
 export const HoverPriceIntelTable: React.FC<HoverPriceIntelTableProps> = ({ medicineName }) => {
-  const [records, setRecords] = useState<PriceRecord[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [loaded, setLoaded] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const fetchHistory = useCallback(async () => {
-    if (!medicineName || medicineName.length < 2) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await api.getMedicinePriceHistory(medicineName);
-      setRecords(res?.data || []);
-    } catch (_err) {
-      setError('Could not load price history.');
-    } finally {
-      setLoading(false);
-      setLoaded(true);
-    }
-  }, [medicineName]);
-
-  useEffect(() => {
-    fetchHistory();
-  }, [fetchHistory]);
+  const canFetch = !!medicineName && medicineName.length >= 2;
+  const { data: historyRes, isFetching, isSuccess, isError } = useApiQuery<{ data?: PriceRecord[] }>(
+    ['medicine-price-history', medicineName],
+    () => api.getMedicinePriceHistory(medicineName),
+    { enabled: canFetch }
+  );
+  const records: PriceRecord[] = historyRes?.data || [];
+  const loading = isFetching;
+  const loaded = isSuccess || isError;
+  const error = isError ? 'Could not load price history.' : null;
 
   if (!medicineName || medicineName.length < 2) return null;
 

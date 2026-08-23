@@ -462,16 +462,18 @@ class WhatsAppQueueWorker {
 
   /** Internal queue processor that processes items one-by-one with 10–12 second pacing */
   private async processQueueInternal(): Promise<boolean> {
+    // Single-flight claim MUST be set synchronously, BEFORE any await.
+    // An await (isWhatsAppExplicitlyDisabled DB read) previously sat between the check
+    // and the set, letting two concurrent entry points (double forceNext / scheduler tick)
+    // both pass and physically send the SAME pending item twice (duplicate WhatsApp sends).
     if (this.isProcessing || this.isPaused) return false;
-
-    if (await isWhatsAppExplicitlyDisabled()) {
-      return false;
-    }
-
     this.isProcessing = true;
     this.broadcastQueueState(true);
 
     try {
+      if (await isWhatsAppExplicitlyDisabled()) {
+        return false;
+      }
       await this.loadPacingConfig();
       const db = await dbManager.getConnection();
       const now = Date.now();

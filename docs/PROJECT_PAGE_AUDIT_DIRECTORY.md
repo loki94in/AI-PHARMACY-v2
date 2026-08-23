@@ -7,6 +7,24 @@
 
 ---
 
+## Audit Resolution Changelog — 2026-08-23
+
+Verified fixes applied against dead/disconnected surface found by the repo-wide connection scan:
+
+| Change | Detail |
+|---|---|
+| `/compliance` now navigable | Sidebar entry "H1 Compliance" added (`Layout.tsx`); page chunk moved into `pageImports` registry so background prefetch covers it. Page was fully functional but previously reachable only by typing the URL. |
+| `/sell-price-config` route removed | Orphaned purchase-invoice price wizard (no caller ever navigated to it; unusable standalone). Page folder, route, and `pageImports` entry deleted. Backend `GET /api/sell-price/by-invoice/:invoiceNo` removed with it; **`POST /api/sell-price/bulk-update` is retained** — POS `SaveBillSpecialPriceModal` depends on it. |
+| Duplicate Credit Notes API deleted | `src/routes/creditNotes.ts` (`/api/credit-notes`, writing the never-used `credit_notes` table) removed. The LIVE credit-note ledger is `expiry_returns_tracking` via `src/services/creditNoteService.ts` (`trackExpiryReturn` on approval, Telegram overdue alerts, distributor reconciliation) — do not confuse the two; do not rebuild a `/credit-notes` surface. |
+| Dead routers/services deleted | `src/routes/archive.ts` (`/api/archive`, zero callers) and `src/services/customerService.ts` (zero importers) removed from `server.ts` mounts / disk. |
+| Phantom Migration V2 wrappers removed | `analyze-zip`, `analyze-excel`, `pre-migration-simulate`, staging row PUT/DELETE and staging items sub-routes had no backend routes; uncalled wrappers deleted from `services/api.ts`. |
+| Returns history filter completed | Min/Max Amount filter was wired end-to-end but had no inputs; two number inputs added to the filter bar (`Returns/index.tsx`). |
+| Fake-data residue removed | Learning stats no longer fall back to literal `142`; hardcoded "24,500+" salt-mappings figure replaced with an honest em-dash; Doctor "Directory Status" derives from real query state. Inventory empty/commented imports removed. |
+
+Note: the ~119 wrapper methods on `api` that duplicate direct `apiClient.*` calls were deliberately LEFT in place — cleanup was attempted and rolled back after a concurrent-session conflict; zero functional impact.
+
+---
+
 ## Executive Summary of Legacy Path Risks & Structural Discrepancies
 
 | Feature Area | Authoritative New Location | Legacy / Obsolete Path (DO NOT USE) | Found Vulnerability / Risk |

@@ -99,19 +99,18 @@ export function useInfiniteScroll<T>({
     return () => window.removeEventListener('clear-module-cache', handleClear);
   }, [cacheKey]);
 
-  const prevFiltersRef = useRef<InfiniteScrollFilters>(serverFilters);
+  const [prevFilters, setPrevFilters] = useState<InfiniteScrollFilters>(serverFilters);
 
-  // Clear cache and reset state when server filters change to prevent stale flash
-  const filtersChanged = useMemo(() => {
-    const changed = JSON.stringify(prevFiltersRef.current) !== JSON.stringify(serverFilters);
-    if (changed) {
-      prevFiltersRef.current = serverFilters;
-    }
-    return changed;
-  }, [serverFilters]);
+  // Detect server filter changes to prevent stale flash while the new page loads
+  const filtersChanged = useMemo(
+    () => JSON.stringify(prevFilters) !== JSON.stringify(serverFilters),
+    [prevFilters, serverFilters]
+  );
 
   useEffect(() => {
     if (filtersChanged) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional stale-cache reset on filter change
+      setPrevFilters(serverFilters);
       globalModuleCache[cacheKey] = [];
       globalTotalItems[cacheKey] = 0;
       globalMeta[cacheKey] = {};
@@ -119,7 +118,7 @@ export function useInfiniteScroll<T>({
       setTotalItems(0);
       setMeta({});
     }
-  }, [filtersChanged, cacheKey]);
+  }, [filtersChanged, serverFilters, cacheKey]);
 
   const {
     data,
@@ -156,6 +155,7 @@ export function useInfiniteScroll<T>({
       const lastPage = data.pages[data.pages.length - 1];
       if (lastPage && typeof lastPage.totalItems === 'number') {
         globalTotalItems[cacheKey] = lastPage.totalItems;
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing query data into render state
         setTotalItems(lastPage.totalItems);
       }
       if (lastPage && lastPage.meta) {
@@ -169,7 +169,9 @@ export function useInfiniteScroll<T>({
 
   // Keep latest dependencies in a ref to avoid stale closures in stable callback
   const latestDepsRef = useRef({ hasNextPage, fetchNextPage, isFetching, isFetchingNextPage });
-  latestDepsRef.current = { hasNextPage, fetchNextPage, isFetching, isFetchingNextPage };
+  useEffect(() => {
+    latestDepsRef.current = { hasNextPage, fetchNextPage, isFetching, isFetchingNextPage };
+  });
 
   // intersection observer for loading more items when scrolling to the bottom
   const observerRef = useRef<IntersectionObserver | null>(null);

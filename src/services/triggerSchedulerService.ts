@@ -92,7 +92,7 @@ class TriggerSchedulerService {
 
       // 5. Auto Expiry Returns Creator
       trigger_expiry_return_enabled: 'true',
-      trigger_expiry_return_days: '18,19,20',
+      trigger_expiry_return_interval_days: '15',
 
       // 6. Pharmarack Token Refresher
       trigger_pharmarack_refresh_enabled: 'true',
@@ -246,24 +246,26 @@ class TriggerSchedulerService {
 
     // ----------------------------------------------------
     // Trigger 4: Auto Expiry Returns Review Scanner
+    // Daily 09:00 tick gated by an every-N-days interval (default 15).
+    // The gate is ONE app_settings read; off-day ticks cost nothing.
     // ----------------------------------------------------
     if (cfg.trigger_expiry_return_enabled === 'true') {
-      const daysStr = cfg.trigger_expiry_return_days || '18,19,20';
-      const cronDays = this.daysToCron(daysStr);
-      const cronExpr = `0 9 ${cronDays} * *`;
+      const intervalDays = Math.max(1, parseInt(cfg.trigger_expiry_return_interval_days || '15', 10) || 15);
+      const cronExpr = '0 9 * * *';
 
       try {
         const task = cron.schedule(cronExpr, async () => {
           try {
-            console.log(`[Trigger: Expiry Return Review] Scanning expired stock for pending pharmacist review (Days: ${daysStr})...`);
-            const { scanAndCreateExpiryReviews } = await import('./returnsService.js');
+            const { shouldRunScheduledExpiryReturnScan, scanAndCreateExpiryReviews } = await import('./returnsService.js');
+            if (!(await shouldRunScheduledExpiryReturnScan(database, intervalDays))) return;
+            console.log(`[Trigger: Expiry Return Review] Running inventory-only expired-stock scan (every ${intervalDays} days)...`);
             await scanAndCreateExpiryReviews(database);
           } catch (err) {
             console.error('[Trigger: Expiry Return Review] Execution failed:', err);
           }
         });
         this.scheduledTasks.set('expiry_returns', task);
-        console.log(`[TriggerScheduler] Registered 'Auto Expiry Return Review Scanner' -> Cron: ${cronExpr} (Days: ${daysStr})`);
+        console.log(`[TriggerScheduler] Registered 'Auto Expiry Return Review Scanner' -> Daily tick, interval: every ${intervalDays} day(s)`);
       } catch (err) {
         console.error('[TriggerScheduler] Failed to schedule Auto Expiry Return Review Scanner:', err);
       }

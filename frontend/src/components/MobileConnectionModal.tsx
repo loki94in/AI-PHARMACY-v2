@@ -58,6 +58,7 @@ export const MobileConnectionModal: React.FC<Props> = ({ onClose }) => {
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async connection-info load + poller
     fetchConnectionInfo();
     const interval = setInterval(async () => {
       try {

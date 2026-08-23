@@ -1,4 +1,6 @@
-export const pageImports: Record<string, () => Promise<any>> = {
+import type { ComponentType } from 'react';
+
+export const pageImports: Record<string, () => Promise<{ default: ComponentType }>> = {
   '/dashboard': () => import('../pages/Dashboard'),
   '/inventory': () => import('../pages/Inventory'),
   '/pos': () => import('../pages/POS'),
@@ -17,7 +19,7 @@ export const pageImports: Record<string, () => Promise<any>> = {
   '/investigation': () => import('../pages/Investigation'),
   '/phone-sales': () => import('../pages/PhoneSales'),
   '/dispatch': () => import('../pages/Dispatch'),
-  '/sell-price-config': () => import('../pages/SellPriceConfig'),
+  '/compliance': () => import('../pages/Compliance'),
   '/learning': () => import('../pages/Learning'),
   '/audit': () => import('../pages/AuditCenter'),
 };

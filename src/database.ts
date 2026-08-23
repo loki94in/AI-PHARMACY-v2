@@ -2,7 +2,7 @@ import { dbManager } from './database/connection.js';
 
 // Bump this number whenever you add new CREATE TABLE, ALTER TABLE, or INSERT OR IGNORE statements below.
 // On normal boots where this version matches the stored version, all DDL is skipped entirely (~3-5s saved).
-const CURRENT_SCHEMA_VERSION = 42;
+const CURRENT_SCHEMA_VERSION = 43;
 
 // FTS5 creates exactly these four shadow tables for an external-content index.
 // While the `medicines_fts` declaration exists in sqlite_master these names are
@@ -405,6 +405,7 @@ export async function ensureSchema(dbPath: string) {
       rack_location TEXT,
       batch_no TEXT,
       expiry_date DATETIME,
+      expiry_month TEXT,
       is_active INTEGER DEFAULT 1,
       FOREIGN KEY(medicine_id) REFERENCES medicines(id)
     );
@@ -920,6 +921,7 @@ export async function ensureSchema(dbPath: string) {
     ['inventory_master', 'loose_quantity', 'ALTER TABLE inventory_master ADD COLUMN loose_quantity INTEGER DEFAULT 0'],
     ['inventory_master', 'is_active', 'ALTER TABLE inventory_master ADD COLUMN is_active INTEGER DEFAULT 1'],
     ['inventory_master', 'created_at', 'ALTER TABLE inventory_master ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP'],
+    ['inventory_master', 'expiry_month', 'ALTER TABLE inventory_master ADD COLUMN expiry_month TEXT'],
     ['medicines', 'max_stock_level', 'ALTER TABLE medicines ADD COLUMN max_stock_level INTEGER DEFAULT NULL'],
     ['medicines', 'mrp', 'ALTER TABLE medicines ADD COLUMN mrp REAL DEFAULT 0'],
     ['medicines', 'hsn_code', 'ALTER TABLE medicines ADD COLUMN hsn_code TEXT'],
@@ -1081,6 +1083,47 @@ export async function ensureSchema(dbPath: string) {
         await db.run(stmt);
       }
     } catch (_e) {}
+  }
+
+  // expiry_month: indexed YYYY-MM shadow of the mixed-format expiry_date column.
+  // Maintained by triggers below so EVERY write path (purchases, migration, OCR,
+  // manual edit) stays in sync with zero route-level code. Normalization mirrors
+  // routes/compliance.ts: 'MM/YY' -> '20YY-MM', 'MM/YYYY' -> 'YYYY-MM',
+  // 'YYYY-MM-DD' -> 'YYYY-MM'; unparseable formats stay NULL and fall back to
+  // JS-side isExpired() checks in consumers.
+  try {
+    const invColsForExpiryMonth = await db.all('PRAGMA table_info(inventory_master)');
+    if (invColsForExpiryMonth.some((c: { name: string }) => c.name === 'expiry_month')) {
+      const monthExpr = (ref: string) => `CASE
+        WHEN ${ref} IS NULL OR TRIM(${ref}) = '' THEN NULL
+        WHEN length(${ref}) = 5 THEN '20' || substr(${ref}, 4, 2) || '-' || substr(${ref}, 1, 2)
+        WHEN length(${ref}) = 7 AND ${ref} LIKE '%/%' THEN substr(${ref}, 4, 4) || '-' || substr(${ref}, 1, 2)
+        WHEN ${ref} LIKE '____-__%' THEN substr(${ref}, 1, 7)
+        ELSE NULL
+      END`;
+      await db.exec(`
+        CREATE TRIGGER IF NOT EXISTS trg_inventory_expiry_month_ins
+        AFTER INSERT ON inventory_master
+        WHEN NEW.expiry_date IS NOT NULL
+        BEGIN
+          UPDATE inventory_master
+          SET expiry_month = ${monthExpr('NEW.expiry_date')}
+          WHERE id = NEW.id;
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS trg_inventory_expiry_month_upd
+        AFTER UPDATE OF expiry_date ON inventory_master
+        BEGIN
+          UPDATE inventory_master
+          SET expiry_month = ${monthExpr('NEW.expiry_date')}
+          WHERE id = NEW.id;
+        END;
+      `);
+      await db.run(`UPDATE inventory_master SET expiry_month = ${monthExpr('expiry_date')} WHERE expiry_month IS NULL OR expiry_month = ''`);
+      await db.run('CREATE INDEX IF NOT EXISTS idx_inventory_expiry_month ON inventory_master (expiry_month)');
+    }
+  } catch (err) {
+    console.warn('[Database] expiry_month trigger/backfill warning:', err);
   }
 
   try {

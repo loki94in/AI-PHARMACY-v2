@@ -66,16 +66,16 @@ export const BackupCenterContent: React.FC<BackupCenterContentProps> = ({
   isInline = false,
 }) => {
   const [status, setStatus] = useState<BackupStatus | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [statusError, setStatusError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [confirmRestore, setConfirmRestore] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [lastBackupError, setLastBackupError] = useState<string | null>(null);
 
+  // Core loader (no sync setState before the await); the mount path relies on
+  // the initial loading=true / statusError=null state.
   const fetchStatus = async () => {
-    setLoading(true);
-    setStatusError(null);
     try {
       const { data } = await apiClient.get('/utilities/backup/status');
       if (data.success) {
@@ -96,6 +96,13 @@ export const BackupCenterContent: React.FC<BackupCenterContentProps> = ({
     }
   };
 
+  // User-action refresh entry: gates loading/errors explicitly.
+  const refreshStatus = async () => {
+    setLoading(true);
+    setStatusError(null);
+    await fetchStatus();
+  };
+
   useEffect(() => {
     fetchStatus();
   }, []);
@@ -109,7 +116,7 @@ export const BackupCenterContent: React.FC<BackupCenterContentProps> = ({
       if (data.success) {
         toastEvent.trigger('Manual backup and cloud upload completed successfully!', 'success');
         setLastBackupError(null);
-        fetchStatus();
+        refreshStatus();
       }
     } catch (err: unknown) {
       const apiErr = err as LocalApiErrorShape;
@@ -147,7 +154,7 @@ export const BackupCenterContent: React.FC<BackupCenterContentProps> = ({
       if (data.success) {
         toastEvent.trigger('Backup archive deleted from system', 'success');
         setConfirmDelete(null);
-        fetchStatus();
+        refreshStatus();
       }
     } catch (err: unknown) {
       toastEvent.trigger((err as LocalApiErrorShape).response?.data?.error || 'Delete failed', 'error');
@@ -162,7 +169,7 @@ export const BackupCenterContent: React.FC<BackupCenterContentProps> = ({
       const { data } = await apiClient.post('/utilities/backup/toggle-pause');
       if (data.success) {
         toastEvent.trigger(data.message, 'success');
-        fetchStatus();
+        refreshStatus();
       }
     } catch (err: unknown) {
       toastEvent.trigger((err as LocalApiErrorShape).response?.data?.error || 'Failed to toggle pause status', 'error');
@@ -353,7 +360,7 @@ export const BackupCenterContent: React.FC<BackupCenterContentProps> = ({
                 <span className="text-xs text-muted font-normal">({status.availableArchives.length})</span>
               </h4>
               <button
-                onClick={fetchStatus}
+                onClick={refreshStatus}
                 disabled={loading}
                 className="text-xs font-bold text-sky hover:text-sky/80 flex items-center gap-1 transition-colors"
               >
@@ -458,7 +465,7 @@ export const BackupCenterContent: React.FC<BackupCenterContentProps> = ({
           <AlertTriangle className="text-amber" size={28} />
           <p className="text-sm text-muted">{statusError || 'Failed to retrieve status metrics.'}</p>
           <button
-            onClick={fetchStatus}
+            onClick={refreshStatus}
             disabled={loading}
             className="px-4 py-2 bg-sky-500/10 hover:bg-sky-500/20 text-sky border border-sky-500/20 rounded-xl text-xs font-bold uppercase transition-all flex items-center gap-1.5 disabled:opacity-50"
           >

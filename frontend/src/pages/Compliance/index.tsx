@@ -84,8 +84,10 @@ const CompliancePage: React.FC = () => {
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- module-cache hydration mount load
     fetchDashboardStats();
     fetchLogs();
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only load; filters refresh via explicit submit
   }, []);
 
   const handleFilterSubmit = (e: React.FormEvent) => {

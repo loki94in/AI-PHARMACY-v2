@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { Tag, X, Percent, TrendingUp, Sparkles, Check } from 'lucide-react';
@@ -37,6 +37,38 @@ interface PriceRow {
   margin: number; // profit margin % over rate
 }
 
+const buildInitialRows = (items: BillItemForPriceConfig[]): PriceRow[] =>
+  items.map(item => {
+    const medId = Number(item.medicine_id || item.id || 0);
+    const medName = item.medicine_name || item.name || 'Unknown Item';
+    const rateVal = Math.max(0, Number(item.rate || 0));
+    const mrpVal = Math.max(0, Number(item.mrp || 0));
+
+    let initialSellPrice = '';
+    let initialDiscount = '';
+
+    if (item.sell_price !== undefined && item.sell_price !== null && item.sell_price !== '') {
+      const sp = Number(item.sell_price);
+      if (!isNaN(sp) && sp > 0 && sp < mrpVal) {
+        initialSellPrice = String(sp);
+        initialDiscount = String(Math.round(((mrpVal - sp) / mrpVal) * 100 * 100) / 100);
+      }
+    }
+
+    const currentSp = initialSellPrice ? Number(initialSellPrice) : mrpVal;
+    const margin = rateVal > 0 ? Math.round(((currentSp - rateVal) / rateVal) * 1000) / 10 : 0;
+
+    return {
+      medicine_id: medId,
+      medicine_name: medName,
+      rate: rateVal,
+      mrp: mrpVal,
+      sell_price: initialSellPrice,
+      discount_per: initialDiscount,
+      margin
+    };
+  });
+
 export const SaveBillSpecialPriceModal: React.FC<SaveBillSpecialPriceModalProps> = ({
   isOpen,
   onClose,
@@ -49,41 +81,16 @@ export const SaveBillSpecialPriceModal: React.FC<SaveBillSpecialPriceModalProps>
   const [batchDiscount, setBatchDiscount] = useState<string>('10');
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
+  // Re-seed rows whenever the modal opens or a new items list arrives (render-time adjustment)
+  const [prevOpen, setPrevOpen] = useState(isOpen);
+  const [prevItems, setPrevItems] = useState(items);
+  if (isOpen !== prevOpen || items !== prevItems) {
+    setPrevOpen(isOpen);
+    setPrevItems(items);
     if (isOpen && Array.isArray(items) && items.length > 0) {
-      const initialRows: PriceRow[] = items.map(item => {
-        const medId = Number(item.medicine_id || item.id || 0);
-        const medName = item.medicine_name || item.name || 'Unknown Item';
-        const rateVal = Math.max(0, Number(item.rate || 0));
-        const mrpVal = Math.max(0, Number(item.mrp || 0));
-
-        let initialSellPrice = '';
-        let initialDiscount = '';
-
-        if (item.sell_price !== undefined && item.sell_price !== null && item.sell_price !== '') {
-          const sp = Number(item.sell_price);
-          if (!isNaN(sp) && sp > 0 && sp < mrpVal) {
-            initialSellPrice = String(sp);
-            initialDiscount = String(Math.round(((mrpVal - sp) / mrpVal) * 100 * 100) / 100);
-          }
-        }
-
-        const currentSp = initialSellPrice ? Number(initialSellPrice) : mrpVal;
-        const margin = rateVal > 0 ? Math.round(((currentSp - rateVal) / rateVal) * 1000) / 10 : 0;
-
-        return {
-          medicine_id: medId,
-          medicine_name: medName,
-          rate: rateVal,
-          mrp: mrpVal,
-          sell_price: initialSellPrice,
-          discount_per: initialDiscount,
-          margin
-        };
-      });
-      setRows(initialRows);
+      setRows(buildInitialRows(items));
     }
-  }, [isOpen, items]);
+  }
 
   if (!isOpen) return null;
 

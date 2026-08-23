@@ -298,7 +298,10 @@ const Learning: React.FC = () => {
 
 
 
-  useEffect(() => {
+  // Sync tab/profile selection from URL params (render-time adjustment)
+  const [prevParams, setPrevParams] = useState(searchParams);
+  if (prevParams !== searchParams) {
+    setPrevParams(searchParams);
     const tabParam = searchParams.get('tab');
     if (tabParam) {
       setActiveTab(normalizeTab(tabParam));
@@ -307,7 +310,7 @@ const Learning: React.FC = () => {
     if (idParam && !isNaN(Number(idParam))) {
       setSelectedProfileId(Number(idParam));
     }
-  }, [searchParams]);
+  }
 
   const handleTabChange = (tabId: string) => {
     const paramValue = tabId === 'distributors' ? 'distributor_layouts' : tabId;
