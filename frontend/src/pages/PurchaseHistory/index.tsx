@@ -995,7 +995,7 @@ const PurchaseHistory = () => {
                   <button
                     onClick={() => handleReissue(selectedOrder.email_uid)}
                     disabled={reissuingUid !== null}
-                    className="px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-xl bg-primary hover:bg-primary/90 text-text font-bold shadow-lg transition-all flex items-center gap-1.5 cursor-pointer"
+                    className="px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-xl bg-primary hover:bg-primary/90 text-white font-bold shadow-lg transition-all flex items-center gap-1.5 cursor-pointer"
                   >
                     {reissuingUid === selectedOrder.email_uid ? 'Opening Purchases...' : 'Reprocess & Open in Purchases'}
                   </button>
@@ -1105,7 +1105,7 @@ const PurchaseHistory = () => {
                     </div>
                     <button
                       onClick={() => window.open(billBarcode.pdfUrl, '_blank')}
-                      className="px-3.5 py-2 bg-primary/20 hover:bg-primary text-primary hover:text-text rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 border border-primary/30 shrink-0 cursor-pointer"
+                      className="px-3.5 py-2 bg-primary/20 hover:bg-primary text-primary hover:text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 border border-primary/30 shrink-0 cursor-pointer"
                       title="Print the scannable QR + barcode label for this purchase bill"
                     >
                       <Printer size={14} /> Print Bill Label

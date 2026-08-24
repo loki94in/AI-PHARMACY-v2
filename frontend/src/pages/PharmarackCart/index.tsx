@@ -1799,7 +1799,8 @@ const [showAddedItems] = useState<boolean>(false);
       }
 
       if (unmapped.length > 0) {
-        toastEvent.trigger(`${unmapped.length} distributor(s) missing WhatsApp numbers. Please add phone numbers.`, 'info');
+        toastEvent.trigger(`⚠️ ${unmapped.length} supplier(s) missing WhatsApp numbers. Opening editor for ${unmapped[0].storeName}...`, 'info');
+        handleOpenEditModal(unmapped[0]);
       }
     } catch (err: unknown) {
       const apiErr = err as LocalApiError;
@@ -1949,6 +1950,28 @@ const [showAddedItems] = useState<boolean>(false);
       } catch (_) {}
 
       await broadcastContactDataChanged();
+
+      // 3. Auto-enqueue order WhatsApp directly to this newly added distributor only
+      if (cleanPhone && cleanPhone.replace(/\D/g, '').length >= 10 && editingDistributor.items && editingDistributor.items.length > 0) {
+        try {
+          const itemsToSend = editingDistributor.items.filter(item => isItemIncludedInDispatch(item, editingDistributor));
+          if (itemsToSend.length > 0) {
+            const msg = buildDistributorOrderMessage({ ...editingDistributor, storeName: distName });
+            await apiClient.post('/messaging/enqueue-single-distributor-order', {
+              storeId: editingDistributor.storeId,
+              storeName: distName,
+              phone: cleanPhone,
+              message: msg,
+              items: itemsToSend
+            });
+            setSentWaStatusMap(prev => ({ ...prev, [editingDistributor.storeId]: 'queued' }));
+            toastEvent.trigger(`⚡ WhatsApp order automatically queued for ${distName}!`, 'success');
+            whatsappQueueEvent.triggerUpdated();
+          }
+        } catch (enqueueErr) {
+          console.warn('Auto-enqueue for newly saved distributor failed:', enqueueErr);
+        }
+      }
     } catch (err: unknown) {
       console.warn('Background save distributor contact error:', err);
     } finally {
@@ -3251,7 +3274,7 @@ const [showAddedItems] = useState<boolean>(false);
                   ) : (
                     <button
                       onClick={() => fetchCart(true)}
-                      className="premium-btn bg-primary text-text px-4 py-2 hover:bg-primary/80 text-xs font-bold"
+                      className="premium-btn bg-primary text-white px-4 py-2 hover:bg-primary/80 text-xs font-bold"
                     >
                       Retry
                     </button>
@@ -3593,15 +3616,16 @@ const [showAddedItems] = useState<boolean>(false);
 
                               return (
                                 <button
+                                  type="button"
                                   onClick={() => handleOpenEditModal(dist)}
-                                  className={`flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md border transition-all active:scale-95 cursor-pointer ${activePhone
+                                  className={`flex items-center gap-1.5 text-[10px] font-bold px-2 py-0.5 rounded-md border transition-all active:scale-95 cursor-pointer ${activePhone
                                     ? 'bg-bg2 text-text border-border hover:bg-bg3'
-                                    : 'bg-amber-500/15 text-amber-400 border-amber-500/30 hover:bg-amber-500/25'
+                                    : 'bg-amber-500/20 text-amber-400 border-amber-500/40 hover:bg-amber-500/30 font-extrabold shadow-sm'
                                     }`}
-                                  title={activePhone ? 'Edit WhatsApp phone number' : 'Missing WhatsApp number — click to add'}
+                                  title={activePhone ? 'Edit WhatsApp phone number' : 'Missing WhatsApp number — click to enter and auto-send'}
                                 >
-                                  <Phone size={10} />
-                                  <span>{activePhone || 'No Phone'}</span>
+                                  <Phone size={10} className={activePhone ? '' : 'text-amber-400'} />
+                                  <span>{activePhone || '⚠️ Missing Phone — Click to Add'}</span>
                                   <Edit2 size={9} className="opacity-70" />
                                 </button>
                               );

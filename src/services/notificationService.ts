@@ -952,6 +952,51 @@ export class NotificationService {
       return { ok: false, message: err.message || 'Internal error' };
     }
   }
+
+  /**
+   * Send WhatsApp alert to Pharmacy Admin/Owner when active distributors are missing contact numbers
+   */
+  async sendMissingDistributorPhonesAdminAlert(
+    missingDistributors: Array<{ name: string; itemsCount?: number }>
+  ): Promise<boolean> {
+    try {
+      const db = await dbManager.getConnection();
+      const adminSetting = await db.get("SELECT value FROM app_settings WHERE key IN ('owner_whatsapp_number', 'shop_phone') AND value IS NOT NULL AND value != '' LIMIT 1");
+      if (!adminSetting?.value) return false;
+      const adminPhone = String(adminSetting.value).replace(/\D/g, '').slice(-10);
+      if (!adminPhone || adminPhone.length !== 10) return false;
+
+      const shopNameRow = await db.get("SELECT value FROM app_settings WHERE key = 'shop_name'");
+      const storeName = shopNameRow?.value || 'AI Pharmacy';
+      const dateLabel = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+
+      let msg = `⚠️ *MISSING DISTRIBUTOR CONTACT NUMBERS*\n🏥 *${storeName}* — 📅 *${dateLabel}*\n\n`;
+      msg += `The following supplier(s) have orders today but *NO contact phone* saved in the app:\n\n`;
+      missingDistributors.forEach((d, idx) => {
+        msg += `${idx + 1}. *${d.name}* ${d.itemsCount ? `(${d.itemsCount} items)` : ''}\n`;
+      });
+      msg += `\n👉 *Action Needed:* Please open the app (*Pharmarack Cart* or *Dispatch*) and save their 10-digit number so dispatch reminders can be sent automatically.`;
+
+      const queueId = await whatsappQueueWorker.enqueue(
+        adminPhone,
+        msg,
+        'admin_missing_distributor_phones',
+        'Admin / Store Owner'
+      );
+
+      const todayIso = new Date().toISOString().split('T')[0];
+      await db.run(
+        `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        ['admin_missing_distributor_phones', 'Admin / Store Owner', adminPhone, msg, 'sent', `missing_dist_phones_${todayIso}_${Date.now()}`]
+      );
+
+      return Boolean(queueId);
+    } catch (err: any) {
+      console.error('[DistributorReminderWorker] Failed to send missing phones admin alert:', err.message);
+      return false;
+    }
+  }
 }
 
 // Singleton instance

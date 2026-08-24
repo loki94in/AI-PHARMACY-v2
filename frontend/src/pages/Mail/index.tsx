@@ -1263,7 +1263,7 @@ const Mail = () => {
                   className={`w-full premium-btn text-xs font-bold uppercase tracking-wider py-2.5 flex items-center justify-center gap-2 rounded-xl transition-all ${
                     processing || selectedCount === 0
                       ? 'bg-white/5 border border-glass-border text-muted cursor-not-allowed'
-                      : 'bg-green text-text shadow-[0_4px_12px_rgba(16,185,129,0.3)] hover:bg-green/90'
+                      : 'bg-green text-white shadow-[0_4px_12px_rgba(16,185,129,0.3)] hover:bg-green/90'
                   }`}
                 >
                   {processing ? (

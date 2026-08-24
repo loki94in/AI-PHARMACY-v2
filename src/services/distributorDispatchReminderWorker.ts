@@ -504,22 +504,54 @@ export async function checkAndSendAutoReminders() {
     const todayStr = getTodayDateString();
     await syncTodayActiveDistributors();
 
-    const pendingReminders = await db.all(
-      `SELECT id, distributor_name FROM distributor_dispatch_reminders
-       WHERE date = ? AND status = 'Pending'
-         AND (last_reminded_at IS NULL OR DATE(last_reminded_at) != ?)`,
+    // 1. Fetch all active reminders for today (Pending or Dispatched) that have not been reminded today
+    const activeReminders = await db.all(
+      `SELECT r.id, r.distributor_name, r.distributor_phone, d.phone as master_phone
+       FROM distributor_dispatch_reminders r
+       LEFT JOIN distributors d ON r.distributor_id = d.id
+       WHERE r.date = ? AND r.status != 'No Order Today'
+         AND (r.last_reminded_at IS NULL OR DATE(r.last_reminded_at) != ?)`,
       [todayStr, todayStr]
     );
 
-    if (pendingReminders.length > 0) {
-      console.log(`[DistributorReminderWorker] Found ${pendingReminders.length} pending reminders for ${startTimeStr}-${endTimeStr} window.`);
+    const withPhone: Array<{ id: number; distributor_name: string }> = [];
+    const missingPhone: Array<{ id: number; distributor_name: string }> = [];
 
-      for (const item of pendingReminders) {
+    for (const item of activeReminders) {
+      const p = (item.distributor_phone || item.master_phone || '').replace(/\D/g, '').slice(-10);
+      if (p && p.length === 10) {
+        withPhone.push({ id: item.id, distributor_name: item.distributor_name });
+      } else {
+        missingPhone.push({ id: item.id, distributor_name: item.distributor_name });
+      }
+    }
+
+    if (withPhone.length > 0) {
+      console.log(`[DistributorReminderWorker] Found ${withPhone.length} active distributor reminders to send for ${startTimeStr}-${endTimeStr} window.`);
+
+      for (const item of withPhone) {
         // Anti-ban safe delay: 5 to 10 seconds between messages (strictly non-bulk)
         const delay = Math.floor(Math.random() * 5000) + 5000;
         await new Promise(res => setTimeout(res, delay));
 
         await notificationService.sendDistributorDispatchReminder(item.id);
+      }
+    }
+
+    // 2. Alert Pharmacy Admin if any active suppliers are missing contact phone numbers
+    if (missingPhone.length > 0) {
+      const alreadyAlerted = await db.get(
+        `SELECT id FROM automation_notifications 
+         WHERE type = 'admin_missing_distributor_phones' AND DATE(created_at) = ?
+         LIMIT 1`,
+        [todayStr]
+      );
+
+      if (!alreadyAlerted) {
+        console.log(`[DistributorReminderWorker] Alerting pharmacy admin of ${missingPhone.length} missing distributor phone numbers.`);
+        await notificationService.sendMissingDistributorPhonesAdminAlert(
+          missingPhone.map(m => ({ name: m.distributor_name }))
+        );
       }
     }
   } catch (err: any) {

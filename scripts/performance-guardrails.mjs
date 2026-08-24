@@ -147,6 +147,16 @@ const RULES = [
       // explicit light-mode overrides in index.css (softened to 0.35), so they
       // are theme-safe by design. Buttons/text on colored surfaces are NOT.
       if (/inset-0/.test(line) && /backdrop-blur|z-(modal|global-modal|drawer)/.test(line)) return null;
+      // Accent-fill label exception: `text-white` (incl. hover:/group-hover:)
+      // on an element that also carries a solid accent background class is
+      // THEME-SAFE BY CONTRACT — index.css's light-mode override
+      // (.light .text-white:not([class*="bg-primary"])…) keeps such labels
+      // white in Day mode. This combination is the sanctioned fix for
+      // unreadable same-hue text when `text-text` sat on colored fills
+      // (bug register P2-05); `text-text` stays reserved for neutral surfaces
+      // per AGENTS.md UI Development Guidelines.
+      if (/text-white/.test(line)
+        && /(?:bg-(?:primary|red|green|blue|purple|emerald|sky|indigo|yellow|amber|cyan|orange)|from-primary)/.test(line)) return null;
       const cls = /(bg|text|border|ring|divide|outline|decoration|from|to|via)-(black|white)([^a-z0-9-]|$)/.test(line);
       if (cls) return 'Raw Tailwind black/white class breaks the light-mode/theme toggle. Use semantic tokens: bg-bg/bg2/bg3, text-text/text-muted, border-border.';
       if (/(bg|text|border|ring|from|to|via|shadow)-\[(#|rgb|hsl)/.test(line)) return 'Hardcoded arbitrary color value breaks theming. Use semantic Tailwind variables.';
@@ -379,6 +389,8 @@ function selfTest() {
     ['F1', "void queryClient.invalidateQueries({ queryKey: key, refetchType: 'none' });"],
     ['F5', 'const id = setTimeout(settle, 100);'],
     ['F6', '<div className="bg-bg2 text-muted border-border">ok</div>'],
+    ['F6', '<button className="bg-primary text-white font-bold">Save</button>'],
+    ['F6', '<span className="bg-sky/10 group-hover:bg-sky group-hover:text-white">Add</span>'],
     ['F8', "source: invoice.source_flag"],
     ['F9', 'if (modalRef.confirm()) close();'],
   ];

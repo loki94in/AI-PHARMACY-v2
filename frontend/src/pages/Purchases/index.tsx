@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {} from '../../hooks/useDeferredEffect';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Edit, Camera, CheckCircle, Mail, Package, X, Plus, BookOpen, AlertTriangle, ShieldAlert, Factory, RefreshCw, ExternalLink } from 'lucide-react';
+import { Edit, Camera, CheckCircle, Mail, Package, X, Plus, BookOpen, AlertTriangle, ShieldAlert, Factory, RefreshCw, ExternalLink, Loader2 } from 'lucide-react';
 import { useOnClickOutside } from '../../hooks/useOnClickOutside';
 import { api, apiClient, getCompactInventoryCache } from '../../services/api';
 import { useApiQuery } from '../../hooks/useApiQuery';
@@ -258,11 +258,6 @@ const newBillId = (): string => 'bill_' + Date.now();
 const newGrnNo = (): string => `P-${Math.floor(100 + Math.random() * 900)}`;
 const generateInvoiceNo = (): string => `INV-${Date.now().toString().slice(-6)}`;
 const nowMs = (): number => Date.now();
-let cachedMasterCatalog: Medicine[] = [];
-let isMasterCatalogHydrating = false;
-let cachedMergedCatalog: Medicine[] | null = null;
-let lastMasterLength = -1;
-let lastCompactLength = -1;
 
 // One-shot purchase-history model (module-level, survives KeepAlive navigation):
 // GET /purchases/medicine-batches is fetched ONCE per medicine+distributor when a
@@ -368,12 +363,66 @@ const historyRowsAsPriceRecords = (rows: MedicineBatchHistoryRow[] | null): Pric
   }));
 };
 
+// Recent-search result cache (module scope, survives KeepAlive navigation).
+// A term fetched once this session repaints instantly with ZERO network on
+// every revisit — typing, deleting a char and retyping, switching rows, or
+// coming back to the page never re-fetches the same master query.
+const SEARCH_CACHE_TTL_MS = 5 * 60_000;
+const SEARCH_CACHE_MAX_ENTRIES = 40;
+const searchResultsCache = new Map<string, { at: number; results: Medicine[] }>();
+
+const getCachedSearchResults = (term: string): Medicine[] | null => {
+  const key = term.toLowerCase().replace(/\s+/g, ' ').trim();
+  const entry = searchResultsCache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.at >= SEARCH_CACHE_TTL_MS) {
+    searchResultsCache.delete(key);
+    return null;
+  }
+  entry.at = Date.now(); // LRU touch
+  return entry.results;
+};
+
+const storeCachedSearchResults = (term: string, results: Medicine[]): void => {
+  const key = term.toLowerCase().replace(/\s+/g, ' ').trim();
+  if (!key) return;
+  searchResultsCache.set(key, { at: Date.now(), results });
+  if (searchResultsCache.size > SEARCH_CACHE_MAX_ENTRIES) {
+    const oldestKey = searchResultsCache.keys().next().value;
+    if (oldestKey !== undefined) searchResultsCache.delete(oldestKey);
+  }
+};
+
+// POS-cart-like instant narrowing: find the LONGEST already-cached term that
+// is a prefix of the current term and locally filter its master-sourced rows.
+// Purely a paint accelerator — the debounced backend fetch always follows and
+// replaces this preview with the authoritative full list for the exact term.
+const getInstantNarrowedResults = (term: string): Medicine[] => {
+  const norm = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim();
+  const target = norm(term);
+  if (!target || searchResultsCache.size === 0) return [];
+  let bestKey = '';
+  let bestEntry: { at: number; results: Medicine[] } | null = null;
+  for (const [key, entry] of searchResultsCache.entries()) {
+    if (Date.now() - entry.at >= SEARCH_CACHE_TTL_MS) continue;
+    if (target.startsWith(key) && key.length > bestKey.length && entry.results.length > 0) {
+      bestKey = key;
+      bestEntry = entry;
+    }
+  }
+  if (!bestEntry || bestKey === target) return [];
+  const lowerTerm = target.toLowerCase();
+  return bestEntry.results.filter(m => {
+    const name = String(m.name || '').toLowerCase();
+    return name.includes(lowerTerm);
+  });
+};
+
 // ONE row per medicine NAME in the Purchases dropdown. The master catalog
 // still contains a few legacy duplicate-name groups (same medicine, different
 // ids); backend collapses them, this guards stale module caches mid-session.
 // Preference: in-stock entry wins, then the lower id.
-const dedupeMedicinesByName = (list: Medicine[]): Medicine[] => {
-  const byName = new Map<string, Medicine>();
+const dedupeMedicinesByName = (list: Medicine[]): Medicine[] => {  const byName = new Map<string, Medicine>();
   const out: Medicine[] = [];
   for (const m of list) {
     const key = String(m.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -390,59 +439,6 @@ const dedupeMedicinesByName = (list: Medicine[]): Medicine[] => {
     }
   }
   return out;
-};
-
-const getMergedCatalog = (): Medicine[] => {
-  const compact = getCompactInventoryCache();
-  if (cachedMergedCatalog && lastMasterLength === cachedMasterCatalog.length && lastCompactLength === compact.length) {
-    return cachedMergedCatalog;
-  }
-
-  if (compact.length === 0) {
-    cachedMergedCatalog = cachedMasterCatalog;
-    lastMasterLength = cachedMasterCatalog.length;
-    lastCompactLength = 0;
-    return cachedMergedCatalog;
-  }
-
-  const map = new Map<number, Medicine>();
-  for (let i = 0; i < cachedMasterCatalog.length; i++) {
-    const m = cachedMasterCatalog[i];
-    if (m && m.id) map.set(m.id, { ...m });
-  }
-  for (let i = 0; i < compact.length; i++) {
-    const item = compact[i];
-    const medId = item.medicine_id || item.id;
-    if (medId) {
-      const existing = map.get(medId);
-      if (existing) {
-        existing.stock_qty = item.stock_qty !== undefined ? item.stock_qty : existing.stock_qty;
-        existing.loose_qty = item.loose_quantity !== undefined ? item.loose_quantity : existing.loose_qty;
-      } else {
-        map.set(medId, {
-          id: medId,
-          name: item.name,
-          generic_name: item.salts || '',
-          manufacturer: item.manufacturer || '',
-          pack_unit: item.packaging || '',
-          strength: '',
-          mrp: item.mrp || 0,
-          rate: item.unit_price || item.cost_price || 0,
-          scheme_paid: 0,
-          scheme_free: 0,
-          cgst_per: 0,
-          sgst_per: 0,
-          hsn_code: '',
-          stock_qty: item.stock_qty,
-          loose_qty: item.loose_quantity
-        });
-      }
-    }
-  }
-  cachedMergedCatalog = dedupeMedicinesByName(Array.from(map.values()));
-  lastMasterLength = cachedMasterCatalog.length;
-  lastCompactLength = compact.length;
-  return cachedMergedCatalog;
 };
 
 const getLiveStockForItem = (item: BillItem): { stock_qty: number; loose_qty: number; found: boolean } | null => {
@@ -477,33 +473,6 @@ const getLiveStockForItem = (item: BillItem): { stock_qty: number; loose_qty: nu
     };
   }
   return null;
-};
-
-const filterLocalCatalog = (query: string, catalog?: Medicine[]): Medicine[] => {
-  if (!query || !query.trim()) return [];
-  const term = query.trim().toLowerCase();
-  const sourceCatalog = (catalog && catalog.length > 0) ? catalog : getMergedCatalog();
-  
-  const prefixes: Medicine[] = [];
-  const infixes: Medicine[] = [];
-
-  for (let i = 0; i < sourceCatalog.length; i++) {
-    const m = sourceCatalog[i];
-    const name = m.name ? m.name.toLowerCase() : '';
-    const generic = m.generic_name ? m.generic_name.toLowerCase() : '';
-    const mfg = m.manufacturer ? m.manufacturer.toLowerCase() : '';
-
-    if (name.startsWith(term) || generic.startsWith(term) || mfg.startsWith(term)) {
-      prefixes.push(m);
-      if (prefixes.length >= 30) break;
-    } else if (name.includes(term) || generic.includes(term) || mfg.includes(term)) {
-      if (infixes.length < 15) {
-        infixes.push(m);
-      }
-    }
-  }
-
-  return prefixes.length >= 15 ? prefixes.slice(0, 30) : [...prefixes, ...infixes].slice(0, 30);
 };
 
 const getInitialPurchasesTabs = (): PurchaseTab[] => {
@@ -1138,6 +1107,8 @@ const Purchases: React.FC = () => {
   const [searchResults, setSearchResults] = useState<Medicine[]>([]);
   const [activeSearchIndex, setActiveSearchIndex] = useState<number | null>(null);
   const [searchHighlightIndex, setSearchHighlightIndex] = useState(-1);
+  // True while the single master-database search (debounce + fetch) is in flight.
+  const [searchSearching, setSearchSearching] = useState(false);
   useOnClickOutside(activeSearchRef, () => {
     setActiveSearchIndex(null);
     setSearchResults([]);
@@ -1504,25 +1475,9 @@ const Purchases: React.FC = () => {
   };
 
   const searchTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Pre-hydrate master catalog in background on mount
-  // B4: non-essential background warm-up; staggered along with the other
-  // deferred fetches so it doesn't compete with the form's initial fetches.
-  useEffect(() => {
-    if (!deferredFetchesReady) return;
-    if (cachedMasterCatalog.length === 0 && !isMasterCatalogHydrating) {
-      isMasterCatalogHydrating = true;
-      api.catalogSearch('').then(list => {
-        if (Array.isArray(list) && list.length > 0) {
-          cachedMasterCatalog = list;
-        }
-      }).catch(err => {
-        console.warn('Background catalog pre-hydration warning:', err);
-      }).finally(() => {
-        isMasterCatalogHydrating = false;
-      });
-    }
-  }, [deferredFetchesReady]);
+  // Monotonic search sequence: a slow earlier request can never overwrite the
+  // results of a newer keystroke.
+  const searchSeqRef = React.useRef(0);
 
   const searchMedicines = (term: string, index: number) => {
     if (searchTimeoutRef.current) {
@@ -1534,60 +1489,69 @@ const Purchases: React.FC = () => {
 
     const cleanTerm = (term || '').trim();
     if (!cleanTerm || cleanTerm.length < 3) {
-      if (cleanTerm.length > 0) {
-        getMergedCatalog();
-      }
+      searchSeqRef.current += 1;
       setSearchResults([]);
       setSearchHighlightIndex(-1);
+      setSearchSearching(false);
       return;
     }
 
-    // Step 1: INSTANT (<1ms) in-memory filter from local catalog & compact inventory cache
-    const instantMatches = filterLocalCatalog(cleanTerm);
-    setSearchResults(instantMatches);
-    setSearchHighlightIndex(-1);
+    // Recent-search cache (owner request): a term already fetched this session
+    // repaints INSTANTLY from the module cache with zero network — deleting a
+    // char and retyping, switching rows, or revisiting a term never re-hits
+    // the backend. Cache lives at module scope below.
+    const cached = getCachedSearchResults(cleanTerm);
+    if (cached) {
+      searchSeqRef.current += 1;
+      setSearchResults(cached);
+      setSearchHighlightIndex(-1);
+      setSearchSearching(false);
+      return;
+    }
 
-    // Step 2: Asynchronous backend query to update and merge master catalog
+    // POS-cart-like instant narrowing (owner request): if a LONGER-family term
+    // was already fetched (e.g. "dol" while now typing "dolo 6"), filter those
+    // cached MASTER rows locally and paint immediately — zero network, still
+    // single-source (every row came from the master endpoint this session).
+    // The debounced backend fetch below then replaces this with the complete,
+    // authoritative list for the exact term.
+    const narrowed = getInstantNarrowedResults(cleanTerm);
+    if (narrowed.length > 0) {
+      setSearchResults(narrowed);
+      setSearchHighlightIndex(-1);
+    }
+
+    // ONE source (owner contract): the master database via
+    // GET /inventory/catalog-search — no separate local inventory-filter list.
+    // Live stock numbers ride the backend's own enrichment, so availability
+    // chips still render per row. Backend is localhost + indexed (~25ms), so
+    // the debounce is the dominant latency: 150 ms keeps first-paint at
+    // POS-like speed while the instant layers cover every revisit.
+    const seq = ++searchSeqRef.current;
+    if (narrowed.length === 0) {
+      setSearchResults([]);
+      setSearchHighlightIndex(-1);
+    }
+    setSearchSearching(true);
     searchTimeoutRef.current = setTimeout(async () => {
       try {
         const response = await api.catalogSearch(cleanTerm) as CatalogSearchRow[] | null;
-        if (Array.isArray(response) && response.length > 0) {
-          // Merge newly fetched items into cachedMasterCatalog
-          const seen = new Set(cachedMasterCatalog.map(m => m.id));
-          for (const item of response) {
-            if (!seen.has(item.id)) {
-              seen.add(item.id);
-              cachedMasterCatalog.push(item as Medicine);
-            }
-          }
-          const compact = getCompactInventoryCache();
-          const compactMap = new Map(compact.map(ci => [(ci.medicine_id || ci.id), ci]));
-          const enrichedResponse = response.map(med => {
-            const cItem = compactMap.get(med.id);
-            return {
-              ...med,
-              // stock_qty stays UNDEFINED for master-database-only entries (no
-              // inventory row yet) so the dropdown can label them distinctly.
-              stock_qty: cItem ? cItem.stock_qty : med.stock_qty,
-              loose_qty: cItem ? cItem.loose_quantity : med.loose_qty
-            };
-          });
-          // In-stock inventory first; master-database entries grouped after.
-          // Name-dedupe guards against stale cached twins resurfacing.
-          const deduped = dedupeMedicinesByName(enrichedResponse as Medicine[]);
-          deduped.sort((a, b) => {
-            const aStock = (((a.stock_qty as number) || 0) + ((a.loose_qty as number) || 0)) > 0 ? 1 : 0;
-            const bStock = (((b.stock_qty as number) || 0) + ((b.loose_qty as number) || 0)) > 0 ? 1 : 0;
-            if (aStock !== bStock) return bStock - aStock;
-            return String(a.name || '').localeCompare(String(b.name || ''));
-          });
+        if (seq !== searchSeqRef.current) return; // superseded keystroke
+        if (Array.isArray(response)) {
+          const deduped = dedupeMedicinesByName(response as Medicine[]);
+          deduped.sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+          storeCachedSearchResults(cleanTerm, deduped);
           setSearchResults(deduped);
           setSearchHighlightIndex(-1);
         }
       } catch (error) {
         console.error('Error searching medicines:', error);
+      } finally {
+        if (seq === searchSeqRef.current) {
+          setSearchSearching(false);
+        }
       }
-    }, 300);
+    }, 150);
   };
 
   useEffect(() => {
@@ -3558,10 +3522,18 @@ const Purchases: React.FC = () => {
                               </span>
                             )}
                           </div>
-                          {activeSearchIndex === index && searchResults.length === 0 && item.medicine_name.trim().length >= 2 && (
+                          {activeSearchIndex === index && searchSearching && searchResults.length === 0 && item.medicine_name.trim().length >= 3 && (
+                            <div ref={searchResultsRef} className="absolute z-[9999] w-[440px] max-w-[90vw] mt-1 bg-bg2 border border-glass-border rounded-xl shadow-2xl p-3 left-0 backdrop-blur-xl">
+                              <div className="flex items-center gap-2 text-xs text-muted font-semibold">
+                                <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" />
+                                Searching Master Database for &ldquo;{item.medicine_name.trim()}&rdquo;&hellip;
+                              </div>
+                            </div>
+                          )}
+                          {activeSearchIndex === index && !searchSearching && searchResults.length === 0 && item.medicine_name.trim().length >= 3 && (
                             <div ref={searchResultsRef} className="absolute z-[9999] w-[440px] max-w-[90vw] mt-1 bg-bg2 border border-glass-border rounded-xl shadow-2xl p-2 left-0 backdrop-blur-xl">
                               <div className="px-3 py-1.5 text-xs text-muted font-medium border-b border-glass-border/30 flex items-center justify-between">
-                                <span>No exact match in store inventory</span>
+                                <span>No match in Master Database</span>
                                 <span className="text-[10px] text-amber-400 font-mono font-semibold">New Item</span>
                               </div>
                               <button
@@ -4411,24 +4383,8 @@ const Purchases: React.FC = () => {
               setItems(newItems);
             }
 
-            if (saved && saved.id) {
-              cachedMasterCatalog.unshift({
-                id: saved.id,
-                name: saved.name,
-                generic_name: saved.generic_name,
-                manufacturer: saved.manufacturer,
-                pack_unit: saved.pack_unit,
-                pack_size: saved.pack_size,
-                mrp: saved.mrp,
-                rate: saved.rate,
-                cgst_per: saved.cgst_per || 0,
-                sgst_per: saved.sgst_per || 0,
-                hsn_code: saved.hsn_code || '',
-                strength: saved.strength || '',
-                scheme_paid: 0,
-                scheme_free: 0
-              });
-            }
+            // (Newly registered medicines surface in the dropdown via the next
+            // backend master search — no local catalog cache to maintain.)
 
             setIsUniversalModalOpen(false);
             setUniversalEditMedicineId(null);

@@ -224,6 +224,61 @@ router.post('/enqueue-pharmarack-batch', async (req, res) => {
   }
 });
 
+// POST enqueue a single distributor order message directly when missing number is saved
+router.post('/enqueue-single-distributor-order', async (req, res) => {
+  const { storeId, storeName, phone, message, items } = req.body || {};
+  if (!storeName || !phone || !message) {
+    return res.status(400).json({ error: 'storeName, phone, and message are required' });
+  }
+  const cleanPhone = normalizeWhatsAppPhone(phone);
+  if (!cleanPhone || cleanPhone.length < 10) {
+    return res.status(400).json({ error: 'Valid 10-digit phone number is required' });
+  }
+
+  try {
+    const db = await dbManager.getConnection();
+    const queueId = await whatsappQueueWorker.enqueue(
+      cleanPhone,
+      message,
+      'pharmarack_distributor_order',
+      storeName
+    );
+
+    // Save/sync phone to master distributors table and today's active reminder record
+    const today = new Date().toISOString().split('T')[0];
+    const rawDigits = cleanPhone.slice(-10);
+    await db.run(
+      `UPDATE distributors SET phone = ? WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) OR (id = ? AND id > 0)`,
+      [rawDigits, storeName, storeId || 0]
+    );
+    await db.run(
+      `UPDATE distributor_dispatch_reminders SET distributor_phone = ? WHERE LOWER(TRIM(distributor_name)) = LOWER(TRIM(?)) AND date = ?`,
+      [rawDigits, storeName, today]
+    );
+
+    // If items provided, log placed order history
+    if (Array.isArray(items) && items.length > 0) {
+      const placedAt = Date.now();
+      await db.run(
+        `INSERT INTO pharmarack_placed_orders (order_date, store_id, store_name, items_json, delivery_persons_json, placed_at, batch_sent, batch_sent_at)
+         VALUES (?, ?, ?, ?, ?, ?, 1, ?)`,
+        [today, storeId || null, storeName, JSON.stringify(items), null, placedAt, placedAt]
+      );
+    }
+
+    whatsappQueueWorker.triggerProcessing();
+
+    res.json({
+      success: true,
+      queueId,
+      message: `Enqueued order message to ${storeName} (${cleanPhone})`
+    });
+  } catch (err: any) {
+    console.error('Failed to enqueue single distributor order:', err);
+    res.status(500).json({ error: err?.message || 'Failed to enqueue single distributor order' });
+  }
+});
+
 // POST enqueue a single WhatsApp message into the background queue
 router.post('/enqueue-single', async (req, res) => {
   const { number, message, type = 'crm_notification', targetName, explicitScheduledAt } = req.body || {};

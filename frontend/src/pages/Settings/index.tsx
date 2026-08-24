@@ -1170,7 +1170,7 @@ function IntegrationsCredentialsTab({ rawSettings, refetchSettings, isVisible }:
             <button
               type="button"
               onClick={handleLaunchPharmarackLogin}
-              className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-primary text-text font-bold text-xs rounded-xl hover:bg-primary/80 transition-all cursor-pointer shadow-sm"
+              className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-primary text-white font-bold text-xs rounded-xl hover:bg-primary/80 transition-all cursor-pointer shadow-sm"
               title="Open Chrome window with auto-filled credentials to enter OTP"
             >
               <Smartphone size={14} />

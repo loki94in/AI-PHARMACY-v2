@@ -7,6 +7,17 @@
 
 ## Fixed
 
+### [Fixed] P2-05 — Day-mode text invisible on colored buttons ("font and background same colour"); secondary text too pale
+
+| Field | Content |
+|-------|---------|
+| **What the user saw** | In the Day (light) theme, several buttons/chips showed label text in nearly the same colour as their fill (green-on-green / green-on-blue), e.g. POS "+ Add"/"Import & Add" hover chips, AI Camera Scan, Save & Print, Doctor/Patient save buttons, Settings Pharmarack login, Mail process button, PurchaseHistory/Sells print-label buttons, 404 "Return to Dashboard". Secondary (`text-muted`) copy also looked washed out. |
+| **Root cause** | 12 elements placed the semantic body-text token `text-text` on top of saturated accent fills (`bg-primary`, `bg-sky`, `bg-green`, gradient `from-primary to-teal-500`, incl. hover-fill states). In Dark mode `--text` is near-white so it read fine; when the Day palette shipped it became deep green `#14532d`, landing same-hue on `#22c55e`/`#0ea5e9` fills. Separately, light `--muted` `#5b7a68` gives only ≈3.7:1 contrast on mint/white (< WCAG AA 4.5:1). |
+| **How it was fixed** | All 12 spots switched to `text-white` / `hover:text-white` / `group-hover:text-white` — the pattern `index.css` already exempts from its `.light .text-white` override for elements carrying an accent bg class (CRM filter chip was already correct; used as reference). Files: App.tsx, POS/index.tsx (8 spots), Mail, PurchaseHistory (2), Sells, Settings, PharmarackCart. Light `--muted` darkened `#5b7a68` → `#44604f` (≥5:1 on mint/white). Dark mode unchanged visually (white ≈ prior near-white). |
+| **Priority** | P2 |
+| **What not to touch** | The `index.css` exemption list on `.light .text-white:not([class*="bg-primary"])…` is what keeps these labels white in Day mode — never narrow it. Do not use `text-text` on solid accent fills anywhere; neutral surfaces only. |
+| **Verified by** | Repo-wide grep shows zero remaining `text-text` on solid accent fills; guardrails PASS; no dark-mode white-on-white collisions found. |
+
 ### [Fixed] P2-04 — Investigation Center & Reports pages slow; Purchases dropdown showed duplicate medicines and hid saved batches
 
 | Field | Content |

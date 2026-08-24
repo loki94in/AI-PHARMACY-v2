@@ -569,13 +569,13 @@ router.get('/catalog-search', async (req, res) => {
        FROM medicine_aliases a
        JOIN medicines m ON a.medicine_id = m.id
        WHERE a.alias_name LIKE ?
-       ORDER BY name ASC LIMIT 30`,
+       ORDER BY name ASC LIMIT 40`,
       [prefixQ, prefixQ]
     );
 
     const rows: any[] = [];
     const seenIds = new Set<number>();
-    
+
     for (const r of prefixRows) {
       if (!seenIds.has(r.id)) {
         seenIds.add(r.id);
@@ -583,8 +583,14 @@ router.get('/catalog-search', async (req, res) => {
       }
     }
 
-    // Pass 2: Containment match on name & aliases if needed
-    if (rows.length < 30) {
+    // Pass 2: Containment match on name & aliases — ONLY when the prefix pass
+    // came back sparse (<15). Common brand prefixes skip the %term% scan
+    // entirely, keeping the whole request inside the owner-approved 100-300 ms
+    // budget. (The former Pass 3 — %term% ORs over api_reference/item_code/
+    // manufacturer/generic_name — was REMOVED 2026-08: it full-scanned all 291k
+    // rows and took a measured ~2.7 s whenever the term had few name hits,
+    // blowing the dropdown budget with confusing noise results.)
+    if (rows.length < 15) {
       const containmentRows = await db.all(
         `SELECT id, name, item_code, manufacturer, strength, packaging, pack_unit, mrp, rate, cgst_per, sgst_per, hsn_code, generic_name
          FROM medicines
@@ -594,33 +600,14 @@ router.get('/catalog-search', async (req, res) => {
          FROM medicine_aliases a
          JOIN medicines m ON a.medicine_id = m.id
          WHERE a.alias_name LIKE ?
-         ORDER BY name ASC LIMIT 30`,
+         ORDER BY name ASC LIMIT 50`,
         [likeQ, likeQ]
       );
       for (const r of containmentRows) {
         if (!seenIds.has(r.id)) {
           seenIds.add(r.id);
           rows.push(r);
-          if (rows.length >= 30) break;
-        }
-      }
-    }
-
-    // Pass 3: Secondary fields if still < 30 results
-    if (rows.length < 30) {
-      const needed = 30 - rows.length;
-      const secondaryRows = await db.all(
-        `SELECT id, name, item_code, manufacturer, strength, packaging, pack_unit, mrp, rate, cgst_per, sgst_per, hsn_code, generic_name
-         FROM medicines
-         WHERE api_reference LIKE ? OR item_code LIKE ? OR manufacturer LIKE ? OR generic_name LIKE ?
-         ORDER BY name ASC LIMIT ?`,
-        [likeQ, likeQ, likeQ, likeQ, needed]
-      );
-      for (const r of secondaryRows) {
-        if (!seenIds.has(r.id)) {
-          seenIds.add(r.id);
-          rows.push(r);
-          if (rows.length >= 30) break;
+          if (rows.length >= 50) break;
         }
       }
     }

@@ -230,7 +230,7 @@ function App() {
                       <p className="text-muted text-sm max-w-md">The requested route does not exist or has been relocated to another workspace tab.</p>
                       <a
                         href="/dashboard"
-                        className="px-5 py-2.5 bg-primary text-text font-bold text-xs rounded-xl shadow-lg hover:bg-primary/90 transition-all inline-flex items-center gap-2"
+                        className="px-5 py-2.5 bg-primary text-white font-bold text-xs rounded-xl shadow-lg hover:bg-primary/90 transition-all inline-flex items-center gap-2"
                       >
                         Return to Dashboard
                       </a>

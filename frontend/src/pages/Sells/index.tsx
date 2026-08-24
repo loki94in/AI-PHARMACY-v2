@@ -1201,7 +1201,7 @@ const Sells = () => {
                   </div>
                   <button
                     onClick={() => printCurrentBill(`Invoice-${viewInvoice.invoice_no}-${viewInvoice.customer_name || 'Walk-in'}`)}
-                    className="px-3.5 py-2 bg-primary/20 hover:bg-primary text-primary hover:text-text rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 border border-primary/30 shrink-0 cursor-pointer"
+                    className="px-3.5 py-2 bg-primary/20 hover:bg-primary text-primary hover:text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 border border-primary/30 shrink-0 cursor-pointer"
                     title="Print the complete saved bill (customer, doctor, items with batch/MRP/qty)"
                   >
                     <Printer size={14} /> Print Bill

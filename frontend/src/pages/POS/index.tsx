@@ -3830,7 +3830,7 @@ const POS = () => {
                           <span className="font-semibold text-text group-hover:text-primary transition-all">Add "{searchTerm.trim()}" directly to cart (Quick Add)</span>
                           <span className="text-[13px] text-muted font-normal">Added as custom entry — please input real rate, batch, and expiry</span>
                         </div>
-                        <span className="text-[14px] bg-primary/10 border border-primary/20 text-primary py-1.5 px-3 rounded-lg font-bold group-hover:bg-primary group-hover:text-text transition-all">+ Add</span>
+                        <span className="text-[14px] bg-primary/10 border border-primary/20 text-primary py-1.5 px-3 rounded-lg font-bold group-hover:bg-primary group-hover:text-white transition-all">+ Add</span>
                       </button>
 
                       {searchingOnline && (
@@ -3857,7 +3857,7 @@ const POS = () => {
                                 <span className="text-[13px] text-muted font-normal">Active Salts: <strong className="text-text">{sug.api_reference || '—'}</strong></span>
                                 {sug.manufacturer && <span className="text-[13px] text-muted font-normal">Mfr: {sug.manufacturer}</span>}
                               </div>
-                              <span className="text-[14px] bg-sky/10 border border-sky/20 text-sky py-1.5 px-3 rounded-lg font-bold group-hover:bg-sky group-hover:text-text transition-all">✨ Import & Add</span>
+                              <span className="text-[14px] bg-sky/10 border border-sky/20 text-sky py-1.5 px-3 rounded-lg font-bold group-hover:bg-sky group-hover:text-white transition-all">✨ Import & Add</span>
                             </button>
                           ))}
                         </>
@@ -3999,7 +3999,7 @@ const POS = () => {
                                   >
                                     <Edit size={12} />
                                   </button>
-                                  <span className="text-[14px] bg-primary/10 border border-primary/20 text-primary py-1.5 px-3 rounded-lg font-bold group-hover:bg-primary group-hover:text-text transition-all">+ Add</span>
+                                  <span className="text-[14px] bg-primary/10 border border-primary/20 text-primary py-1.5 px-3 rounded-lg font-bold group-hover:bg-primary group-hover:text-white transition-all">+ Add</span>
                                 </div>
                               </div>
                             </button>
@@ -4075,7 +4075,7 @@ const POS = () => {
                                 <span className="text-[13px] text-muted font-normal">Active Salts: <strong className="text-text">{sug.api_reference || '—'}</strong></span>
                                 {sug.manufacturer && <span className="text-[13px] text-muted font-normal">Mfr: {sug.manufacturer}</span>}
                               </div>
-                              <span className="text-[14px] bg-sky/10 border border-sky/20 text-sky py-1.5 px-3 rounded-lg font-bold group-hover:bg-sky group-hover:text-text transition-all">✨ Import & Add</span>
+                              <span className="text-[14px] bg-sky/10 border border-sky/20 text-sky py-1.5 px-3 rounded-lg font-bold group-hover:bg-sky group-hover:text-white transition-all">✨ Import & Add</span>
                             </button>
                           ))}
                         </>
@@ -4110,7 +4110,7 @@ const POS = () => {
                 type="button"
                 aria-label="AI Camera Scan"
                 onClick={() => setShowCamera(true)}
-                className="premium-btn bg-gradient-to-r from-primary to-teal-500 text-text shadow-[0_2px_8px_rgba(59,130,246,0.2)] hover:shadow-[0_4px_12px_rgba(59,130,246,0.3)] hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center gap-1.5 px-3 h-8 rounded-lg shrink-0 font-bold text-[11px]"
+                className="premium-btn bg-gradient-to-r from-primary to-teal-500 text-white shadow-[0_2px_8px_rgba(59,130,246,0.2)] hover:shadow-[0_4px_12px_rgba(59,130,246,0.3)] hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center gap-1.5 px-3 h-8 rounded-lg shrink-0 font-bold text-[11px]"
               >
                 <Camera size={13} />
                 <span>AI Camera Scan</span>
@@ -4970,7 +4970,7 @@ const POS = () => {
               className={`py-1.5 px-4 rounded-lg text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 transition-all cursor-pointer shadow-md ${
                 cart.length === 0
                   ? 'bg-bg3 border border-glass-border text-muted cursor-not-allowed'
-                  : 'bg-green text-text hover:bg-emerald-600 shadow-[0_0_14px_rgba(16,185,129,0.3)] hover:-translate-y-px'
+                  : 'bg-green text-white hover:bg-emerald-600 shadow-[0_0_14px_rgba(16,185,129,0.3)] hover:-translate-y-px'
               }`}
             >
               <CheckCircle size={13} />
@@ -5207,7 +5207,7 @@ const POS = () => {
               </button>
               <button 
                 onClick={handleSavePatientProfile}
-                className="premium-btn bg-primary text-text hover:bg-teal-500 py-2 px-5 text-xs font-bold uppercase tracking-wider rounded-xl shadow-md"
+                className="premium-btn bg-primary text-white hover:bg-teal-500 py-2 px-5 text-xs font-bold uppercase tracking-wider rounded-xl shadow-md"
               >
                 Save Profile (Ctrl+S)
               </button>
@@ -5302,7 +5302,7 @@ const POS = () => {
               <button 
                 onClick={handleRegisterDoctor}
                 disabled={!newDoctorName}
-                className="px-4 py-2 rounded-xl text-sm font-bold bg-sky text-text hover:bg-sky/90 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 shadow-[0_0_15px_rgba(14,165,233,0.2)]"
+                className="px-4 py-2 rounded-xl text-sm font-bold bg-sky text-white hover:bg-sky/90 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 shadow-[0_0_15px_rgba(14,165,233,0.2)]"
               >
                 <CheckCircle size={16} /> Save Doctor
               </button>

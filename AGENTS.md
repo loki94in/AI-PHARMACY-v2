@@ -269,6 +269,8 @@ This breaks the light mode/theme toggle.
 - Text: `text-text`, `text-muted`
 - Borders: `border-border`, `border-glass-border`
 
+**Exception — labels on solid accent fills (added 2026-08, bug P2-05):** an element whose background is a saturated accent (`bg-primary`, `bg-sky`, `bg-green`, gradients `from-primary …`, incl. `hover:`/`group-hover:` fill states) MUST use `text-white` for its label — `index.css`'s `.light .text-white:not([class*="bg-…"])` exemption keeps it white in Day mode. NEVER place `text-text` on accent fills: in Day mode `--text` is deep green and renders unreadable green-on-green. `text-text`/`text-muted` stay reserved for neutral surfaces (`bg`, `bg2`, `bg3`, glass).
+
 ---
 
 ## No Simulated/Mock Features Rule

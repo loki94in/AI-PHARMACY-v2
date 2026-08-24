@@ -25,7 +25,8 @@ import {
   PhoneCall,
   Zap,
   ShoppingCart,
-  } from 'lucide-react';
+  AlertCircle,
+} from 'lucide-react';
 import { api, apiClient, type DistributorDispatchReminder } from '../../services/api';
 import { whatsappQueueEvent, toastEvent, messageSendEvent } from '../../services/events';
 import {
@@ -445,8 +446,16 @@ const Dispatch = () => {
         phone: finalPhone
       });
       setDistributorReminders(prev => prev.map(r => r.id === item.id ? { ...r, distributor_phone: finalPhone } : r));
-      showNotif(`Phone number updated for ${item.distributor_name}`);
       setEditingDistPhoneId(null);
+
+      // Auto-dispatch reminder message to this newly added distributor only
+      try {
+        await api.sendDistributorReminderNow(item.id);
+        showNotif(`Phone saved & reminder dispatched to ${item.distributor_name}!`);
+      } catch {
+        showNotif(`Phone number saved for ${item.distributor_name}`);
+      }
+
       await fetchDistributorReminders(true);
     } catch (err) {
       const e = err as LocalApiError;
@@ -1001,46 +1010,63 @@ const Dispatch = () => {
               r.has_order_today === 1 && r.latest_notif_status !== 'sent' && r.latest_notif_status !== 'delivered'
             ).length;
 
+            const missingPhoneCount = distributorReminders.filter(r =>
+              r.has_order_today === 1 && (!r.distributor_phone || !r.distributor_phone.trim())
+            ).length;
+
             return (
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                {/* Metric 1: Today's Orders */}
-                <div className="p-3.5 rounded-xl bg-bg/50 border border-glass-border/70 flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-xl bg-amber-500/15 text-amber-400 flex items-center justify-center shrink-0">
-                    <Package size={18} />
+              <div className="space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {/* Metric 1: Today's Orders */}
+                  <div className="p-3.5 rounded-xl bg-bg/50 border border-glass-border/70 flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-amber-500/15 text-amber-400 flex items-center justify-center shrink-0">
+                      <Package size={18} />
+                    </div>
+                    <div>
+                      <div className="text-[10px] font-semibold text-muted uppercase tracking-wide">Today's Orders</div>
+                      <div className="text-base font-bold text-text font-mono flex items-center gap-1.5">
+                        {todayCount} <span className="text-[10px] font-normal text-muted">distributors</span>
+                      </div>
+                    </div>
                   </div>
-                  <div>
-                    <div className="text-[10px] font-semibold text-muted uppercase tracking-wide">Today's Orders</div>
-                    <div className="text-base font-bold text-text font-mono flex items-center gap-1.5">
-                      {todayCount} <span className="text-[10px] font-normal text-muted">distributors</span>
+
+                  {/* Metric 2: Messages Sent */}
+                  <div className="p-3.5 rounded-xl bg-bg/50 border border-glass-border/70 flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-emerald-500/15 text-emerald-400 flex items-center justify-center shrink-0">
+                      <CheckCircle size={18} />
+                    </div>
+                    <div>
+                      <div className="text-[10px] font-semibold text-muted uppercase tracking-wide">Messages Sent</div>
+                      <div className="text-base font-bold text-emerald-400 font-mono flex items-center gap-1.5">
+                        {sentTodayCount} <span className="text-[10px] font-normal text-muted">/ {todayCount}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Metric 3: Handover Pending */}
+                  <div className="p-3.5 rounded-xl bg-bg/50 border border-glass-border/70 flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-sky/15 text-sky flex items-center justify-center shrink-0">
+                      <Clock size={18} />
+                    </div>
+                    <div>
+                      <div className="text-[10px] font-semibold text-muted uppercase tracking-wide">Pending Handover</div>
+                      <div className="text-base font-bold text-amber-300 font-mono flex items-center gap-1.5">
+                        {notSentTodayCount} <span className="text-[10px] font-normal text-muted">remaining</span>
+                      </div>
                     </div>
                   </div>
                 </div>
 
-                {/* Metric 2: Messages Sent */}
-                <div className="p-3.5 rounded-xl bg-bg/50 border border-glass-border/70 flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-xl bg-emerald-500/15 text-emerald-400 flex items-center justify-center shrink-0">
-                    <CheckCircle size={18} />
-                  </div>
-                  <div>
-                    <div className="text-[10px] font-semibold text-muted uppercase tracking-wide">Messages Sent</div>
-                    <div className="text-base font-bold text-emerald-400 font-mono flex items-center gap-1.5">
-                      {sentTodayCount} <span className="text-[10px] font-normal text-muted">/ {todayCount}</span>
+                {missingPhoneCount > 0 && (
+                  <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between gap-3 text-xs shadow-xs">
+                    <div className="flex items-center gap-2.5 text-amber-400 font-bold">
+                      <AlertCircle size={16} className="shrink-0 text-amber-400" />
+                      <span>
+                        <strong>{missingPhoneCount} active distributor(s)</strong> have no phone number saved. Click "Missing Phone" below to enter their 10-digit number and auto-dispatch reminders.
+                      </span>
                     </div>
                   </div>
-                </div>
-
-                {/* Metric 3: Handover Pending */}
-                <div className="p-3.5 rounded-xl bg-bg/50 border border-glass-border/70 flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-xl bg-sky/15 text-sky flex items-center justify-center shrink-0">
-                    <Clock size={18} />
-                  </div>
-                  <div>
-                    <div className="text-[10px] font-semibold text-muted uppercase tracking-wide">Pending Handover</div>
-                    <div className="text-base font-bold text-amber-300 font-mono flex items-center gap-1.5">
-                      {notSentTodayCount} <span className="text-[10px] font-normal text-muted">remaining</span>
-                    </div>
-                  </div>
-                </div>
+                )}
               </div>
             );
           })()}
@@ -1261,17 +1287,31 @@ const Dispatch = () => {
                               </div>
                             ) : (
                               <div className="flex items-center gap-1.5 group">
-                                <span className={item.distributor_phone ? 'text-text font-semibold' : 'text-muted italic'}>
-                                  {item.distributor_phone || 'No phone set'}
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={() => handleStartEditDistPhone(item)}
-                                  className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-bg3 text-muted hover:text-sky transition-all cursor-pointer"
-                                  title={item.distributor_phone ? "Edit phone number" : "Add phone number"}
-                                >
-                                  <Edit2 size={11} />
-                                </button>
+                                {item.distributor_phone ? (
+                                  <span className="text-text font-semibold">
+                                    {item.distributor_phone}
+                                  </span>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleStartEditDistPhone(item)}
+                                    className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30 hover:bg-amber-500/25 flex items-center gap-1 cursor-pointer transition-all active:scale-95 shadow-sm"
+                                    title="Missing 10-digit contact number — click to enter and auto-send reminder"
+                                  >
+                                    <Edit2 size={10} />
+                                    <span>Missing Phone</span>
+                                  </button>
+                                )}
+                                {item.distributor_phone && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleStartEditDistPhone(item)}
+                                    className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-bg3 text-muted hover:text-sky transition-all cursor-pointer"
+                                    title="Edit phone number"
+                                  >
+                                    <Edit2 size={11} />
+                                  </button>
+                                )}
                               </div>
                             )}
                           </td>
