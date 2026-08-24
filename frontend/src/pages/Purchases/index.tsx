@@ -376,7 +376,7 @@ const dedupeMedicinesByName = (list: Medicine[]): Medicine[] => {
   const byName = new Map<string, Medicine>();
   const out: Medicine[] = [];
   for (const m of list) {
-    const key = String(m.name || '').toLowerCase().replace(/\s+/g, ' ').trim();
+    const key = String(m.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
     if (!key) { out.push(m); continue; }
     const existing = byName.get(key);
     if (!existing) { byName.set(key, m); out.push(m); continue; }

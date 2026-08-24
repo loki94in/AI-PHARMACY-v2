@@ -646,14 +646,15 @@ router.get('/catalog-search', async (req, res) => {
       }
 
       // Purchases-dropdown contract (owner request): ONE row per medicine NAME.
-      // The 291k master catalog still contains a handful of legacy duplicate
-      // name groups (different ids, identical names) — collapse them here so
-      // the dropdown never shows the same medicine twice. Preference: in-stock
+      // The master catalog still contains legacy duplicate-name groups (exact
+      // AND punctuation/spacing variants like "DOLO-650" vs "DOLO 650") — the
+      // alphanumeric-only key collapses every such twin. Preference: in-stock
       // row wins, then the lower id (oldest canonical record).
       const byName = new Map<string, any>();
       const collapsed: any[] = [];
+      const normKey = (n: unknown) => String(n || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
       for (const r of rows) {
-        const key = String(r.name || '').toLowerCase().replace(/\s+/g, ' ').trim();
+        const key = normKey(r.name);
         const existing = byName.get(key);
         if (!existing) {
           byName.set(key, r);

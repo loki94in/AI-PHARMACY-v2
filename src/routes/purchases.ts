@@ -1841,17 +1841,36 @@ router.get('/medicine-batches', async (req, res) => {
 
     // Sibling-name expansion (owner contract): history must follow the
     // medicine NAME, not whichever duplicate master id happens to be selected.
-    // The catalog still holds a few legacy duplicate-name groups; without this,
-    // picking twin A hides every batch saved under twin B.
+    // The catalog still holds legacy duplicate-name groups — exact twins AND
+    // punctuation/spacing variants ("DOLO-650" vs "DOLO 650"). Without this,
+    // picking either twin hides every batch saved under the other.
+    const alnumKey = (n: unknown): string => String(n || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
     const expandSiblingIds = async (ids: number[]): Promise<number[]> => {
       if (ids.length === 0) return ids;
       const conn = await dbManager.getConnection();
-      const nameRows = await conn.all(
-        `SELECT id FROM medicines WHERE LOWER(TRIM(name)) IN (SELECT LOWER(TRIM(name)) FROM medicines WHERE id IN (${ids.map(() => '?').join(',')}))`,
+      const seedRows = await conn.all(
+        `SELECT id, name FROM medicines WHERE id IN (${ids.map(() => '?').join(',')})`,
         ids
-      ).catch(() => []);
+      ).catch(() => [] as any[]);
       const all = new Set<number>(ids);
-      for (const r of nameRows) all.add(r.id);
+      const wantedKeys = new Set<string>();
+      for (const r of seedRows) {
+        const k = alnumKey(r.name);
+        if (k) wantedKeys.add(k);
+        // Indexed prefix probe on the RAW name head (LIKE is ASCII
+        // case-insensitive); candidates verified JS-side against the
+        // alphanumeric-stripped key so punctuation twins match too.
+        // '%'/'_' stripped from the prefix to keep LIKE literal.
+        const prefix = String(r.name || '').trim().slice(0, 6).replace(/[%_]/g, '');
+        if (prefix.length < 3) continue;
+        const candidates = await conn.all(
+          'SELECT id, name FROM medicines WHERE name LIKE ? LIMIT 50',
+          [`${prefix}%`]
+        ).catch(() => [] as any[]);
+        for (const c of candidates) {
+          if (k && wantedKeys.has(alnumKey(c.name))) all.add(c.id);
+        }
+      }
       return Array.from(all);
     };
 
