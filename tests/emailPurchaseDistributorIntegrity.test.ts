@@ -3,6 +3,7 @@ import { jest } from '@jest/globals';
 jest.unstable_mockModule('../src/whatsappClient.js', () => ({
   __esModule: true,
   sendMessage: jest.fn(() => Promise.resolve(true)),
+  waitForWhatsAppReady: jest.fn(() => Promise.resolve(true)),
   initClient: jest.fn(() => Promise.resolve(true)),
   currentQr: null,
   isReady: false,
@@ -415,6 +416,8 @@ describe('Email Purchase Distributor Integrity Tests', () => {
     for (const notif of notifs) {
       expect(notif.message).toContain('Distributor: Metro Pharma Logistics');
       expect(notif.message).toContain('Invoice No: INV-CONCISE-1088');
+      expect(notif.message).toContain('Bill Amount: ₹1,500.00');
+      expect(notif.message).toContain('Arrival Time:');
       // Must not contain unnecessary bulk text
       expect(notif.message).not.toContain('No items could be extracted from the email text body');
     }

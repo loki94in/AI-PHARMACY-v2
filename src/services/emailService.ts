@@ -1424,9 +1424,22 @@ export class EmailService {
       }
     }
 
-    // Format current time as HH:MM
-    const date = new Date();
-    const timeStr = date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false });
+    // Format email arrival time
+    const emailDate = email.date ? new Date(email.date) : new Date();
+    const timeStr = !isNaN(emailDate.getTime())
+      ? emailDate.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })
+      : new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+
+    // Extract billing amount (total bill/invoice amount)
+    let billAmount = '';
+    const amtMatch = (subject + ' ' + body).match(/(?:(?:grand\s*total|net\s*amount|bill\s*amount|inv(?:oice)?\s*amount|total\s*amount)\s*[:\-\s]*\s*(?:rs\.?|inr|₹)?\s*([\d,]+(?:\.\d{1,2})?)|(?:total|amount|amt)\s*[:\-\s]*(?:rs\.?|inr|₹)\s*([\d,]+(?:\.\d{1,2})?)|(?:total|amount|amt)\s*[:\-\s]*\s*(?!items|qty|quantity|units|pcs|medicines|rows)([\d,]+(?:\.\d{1,2})?)|(?:rs\.?|inr|₹)\s*([\d,]+(?:\.\d{1,2})?))/i);
+    if (amtMatch) {
+      const rawNum = (amtMatch[1] || amtMatch[2] || amtMatch[3] || amtMatch[4] || '').replace(/,/g, '').trim();
+      const parsed = parseFloat(rawNum);
+      if (!isNaN(parsed) && parsed > 0) {
+        billAmount = `₹${parsed.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      }
+    }
 
   // Try to extract medicine candidates. A line doesn't need an explicit "qty:" label to be
   // considered — many distributors just list items one per line — so every non-noise line is
@@ -1492,6 +1505,7 @@ export class EmailService {
     return {
       distributorName: (distributorName && isValidDistributorName(distributorName)) ? distributorName.trim() : '',
       invoiceNumber,
+      billAmount: billAmount || undefined,
       timeStr,
       medicines: displayMeds,
       totalItems: resolvedMedicines.reduce((sum, m) => sum + parseInt(m.quantity || '0'), 0) || displayMeds.length,
@@ -1521,17 +1535,24 @@ export class EmailService {
       if (!targetPhones || targetPhones.length === 0) {
         console.log(`[MailArrival] Invoice/Email WhatsApp alerts disabled or no recipient phone configured. Skipping WhatsApp alert for ${refId}.`);
       } else {
-        // Build concise message (strictly Distributor Name & Bill Number as requested)
+        // Build concise message (Distributor Name, Bill Number, Bill Amount, and Arrival Time)
         const distName = (orderInfo?.distributorName && isValidDistributorName(orderInfo.distributorName))
           ? orderInfo.distributorName.trim()
           : (orderInfo?.senderEmail || processedEmail.from || 'Distributor');
         const billNo = (orderInfo?.invoiceNumber && orderInfo.invoiceNumber !== 'N/A')
           ? orderInfo.invoiceNumber.trim()
           : 'N/A';
+        const arrivalTime = orderInfo?.timeStr || (parsedDate ? new Date(parsedDate).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }) : new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }));
+        const billAmount = orderInfo?.billAmount || '';
 
-        const message = isOrder
+        let message = isOrder
           ? `Distributor: ${distName}\nInvoice No: ${billNo}`
           : `📧 *New Email Received*\nFrom: ${processedEmail.from || 'Unknown'}\nSubject: ${processedEmail.subject || 'No Subject'}`;
+
+        if (isOrder && billAmount) {
+          message += `\nBill Amount: ${billAmount}`;
+        }
+        message += `\nArrival Time: ${arrivalTime}`;
 
         for (const phone of targetPhones) {
           const phoneRefId = `${refId}_${phone}`;
@@ -1649,9 +1670,15 @@ export class EmailService {
       const billNo = (orderInfo?.invoiceNumber && orderInfo.invoiceNumber !== 'N/A')
         ? orderInfo.invoiceNumber.trim()
         : 'N/A';
+      const arrivalTime = orderInfo?.timeStr || new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+      const billAmount = orderInfo?.billAmount || '';
 
       const logRefId = customRefId || orderInfo.invoiceNumber || 'distributor_invoice';
-      const message = `Distributor: ${distName}\nInvoice No: ${billNo}`;
+      let message = `Distributor: ${distName}\nInvoice No: ${billNo}`;
+      if (billAmount) {
+        message += `\nBill Amount: ${billAmount}`;
+      }
+      message += `\nArrival Time: ${arrivalTime}`;
 
       for (const phone of targetPhones) {
         const phoneRefId = `${logRefId}_${phone}`;
