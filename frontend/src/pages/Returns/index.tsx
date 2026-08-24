@@ -1172,7 +1172,7 @@ const Returns: React.FC = () => {
   };
 
   return (
-    <div className="h-full flex flex-col fade-in relative overflow-hidden gap-3 p-4 bg-bg text-text">
+    <div className="h-full flex flex-col fade-in relative overflow-hidden gap-3 p-4 text-text">
       {/* Premium Glassmorphic Top Bar */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-bg2/90 backdrop-blur-md border border-border/80 rounded-2xl p-3 px-5 shadow-sm shrink-0">
         {/* Title & Quick Stats */}

@@ -3262,7 +3262,7 @@ const POS = () => {
   }, []);
 
   return (
-    <div className="h-full flex flex-col fade-in overflow-hidden bg-bg text-text">
+    <div className="h-full flex flex-col fade-in overflow-hidden text-text">
 
       {/* Main Container: Stacked — Cart workspace on top, Checkout bar at bottom */}
       <div className="flex-1 flex flex-col gap-0 overflow-hidden min-h-0">

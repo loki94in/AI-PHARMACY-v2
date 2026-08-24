@@ -192,7 +192,7 @@ export default function AuditCenter() {
   const isReady = report?.status === 'PROJECT READY';
 
   return (
-    <div className="h-full flex flex-col overflow-hidden bg-bg text-text">
+    <div className="h-full flex flex-col overflow-hidden text-text">
       {/* Header */}
       <div className="flex-none p-5 border-b border-border bg-glass-bg/60 backdrop-blur-sm">
         <div className="flex items-start justify-between gap-4 flex-wrap">

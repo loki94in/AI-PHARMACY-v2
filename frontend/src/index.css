@@ -658,3 +658,82 @@ input[type="date"]:focus {
 .animate-shake {
   animation: shake 0.4s ease-in-out;
 }
+
+/* ═══════════════════════════════════════════
+   CLEAN & CRISP STATUS BADGES, CHIPS & ACTION CONTROLS (ALL 22+ PAGES)
+   Removes heavy solid/tinted background fills from badges, status pills,
+   chips, and action controls across every page so text is directly
+   and cleanly readable with high-contrast borders and text colors.
+   ═══════════════════════════════════════════ */
+
+/* Universal Status Badges, Tags & Pills: Transparent background with crisp text & border */
+span[class*="px-"][class*="bg-"]:not([class*="bg-primary"]):not([class*="bg-accent"]):not([class*="peer-checked"]),
+span[class*="py-"][class*="bg-"]:not([class*="bg-primary"]):not([class*="bg-accent"]):not([class*="peer-checked"]),
+div[class*="px-"][class*="bg-"][class*="rounded-full"]:not([class*="peer-checked"]),
+div[class*="px-"][class*="bg-"][class*="rounded-xl"]:not([class*="peer-checked"]),
+div[class*="px-"][class*="bg-"][class*="rounded-lg"]:not([class*="peer-checked"]),
+div[class*="px-"][class*="bg-"][class*="rounded-md"]:not([class*="peer-checked"]) {
+  background-color: transparent !important;
+}
+
+/* Secondary Action Buttons & Chips with color tint classes */
+button[class*="bg-emerald-500/"],
+button[class*="bg-emerald-600/"],
+button[class*="bg-green-500/"],
+button[class*="bg-green/"],
+button[class*="bg-sky-500/"],
+button[class*="bg-sky/"],
+button[class*="bg-blue-500/"],
+button[class*="bg-amber-500/"],
+button[class*="bg-yellow-500/"],
+button[class*="bg-orange-500/"],
+button[class*="bg-rose-500/"],
+button[class*="bg-red-500/"],
+button[class*="bg-red/"],
+button[class*="bg-purple-500/"],
+button[class*="bg-violet-500/"],
+button[class*="bg-indigo-500/"],
+button[class*="bg-primary/"]:not([class*="bg-primary/9"]):not([class*="bg-primary/8"]):not([class*="bg-primary/7"]) {
+  background-color: transparent !important;
+}
+
+/* Crisp subtle hover state for transparent action buttons */
+button[class*="bg-emerald-500/"]:hover,
+button[class*="bg-emerald-600/"]:hover,
+button[class*="bg-green-500/"]:hover,
+button[class*="bg-green/"]:hover,
+button[class*="bg-sky-500/"]:hover,
+button[class*="bg-sky/"]:hover,
+button[class*="bg-blue-500/"]:hover,
+button[class*="bg-amber-500/"]:hover,
+button[class*="bg-yellow-500/"]:hover,
+button[class*="bg-orange-500/"]:hover,
+button[class*="bg-rose-500/"]:hover,
+button[class*="bg-red-500/"]:hover,
+button[class*="bg-red/"]:hover,
+button[class*="bg-purple-500/"]:hover,
+button[class*="bg-violet-500/"]:hover,
+button[class*="bg-indigo-500/"]:hover,
+button[class*="bg-primary/"]:not([class*="bg-primary/9"]):not([class*="bg-primary/8"]):not([class*="bg-primary/7"]):hover {
+  background-color: rgba(255, 255, 255, 0.06) !important;
+}
+
+.light button[class*="bg-emerald-500/"]:hover,
+.light button[class*="bg-emerald-600/"]:hover,
+.light button[class*="bg-green-500/"]:hover,
+.light button[class*="bg-green/"]:hover,
+.light button[class*="bg-sky-500/"]:hover,
+.light button[class*="bg-sky/"]:hover,
+.light button[class*="bg-blue-500/"]:hover,
+.light button[class*="bg-amber-500/"]:hover,
+.light button[class*="bg-yellow-500/"]:hover,
+.light button[class*="bg-orange-500/"]:hover,
+.light button[class*="bg-rose-500/"]:hover,
+.light button[class*="bg-red-500/"]:hover,
+.light button[class*="bg-red/"]:hover,
+.light button[class*="bg-purple-500/"]:hover,
+.light button[class*="bg-violet-500/"]:hover,
+.light button[class*="bg-indigo-500/"]:hover,
+.light button[class*="bg-primary/"]:not([class*="bg-primary/9"]):not([class*="bg-primary/8"]):not([class*="bg-primary/7"]):hover {
+  background-color: rgba(0, 0, 0, 0.05) !important;
+}

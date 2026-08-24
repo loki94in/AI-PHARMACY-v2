@@ -640,7 +640,7 @@ const Reports = () => {
   ] as const;
 
   return (
-    <div className="h-full flex flex-col gap-4 min-h-0 overflow-hidden text-text bg-bg p-4 animate-in fade-in duration-300">
+    <div className="h-full flex flex-col gap-4 min-h-0 overflow-hidden text-text p-4 animate-in fade-in duration-300">
       
       {/* Sleek Compact Top Bar & Filters Header */}
       <div className="flex flex-col gap-3 bg-bg border border-border p-3.5 px-4 rounded-2xl flex-shrink-0 shadow-sm">

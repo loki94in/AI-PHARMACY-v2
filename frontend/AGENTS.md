@@ -7,6 +7,7 @@ This directory contains the Single Page Application (SPA) built using Vite, Reac
 - **UI Guidelines**: 
   - Never hardcode raw Tailwind colors like `bg-black/20`, `text-white`, or `bg-white/5` (which break light/dark themes).
   - Use semantic variables: `bg-bg`, `bg-bg2`, `bg-bg3`, `bg-glass-bg`, `text-text`, `text-muted`, `border-border`, `border-glass-border`.
+  - **Transparent page roots (added 2026-08)**: page-level root containers MUST NOT paint a solid background (`bg-bg` removed from all 24 page roots incl. CRM's patient/chat panes) — every page sits directly on the global body background. Cards, panels, inputs and modals keep their semantic surfaces.
 
 ## Development Rules
 - Start the frontend dev server using `npm run dev` from the `frontend/` folder.
@@ -27,6 +28,7 @@ This directory contains the Single Page Application (SPA) built using Vite, Reac
 - A search/autocomplete dropdown list must NEVER appear (and must never trigger its network fetch) from focus or click alone. It may only open when the user has TYPED at least 2 characters (Purchase medicine rows keep their existing ≥3-char rule) AND results exist. Applies to every page: POS patient/doctor/medicine, Purchases distributor/medicine, CRM special-order rows, Pharmarack search, and any future autocomplete.
 - Never re-add unconditional `onFocus`/`onClick => setOpen(true)` on a search input, and never seed dropdowns with fabricated/default entries (the hardcoded POS default doctors were removed under this rule).
 - Live Cart search is PHARMARACK-ONLY (owner decision 2026-08-23): the LiveCartAddModal autocomplete must call ONLY `api.searchPharmarack` (live upstream OpenSearch). Do NOT add any local catalog/inventory stage, `/search-local` endpoint, or two-stage merge — a previous two-stage local-catalog experiment was explicitly removed by owner request.
+- Live Cart add is STAGE-STYLE (added 2026-08): `selectSuggestion` MUST abort the in-flight keystroke search (`searchAbortControllerRef`) — after a selection no newer controller exists, so an un-aborted late response passes the stale-guard and repaints the just-closed dropdown ~100–200ms later. `handleSubmit` stages into a module-cached pending queue (`pendingAddsCache`: adding → added / failed+Retry chips, auto-clear 4 s) and resets the form INSTANTLY; the upstream `api.addPharmarackCart`, source-order `Ordered` flip, and cart/pending refreshes run detached via `processBackgroundAdd` (fires existing `refresh-pharmarack-cart` on success only). Never revert to a blocking submit that awaits the upstream add before resetting the form, and never show a success state for a failed background add.
 
 ## Lint Debt Policy (added 2026-08)
 

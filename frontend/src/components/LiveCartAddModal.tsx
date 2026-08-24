@@ -279,6 +279,39 @@ let cachedPrMode: 'Live' | 'Unknown' = 'Live';
 const clientSearchCache = new Map<string, SuggestionMedicine[]>();
 const MAX_CLIENT_SEARCH_CACHE = 100;
 
+// Stage-style background adds: the UI queues instantly, the upstream Pharmarack
+// cart mutation runs detached. Module cache survives modal close/reopen.
+interface LocalLiveCartAddPayload {
+  productId: string | number;
+  storeId: string | number;
+  qty: number;
+  rate?: number;
+  scheme?: string;
+  productCode?: string;
+  company?: string;
+  productName?: string;
+  storeName?: string;
+  packaging?: string;
+  mapped?: boolean;
+}
+
+interface LocalPendingAdd {
+  id: number;
+  name: string;
+  qty: number;
+  status: 'adding' | 'added' | 'failed';
+  payload: LocalLiveCartAddPayload;
+  sourceOrderId?: number;
+  hadSourceRefill: boolean;
+}
+
+let pendingAddSeq = 1;
+const pendingAddsCache: LocalPendingAdd[] = [];
+const syncPendingAddsCache = (next: LocalPendingAdd[]) => {
+  pendingAddsCache.length = 0;
+  pendingAddsCache.push(...next);
+};
+
 export interface LiveCartAddModalProps {
   initialSearch?: string;
   initialQty?: number;
@@ -318,6 +351,9 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
   const [selectedPackaging, setSelectedPackaging] = useState('');
   const [selectedMedicineName, setSelectedMedicineName] = useState('');
   const [lastAddedDistributor, setLastAddedDistributor] = useState<string>(() => localStorage.getItem('pharmarack_last_added_distributor') || '');
+
+  // Stage-style pending adds (instant UI, silent upstream sync)
+  const [pendingAdds, setPendingAdds] = useState<LocalPendingAdd[]>(() => pendingAddsCache.map(p => ({ ...p })));
 
   // Active Source Order/Refill Context
   const [activeSourceOrderId, setActiveSourceOrderId] = useState<number | undefined>(sourceOrderId);
@@ -422,7 +458,6 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
   const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(-1);
   const [searchLoading, setSearchLoading] = useState(false);
   
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [prMode, setPrMode] = useState<'Live' | 'Unknown'>(cachedPrMode);
 
@@ -1031,6 +1066,12 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
 
   const selectSuggestion = (med: SuggestionMedicine) => {
     if (med.isErrorMessage) return;
+    // Kill any in-flight keystroke search: after a selection no newer
+    // controller exists, so its late response would pass the stale-guard and
+    // repaint the just-closed dropdown ~100-200ms later.
+    if (searchAbortControllerRef.current) {
+      searchAbortControllerRef.current.abort();
+    }
     setIgnoreNextSearchRef(ignoreNextSearchRef, true);
     
     // Save current suggestions candidate list for cheaper option cross-checking
@@ -1087,6 +1128,63 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
     }
   };
 
+  const setPendingAddStatus = (id: number, status: LocalPendingAdd['status']) => {
+    setPendingAdds(prev => {
+      const next = prev.map(p => (p.id === id ? { ...p, status } : p));
+      syncPendingAddsCache(next);
+      return next;
+    });
+  };
+
+  const dismissPendingAdd = (id: number) => {
+    setPendingAdds(prev => {
+      const next = prev.filter(p => p.id !== id);
+      syncPendingAddsCache(next);
+      return next;
+    });
+  };
+
+  // Detached upstream sync for one staged item — never blocks the form.
+  const processBackgroundAdd = async (record: LocalPendingAdd) => {
+    try {
+      await api.addPharmarackCart([record.payload]);
+      setPendingAddStatus(record.id, 'added');
+      toastEvent.trigger(`Added "${record.name}" directly to live Pharmarack cart!`, 'success');
+      window.dispatchEvent(new CustomEvent('refresh-pharmarack-cart'));
+
+      // Automatically update source order status if opened from pending requests or refills
+      if (record.sourceOrderId) {
+        try {
+          await api.updateOrder(record.sourceOrderId, { status: 'Ordered' });
+        } catch (e) {
+          console.warn('Failed to update source order status:', e);
+        }
+        fetchPendingOrders().catch(() => {});
+      }
+      if (record.hadSourceRefill) {
+        fetchPendingRefills().catch(() => {});
+      }
+
+      // Silent modal-side preview refresh, then auto-clear the settled chip
+      Promise.allSettled([fetchCart()]).finally(() => {
+        window.setTimeout(() => dismissPendingAdd(record.id), 4000);
+      });
+    } catch (cartErr: unknown) {
+      console.error('Failed to add live cart item:', cartErr);
+      const apiErr = cartErr as LocalApiError;
+      const detailedError = apiErr?.response?.data?.details || apiErr?.response?.data?.error || apiErr?.message || 'Unknown error';
+      setPendingAddStatus(record.id, 'failed');
+      toastEvent.trigger(`Live addition failed: ${detailedError}`, 'error');
+    }
+  };
+
+  const retryPendingAdd = (id: number) => {
+    const record = pendingAdds.find(p => p.id === id);
+    if (!record || record.status !== 'failed') return;
+    setPendingAddStatus(id, 'adding');
+    void processBackgroundAdd(record);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -1128,79 +1226,67 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
       return;
     }
 
-    setIsSubmitting(true);
-    try {
-      await api.addPharmarackCart([{
-        productId: productIdToUse,
-        storeId: storeIdToUse,
-        qty,
-        rate: rateToUse !== '' ? Number(rateToUse) : undefined,
-        scheme: schemeToUse || undefined,
-        productCode: productCodeToUse,
-        company: companyToUse,
-        productName: productNameToUse,
-        storeName: distributorToUse,
-        packaging: packagingToUse,
-        mapped: mappedToUse === false ? false : true
-      }]);
+    const payload: LocalLiveCartAddPayload = {
+      productId: productIdToUse,
+      storeId: storeIdToUse,
+      qty,
+      rate: rateToUse !== '' ? Number(rateToUse) : undefined,
+      scheme: schemeToUse || undefined,
+      productCode: productCodeToUse,
+      company: companyToUse,
+      productName: productNameToUse,
+      storeName: distributorToUse,
+      packaging: packagingToUse,
+      mapped: mappedToUse === false ? false : true
+    };
 
-      toastEvent.trigger(`Added "${productNameToUse}" directly to live Pharmarack cart!`, 'success');
+    // Stage-style instant add: queue the item visually, reset the form right
+    // away, and let the upstream Pharmarack sync run detached (truthful chips:
+    // adding → added / failed+Retry — never claims success prematurely).
+    const record: LocalPendingAdd = {
+      id: pendingAddSeq++,
+      name: productNameToUse,
+      qty,
+      status: 'adding',
+      payload,
+      sourceOrderId: activeSourceOrderId,
+      hadSourceRefill: activeSourceRefillId !== undefined
+    };
+    setPendingAdds(prev => {
+      const next = [...prev, record];
+      syncPendingAddsCache(next);
+      return next;
+    });
 
-      if (distributorToUse) {
-        localStorage.setItem('pharmarack_last_added_distributor', distributorToUse);
-        setLastAddedDistributor(distributorToUse);
-      }
-
-      // Automatically update source order status if opened from pending requests or refills
-      if (activeSourceOrderId) {
-        try {
-          await api.updateOrder(activeSourceOrderId, { status: 'Ordered' });
-        } catch (e) {
-          console.warn('Failed to update source order status:', e);
-        }
-      }
-
-      // Parallel close-out: cart preview refresh, source-list refreshes and
-      // form reset no longer run as a serial waterfall after the upstream add.
-      await Promise.allSettled([
-        fetchCart(),
-        activeSourceOrderId ? fetchPendingOrders() : Promise.resolve(),
-        activeSourceRefillId ? fetchPendingRefills() : Promise.resolve()
-      ]);
-      
-      // Reset form and keep open
-      setProduct('');
-      setQty(1);
-      setPendingTargetQty(null);
-      setActiveSourceOrderId(undefined);
-      setActiveSourceRefillId(undefined);
-      setSelectedDistributor('');
-      setSelectedRate('');
-      setSelectedMrp('');
-      setSelectedMapped(null);
-      setSelectedScheme('');
-      setSelectedProductId('');
-      setSelectedStoreId('');
-      setSelectedProductCode('');
-      setSelectedCompany('');
-      setSelectedPackaging('');
-      setSelectedMedicineName('');
-
-      // Focus back to search input so user can add another medicine
-      setTimeout(() => {
-        productInputRef.current?.focus();
-      }, 100);
-      
-      // Refresh any active cart indicators in the header/sidebar
-      window.dispatchEvent(new CustomEvent('refresh-pharmarack-cart'));
-    } catch (cartErr: unknown) {
-      console.error('Failed to add live cart item:', cartErr);
-      const apiErr = cartErr as LocalApiError;
-      const detailedError = apiErr?.response?.data?.details || apiErr?.response?.data?.error || apiErr?.message || 'Unknown error';
-      toastEvent.trigger(`Live addition failed: ${detailedError}`, 'error');
-    } finally {
-      setIsSubmitting(false);
+    if (distributorToUse) {
+      localStorage.setItem('pharmarack_last_added_distributor', distributorToUse);
+      setLastAddedDistributor(distributorToUse);
     }
+
+    // Reset form and keep open so the user can search the next medicine
+    setProduct('');
+    setQty(1);
+    setPendingTargetQty(null);
+    setActiveSourceOrderId(undefined);
+    setActiveSourceRefillId(undefined);
+    setSelectedDistributor('');
+    setSelectedRate('');
+    setSelectedMrp('');
+    setSelectedMapped(null);
+    setSelectedScheme('');
+    setSelectedProductId('');
+    setSelectedStoreId('');
+    setSelectedProductCode('');
+    setSelectedCompany('');
+    setSelectedPackaging('');
+    setSelectedMedicineName('');
+
+    // Focus back to search input so user can add another medicine
+    setTimeout(() => {
+      productInputRef.current?.focus();
+    }, 100);
+
+    void processBackgroundAdd(record);
   };
 
   const sortedCartDistributors = React.useMemo(() => {
@@ -1981,7 +2067,57 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
 
               {/* Form Body */}
               <form id="live-cart-add-form" onSubmit={handleSubmit} className="space-y-4">
-                
+
+                {/* Stage-style pending adds: truthful adding → added / failed+Retry */}
+                {pendingAdds.length > 0 && (
+                  <div className="flex flex-col gap-1.5 max-h-[92px] overflow-y-auto scrollbar-thin">
+                    {pendingAdds.map(pa => (
+                      <div
+                        key={pa.id}
+                        className={`flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg border text-[11px] font-semibold ${
+                          pa.status === 'added'
+                            ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
+                            : pa.status === 'failed'
+                            ? 'bg-red-500/10 border-red-500/30 text-red'
+                            : 'bg-bg3 border-glass-border text-muted'
+                        }`}
+                      >
+                        <span className="truncate flex items-center gap-1.5 min-w-0">
+                          {pa.status === 'adding' ? (
+                            <Loader2 size={11} className="animate-spin shrink-0" />
+                          ) : pa.status === 'added' ? (
+                            <CheckCircle2 size={11} className="shrink-0" />
+                          ) : (
+                            <AlertCircle size={11} className="shrink-0" />
+                          )}
+                          <span className="truncate">
+                            {pa.status === 'adding' ? `Adding ${pa.name}…` : pa.status === 'added' ? `${pa.name} added` : `${pa.name} failed`}
+                          </span>
+                        </span>
+                        {pa.status === 'failed' && (
+                          <button
+                            type="button"
+                            onClick={() => retryPendingAdd(pa.id)}
+                            className="px-1.5 py-0.5 rounded bg-bg2 border border-border text-text hover:bg-bg3 font-bold shrink-0"
+                          >
+                            Retry
+                          </button>
+                        )}
+                        {(pa.status === 'failed' || pa.status === 'added') && (
+                          <button
+                            type="button"
+                            onClick={() => dismissPendingAdd(pa.id)}
+                            className="text-muted hover:text-text shrink-0"
+                            title="Dismiss"
+                          >
+                            ✕
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
                 {/* Autocomplete Search Input */}
                 <div className="relative z-50 animate-in fade-in duration-200" ref={autocompleteRef}>
                   <label className="block text-[11px] font-bold text-muted uppercase tracking-wider mb-1.5">Medicine Search</label>
@@ -2265,18 +2401,10 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
               <button
                 type="submit"
                 form="live-cart-add-form"
-                disabled={isSubmitting || !selectedProductId}
+                disabled={!selectedProductId}
                 className="px-5 py-2 bg-gradient-to-r from-primary to-purple-600 hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold rounded-xl shadow-[0_0_15px_rgba(59,130,246,0.2)] flex items-center gap-1.5 shrink-0 whitespace-nowrap"
               >
-                {isSubmitting ? (
-                  <>
-                    <Loader2 size={14} className="animate-spin" /> Adding...
-                  </>
-                ) : (
-                  <>
-                    <ShoppingCart size={14} /> Add to Live Cart
-                  </>
-                )}
+                <ShoppingCart size={14} /> Add to Live Cart
               </button>
             </div>
           </div>

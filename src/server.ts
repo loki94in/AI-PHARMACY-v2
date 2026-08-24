@@ -529,6 +529,15 @@ server.on('error', (err: any) => {
 
       console.log(`[Boot:Phase2] Cache init + reference seed dispatched in ${Math.round(performance.now() - phase2T0)}ms.`);
 
+      // Pharmarack session validation starts as soon as the DB is ready — the
+      // boot heartbeat probe (T≈now instead of T+2s) proves the stored token or
+      // begins the single-flight browser restore BEFORE a user's first search
+      // can hit a mid-typing 401. orderFulfillmentService stays on the T+2s
+      // stagger in Phase 4 below.
+      import('./services/tokenRefreshScheduler.js')
+        .then(m => m.tokenRefreshScheduler.start())
+        .catch(err => console.warn('[Boot:Phase2] Pharmarack session heartbeat start failed:', err));
+
       // Record unclean boot flag (flipped to 'true' on clean gracefulShutdown)
       try {
         const prevShutdown = await db.get("SELECT value FROM app_settings WHERE key = 'last_clean_shutdown'");
@@ -647,19 +656,19 @@ server.on('error', (err: any) => {
         // ── Phase 4: Headless browser subsystems & asynchronous workers (staggered) ──
         console.log('[Boot:Phase4] Staging headless browser & external service schedulers...');
 
-        // T+2s: Pharmarack session refresh & order fulfillment. messagingQueue
-        // is lazy now (owner rule 2026-08): its poll loop starts on first
-        // pending queueMessage()/retryMessage() — zero ticks when unused.
+        // T+2s: order fulfillment only — the Pharmarack session heartbeat now
+        // starts right after Phase 1/2 (see [Boot:Phase2]) so token validation
+        // and any needed single-flight browser restore begin before the first
+        // user search. messagingQueue is lazy now (owner rule 2026-08): its
+        // poll loop starts on first pending queueMessage()/retryMessage() —
+        // zero ticks when unused.
         setTimeout(async () => {
           try {
-            const { tokenRefreshScheduler } = await import('./services/tokenRefreshScheduler.js');
-            tokenRefreshScheduler.start();
-
             const { orderFulfillmentService } = await import('./services/orderFulfillmentService.js');
             orderFulfillmentService.start();
           } catch (srvErr) {
             bootWorkerFailures++;
-            console.error('[Boot:Phase4] Failed to start T+2s services:', srvErr);
+            console.error('[Boot:Phase4] Failed to start order fulfillment service:', srvErr);
           }
         }, 2000);
 

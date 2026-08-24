@@ -1141,7 +1141,7 @@ const RefillsSection: React.FC = () => {
         </div>
 
         {/* Right: Selected Patient Command Center */}
-        <div className="flex-1 flex flex-col min-h-0 bg-bg min-w-0">
+        <div className="flex-1 flex flex-col min-h-0 min-w-0">
           {selectedPatient ? (
             <>
               {/* Account / Patient Header Bar */}
@@ -3212,7 +3212,7 @@ function isSameChat(chat: WaChatItem, targetChatId: string, resolvedNum?: string
         </div>
 
         {/* Right: Active Chat Thread & Composer */}
-        <div className="flex-1 flex flex-col min-h-0 bg-bg min-w-0">
+        <div className="flex-1 flex flex-col min-h-0 min-w-0">
           {activeChat ? (
             <>
               {/* Thread Header */}

@@ -244,8 +244,8 @@ export const PharmarackCartCalendar: React.FC<PharmarackCartCalendarProps> = ({
                   onClick={() => handleTimerChange(sec)}
                   className={`px-1.5 py-0.5 rounded-md text-[9px] font-black transition-all cursor-pointer ${
                     timerSec === sec
-                      ? 'bg-sky-500 text-white shadow-xs'
-                      : 'text-muted hover:text-text hover:bg-bg3'
+                      ? 'bg-transparent text-sky-400 border border-sky-400/60 shadow-xs'
+                      : 'text-muted hover:text-text hover:bg-bg3 border border-transparent'
                   }`}
                   title={`Set auto-send delay timer to ${sec}s`}
                 >
@@ -298,7 +298,7 @@ export const PharmarackCartCalendar: React.FC<PharmarackCartCalendarProps> = ({
                   : isRed
                     ? 'border-rose-500/40 hover:border-rose-500/70 text-rose-400 font-bold'
                     : card.isToday
-                      ? 'border-sky-400 ring-2 ring-sky-400/80 shadow-[0_0_15px_rgba(56,189,248,0.6)] text-sky-300 font-black animate-pulse'
+                      ? 'border-sky-400 text-sky-300 font-black'
                       : 'border-glass-border hover:border-border text-text'}
               `}
               title={`${card.dayName} ${card.dateNum} ${card.monthName} ${card.holidayName ? `(${card.holidayName})` : card.isSunday ? '(Sunday)' : ''} - Click to ${card.isPaused ? 'resume' : 'pause'}`}

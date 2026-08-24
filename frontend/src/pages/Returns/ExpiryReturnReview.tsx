@@ -286,7 +286,7 @@ export const ExpiryReturnReview: React.FC<{ onPendingCountChange?: (count: numbe
   const pendingInView = reviews.filter(r => r.status === 'pending');
 
   return (
-    <div className="flex-1 flex flex-col gap-4 min-h-0 overflow-hidden bg-bg text-text">
+    <div className="flex-1 flex flex-col gap-4 min-h-0 overflow-hidden text-text">
       {/* Top Banner / Summary KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 shrink-0">
         {/* Pending Card */}

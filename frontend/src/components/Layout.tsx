@@ -1842,12 +1842,12 @@ const Topbar = memo(({
           <Link
             to="/pharmarack-cart"
             className={`
-              hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border transition-all cursor-pointer text-xs font-semibold uppercase tracking-wider
+              hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-glass-border hover:bg-bg3/60 transition-all cursor-pointer text-xs font-semibold uppercase tracking-wider
               ${servicesStatus?.pharmarack?.isRefreshing
-                ? 'bg-amber-500/10 border-amber-500/20 text-amber-400'
+                ? 'text-amber-400'
                 : servicesStatus?.pharmarack?.connected
-                  ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
-                  : 'bg-rose-500/10 border-rose-500/20 text-rose-400'}
+                  ? 'text-emerald-400'
+                  : 'text-rose-400'}
             `}
             title={servicesStatus?.pharmarack?.connected ? "Pharmarack Live Cart Online" : "Pharmarack Session Expired - Click to Re-authenticate"}
           >

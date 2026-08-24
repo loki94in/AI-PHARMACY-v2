@@ -2687,7 +2687,7 @@ const [showAddedItems] = useState<boolean>(false);
   const totalAmount = distributors.reduce((s, d) => s + d.items.reduce((a, i) => a + getCartItemAmount(i), 0), 0);
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden bg-bg text-text gap-1 p-1.5 sm:p-2 pb-2 relative w-full h-full">
+    <div className="flex-1 flex flex-col overflow-hidden text-text gap-1 p-1.5 sm:p-2 pb-2 relative w-full h-full">
       {/* Top Integrated Scheduler & Navigation Bar */}
       <PharmarackCartCalendar
         currentTab={currentTab}
@@ -2830,7 +2830,7 @@ const [showAddedItems] = useState<boolean>(false);
                                   <button
                                     onClick={() => handleReaddSingleSentItem(item, order.store_id, order.store_name)}
                                     disabled={readdingSentItems}
-                                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white text-emerald-600 border border-emerald-500 hover:bg-emerald-50 text-[10px] font-bold transition-all active:scale-95 cursor-pointer disabled:opacity-50 shadow-sm"
+                                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-transparent text-emerald-400 border border-emerald-500/40 hover:bg-emerald-500/10 text-[10px] font-bold transition-all active:scale-95 cursor-pointer disabled:opacity-50 shadow-xs"
                                     title="Transfer this medicine to Unsent Cart Orders"
                                   >
                                     <Plus size={11} /> Re-add
@@ -3194,7 +3194,7 @@ const [showAddedItems] = useState<boolean>(false);
               <button
                 onClick={() => handleSendAllWhatsAppOrders()}
                 disabled={isSendingBatchWhatsApp || distributors.length === 0}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-white text-emerald-600 border border-emerald-500 hover:bg-emerald-50 font-extrabold transition-all active:scale-95 text-xs disabled:opacity-50 shadow-sm cursor-pointer"
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-transparent text-emerald-400 border border-emerald-500/40 hover:bg-emerald-500/10 font-extrabold transition-all active:scale-95 text-xs disabled:opacity-50 shadow-xs cursor-pointer"
                 title="Send order messages silently to all saved distributor WhatsApp numbers with 30-45s safe delay"
               >
                 {isSendingBatchWhatsApp ? (
@@ -3708,8 +3708,8 @@ const [showAddedItems] = useState<boolean>(false);
                               const hasUnsentItems = dist.items.some(i => !isItemAlreadySent(i, dist));
                               const isAlreadySent = !hasUnsentItems && (status === 'success' || (dist.items.length > 0 && dist.items.every(i => isItemAlreadySent(i, dist))));
 
-                              // User styling requirement: WHITE background, GREEN text & GREEN border only. NO solid green fill background.
-                              const whiteGreenBtnClass = "bg-white text-emerald-600 border border-emerald-500 hover:bg-emerald-50 font-extrabold shadow-sm";
+                              // Button styling: transparent background with emerald text & border for clear readability
+                              const whiteGreenBtnClass = "bg-transparent text-emerald-400 border border-emerald-500/40 hover:bg-emerald-500/10 font-extrabold shadow-xs";
 
                               if (isAlreadySent) {
                                 return (
@@ -3725,7 +3725,7 @@ const [showAddedItems] = useState<boolean>(false);
                                       {isSending ? (
                                         <span className="w-2.5 h-2.5 border border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin" />
                                       ) : (
-                                        <RotateCcw size={11} className="text-emerald-600" />
+                                        <RotateCcw size={11} className="text-emerald-400" />
                                       )}
                                       <span>Resend (Distributor Only)</span>
                                     </button>
@@ -3738,16 +3738,16 @@ const [showAddedItems] = useState<boolean>(false);
                                       className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] transition-all active:scale-95 cursor-pointer disabled:opacity-50 ${whiteGreenBtnClass}`}
                                       title="Resend WhatsApp order message to BOTH Distributor and Delivery Boy"
                                     >
-                                      <Send size={10} className="text-emerald-600" />
+                                      <Send size={10} className="text-emerald-400" />
                                       <span>Resend Both</span>
                                     </button>
                                   </div>
                                 );
                               }
 
-                              let btnClass = "bg-white text-emerald-600 border border-emerald-500 hover:bg-emerald-50 font-bold";
-                              if (status === 'queued') btnClass = "bg-white text-amber-600 border border-amber-500 hover:bg-amber-50";
-                              if (status === 'error') btnClass = "bg-white text-rose-600 border border-rose-500 hover:bg-rose-50";
+                              let btnClass = "bg-transparent text-emerald-400 border border-emerald-500/40 hover:bg-emerald-500/10 font-bold";
+                              if (status === 'queued') btnClass = "bg-transparent text-amber-400 border border-amber-500/40 hover:bg-amber-500/10 font-bold";
+                              if (status === 'error') btnClass = "bg-transparent text-rose-400 border border-rose-500/40 hover:bg-rose-500/10 font-bold";
 
                               return (
                                 <button

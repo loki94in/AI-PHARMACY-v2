@@ -156,23 +156,15 @@ async function searchOfflineCatalogFallback(q: string, storeId?: number | null, 
   }
 }
 
-// Search endpoint
-router.get('/search', async (req, res) => {
-  const qRaw = (req.query.q as string || '').trim();
-  if (!qRaw) {
-    return res.json([]);
-  }
+type PharmarackSearchOutcome =
+  | { status: 'ok'; items: any[] }
+  | { status: 'need_login' }
+  | { status: 'connection_error' };
 
-  const storeId = req.query.storeId ? Number(req.query.storeId) : null;
-  const isMapped = req.query.isMapped === 'true';
+// Shared search core — used by both the request path and background stale
+// revalidation. Caching behavior is unchanged: only non-empty results stored.
+async function performPharmarackSearch(qRaw: string, storeId: number | null, isMapped: boolean): Promise<PharmarackSearchOutcome> {
   const hasStoreFilter = storeId !== null && !isNaN(storeId);
-
-  // 1. Fast in-memory cache lookup (<1ms response for repeat queries & pending item transfers)
-  const cached = searchCache.get(qRaw, storeId, isMapped);
-  if (cached && Array.isArray(cached) && cached.length > 0) {
-    return res.json(cached);
-  }
-
   try {
     const settings = await getPharmarackSettings();
     const token = settings['pharmarack_session_token'] || '';
@@ -182,9 +174,9 @@ router.get('/search', async (req, res) => {
       const offline = await searchOfflineCatalogFallback(qRaw, storeId, isMapped);
       if (offline.length > 0) {
         searchCache.set(qRaw, storeId, isMapped, offline);
-        return res.json(offline);
+        return { status: 'ok', items: offline };
       }
-      return res.status(401).json({ error: 'Need to login', code: 'NEED_LOGIN' });
+      return { status: 'need_login' };
     }
 
     // Direct pass-through query to Pharmarack OpenSearch Engine (exact payload used by official site)
@@ -245,7 +237,7 @@ router.get('/search', async (req, res) => {
       });
 
       searchCache.set(qRaw, storeId, isMapped, results);
-      return res.json(results);
+      return { status: 'ok', items: results };
     }
 
     // Fallback: If live OpenSearch returns 0 items, search local catalog cache
@@ -253,7 +245,7 @@ router.get('/search', async (req, res) => {
     if (offline.length > 0) {
       searchCache.set(qRaw, storeId, isMapped, offline);
     }
-    return res.json(offline);
+    return { status: 'ok', items: offline };
 
   } catch (err: any) {
     console.error('Pharmarack direct live API search failed:', err.message);
@@ -263,12 +255,55 @@ router.get('/search', async (req, res) => {
       const offline = await searchOfflineCatalogFallback(qRaw, storeId, isMapped);
       if (offline.length > 0) {
         searchCache.set(qRaw, storeId, isMapped, offline);
-        return res.json(offline);
+        return { status: 'ok', items: offline };
       }
     } catch (_) {}
 
+    return { status: 'connection_error' };
+  }
+}
+
+// Single-flight background revalidation of stale cache entries (cold boot /
+// expired TTL): one refresh per key; failures silently keep the stale data.
+const searchRevalidations = new Map<string, Promise<unknown>>();
+function revalidateStaleSearch(qRaw: string, storeId: number | null, isMapped: boolean): void {
+  const key = searchCache.keyFor(qRaw, storeId, isMapped);
+  if (searchRevalidations.has(key)) return;
+  const p = performPharmarackSearch(qRaw, storeId, isMapped)
+    .catch(() => {})
+    .finally(() => {
+      searchRevalidations.delete(key);
+    });
+  searchRevalidations.set(key, p);
+}
+
+// Search endpoint
+router.get('/search', async (req, res) => {
+  const qRaw = (req.query.q as string || '').trim();
+  if (!qRaw) {
+    return res.json([]);
+  }
+
+  const storeId = req.query.storeId ? Number(req.query.storeId) : null;
+  const isMapped = req.query.isMapped === 'true';
+
+  // 1. Fresh OR stale disk-backed cache lookup (<1ms). Stale hits answer the
+  // dropdown instantly (cold-boot resilience); a background single-flight
+  // refresh replaces the entry for the next keystroke.
+  const cachedHit = searchCache.lookup(qRaw, storeId, isMapped);
+  if (cachedHit) {
+    if (cachedHit.stale) revalidateStaleSearch(qRaw, storeId, isMapped);
+    return res.json(cachedHit.items);
+  }
+
+  const outcome = await performPharmarackSearch(qRaw, storeId, isMapped);
+  if (outcome.status === 'need_login') {
+    return res.status(401).json({ error: 'Need to login', code: 'NEED_LOGIN' });
+  }
+  if (outcome.status === 'connection_error') {
     return res.status(503).json({ error: 'Connection error, please check internet or reconnect', code: 'CONNECTION_ERROR' });
   }
+  return res.json(outcome.items);
 });
 
 // Fetch store list grouped by mapped vs non-mapped (Strictly from local AI Learning database)

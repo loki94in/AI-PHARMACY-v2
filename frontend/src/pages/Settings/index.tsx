@@ -96,7 +96,7 @@ export default function Settings() {
   };
 
   return (
-    <div className="flex flex-col h-full bg-bg text-text p-4 space-y-4 overflow-y-auto">
+    <div className="flex flex-col h-full text-text p-4 space-y-4 overflow-y-auto">
       {/* Compact Unified Top Bar */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-bg border border-border rounded-2xl p-3 px-4 shadow-sm">
         {/* Title */}
