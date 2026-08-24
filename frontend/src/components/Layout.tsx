@@ -28,7 +28,6 @@ import {
   Info,
   ChevronRight,
   Mail as MailIcon,
-  Beaker,
   Smartphone,
   ClipboardPlus,
   RefreshCw,
@@ -42,6 +41,7 @@ import {
   FileText,
   Loader2,
   ChevronDown,
+  BrainCircuit,
 } from 'lucide-react';
 import { shortcutEvent, SHORTCUT_DIRECTORY } from '../services/keyboardShortcuts';
 import {
@@ -145,9 +145,7 @@ const Sidebar = memo(({
     { path: '/reports', label: 'Reports', icon: <LayoutDashboard size={18} /> },
     { path: '/pharmarack-cart', label: 'Pharmarack Cart', icon: <ShoppingCart size={18} /> },
     { path: '/investigation', label: 'Investigation Center', icon: <PackageSearch size={18} /> },
-    { path: '/compliance', label: 'H1 Compliance', icon: <FileText size={18} /> },
-    { path: '/schedule-drugs', label: 'Schedule Drugs', icon: <ShieldCheckIcon size={18} /> },
-    { path: '/composition-queue', label: 'Composition Queue', icon: <Beaker size={18} /> },
+    { path: '/ai-engineering', label: 'Pharma Intelligence', icon: <BrainCircuit size={18} /> },
     { path: '/learning', label: 'AI Learning', icon: <Brain size={18} /> },
     { path: '/dispatch', label: 'Dispatch', icon: <Truck size={18} /> },
     { path: '/crm', label: 'CRM & Messages', icon: <Users size={18} /> },

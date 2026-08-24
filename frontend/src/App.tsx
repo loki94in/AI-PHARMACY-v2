@@ -1,5 +1,5 @@
 import React, { useState, useEffect, lazy, Suspense } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useSearchParams } from 'react-router-dom';
 import { pageImports } from './lib/pageImports';
 import { KeepAliveOutlet, type KeepAliveRoute } from './lib/keepAlive/KeepAliveOutlet';
 import { prewarmRoute } from './lib/keepAlive/routePool';
@@ -37,15 +37,22 @@ const Mail = lazy(pageImports['/mail']);
 const Returns = lazy(pageImports['/returns']);
 const Sells = lazy(pageImports['/sells']);
 const DatabasePage = lazy(pageImports['/database']);
-const CompositionQueue = lazy(pageImports['/composition-queue']);
+const AIEngineering = lazy(pageImports['/ai-engineering']);
 const PharmarackCart = lazy(pageImports['/pharmarack-cart']);
 const InvestigationCenter = lazy(pageImports['/investigation']);
 const PhoneSales = lazy(pageImports['/phone-sales']);
 const DispatchPage = lazy(pageImports['/dispatch']);
-const CompliancePage = lazy(pageImports['/compliance']);
-const ScheduleDrugsPage = lazy(pageImports['/schedule-drugs']);
 const Learning = lazy(pageImports['/learning']);
 const AuditCenter = lazy(pageImports['/audit']);
+
+// Legacy routes → Pharma Intelligence hub tabs. Query params (e.g. POS's
+// /composition-queue?highlight=N) are preserved through the redirect.
+const HubRedirect: React.FC<{ tab: string }> = ({ tab }) => {
+  const [searchParams] = useSearchParams();
+  const merged = new URLSearchParams(searchParams);
+  merged.set('tab', tab);
+  return <Navigate to={`/ai-engineering?${merged.toString()}`} replace />;
+};
 
 // Real pages rendered through KeepAliveOutlet — every path here stays mounted once visited.
 const pageRoutes: KeepAliveRoute[] = [
@@ -60,8 +67,7 @@ const pageRoutes: KeepAliveRoute[] = [
   { path: '/manual-purchase', element: <Purchases /> },
   { path: '/purchase-history', element: <PurchaseHistory /> },
   { path: '/crm', element: <CRM /> },
-  { path: '/compliance', element: <CompliancePage /> },
-  { path: '/schedule-drugs', element: <ScheduleDrugsPage /> },
+  { path: '/ai-engineering', element: <AIEngineering /> },
   { path: '/pharmarack-cart', element: <PharmarackCart /> },
   { path: '/migration', element: <Migration /> },
   { path: '/reports', element: <Reports /> },
@@ -69,7 +75,6 @@ const pageRoutes: KeepAliveRoute[] = [
   { path: '/mail', element: <Mail /> },
   { path: '/dispatch', element: <DispatchPage /> },
   { path: '/database', element: <DatabasePage /> },
-  { path: '/composition-queue', element: <CompositionQueue /> },
   { path: '/learning', element: <Learning /> },
   { path: '/audit', element: <AuditCenter /> },
 ];
@@ -210,6 +215,9 @@ function App() {
               <Route path="/catalog" element={<Navigate to="/database?tab=catalog" replace />} />
               <Route path="/customer-returns" element={<Navigate to="/returns?tab=customer" replace />} />
               <Route path="/customer-returns-history" element={<Navigate to="/returns?tab=customer-history" replace />} />
+              <Route path="/compliance" element={<HubRedirect tab="compliance" />} />
+              <Route path="/schedule-drugs" element={<HubRedirect tab="schedules" />} />
+              <Route path="/composition-queue" element={<HubRedirect tab="composition" />} />
               <Route path="*" element={
                 <KeepAliveOutlet
                   routes={pageRoutes}

@@ -1,6 +1,7 @@
 // Intent keywords and text parser for WhatsApp medicine requests.
 // Pure data + small functions. No network calls.
 import { dbManager } from '../database/connection.js';
+import { COSMETIC_MARKERS } from '../utils/drugSchedules.js';
 
 // --- Intent words: is the message a medicine order request? ---
 
@@ -380,4 +381,43 @@ export function isMedicineLikely(ocrText: string, potentialName?: string): boole
     }
   }
   return true;
+}
+
+// ─── Non-Allopathic Candidate Detection ──────────────────────────────────
+// Cosmetic / personal-care, Ayurvedic and Homeopathy products are not
+// allopathic stock queries: searching them on Pharmarack burns the one live
+// search per message and floods the admin feed with unmatched noise. When a
+// WhatsApp candidate matches these NAME markers (and has no exact registered
+// in-stock match), the intent pipeline skips catalog/live searches entirely
+// and labels the broadcast `NON_ALLOPATHIC` with its kind — the request still
+// reaches the Pharma Intelligence → WA Requests feed truthfully.
+//
+// Intentionally non-exhaustive, same accepted tradeoff as COSMETIC_MARKERS
+// in utils/drugSchedules.ts (single-source list reused below) and the
+// enrichment NON_PHARMA_KEYWORDS. A genuine allopathic brand never contains
+// these whole words.
+
+const AYURVEDIC_NAME_MARKERS: RegExp[] = [
+  /\bchyawanprash\b/, /\bchurna\b/, /\bvati\b/, /\bbhasma\b/, /\bkwath\b/,
+  /\basav\b/, /\barishta\b/, /\bguggul\b/, /\btriphala\b/, /\bashwagandh/,
+  /\bgiloy\b/, /\bbrahmi\b/, /\bshatavar\b/, /\bherbal\b/,
+];
+
+const HOMEOPATHY_NAME_MARKERS: RegExp[] = [
+  /\bmother\s+tincture\b/, /\bbiochemic\b/, /\bhomeopath(?:ic)?\b/,
+  /\bschwabe\b/, /\breckeweg\b/,
+];
+
+export type NonAllopathicKind = 'cosmetic' | 'ayurvedic' | 'homeopathy';
+
+/** Classify a candidate product name as non-allopathic, or null. Exported for unit testing. */
+export function detectNonAllopathicKind(name: string): NonAllopathicKind | null {
+  const lower = String(name || '').toLowerCase();
+  if (!lower) return null;
+  if (HOMEOPATHY_NAME_MARKERS.some((m) => m.test(lower))) return 'homeopathy';
+  if (AYURVEDIC_NAME_MARKERS.some((m) => m.test(lower))) return 'ayurvedic';
+  for (const c of COSMETIC_MARKERS) {
+    if (lower.includes(c)) return 'cosmetic';
+  }
+  return null;
 }

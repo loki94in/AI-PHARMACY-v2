@@ -6,10 +6,24 @@ jest.unstable_mockModule('../src/whatsappClient.js', () => ({
   __esModule: true,
   sendMessage: mockSendMessage,
   initClient: jest.fn(() => Promise.resolve(true)),
+  destroyClient: jest.fn(() => Promise.resolve()),
+  reconnectClient: jest.fn(() => Promise.resolve()),
+  forceReconnect: jest.fn(() => Promise.resolve()),
   getWhatsAppStatus: jest.fn(() => Promise.resolve({ isConnected: true, isReady: true, status: 'CONNECTED' })),
   normalizeWhatsAppPhone: jest.fn((p: string) => p ? String(p).replace(/\D/g, '') : ''),
   shouldRouteToBusiness: jest.fn(() => false),
-  hashMessageBody: jest.fn((b: string) => b.length)
+  hashMessageBody: jest.fn((b: string) => b.length),
+  hasSavedSession: jest.fn(() => true),
+  isWhatsAppExplicitlyDisabled: jest.fn(() => Promise.resolve(false)),
+  markWhatsAppActivity: jest.fn(),
+  waitForWhatsAppReady: jest.fn(() => Promise.resolve(true)),
+  getChats: jest.fn(() => Promise.resolve([])),
+  getChatMessages: jest.fn(() => Promise.resolve([])),
+  getMessageMedia: jest.fn(() => Promise.resolve({ mimetype: 'image/jpeg', data: '' })),
+  currentQr: null,
+  isReady: true,
+  setCurrentQr: jest.fn(),
+  setIsReady: jest.fn()
 }));
 
 import fs from 'fs';
@@ -86,10 +100,11 @@ describe('Pharmarack Cart Notifications Tests', () => {
 
     // Verify distributor message content
     const msg = notifs[0].message;
-    expect(msg).toContain("Items Requested:");
+    expect(msg).toContain("TODAY DISTRIBUTOR ORDER");
+    expect(msg).toContain("Medicines List:");
     expect(msg).toContain("Aspirin");
     expect(msg).toContain("Pack: 15's");
-    expect(msg).toContain("*2 Strips* (30 Tablets)");
+    expect(msg).toContain("*2 Strips*");
     expect(msg).toContain("Ibuprofen");
     expect(msg).toContain("Pack: 100 ml");
     expect(msg).toContain("*5 Bottles*");

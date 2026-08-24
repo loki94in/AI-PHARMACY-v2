@@ -4,7 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import { dbManager } from '../database/connection.js';
 import { eventService } from './eventService.js';
-import { parseMessage, isRepeatRequest, isPlausibleMedicineName, detectDosageForm, isMedicineLikely, extractMedicineCandidates } from './intentKeywords.js';
+import { parseMessage, isRepeatRequest, isPlausibleMedicineName, detectDosageForm, isMedicineLikely, extractMedicineCandidates, detectNonAllopathicKind } from './intentKeywords.js';
 import { ocrScanQueue } from './ocrScanQueue.js';
 import { productNameFilterService } from './productNameFilterService.js';
 import { searchCatalog, scoreProductName } from './pharmarackCatalogCache.js';
@@ -501,13 +501,41 @@ async function searchAndBroadcast(opts: {
     console.warn('[Intent Service] Inventory stock resolution failed:', dbErr);
   }
   const availability: Availability = classifyAvailability(filterResult.matches, inventoryStock);
+  const isExactLocal = (filterResult.topScore ?? 0) >= 0.95;
+
+  // NON-ALLOPATHIC SKIP (owner rule): cosmetic / ayurvedic / homeopathy
+  // products must not burn the Pharmarack catalog or live search budget. The
+  // request is still broadcast to the admin feed truthfully labeled
+  // NON_ALLOPATHIC with its kind; no escalation / shortage tracking fires.
+  // Only an EXACT registered local name that is physically IN STOCK takes the
+  // normal flow, so a sellable shelf item is never hidden by the label.
+  const nonAllopathicKind = detectNonAllopathicKind(medicineName);
+  if (nonAllopathicKind && !(isExactLocal && availability === 'IN_STOCK')) {
+    console.log(`[Intent Service] Non-allopathic (${nonAllopathicKind}) product "${medicineName}" — external searches skipped`);
+    eventService.broadcast('wa_medicine_match', {
+      customer,
+      isNewCustomer,
+      medicineName,
+      quantity,
+      unit,
+      dosageForm,
+      localMatches: filterResult.matches,
+      inventoryStock,
+      availability: 'NON_ALLOPATHIC',
+      productKind: nonAllopathicKind,
+      catalogResults: null,
+      confidence: Math.round((filterResult.topScore ?? 0) * 100),
+      source,
+      messageBody,
+    });
+    return;
+  }
 
   // If no local match, also try direct Pharmarack catalog search
   let catalogResults = filterResult.catalogResults || null;
   // Consult Pharmarack whenever there is NO exact local brand match (near-match
   // or no-match), not only when local is completely empty — so admin always sees
   // real distributor availability instead of a possibly-wrong local name.
-  const isExactLocal = (filterResult.topScore ?? 0) >= 0.95;
   if ((filterResult.matches.length === 0 || !isExactLocal || availability === 'REGISTERED_NO_STOCK') && !catalogResults) {
     try {
       catalogResults = await searchCatalog(medicineName, dosageForm, mrp);

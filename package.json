@@ -10,6 +10,7 @@
     "dev:server:watch": "tsx watch --exclude \".wwebjs_auth/**\" --exclude \"pharmarack_profile/**\" --exclude \"data/**\" --exclude \"uploads/**\" --exclude \"dist/**\" --exclude \"dist-pkg/**\" --exclude \".understand-anything/**\" --exclude \"*.log\" --exclude \"crash_log*\" --exclude \"*.sqlite*\" --exclude \"*.db*\" src/bootstrap.ts",
     "dev:client": "npm run dev --prefix frontend",
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js --passWithNoTests --forceExit",
+    "guardrails": "node scripts/performance-guardrails.mjs",
     "enqueue-catalog": "tsx ./src/cli/enqueueCatalog.ts",
     "worker": "tsx ./src/worker/catalogWorker.ts",
     "watch-catalog": "tsx ./src/cli/watchCatalog.ts",

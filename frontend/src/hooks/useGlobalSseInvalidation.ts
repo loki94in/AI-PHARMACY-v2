@@ -37,6 +37,7 @@ const SSE_CUSTOM_EVENTS: Record<string, string[]> = {
   wa_status_changed: ['sse-wa-status-changed'],
   wa_queue_update: ['sse-wa-status-changed', 'sse-wa-queue-updated'],
   wa_new_message: ['sse-wa-new-message'],
+  wa_medicine_match: ['sse-wa-medicine-match'],
   ocr_scan_complete: ['sse-ocr-scan-complete'],
   auth_failure: ['sse-auth-failure'],
   pharmarack_session_refreshed: ['sse-pharmarack-refreshed'],

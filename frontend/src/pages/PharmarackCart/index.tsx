@@ -1516,10 +1516,10 @@ const [showAddedItems] = useState<boolean>(false);
 
     itemsToSend.forEach((item, idx) => {
       const packInfo = formatPackagingAndUnit(item.packaging, item.qty);
-      const packBadge = packInfo.packLabel ? ` • 📦 *${packInfo.packLabel}*` : '';
+      const packLine = packInfo.packLabel ? `   📦 *${packInfo.packLabel}*\n` : '';
       const mrpVal = Number(item.mrp || 0) > 0 ? Number(item.mrp) : (Number(item.ptr || 0) > 0 ? Number(item.ptr) : 0);
       const mrpStr = mrpVal > 0 ? ` (MRP: ₹${mrpVal % 1 === 0 ? mrpVal : mrpVal.toFixed(2)})` : '';
-      msg += `${idx + 1}. *${item.productName}*${packBadge}\n   🔢 Order Qty: *${packInfo.unitQtyStr}*${mrpStr}\n`;
+      msg += `${idx + 1}. *${item.productName}*\n${packLine}   🔢 Order Qty: *${packInfo.unitQtyStr}*${mrpStr}\n`;
     });
 
     msg += `\n🚚 *Delivery Person:*\n`;

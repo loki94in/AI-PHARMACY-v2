@@ -1,10 +1,10 @@
 import React, { useState, memo } from 'react';
 import { ShieldCheck, Search, FileText, Pill, Ban, PackageSearch } from 'lucide-react';
-import { api, type ScheduleDrugItem } from '../../services/api';
-import { useApiQuery } from '../../hooks/useApiQuery';
-import { usePageActive } from '../../lib/keepAlive/PageActiveContext';
-import { formatINR, formatCount } from '../../utils/currency';
-import ReviewQueue from './ReviewQueue';
+import { api, type ScheduleDrugItem } from '../../../services/api';
+import { useApiQuery } from '../../../hooks/useApiQuery';
+import { usePageActive } from '../../../lib/keepAlive/PageActiveContext';
+import { formatINR, formatCount } from '../../../utils/currency';
+import ReviewQueue from './ScheduleReviewQueue';
 
 // Module-level caches (SPA contract): revisits paint instantly, refreshes are silent.
 interface ScheduleSummary {
@@ -105,7 +105,7 @@ const SummaryChip = memo(({
   </button>
 ));
 
-const ScheduleDrugsPage: React.FC = () => {
+const ScheduleDrugsPanel: React.FC = () => {
   const isActive = usePageActive();
   const [tab, setTab] = useState<'classified' | 'review'>('classified');
   const [view, setView] = useState<View>({ type: 'ALL', q: '', stock: '', page: 1 });
@@ -135,23 +135,7 @@ const ScheduleDrugsPage: React.FC = () => {
   const hasMore = list.data?.hasMore ?? false;
 
   return (
-    <div className="p-6 space-y-6 max-w-7xl mx-auto">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-glass-border pb-5">
-        <div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <h1 className="text-2xl font-black text-text tracking-tight">Schedule Medicine Hub</h1>
-            <span className="bg-amber-500/15 text-amber-400 border border-amber-500/30 text-[10px] font-extrabold px-2.5 py-0.5 rounded-full uppercase tracking-wider">
-              D&amp;C Rules 1945
-            </span>
-          </div>
-          <p className="text-xs text-muted mt-1">
-            Every medicine in your master database classified against India&apos;s official drug schedules —
-            Schedule H1 (GSR 588(E)/2013 · 46 drugs), Schedule X and Schedule H — in one place.
-          </p>
-        </div>
-      </div>
-
+    <div className="p-4 space-y-6 max-w-7xl mx-auto">
       {/* Mode tabs: browse classified / review new medicines */}
       <div className="flex items-center gap-2">
         {([
@@ -327,4 +311,4 @@ const ScheduleDrugsPage: React.FC = () => {
   );
 };
 
-export default ScheduleDrugsPage;
+export default ScheduleDrugsPanel;

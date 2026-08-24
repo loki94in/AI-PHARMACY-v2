@@ -241,10 +241,10 @@ Note: the ~119 wrapper methods on `api` that duplicate direct `apiClient.*` call
 
 ---
 
-### 22. Chemical Composition Queue (`/composition-queue`)
-* **Component Path**: [pages/CompositionQueue/index.tsx](file:///e:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY%20v2/frontend/src/pages/CompositionQueue/index.tsx)
+### 22. Chemical Composition Queue (Composition AI tab of `/ai-engineering`)
+* **Component Path**: [pages/AIEngineering/panels/CompositionPanel.tsx](file:///e:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY%20v2/frontend/src/pages/AIEngineering/panels/CompositionPanel.tsx) (legacy route `/composition-queue?highlight=N` silently redirects to `/ai-engineering?tab=composition&highlight=N`)
 * **Authoritative Responsibilities**: Medicines missing drug chemical compositions, automated API substance lookup queue.
-* **Authoritative Data Sources**: `GET /api/catalog/composition-queue`.
+* **Authoritative Data Sources**: `GET /api/catalog/composition-queue` plus the `/api/enrichment/*` pipeline (`status`, `start`, `stop`, `queue`, `preview-tokens`, `set-search-term`, `trigger-online/:id`, CSV import/export).
 * **Database Tables**: `medicines`, `api_substances`.
 
 ---
@@ -296,12 +296,20 @@ Note: the ~119 wrapper methods on `api` that duplicate direct `apiClient.*` call
 
 ---
 
-### 29. Schedule Medicine Hub (`/schedule-drugs`)
-* **Component Path**: [pages/ScheduleDrugs/index.tsx](file:///e:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY%20v2/frontend/src/pages/ScheduleDrugs/index.tsx) (+ `ReviewQueue.tsx`, `ScheduleResearchModal.tsx`)
+### 29. Schedule Medicine Hub (Drug Schedules tab of `/ai-engineering`)
+* **Component Path**: [pages/AIEngineering/panels/ScheduleDrugsPanel.tsx](file:///e:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY%20v2/frontend/src/pages/AIEngineering/panels/ScheduleDrugsPanel.tsx) (+ `panels/ScheduleReviewQueue.tsx`, `panels/ScheduleResearchModal.tsx`; legacy route `/schedule-drugs` silently redirects to `?tab=schedules`)
 * **Authoritative Responsibilities**: Single hub listing every master-catalog medicine classified under India's retail drug schedules — Schedule H1 (GSR 588(E)/2013, 46 drugs), Schedule X (habit-forming appendix) and Schedule H (2006 consolidated list incl. its Antibiotics class entry). Tabbed counts, name search, stock filter. **Review New Medicines tab**: per-medicine ONE-Google-search research (full-page SERP screenshot via headless Chrome → Tesseract OCR word boxes → filler words dropped and logged → exact + typo-similar matches vs the schedule sets, e.g. "offloxocin"→ofloxacin), API words HIGHLIGHTED on the screenshot; pharmacist confirms → written to master DB with evidence metadata (human-in-the-loop; Google bot-check auto-falls back to DuckDuckGo, engine labeled).
 * **Authoritative Data Sources**: `GET /api/schedule-drugs/summary`, `GET /api/schedule-drugs?type=H1|H|X&q=&stock=in|out&page=`, `GET /api/schedule-drugs/unclassified`, `GET /api/schedule-drugs/research?id=`, `POST /api/schedule-drugs/classify`.
 * **Database Tables**: `medicines.schedule_type` (canonical values `H` / `H1` / `X`; composite index `idx_medicines_schedule_type_name`), evidence keywords in `medicines.metadata`, live stock from `inventory_master`.
-* **Classification Source of Truth**: `src/utils/drugSchedules.ts` (single-source reference data) consumed by `scripts/classifyDrugSchedules.ts` (idempotent offline backfill) and `services/scheduleResearchService.ts` (runtime Google-OCR flow). Molecules outside the official lists stay unclassified — nothing is guessed. Sale-time H1/H/X dispensing continues to flow into the H1 Compliance register (`/compliance`) via `invoiceService`.
+* **Classification Source of Truth**: `src/utils/drugSchedules.ts` (single-source reference data) consumed by `scripts/classifyDrugSchedules.ts` (idempotent offline backfill) and `services/scheduleResearchService.ts` (runtime Google-OCR flow). Molecules outside the official lists stay unclassified — nothing is guessed. Sale-time H1/H/X dispensing continues to flow into the H1 Compliance register (Compliance tab of `/ai-engineering`) via `invoiceService`.
+
+---
+
+### 31. Pharma Intelligence Hub (`/ai-engineering`)
+* **Component Path**: [pages/AIEngineering/index.tsx](file:///e:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY%20v2/frontend/src/pages/AIEngineering/index.tsx)
+* **Authoritative Responsibilities**: The single 4-tab command center for every AI-engineering surface: `?tab=composition` → Composition Enrichment panel (§22), `?tab=schedules` → Drug Schedules panel (§29), `?tab=compliance` → **H1 Regulatory Compliance register** (`panels/CompliancePanel.tsx`: statutory Schedule-H/H1/X dispensing logbook, dashboard stats, doctor-assignment modal, CSV export + print; data via `GET /api/compliance/dashboard`, `GET /api/compliance/h1-register`, `PUT /api/compliance/:id/doctor`, `GET /api/compliance/export`; legacy route `/compliance` redirects here), and `?tab=wa` → **WA Requests** (`WaRequestsPanel.tsx`: live feed consuming SSE `wa_medicine_match` via DOM CustomEvent `sse-wa-medicine-match`; each card shows the customer, noise-stripped medicine candidates, registered-in-app matches with real shelf stock, truthful availability classification and the Pharmarack comparison that `whatsappIntentService` already fetched ONCE server-side — display-only, plus a manual lookup that fires exactly ONE `api.searchPharmarack` per explicit click with no auto-retry).
+* **Sidebar**: single "Pharma Intelligence" entry in `Layout.tsx` (the three former entries are gone).
+* **Legacy routes**: `/composition-queue`, `/schedule-drugs`, `/compliance` are `<HubRedirect>` silent redirects preserving query params (POS deep-link `/composition-queue?highlight=N` keeps working).
 
 ---
 

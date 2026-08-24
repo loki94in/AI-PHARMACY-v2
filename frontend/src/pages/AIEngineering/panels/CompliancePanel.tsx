@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Shield, Calendar, Search, Download, Printer, User, FileText, 
+import {
+  Shield, Calendar, Search, Download, Printer, User, FileText,
   AlertTriangle, RefreshCw, Filter, Edit3, Check, X
 } from 'lucide-react';
-import { api } from '../../services/api';
-import { formatDisplayDate, toDateInputValue } from '../../utils/date';
+import { api } from '../../../services/api';
+import { toastEvent } from '../../../services/events';
+import { formatDisplayDate, toDateInputValue } from '../../../utils/date';
 
 interface ComplianceLog {
   id: number;
@@ -27,7 +28,7 @@ let cachedComplianceStats = {
 };
 let cachedComplianceLogs: ComplianceLog[] = [];
 
-const CompliancePage: React.FC = () => {
+const CompliancePanel: React.FC = () => {
   const [stats, setStats] = useState(cachedComplianceStats);
   const [logs, setLogs] = useState<ComplianceLog[]>(cachedComplianceLogs);
   const [loading, setLoading] = useState(cachedComplianceLogs.length === 0);
@@ -105,11 +106,12 @@ const CompliancePage: React.FC = () => {
         license_no: editLicenseNo.trim() || undefined
       });
       setEditLog(null);
+      toastEvent.trigger('Doctor assignment saved to the H1 register', 'success');
       fetchDashboardStats();
       fetchLogs();
     } catch (err) {
       console.error('Failed to update doctor details:', err);
-      alert('Failed to update doctor details');
+      toastEvent.trigger('Failed to update doctor details', 'error');
     } finally {
       setSavingDoctor(false);
     }
@@ -124,37 +126,33 @@ const CompliancePage: React.FC = () => {
   };
 
   return (
-    <div className="p-6 space-y-6 max-w-7xl mx-auto">
-      {/* Top Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-glass-border pb-5">
-        <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-2xl font-black text-text tracking-tight">Schedule H1 Regulatory Compliance</h1>
-            <span className="bg-amber-500/15 text-amber-400 border border-amber-500/30 text-[10px] font-extrabold px-2.5 py-0.5 rounded-full uppercase tracking-wider">
-              Statutory Register
-            </span>
-          </div>
-          <p className="text-xs text-muted mt-1">
-            Drugs & Cosmetics Rules (Schedule H1 / H / X) dispensing logbook for statutory Drug Inspector audits.
-          </p>
-        </div>
+    <div className="p-4 space-y-6 max-w-7xl mx-auto">
+      {/* Panel header strip */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <h2 className="text-lg font-bold text-text tracking-tight">Schedule H1 Regulatory Compliance</h2>
+        <span className="bg-amber-500/15 text-amber-400 border border-amber-500/30 text-[10px] font-extrabold px-2.5 py-0.5 rounded-full uppercase tracking-wider">
+          Statutory Register
+        </span>
+        <p className="text-xs text-muted w-full sm:w-auto sm:ml-2">
+          Drugs &amp; Cosmetics Rules dispensing logbook for statutory Drug Inspector audits.
+        </p>
+      </div>
 
-        <div className="flex items-center gap-3">
-          <button
-            onClick={handleExportCsv}
-            className="px-4 py-2 bg-bg2 border border-glass-border hover:bg-bg3 text-text rounded-xl text-xs font-bold transition-all flex items-center gap-2"
-          >
-            <Download size={14} className="text-emerald-400" />
-            Export CSV
-          </button>
-          <button
-            onClick={handlePrintRegister}
-            className="px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl text-xs font-bold transition-all flex items-center gap-2 shadow-lg shadow-primary/20"
-          >
-            <Printer size={14} />
-            Print Register
-          </button>
-        </div>
+      <div className="flex items-center justify-end gap-3">
+        <button
+          onClick={handleExportCsv}
+          className="px-4 py-2 bg-bg2 border border-glass-border hover:bg-bg3 text-text rounded-xl text-xs font-bold transition-all flex items-center gap-2"
+        >
+          <Download size={14} className="text-emerald-400" />
+          Export CSV
+        </button>
+        <button
+          onClick={handlePrintRegister}
+          className="px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl text-xs font-bold transition-all flex items-center gap-2 shadow-lg shadow-primary/20"
+        >
+          <Printer size={14} />
+          Print Register
+        </button>
       </div>
 
       {/* Metric Cards Grid */}
@@ -477,4 +475,4 @@ const CompliancePage: React.FC = () => {
   );
 };
 
-export default CompliancePage;
+export default CompliancePanel;

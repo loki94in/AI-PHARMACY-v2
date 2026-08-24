@@ -113,6 +113,22 @@ When adding nodes, use these ID prefixes:
 
 ---
 
+## Performance Guardrails (MANDATORY, blocking — added 2026-08)
+
+The app's speed architecture (SSE event-driven refresh, cache-first pages, gated workers, session persistence) is protected by an automated scanner. After ANY code change, agents **MUST** run:
+
+```bash
+npm run guardrails        # = node scripts/performance-guardrails.mjs
+```
+
+- Default mode scans only lines ADDED/CHANGED vs git HEAD (`<2 s`). Exit `0` = pass. Exit `1` = violations that **MUST be fixed before the task is done** — no exceptions.
+- `--all` runs a full-repository legacy audit (advisory; use it when refactoring a whole subsystem).
+- `--self-test` verifies the rule engine itself (run after editing the scanner).
+- Rules enforce: no eager refetch storms (mark-stale-only), no ungated polling timers (`refetchInterval`/`setInterval`), one global SSE connection, semantic Tailwind colors only, no simulation/mock UI, zero dummy-data tokens (`B-*`, `BATCH123`, invented fallbacks), no native `alert()/confirm()`, delivery-boy data only from `delivery_boys` via `/dispatch`, async Pharmarack profile copies, and no autonomous patient messaging from cron/worker files.
+- Sanctioned exceptions live in the `ALLOW` block of `scripts/performance-guardrails.mjs`. Extend them ONLY with a written rationale referencing the governing contract section.
+
+---
+
 ## Quick Commands
 
 ```bash
@@ -343,7 +359,8 @@ To prevent regressions, legacy fallback loops, and developer/AI confusion when f
 2. **Strict Route Ownership Rules**:
    - **Delivery Boy Management**: MUST ONLY be read/written via `/dispatch` (`Dispatch/index.tsx`) using the `delivery_boys` database table (`GET/POST /api/dispatch/delivery-boys`). **NEVER** read/write delivery boy details from `Settings` or `app_settings`.
    - **Special Shortage Orders**: MUST ONLY be managed via `/orders` (`Orders/index.tsx`) using the `special_orders` database table (`GET/POST /api/orders`). **NEVER** introduce parallel logic pointing to `pending_shortage_requests`.
-   - **Schedule Medicine Hub (`/schedule-drugs`)**: The ONLY page for browsing India drug-schedule classification (H / H1 / X) across the master catalog. Classification lives in `medicines.schedule_type` and is written EXCLUSIVELY by (a) the idempotent `scripts/classifyDrugSchedules.ts` backfill against the official D&C Rules lists (H1 = GSR 588(E)/2013 46 drugs; X appendix; H 2006 consolidated list), or (b) the user-clicked Google-OCR research confirm in `/schedule-drugs` → Review New Medicines (ONE search + ONE screenshot + OCR word-highlight, pharmacist confirms; evidence saved to metadata). Never hardcode schedule keywords or per-row classifications anywhere else — reference data lives only in `src/utils/drugSchedules.ts`. Sale-time compliance logging stays owned by `/compliance` via `invoiceService`.
+   - **Pharma Intelligence Hub (`/ai-engineering`)**: The single 4-tab command center (`AIEngineering/index.tsx`) owning ALL AI-engineering surfaces. Tabs: `?tab=composition` (Composition Enrichment — `panels/CompositionPanel.tsx`, the ONLY UI for the `/enrichment/*` pipeline), `?tab=schedules` (Drug Schedules), `?tab=compliance` (H1 Compliance register) and `?tab=wa` (WA Requests — live feed of SSE `wa_medicine_match` events broadcast by `whatsappIntentService`; display-only, its manual lookup fires exactly ONE `searchPharmarack` per user click with no auto-retry; cosmetic / ayurvedic / homeopathy candidates are labeled `NON_ALLOPATHIC` by `detectNonAllopathicKind()` and skip Pharmarack searches server-side). Legacy routes `/composition-queue`, `/schedule-drugs`, `/compliance` are silent redirects preserving query params (POS's `/composition-queue?highlight=N` → `?tab=composition&highlight=N`). Do NOT recreate standalone pages for these features.
+   - **Schedule Medicine Hub (Drug Schedules tab of `/ai-engineering`)**: The ONLY surface for browsing India drug-schedule classification (H / H1 / X) across the master catalog. Classification lives in `medicines.schedule_type` and is written EXCLUSIVELY by (a) the idempotent `scripts/classifyDrugSchedules.ts` backfill against the official D&C Rules lists (H1 = GSR 588(E)/2013 46 drugs; X appendix; H 2006 consolidated list), or (b) the user-clicked Google-OCR research confirm in the tab's Review New Medicines view (ONE search + ONE screenshot + OCR word-highlight, pharmacist confirms; evidence saved to metadata). Never hardcode schedule keywords or per-row classifications anywhere else — reference data lives only in `src/utils/drugSchedules.ts`. Sale-time compliance logging stays owned by the H1 Compliance tab via `invoiceService`.
    - **AI Learning Hub (`/learning`) & Settings Hub (`/settings`)**: `/learning` (`Learning/index.tsx`) is the dedicated 4-tab AI Learning command center managing Clinical AI retraining, OCR text correction rules, Doctor Directory, Distributor OCR layouts, and QR document scanning sandbox. `/settings` (`Settings/index.tsx`) is the store configuration hub managing Store Profile, Staff & Security, External Integrations, and Data & Backups. These pages function as completely separate routes with ZERO cross-page redirects.
 
 ---

@@ -162,6 +162,65 @@ export function formatPackagingAndUnit(
   };
 }
 
+export interface DistributorOrderMessageItem {
+  name: string;
+  qty: number | string;
+  packaging?: string | null;
+}
+
+export interface DistributorOrderMessageParams {
+  distributorName: string;
+  distributorPhone?: string | null;
+  items: DistributorOrderMessageItem[];
+  deliveryBoyName?: string | null;
+  deliveryBoyPhone?: string | null;
+  preferredFileFormat?: string | null;
+  pharmacyEmail?: string | null;
+  dateLabel?: string;
+  isLate?: boolean;
+}
+
+/**
+ * Builds the unified 'TODAY DISTRIBUTOR ORDER' WhatsApp notification message.
+ */
+export function buildStandardDistributorOrderMessage(params: DistributorOrderMessageParams): string {
+  const dateLabel = params.dateLabel || new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+  const prefix = params.isLate ? `📅 TODAY ORDER (LATE ADDITION) — ` : `📅 TODAY DISTRIBUTOR ORDER — `;
+
+  let msg = `${prefix}${dateLabel}\n\n`;
+  msg += `🏬 *${(params.distributorName || 'DISTRIBUTOR').toUpperCase()}*\n`;
+  if (params.distributorPhone && params.distributorPhone.trim()) {
+    msg += `📞 Contact: ${params.distributorPhone.trim()}\n`;
+  }
+
+  const boyName = params.deliveryBoyName || 'Delivery Staff';
+  const boyPhone = params.deliveryBoyPhone || 'N/A';
+  msg += `🚚 *Delivery Boy / Pickup Person:* ${boyName} (${boyPhone})\n\n`;
+
+  msg += `📦 *Medicines List:*\n`;
+  const items = params.items || [];
+  if (items.length > 0) {
+    items.forEach((item, idx) => {
+      const name = item.name || 'Medicine Item';
+      const qty = item.qty || 1;
+      const packInfo = formatPackagingAndUnit(item.packaging, qty);
+      const packLine = packInfo.packLabel ? `   📦 *${packInfo.packLabel}*\n` : '';
+      msg += `${idx + 1}. *${name}*\n${packLine}   🔢 Order Qty: *${packInfo.unitQtyStr}*\n`;
+    });
+  } else {
+    msg += `  • Standard Pharmacy Order Items\n`;
+  }
+
+  msg += `\n📊 *Total Items:* ${items.length}\n`;
+  const format = (params.preferredFileFormat || 'CSV').trim();
+  msg += `📄 *Preferred Email Invoice Format:* ${format}`;
+  if (params.pharmacyEmail && params.pharmacyEmail.trim()) {
+    msg += `\n📩 *Please email bill copies to:* ${params.pharmacyEmail.trim()}`;
+  }
+
+  return msg.trim();
+}
+
 /**
  * Builds standardized WhatsApp Order Notification template with resolved delivery boy.
  */
@@ -174,21 +233,16 @@ export async function buildWhatsAppOrderNotification(params: {
   dbInstance?: any;
 }): Promise<string> {
   const db = params.dbInstance || (await dbManager.getConnection());
-  const storeName = await getStoreMedicalName(db);
   const deliveryBoy = await resolveActiveDeliveryBoy(db, params.assignedBoy);
 
-  const packInfo = formatPackagingAndUnit(params.packaging, params.qty);
-  const packStr = packInfo.packLabel ? ` • 📦 *${packInfo.packLabel}*` : '';
-
-  let msg = `📦 *ORDER NOTIFICATION* - ${storeName}\n\n`;
-  msg += `• *Product*: ${params.productName}${packStr}\n`;
-  msg += `• *Order Qty*: ${packInfo.unitQtyStr}${packInfo.totalUnitsNote}\n`;
-  if (params.distributorName) {
-    msg += `• *Distributor*: ${params.distributorName}\n`;
-  }
-  msg += `\n🚚 *Delivery Details*:\n`;
-  msg += `• *Assigned Boy*: ${deliveryBoy.name}\n`;
-  msg += `• *Contact*: ${deliveryBoy.phone}\n`;
-
-  return msg;
+  return buildStandardDistributorOrderMessage({
+    distributorName: params.distributorName || 'Distributor',
+    items: [{
+      name: params.productName,
+      qty: params.qty,
+      packaging: params.packaging
+    }],
+    deliveryBoyName: deliveryBoy.name,
+    deliveryBoyPhone: deliveryBoy.phone
+  });
 }

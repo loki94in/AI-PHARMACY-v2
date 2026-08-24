@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Beaker, Play, Square, CheckCircle, AlertTriangle, XCircle, Save, ChevronLeft, ChevronRight, Loader2, Sparkles, Upload, Download, Search, RotateCcw, ChevronUp } from 'lucide-react';
-import { api } from '../../services/api';
-import { useApiQuery } from '../../hooks/useApiQuery';
-import { useFetchMode } from '../../hooks/useFetchMode';
-import { usePageActive } from '../../lib/keepAlive/PageActiveContext';
+import { api } from '../../../services/api';
+import { useApiQuery } from '../../../hooks/useApiQuery';
+import { useFetchMode } from '../../../hooks/useFetchMode';
+import { usePageActive } from '../../../lib/keepAlive/PageActiveContext';
 
 type LocalApiError = { response?: { status?: number }; message?: string };
 
@@ -162,7 +162,7 @@ function SearchTermEditor({ item, onEnriched }: { item: QueueItem; onEnriched: (
       <button
         onClick={handleSearch}
         disabled={searching || !computedPreview.trim()}
-        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-semibold transition-all"
+        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 disabled:opacity-40 disabled:cursor-not-allowed text-text text-xs font-semibold transition-all"
       >
         {searching ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}
         {searching ? 'Searching...' : 'Search Now'}
@@ -171,7 +171,7 @@ function SearchTermEditor({ item, onEnriched }: { item: QueueItem; onEnriched: (
   );
 }
 
-export default function CompositionQueue() {
+const CompositionPanel: React.FC = () => {
   const [searchParams] = useSearchParams();
   const highlightId = searchParams.get('highlight') ? parseInt(searchParams.get('highlight')!) : null;
 
@@ -419,7 +419,7 @@ export default function CompositionQueue() {
               <button
                 onClick={handleStopEnrichment}
                 disabled={stopping}
-                className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-red-600 to-rose-600 text-white font-semibold text-sm flex items-center gap-2 hover:from-red-500 hover:to-rose-500 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-red-500/20"
+                className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-red-600 to-rose-600 text-text font-semibold text-sm flex items-center gap-2 hover:from-red-500 hover:to-rose-500 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-red-500/20"
                 title="Stop enrichment at next batch boundary"
               >
                 {stopping ? <Loader2 size={16} className="animate-spin" /> : <Square size={16} />}
@@ -430,7 +430,7 @@ export default function CompositionQueue() {
             <button
               onClick={handleStartEnrichment}
               disabled={starting || isRunning}
-              className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-violet-600 to-purple-600 text-white font-semibold text-sm flex items-center gap-2 hover:from-violet-500 hover:to-purple-500 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-violet-500/20"
+              className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-violet-600 to-purple-600 text-text font-semibold text-sm flex items-center gap-2 hover:from-violet-500 hover:to-purple-500 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-violet-500/20"
             >
               {isRunning ? (
                 <><Loader2 size={16} className="animate-spin" /> Running...</>
@@ -679,4 +679,6 @@ export default function CompositionQueue() {
       </div>
     </div>
   );
-}
+};
+
+export default CompositionPanel;

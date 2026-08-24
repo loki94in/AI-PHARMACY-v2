@@ -118,7 +118,7 @@ If you add a new query that reads inventory/sales/purchases, add its key there.
 | Returns | `/returns` | 🟡 MED — writes inventory |
 | Settings | `/settings` | 🟡 MED — affects all pages indirectly |
 | Database | `/database` | 🟡 MED — edits medicines master |
-| CompositionQueue | `/composition-queue` | 🟡 MED — edits medicines master |
+| AIEngineering (Pharma Intelligence) | `/ai-engineering` | 🟡 MED — edits medicines master (composition/schedules/compliance/WA tabs) |
 | Investigation | `/investigation` | 🟡 MED — reads all tables |
 | PhoneSales | `/phone-sales` | 🟡 MED — triggers sales |
 | Dashboard | `/dashboard` | 🟢 LOW — read-only aggregates |

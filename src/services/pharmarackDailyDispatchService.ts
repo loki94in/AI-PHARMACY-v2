@@ -205,8 +205,8 @@ async function buildSeparateDispatchMessages(db: any, orders: any[], isLate = fa
       const name = item.productName || item.name || 'Unknown';
       const qty = item.qty || item.Quantity || item.quantity || 1;
       const packInfo = formatPackagingAndUnit(item.packaging || item.packing, qty);
-      const packStr = packInfo.packLabel ? ` • 📦 *${packInfo.packLabel}*` : '';
-      msg += `${i + 1}. *${name}*${packStr}\n   🔢 Order Qty: *${packInfo.unitQtyStr}*${packInfo.totalUnitsNote}\n`;
+      const packLine = packInfo.packLabel ? `   📦 *${packInfo.packLabel}*\n` : '';
+      msg += `${i + 1}. *${name}*\n${packLine}   🔢 Order Qty: *${packInfo.unitQtyStr}*\n`;
     }
     msg += `\n📊 *Total Items:* ${items.length}\n`;
     msg += `📄 *Preferred Email Invoice Format:* ${distFormat}`;

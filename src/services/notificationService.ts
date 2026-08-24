@@ -3,11 +3,10 @@ import { whatsappQueueWorker } from './whatsappQueueWorker.js';
 import { telegramBotService } from '../telegramBot.js';
 import { whatsappBusinessService } from './whatsappBusinessService.js';
 import { emailService } from './emailService.js';
-import { config } from '../config/index.js';
 import { dbManager } from '../database/connection.js';
 import { recordPlacedOrder } from './pharmarackDailyDispatchService.js';
 import { resolveDistributorContact } from '../utils/distributorSyncHelper.js';
-import { formatPackagingAndUnit } from '../utils/whatsappTemplateBuilder.js';
+import { formatPackagingAndUnit, buildStandardDistributorOrderMessage } from '../utils/whatsappTemplateBuilder.js';
 
 export interface NotificationData {
   type: 'whatsapp' | 'whatsapp_business' | 'telegram' | 'email';
@@ -333,23 +332,9 @@ export class NotificationService {
       );
 
       // 4. Format message using single customized distributor template
+      // 4. Format message using single standardized distributor template
       const store = await this.getStoreSettings(db);
-      const dateStr = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' });
-
-      let itemsText = '';
-      if (purchaseItems && purchaseItems.length > 0) {
-        itemsText = purchaseItems
-          .map((item: any, idx: number) => {
-            const name = item.medicine_name || 'Medicine Item';
-            const qty = item.quantity || 1;
-            const packInfo = formatPackagingAndUnit(item.packaging, qty);
-            const packStr = packInfo.packLabel ? ` • 📦 *${packInfo.packLabel}*` : '';
-            return `  ${idx + 1}. *${name}*${packStr}\n     🔢 Order Qty: *${packInfo.unitQtyStr}*${packInfo.totalUnitsNote}`;
-          })
-          .join('\n');
-      } else {
-        itemsText = '  • Standard Pharmacy Order Items';
-      }
+      const dateLabel = new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
 
       let boyName = 'Not assigned yet';
       let boyPhone = 'N/A';
@@ -364,13 +349,22 @@ export class NotificationService {
         }
       }
 
-      const message = `🏥 *${store.storeName}*\n` +
-        `*Delivery Location:* ${store.address}\n` +
-        `📞 *Pharmacy Contact:* ${store.phone}\n\n` +
-        `📅 *Date:* ${dateStr}\n\n` +
-        `📋 *Items Requested:*\n${itemsText}\n\n` +
-        `🚚 *Assigned Delivery Boy:*\n  👤 ${boyName}\n  📞 ${boyPhone}\n\n` +
-        `*Note:* ${store.email} (${store.fileFormat}) when sending bills.`;
+      const itemsForTemplate = (purchaseItems || []).map((item: any) => ({
+        name: item.medicine_name || 'Medicine Item',
+        qty: item.quantity || 1,
+        packaging: item.packaging
+      }));
+
+      const message = buildStandardDistributorOrderMessage({
+        distributorName: purchase.distributor_name,
+        distributorPhone: rawPhone ? formatDisplayPhone(rawPhone) : undefined,
+        items: itemsForTemplate,
+        deliveryBoyName: boyName,
+        deliveryBoyPhone: boyPhone,
+        preferredFileFormat: store.fileFormat,
+        pharmacyEmail: store.email,
+        dateLabel
+      });
 
       // 5. Parse & format distributor numbers (support comma/space-separated in distributor phone)
       const distPhones = rawPhone
@@ -519,24 +513,9 @@ export class NotificationService {
         }
       }
 
-      // 3. Format message using single customized distributor template
+      // 3. Format message using single standardized distributor template
       const store = await this.getStoreSettings(db);
-      const dateStr = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' });
-
-      let itemsText = '';
-      if (items && items.length > 0) {
-        itemsText = items
-          .map((item: any, idx: number) => {
-            const name = item.productName || item.name || 'Medicine Item';
-            const qty = item.qty || item.Quantity || 1;
-            const packInfo = formatPackagingAndUnit(item.packaging || item.packing, qty);
-            const packStr = packInfo.packLabel ? ` • 📦 *${packInfo.packLabel}*` : '';
-            return `  ${idx + 1}. *${name}*${packStr}\n     🔢 Order Qty: *${packInfo.unitQtyStr}*${packInfo.totalUnitsNote}`;
-          })
-          .join('\n');
-      } else {
-        itemsText = '  • Standard Pharmacy Order Items';
-      }
+      const dateLabel = new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
 
       let boyName = 'Not assigned yet';
       let boyPhone = 'N/A';
@@ -551,13 +530,22 @@ export class NotificationService {
         }
       }
 
-      const message = `🏥 *${store.storeName}*\n` +
-        `*Delivery Location:* ${store.address}\n` +
-        `📞 *Pharmacy Contact:* ${store.phone}\n\n` +
-        `📅 *Date:* ${dateStr}\n\n` +
-        `📋 *Items Requested:*\n${itemsText}\n\n` +
-        `🚚 *Assigned Delivery Boy:*\n  👤 ${boyName}\n  📞 ${boyPhone}\n\n` +
-        `*Note:* ${store.email} (${store.fileFormat}) when sending bills.`;
+      const itemsForTemplate = (items || []).map((item: any) => ({
+        name: item.productName || item.name || 'Medicine Item',
+        qty: item.qty || item.Quantity || 1,
+        packaging: item.packaging || item.packing
+      }));
+
+      const message = buildStandardDistributorOrderMessage({
+        distributorName: storeName,
+        distributorPhone: rawPhone ? formatDisplayPhone(rawPhone) : undefined,
+        items: itemsForTemplate,
+        deliveryBoyName: boyName,
+        deliveryBoyPhone: boyPhone,
+        preferredFileFormat: store.fileFormat,
+        pharmacyEmail: store.email,
+        dateLabel
+      });
 
       // 5. Parse distributor numbers
       const distPhones = rawPhone
@@ -738,8 +726,8 @@ export class NotificationService {
           const name = item.productName || item.name || 'Unknown Product';
           const qty = item.qty || item.Quantity || item.quantity || 1;
           const packInfo = formatPackagingAndUnit(item.packaging || item.packing, qty);
-          const packStr = packInfo.packLabel ? ` • 📦 *${packInfo.packLabel}*` : '';
-          msg += `${idx + 1}. *${name}*${packStr}\n   🔢 Order Qty: *${packInfo.unitQtyStr}*${packInfo.totalUnitsNote}\n`;
+          const packLine = packInfo.packLabel ? `   📦 *${packInfo.packLabel}*\n` : '';
+          msg += `${idx + 1}. *${name}*\n${packLine}   🔢 Order Qty: *${packInfo.unitQtyStr}*\n`;
         });
 
         msg += `\n📊 *Total Items:* ${order.items?.length || 0}`;

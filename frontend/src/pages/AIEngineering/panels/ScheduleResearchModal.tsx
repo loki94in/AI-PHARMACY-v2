@@ -1,7 +1,7 @@
 import React from 'react';
 import { X, Globe, Check, Ban, Loader2 } from 'lucide-react';
-import { api, type ScheduleUnclassifiedItem, type ScheduleResearchMatch } from '../../services/api';
-import { useApiQuery, useApiMutation } from '../../hooks/useApiQuery';
+import { api, type ScheduleUnclassifiedItem, type ScheduleResearchMatch } from '../../../services/api';
+import { useApiQuery, useApiMutation } from '../../../hooks/useApiQuery';
 
 const MATCH_STYLE: Record<string, string> = {
   H1: 'bg-amber-400/30 border-amber-400 text-amber-300',

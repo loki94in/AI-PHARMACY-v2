@@ -5,10 +5,24 @@ jest.unstable_mockModule('../src/whatsappClient.js', () => ({
   __esModule: true,
   sendMessage: jest.fn(() => Promise.resolve(true)),
   initClient: jest.fn(() => Promise.resolve(true)),
+  destroyClient: jest.fn(() => Promise.resolve()),
+  reconnectClient: jest.fn(() => Promise.resolve()),
+  forceReconnect: jest.fn(() => Promise.resolve()),
   getWhatsAppStatus: jest.fn(() => Promise.resolve({ isConnected: true, isReady: true, status: 'CONNECTED' })),
   normalizeWhatsAppPhone: jest.fn((p: string) => p ? String(p).replace(/\D/g, '') : ''),
   shouldRouteToBusiness: jest.fn(() => false),
-  hashMessageBody: jest.fn((b: string) => b.length)
+  hashMessageBody: jest.fn((b: string) => b.length),
+  hasSavedSession: jest.fn(() => true),
+  isWhatsAppExplicitlyDisabled: jest.fn(() => Promise.resolve(false)),
+  markWhatsAppActivity: jest.fn(),
+  waitForWhatsAppReady: jest.fn(() => Promise.resolve(true)),
+  getChats: jest.fn(() => Promise.resolve([])),
+  getChatMessages: jest.fn(() => Promise.resolve([])),
+  getMessageMedia: jest.fn(() => Promise.resolve({ mimetype: 'image/jpeg', data: '' })),
+  currentQr: null,
+  isReady: true,
+  setCurrentQr: jest.fn(),
+  setIsReady: jest.fn()
 }));
 
 import fs from 'fs';
@@ -103,13 +117,14 @@ describe('Distributor WhatsApp Notification Automation Tests', () => {
 
     // Verify message content
     const sentMessage = notifs[0].message;
-    expect(sentMessage).toContain("Items Requested:");
+    expect(sentMessage).toContain("TODAY DISTRIBUTOR ORDER");
+    expect(sentMessage).toContain("Medicines List:");
     expect(sentMessage).toContain("Paracetamol 500mg");
     expect(sentMessage).toContain("*20 Units*");
     expect(sentMessage).toContain("Azithromycin 500mg");
     expect(sentMessage).toContain("*10 Units*");
     expect(sentMessage).toContain("Rahul Sharma");
-    expect(sentMessage).toContain("Assigned Delivery Boy:");
+    expect(sentMessage).toContain("Delivery Boy / Pickup Person:");
   });
 
   test('Edge Case: Delivery boy not assigned yet falls back to Admin/Owner or DB active delivery boy', async () => {

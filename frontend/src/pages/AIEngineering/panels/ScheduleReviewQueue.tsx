@@ -1,7 +1,7 @@
 import React, { useState, memo } from 'react';
 import { Globe, ChevronLeft, ChevronRight, PackageSearch, Search } from 'lucide-react';
-import { api, type ScheduleUnclassifiedItem } from '../../services/api';
-import { useApiQuery } from '../../hooks/useApiQuery';
+import { api, type ScheduleUnclassifiedItem } from '../../../services/api';
+import { useApiQuery } from '../../../hooks/useApiQuery';
 import ScheduleResearchModal from './ScheduleResearchModal';
 
 // Module-level cache (SPA contract): revisits repaint instantly.
