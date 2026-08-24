@@ -81,6 +81,79 @@ let qrTimeout: NodeJS.Timeout | null = null;
 let lastSyncFailureAt: number = 0;
 const SYNC_RETRY_COOLDOWN_MS = 30_000;
 
+// ── Idle sleep (RAM diet, owner decision 2026-08) ─────────────────────────────
+// The resident headless Chrome is the app's single biggest steady-state RAM
+// consumer (~250–400 MB). All patient messaging is user-clicked (Strict
+// Manual-Only contract), so after an idle window we close the browser and let
+// demand-driven wake paths re-open it: sendMessage()/getChats() auto-init via
+// initClient(), and whatsappQueueWorker's existing 60 s-cooldown silent restore
+// wakes it for queued items. Same number, same library, identical ban profile —
+// this changes ONLY when Chrome runs, never how WhatsApp is driven.
+let waSleepTimer: NodeJS.Timeout | null = null;
+let lastWaActivityAt: number = Date.now();
+let isSleeping = false;
+const WA_SLEEP_EVALUATOR_MS = 60_000;
+
+async function getIdleSleepMinutes(): Promise<number> {
+  try {
+    const db = await dbManager.getConnection();
+    const row = await db.get("SELECT value FROM app_settings WHERE key = 'whatsapp_idle_sleep_min'");
+    const parsed = row?.value ? parseInt(row.value, 10) : NaN;
+    if (!isNaN(parsed) && parsed >= 0) return parsed;
+  } catch (_) {}
+  return 15;
+}
+
+function armSleepEvaluator(delayMs: number = WA_SLEEP_EVALUATOR_MS): void {
+  if (waSleepTimer) clearTimeout(waSleepTimer);
+  waSleepTimer = setTimeout(() => {
+    evaluateIdleSleep().catch(() => {});
+  }, delayMs);
+}
+
+/** Mark user-, queue-, or sync-driven WhatsApp usage so idle-sleep backs off. */
+export function markWhatsAppActivity(): void {
+  lastWaActivityAt = Date.now();
+  if (!waSleepTimer && clientInstance && isReady) {
+    armSleepEvaluator();
+  }
+}
+
+async function evaluateIdleSleep(): Promise<void> {
+  waSleepTimer = null;
+  // Evaluator only runs while a browser is resident; it stops itself when none
+  // exists (asleep/offline) and the next markWhatsAppActivity() re-arms it.
+  if (!isReady || !clientInstance) return;
+  const idleMin = await getIdleSleepMinutes();
+  if (idleMin <= 0) return; // feature disabled in Settings — stays off until next activity
+
+  // Busy flows: retry shortly instead of sleeping mid-flight.
+  if (initPromise || initializing || currentQr || isSyncing) {
+    armSleepEvaluator();
+    return;
+  }
+
+  const idleFor = Date.now() - lastWaActivityAt;
+  if (idleFor < idleMin * 60_000) {
+    armSleepEvaluator(Math.min(idleMin * 60_000 - idleFor + 1_000, WA_SLEEP_EVALUATOR_MS));
+    return;
+  }
+
+  console.log(`[WhatsApp] Idle ≥ ${idleMin} min — sleeping WhatsApp browser to free RAM (saved session intact; auto-wakes on demand).`);
+  isSleeping = true;
+  try {
+    eventService.broadcast('wa_status_changed', {
+      status: 'sleeping',
+      message: 'WhatsApp sleeping to save memory. It wakes automatically when you send a message.',
+      service: 'whatsapp'
+    });
+  } catch (_) {}
+  try {
+    await destroyClient();
+  } catch (_) {}
+}
+// ── end idle sleep ────────────────────────────────────────────────────────────
+
 export let currentQr: string | null = null;
 export let isReady: boolean = false;
 
@@ -118,7 +191,8 @@ export async function getWhatsAppStatus() {
     initializing: initializing || !!initPromise,
     isSyncing,
     pendingQueueCount: pendingCount,
-    hasQr: !!currentQr
+    hasQr: !!currentQr,
+    sleeping: isSleeping && !isReady
   };
 }
 
@@ -479,7 +553,9 @@ function launchClientInstance(forceQr: boolean): Promise<WAClient> {
       initializing = false;
       isReady = true;
       currentQr = null;
+      isSleeping = false;
       resolve(client);
+      markWhatsAppActivity();
 
       // P1 push event: WA UI updates without polling
       try {
@@ -543,6 +619,7 @@ function launchClientInstance(forceQr: boolean): Promise<WAClient> {
       clientInstance = null;
       activeClient = null;
       initializing = false;
+      isSleeping = false; // a real disconnect must not be reported as deliberate sleep
       if (qrTimeout) clearTimeout(qrTimeout);
 
       // P4: session folder on disk stays intact — reconnect reuses saved credentials.
@@ -563,6 +640,7 @@ function launchClientInstance(forceQr: boolean): Promise<WAClient> {
       initializing = false;
       isReady = false;
       activeClient = null;
+      isSleeping = false;
 
       eventService.broadcast('auth_failure', {
         message: `WhatsApp authentication failed: ${msg}. Please reconnect in Settings.`,
@@ -580,6 +658,7 @@ function launchClientInstance(forceQr: boolean): Promise<WAClient> {
       isReady = false;
       activeClient = null;
       clientInstance = null;
+      isSleeping = false;
       if (qrTimeout) clearTimeout(qrTimeout);
 
       eventService.broadcast('wa_status_changed', {
@@ -827,6 +906,7 @@ export async function forceReconnect(): Promise<void> {
   isReady = false;
   currentQr = null;
   initializing = false;
+  isSleeping = false;
   if (qrTimeout) clearTimeout(qrTimeout);
 
   if (activeClient) {
@@ -956,6 +1036,9 @@ export async function sendMessage(
     }
 
     const chatId = `${cleanPhone}@c.us`;
+
+    // Any send (user-clicked or queue-drained) counts as activity for idle-sleep.
+    markWhatsAppActivity();
 
     // Anti-duplicate protection: prevent identical sends to same recipient within 30s
     // Use a simple hash of the full message to avoid false collisions between different orders
@@ -1197,6 +1280,7 @@ export async function sendMessage(
 /** Get all chats from the local SQLite cache with contact name enrichment and LID deduplication */
 export async function getChats(): Promise<any[]> {
   try {
+    markWhatsAppActivity(); // user is viewing the inbox — keep the browser awake
     const db = await dbManager.getConnection();
     const rows = await db.all(
       `SELECT id, name, unread_count as unreadCount, timestamp, is_group as isGroup, last_message as lastMessage, resolved_number as resolvedNumber

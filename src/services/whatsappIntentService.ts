@@ -4,7 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import { dbManager } from '../database/connection.js';
 import { eventService } from './eventService.js';
-import { parseMessage, isRepeatRequest, isPlausibleMedicineName, detectDosageForm, isMedicineLikely } from './intentKeywords.js';
+import { parseMessage, isRepeatRequest, isPlausibleMedicineName, detectDosageForm, isMedicineLikely, extractMedicineCandidates } from './intentKeywords.js';
 import { ocrScanQueue } from './ocrScanQueue.js';
 import { productNameFilterService } from './productNameFilterService.js';
 import { searchCatalog, scoreProductName } from './pharmarackCatalogCache.js';
@@ -265,23 +265,21 @@ export async function handleInbound(msg: any): Promise<void> {
 
     // 3b. SCISPACY NLP — run in parallel on the raw message body (fire-and-forget, 1.5s timeout)
     // This catches medicine names that regex/keyword parsing misses (e.g. "do you have azithromycin?")
-    let scispacyMedicineName: string | null = null;
+    // EVERY chemical entity is collected — mixed messages may name several drugs.
+    let scispacyNames: string[] = [];
     if (body.trim().length > 3) {
       try {
         const { queryScispacy } = await import('./scispacyClient.js');
         const nlp = await queryScispacy(body);
         if (nlp && nlp.entities) {
-          // Pick the first CHEMICAL entity as the drug name candidate
-          const chemEntity = nlp.entities.find((e: any) => e.label === 'CHEMICAL');
-          if (chemEntity && isPlausibleMedicineName(chemEntity.text)) {
-            scispacyMedicineName = chemEntity.text;
+          for (const ent of nlp.entities) {
+            if (ent.label === 'CHEMICAL' && isPlausibleMedicineName(ent.text)) {
+              scispacyNames.push(ent.text);
+            }
           }
           // Also check features.drug array
-          if (!scispacyMedicineName && nlp.features?.drug?.length) {
-            const candidate = nlp.features.drug[0];
-            if (isPlausibleMedicineName(candidate)) {
-              scispacyMedicineName = candidate;
-            }
+          if (scispacyNames.length === 0 && nlp.features?.drug?.length) {
+            scispacyNames = nlp.features.drug.filter((c: string) => isPlausibleMedicineName(c));
           }
         }
       } catch {
@@ -349,38 +347,112 @@ export async function handleInbound(msg: any): Promise<void> {
       }
     }
 
-    // 6. TEXT-BASED SEARCH — regex parsed name OR scispaCy extracted name
-    // Use regex result first (it also has quantity/unit). If regex found nothing
-    // but scispaCy did, use scispaCy as fallback so the message is not silently dropped.
-    const effectiveMedicineName = (parsed.isMedicineRequest && parsed.medicineName)
-      ? parsed.medicineName
-      : scispacyMedicineName;
+    // 6. TEXT-BASED SEARCH — MULTI-CANDIDATE. Mixed conversational messages
+    // ("bhai kal aa raha hu, dolo 650 aur telma 40 chahiye") must yield EVERY
+    // medicine, not one joined garbage query. Candidates come from segment
+    // parsing, then scispaCy entities the regex pass missed. Each candidate is
+    // independently gated inside searchAndBroadcast (confidence + plausibility),
+    // so chit-chat can still never become a false match.
+    const seenCandidateNames = new Set<string>();
+    const candidates: Array<{ name: string; quantity: number; unit: string; fromScispacy: boolean }> = [];
+    const pushCandidate = (name: string | null | undefined, quantity?: number, unit?: string, fromScispacy = false) => {
+      const clean = (name || '').trim();
+      if (!clean || !isPlausibleMedicineName(clean)) return;
+      const key = clean.toLowerCase().replace(/\s+/g, ' ');
+      if (seenCandidateNames.has(key)) return;
+      seenCandidateNames.add(key);
+      candidates.push({ name: clean, quantity: quantity || 1, unit: unit || '', fromScispacy });
+    };
 
-    if (effectiveMedicineName) {
+    for (const c of extractMedicineCandidates(body)) {
+      pushCandidate(c.medicineName, c.quantity, c.unit);
+    }
+    // Legacy single-parse fallback covers names segmenting would split apart
+    // (e.g. a brand containing a conjunction word).
+    if (candidates.length === 0 && parsed.isMedicineRequest && parsed.medicineName) {
+      pushCandidate(parsed.medicineName, parsed.quantity, parsed.unit);
+    }
+
+    // scispaCy rescue — every chemical entity not already covered above.
+    for (const chem of scispacyNames) {
+      pushCandidate(chem, undefined, undefined, true);
+    }
+
+    if (candidates.length > 0) {
       const textForm = detectDosageForm(body);
-      const usedScispacy = !parsed.isMedicineRequest && !!scispacyMedicineName;
-      if (usedScispacy) {
-        console.log(`[Intent Service] scispaCy rescued medicine name: "${effectiveMedicineName}" (regex missed it)`);
+      if (candidates.some(c => c.fromScispacy)) {
+        console.log(`[Intent Service] scispaCy rescued medicine name(s): ${candidates.filter(c => c.fromScispacy).map(c => `"${c.name}"`).join(', ')} (regex missed them)`);
       }
-      await searchAndBroadcast({
-        medicineName: effectiveMedicineName,
-        quantity: parsed.quantity,
-        unit: parsed.unit,
-        customer,
-        isNewCustomer,
-        messageBody: body,
-        source: hasMedia ? 'both' : 'text',
-        dosageForm: textForm || undefined,
-        msgId,
-        phone,
-        chatId,
-        hasIntentWords: parsed.rawIntentWords.length > 0 || usedScispacy
-      });
+      for (const cand of candidates) {
+        await searchAndBroadcast({
+          medicineName: cand.name,
+          quantity: cand.quantity,
+          unit: cand.unit,
+          customer,
+          isNewCustomer,
+          messageBody: body,
+          source: hasMedia ? 'both' : 'text',
+          dosageForm: textForm || undefined,
+          msgId,
+          phone,
+          chatId,
+          hasIntentWords: parsed.rawIntentWords.length > 0 || cand.fromScispacy
+        });
+      }
     }
 
   } catch (err) {
     console.error('[Intent Service] Error handling inbound message:', err);
   }
+}
+
+/**
+ * Resolve REAL active inventory stock for matched master names — a name in the
+ * medicines master table (291k imported reference rows) does NOT mean the strip
+ * is on the shelf. ONE batched indexed query per message; missing rows simply
+ * stay absent from the map. Exported for unit testing.
+ */
+export async function resolveInventoryStock(
+  matchNames: string[],
+  db: any
+): Promise<Record<string, number>> {
+  const stock: Record<string, number> = {};
+  const names = [...new Set(matchNames.map(n => String(n).trim()).filter(Boolean))].slice(0, 10);
+  if (names.length === 0) return stock;
+  try {
+    const placeholders = names.map(() => '?').join(',');
+    const rows = await db.all(
+      `SELECT m.name,
+              COALESCE(SUM(CASE WHEN im.is_active = 1
+                           THEN (im.quantity + COALESCE(im.loose_quantity, 0))
+                           ELSE 0 END), 0) AS total_stock
+       FROM medicines m
+       LEFT JOIN inventory_master im ON im.medicine_id = m.id
+       WHERE LOWER(m.name) IN (${placeholders})
+       GROUP BY m.id`,
+      names.map(n => n.toLowerCase())
+    );
+    for (const row of rows || []) {
+      if (row?.name) stock[String(row.name).toLowerCase()] = Number(row.total_stock) || 0;
+    }
+  } catch (err) {
+    console.warn('[Intent Service] Inventory stock lookup failed:', err);
+  }
+  return stock;
+}
+
+type Availability = 'IN_STOCK' | 'REGISTERED_NO_STOCK' | 'EXTERNAL_ONLY';
+
+/**
+ * Classify where a requested medicine actually lives:
+ * IN_STOCK = master match AND active shelf stock; REGISTERED_NO_STOCK =
+ * master name only (must order); EXTERNAL_ONLY = found via image/catalog.
+ * Exported for unit testing.
+ */
+export function classifyAvailability(localMatches: string[], inventoryStock: Record<string, number>): Availability {
+  if (localMatches.length === 0) return 'EXTERNAL_ONLY';
+  const bestStock = Math.max(0, ...localMatches.map(m => inventoryStock[String(m).toLowerCase()] ?? 0));
+  return bestStock > 0 ? 'IN_STOCK' : 'REGISTERED_NO_STOCK';
 }
 
 /**
@@ -418,13 +490,25 @@ async function searchAndBroadcast(opts: {
     filterResult = { matches: [], sources: { local: false, internet: false, catalog: false }, confidence: 0, fallbackUsed: false, processingTimeMs: 0, scoredMatches: [], topScore: 0 };
   }
 
+  // REAL STOCK CHECK — a medicines-master match is not shelf presence.
+  // Distinguish IN_STOCK (sellable now) from REGISTERED_NO_STOCK (must order)
+  // so neither admin nor customer is ever told "available" wrongly.
+  let inventoryStock: Record<string, number> = {};
+  try {
+    const db = await dbManager.getConnection();
+    inventoryStock = await resolveInventoryStock(filterResult.matches, db);
+  } catch (dbErr) {
+    console.warn('[Intent Service] Inventory stock resolution failed:', dbErr);
+  }
+  const availability: Availability = classifyAvailability(filterResult.matches, inventoryStock);
+
   // If no local match, also try direct Pharmarack catalog search
   let catalogResults = filterResult.catalogResults || null;
   // Consult Pharmarack whenever there is NO exact local brand match (near-match
   // or no-match), not only when local is completely empty — so admin always sees
   // real distributor availability instead of a possibly-wrong local name.
   const isExactLocal = (filterResult.topScore ?? 0) >= 0.95;
-  if ((filterResult.matches.length === 0 || !isExactLocal) && !catalogResults) {
+  if ((filterResult.matches.length === 0 || !isExactLocal || availability === 'REGISTERED_NO_STOCK') && !catalogResults) {
     try {
       catalogResults = await searchCatalog(medicineName, dosageForm, mrp);
     } catch (catErr) {
@@ -442,7 +526,7 @@ async function searchAndBroadcast(opts: {
   let livePharmarackResults: any[] | null = null;
   const nothingFound = filterResult.matches.length === 0 &&
     (!catalogResults || (catalogResults.mapped.length === 0 && catalogResults.nonMapped.length === 0));
-  if ((nothingFound || !isExactLocal) && (hasIntentWords || source !== 'text')) {
+  if ((nothingFound || !isExactLocal || availability === 'REGISTERED_NO_STOCK') && (hasIntentWords || source !== 'text')) {
     try {
       const response = await fetch(`http://localhost:${process.env.PORT || 3000}/api/pharmarack/search?q=${encodeURIComponent(medicineName)}`, {
         signal: AbortSignal.timeout(6000)
@@ -519,6 +603,8 @@ async function searchAndBroadcast(opts: {
     unit,
     dosageForm,
     localMatches: filterResult.matches,
+    inventoryStock,
+    availability,
     catalogResults,
     confidence,
     isRepeat: false,
@@ -537,6 +623,8 @@ async function searchAndBroadcast(opts: {
     unit,
     dosageForm,
     localMatches: filterResult.matches,
+    inventoryStock,
+    availability,
     catalogResults,
     confidence,
     isRepeat: false,
@@ -549,8 +637,9 @@ async function searchAndBroadcast(opts: {
     context
   }).catch(err => console.error('[Intent Service] Admin escalation failed:', err));
 
-  // Track pending shortage request for >23 hour admin reminder if local stock is missing
-  if (medicineName && (filterResult.matches.length === 0 || confidence < 80)) {
+  // Track pending shortage request for >23 hour admin reminder if local stock
+  // is missing — includes master-registered names with zero shelf stock.
+  if (medicineName && (filterResult.matches.length === 0 || confidence < 80 || availability === 'REGISTERED_NO_STOCK')) {
     try {
       const { trackMedicineRequest } = await import('./shortageReminderService.js');
       const distName = catalogResults?.mapped?.[0]?.supplier_name || catalogResults?.nonMapped?.[0]?.distributor_name || 'Standard Distributor';
@@ -567,7 +656,7 @@ async function searchAndBroadcast(opts: {
     }
   }
 
-  console.log(`[Intent Service] Match result for "${medicineName}": ${filterResult.matches.length} local, ${catalogResults?.mapped?.length || 0} mapped, ${catalogResults?.nonMapped?.length || 0} non-mapped (bestScore=${bestScore.toFixed(2)})`);
+  console.log(`[Intent Service] Match result for "${medicineName}": ${filterResult.matches.length} local, ${catalogResults?.mapped?.length || 0} mapped, ${catalogResults?.nonMapped?.length || 0} non-mapped (bestScore=${bestScore.toFixed(2)}, availability=${availability})`);
 }
 
 /**
@@ -630,6 +719,44 @@ export function handleOcrComplete(data: any): void {
     return;
   }
 
+  // EXTRA IMAGE CANDIDATES — a photo (or photo+caption) can carry more than
+  // one medicine. Collect every distinct plausible name beyond the primary:
+  // DB fuzzy matches[], generic/API names, other plausible OCR lines, and
+  // caption-text segments. Every candidate still passes the V2 scan gate +
+  // confidence gate below, so extras can never become wrong entries.
+  const extraCandidates: string[] = [];
+  const seenExtra = new Set<string>(
+    [finalName].map(n => n.toLowerCase().replace(/\s+/g, ' '))
+  );
+  const pushExtra = (v: any) => {
+    const s = String(v || '').trim();
+    if (!s || !isPlausibleMedicineName(s)) return;
+    const key = s.toLowerCase().replace(/\s+/g, ' ');
+    if (seenExtra.has(key)) return;
+    seenExtra.add(key);
+    extraCandidates.push(s);
+  };
+  pushExtra(ocrResult.medicineInfo?.genericName);
+  pushExtra(ocrResult.medicineInfo?.apiName);
+  for (const m of Array.isArray(ocrResult.matches) ? ocrResult.matches : []) {
+    pushExtra(m);
+  }
+  for (const c of extractMedicineCandidates(messageBody || '')) {
+    pushExtra(c.medicineName);
+  }
+  // Line-level fallback: plausible standalone OCR lines (capped).
+  if (ocrResult.text) {
+    const lines = String(ocrResult.text)
+      .split(/[\r\n]+/)
+      .map(l => l.trim())
+      .filter(l => l.length >= 3);
+    for (const line of lines) {
+      if (extraCandidates.length >= 4) break;
+      pushExtra(line);
+    }
+  }
+  const cappedExtras = extraCandidates.slice(0, 4);
+
   // Stage 0 Scan Gate: skip images that are clearly NOT medicines
   // (booking/ticket/bill/finance docs, food packets, random photos).
   // Without this, every image triggers a search + admin escalation even
@@ -647,29 +774,42 @@ export function handleOcrComplete(data: any): void {
     dbManager.getConnection().then(db => db.all('SELECT api FROM api_substances'))
   ]).then(([customer, rows]) => {
     const knownApis = new Set(rows.map(r => (r.api || '').toLowerCase()));
-    const decision = resolveOcrGateDecision(ocrRaw, finalName, knownApis);
-
-    if (decision === 'skip') {
-      console.log(`[Intent Service] Scan gate (V2): skipped non-medicine image (name="${finalName}", chat=${chatId}).`);
-      return;
+    // Primary name first, then extra image/caption candidates — every one
+    // independently through the V2 gate so a second product on a strip or a
+    // caption medicine is found, while tickets/bills still get skipped whole.
+    const allNames = [finalName, ...cappedExtras];
+    const captionCandidates = extractMedicineCandidates(messageBody || '');
+    let anyIdentified = false;
+    for (const candName of allNames) {
+      const decision = resolveOcrGateDecision(ocrRaw, candName, knownApis);
+      if (decision === 'skip') continue;
+      if (candName !== finalName) {
+        console.log(`[Intent Service] OCR extra candidate identified: "${candName}" (chat=${chatId})`);
+      }
+      anyIdentified = true;
+      const isPrimary = candName === finalName;
+      const captionHit = captionCandidates
+        .find(c => c.medicineName.toLowerCase() === candName.toLowerCase());
+      searchAndBroadcast({
+        medicineName: candName,
+        quantity: (isPrimary ? textParsed.quantity : captionHit?.quantity) || 1,
+        unit: (isPrimary ? textParsed.unit : captionHit?.unit) || '',
+        customer,
+        isNewCustomer: !customer,
+        messageBody: messageBody || '',
+        source: textParsed.medicineName ? 'both' : 'ocr',
+        dosageForm,
+        mrp: isPrimary ? mrp : undefined,
+        msgId,
+        phone,
+        chatId,
+        imagePath: isPrimary ? imagePath : undefined,
+        hasIntentWords: textParsed.rawIntentWords.length > 0
+      }).catch(err => console.error('[Intent Service] OCR post-search failed:', err));
     }
-
-    searchAndBroadcast({
-      medicineName: finalName,
-      quantity: textParsed.quantity || 1,
-      unit: textParsed.unit || '',
-      customer,
-      isNewCustomer: !customer,
-      messageBody: messageBody || '',
-      source: textParsed.medicineName ? 'both' : 'ocr',
-      dosageForm,
-      mrp,
-      msgId,
-      phone,
-      chatId,
-      imagePath,
-      hasIntentWords: textParsed.rawIntentWords.length > 0
-    }).catch(err => console.error('[Intent Service] OCR post-search failed:', err));
+    if (!anyIdentified) {
+      console.log(`[Intent Service] Scan gate (V2): skipped non-medicine image (name="${finalName}", chat=${chatId}).`);
+    }
   }).catch(err => {
     console.error('[Intent Service] Error in handleOcrComplete lookup:', err);
   });

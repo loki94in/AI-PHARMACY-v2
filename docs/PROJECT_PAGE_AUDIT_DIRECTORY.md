@@ -1,6 +1,6 @@
 # Complete AI Pharmacy v2 Page Audit & Feature Ownership Directory
 
-> **System Contract**: This document is the **single source of truth** for all 29 pages, feature locations, database tables, and API contracts in AI Pharmacy v2.
+> **System Contract**: This document is the **single source of truth** for all 30 pages, feature locations, database tables, and API contracts in AI Pharmacy v2.
 >
 > **CRITICAL RULE FOR AI AGENTS & DEVELOPERS**: 
 > When modifying code or adding features, **NEVER** introduce legacy fallbacks or query deprecated settings paths (e.g., fetching delivery boy numbers from `/settings` or `app_settings` instead of `/dispatch` & the `delivery_boys` DB table). Always use the **Authoritative New Path** specified for each page below.
@@ -296,7 +296,16 @@ Note: the ~119 wrapper methods on `api` that duplicate direct `apiClient.*` call
 
 ---
 
-### 29. Global Components & SPA Shell (`frontend/src/components/`)
+### 29. Schedule Medicine Hub (`/schedule-drugs`)
+* **Component Path**: [pages/ScheduleDrugs/index.tsx](file:///e:/CURRENT%20PROJECT%20ON%20WORKING/AI%20PHARMACY%20v2/frontend/src/pages/ScheduleDrugs/index.tsx) (+ `ReviewQueue.tsx`, `ScheduleResearchModal.tsx`)
+* **Authoritative Responsibilities**: Single hub listing every master-catalog medicine classified under India's retail drug schedules — Schedule H1 (GSR 588(E)/2013, 46 drugs), Schedule X (habit-forming appendix) and Schedule H (2006 consolidated list incl. its Antibiotics class entry). Tabbed counts, name search, stock filter. **Review New Medicines tab**: per-medicine ONE-Google-search research (full-page SERP screenshot via headless Chrome → Tesseract OCR word boxes → filler words dropped and logged → exact + typo-similar matches vs the schedule sets, e.g. "offloxocin"→ofloxacin), API words HIGHLIGHTED on the screenshot; pharmacist confirms → written to master DB with evidence metadata (human-in-the-loop; Google bot-check auto-falls back to DuckDuckGo, engine labeled).
+* **Authoritative Data Sources**: `GET /api/schedule-drugs/summary`, `GET /api/schedule-drugs?type=H1|H|X&q=&stock=in|out&page=`, `GET /api/schedule-drugs/unclassified`, `GET /api/schedule-drugs/research?id=`, `POST /api/schedule-drugs/classify`.
+* **Database Tables**: `medicines.schedule_type` (canonical values `H` / `H1` / `X`; composite index `idx_medicines_schedule_type_name`), evidence keywords in `medicines.metadata`, live stock from `inventory_master`.
+* **Classification Source of Truth**: `src/utils/drugSchedules.ts` (single-source reference data) consumed by `scripts/classifyDrugSchedules.ts` (idempotent offline backfill) and `services/scheduleResearchService.ts` (runtime Google-OCR flow). Molecules outside the official lists stay unclassified — nothing is guessed. Sale-time H1/H/X dispensing continues to flow into the H1 Compliance register (`/compliance`) via `invoiceService`.
+
+---
+
+### 30. Global Components & SPA Shell (`frontend/src/components/`)
 * **Core Components**:
   - `Layout.tsx`: SPA master shell, sidebar navigation, keyboard shortcuts (Alt+O, Alt+L), modal event bus subscribers.
   - `LiveCartAddModal.tsx`: Global Pharmarack live search and cart addition modal. Supports pre-filled search, quantity, and automatic source order/refill status updating.

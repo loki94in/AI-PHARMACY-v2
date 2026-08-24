@@ -78,7 +78,14 @@ const NOISE_WORDS = new Set([
   // Common Devanagari chatter (greetings/particles/questions)
   'ना', 'नाही', 'आहे', 'आहेत', 'का', 'हो', 'हा', 'नको', 'ठीक', 'बाकी', 'आज', 'उद्या',
   'कधी', 'केव्हा', 'कसे', 'कसा', 'काय', 'क्या', 'कब', 'कहा', 'कैसे', 'हां', 'हाँ', 'जी',
-  'नमस्ते', 'नमस्कार', 'धन्यवाद'
+  'नमस्ते', 'नमस्कार', 'धन्यवाद',
+  // Hinglish conversation verbs/particles seen in mixed messages ("main aa raha
+  // hu", "kal mil jayega") — exact-token matches only, so real brand names
+  // (single tokens like "Dolo") can never collide.
+  'aa', 'raha', 'rahi', 'rahe', 'rha', 'rhi', 'hu', 'hun', 'hoon', 'tha', 'thi',
+  'mein', 'jayega', 'jayenge', 'mil', 'milega', 'milenge', 'lene', 'lena',
+  'liye', 'liya', 'karna', 'kar', 'krna', 'krdo', 'sakta', 'sakte',
+  'wala', 'wali', 'vale'
 ]);
 
 export interface ParsedMessage {
@@ -88,6 +95,21 @@ export interface ParsedMessage {
   unit: string;
   rawIntentWords: string[];
 }
+
+export interface MedicineCandidate {
+  medicineName: string;
+  quantity: number;
+  unit: string;
+}
+
+// Conjunction words that separate TWO medicine requests inside one mixed
+// conversational sentence ("dolo 650 aur telma 40 chahiye").
+const SEGMENT_SPLIT_WORDS = new Set([
+  'aur', 'and', 'bhi', 'also', 'plus', 'or', 'ya', 'ani', 'athva', '&', '+'
+]);
+
+// Safety cap so one pasted list can never fan out into an unbounded search loop.
+const MAX_CANDIDATES = 8;
 
 /**
  * Is this extracted string plausibly a medicine name?
@@ -122,15 +144,18 @@ export function isMedicineRequest(text: string): boolean {
 }
 
 /**
- * Parse a WhatsApp message to extract medicine name, quantity, and intent.
- * Example: "4 pakite health novastat 20" → { medicineName: "novastat 20", qty: 4, unit: "packet" }
+ * Shared token-level parser: strips intent/quantity/unit/noise words from a
+ * word list, returning the residual medicine name + quantity + unit.
+ * Used by BOTH parseMessage (single legacy result) and
+ * extractMedicineCandidates (per-segment results).
  */
-export function parseMessage(text: string): ParsedMessage {
-  if (!text || !text.trim()) {
-    return { isMedicineRequest: false, medicineName: '', quantity: 0, unit: '', rawIntentWords: [] };
-  }
-
-  const words = text.trim().split(/\s+/);
+function parseTokenList(words: string[]): {
+  medicineName: string;
+  quantity: number;
+  unit: string;
+  rawIntentWords: string[];
+  isValidMedicineName: boolean;
+} {
   const lowerWords = words.map(w => w.toLowerCase());
 
   // Detect intent
@@ -190,19 +215,85 @@ export function parseMessage(text: string): ParsedMessage {
   // must not search "118" — 'do'/'send' + number was a production leak).
   const isValidMedicineName = isPlausibleMedicineName(medicineName);
 
+  return {
+    medicineName,
+    quantity,
+    unit,
+    rawIntentWords: foundIntentWords,
+    isValidMedicineName
+  };
+}
+
+/**
+ * Parse a WhatsApp message to extract medicine name, quantity, and intent.
+ * Example: "4 pakite health novastat 20" → { medicineName: "novastat 20", qty: 4, unit: "packet" }
+ */
+export function parseMessage(text: string): ParsedMessage {
+  if (!text || !text.trim()) {
+    return { isMedicineRequest: false, medicineName: '', quantity: 0, unit: '', rawIntentWords: [] };
+  }
+
+  const words = text.trim().split(/\s+/);
+  const parsed = parseTokenList(words);
+
   // Intent words still mark the message as a request (useful downstream signal),
   // but the searched name must independently be plausible.
-  const hasIntent = foundIntentWords.length > 0 || isValidMedicineName;
-
-  const finalMedicineName = isValidMedicineName ? medicineName : '';
+  const hasIntent = parsed.rawIntentWords.length > 0 || parsed.isValidMedicineName;
 
   return {
     isMedicineRequest: hasIntent,
-    medicineName: finalMedicineName,
-    quantity: quantity || 1, // default to 1 if not specified
-    unit: unit || (quantity > 0 ? 'unit' : ''),
-    rawIntentWords: foundIntentWords
+    medicineName: parsed.isValidMedicineName ? parsed.medicineName : '',
+    quantity: parsed.quantity || 1, // default to 1 if not specified
+    unit: parsed.unit || (parsed.quantity > 0 ? 'unit' : ''),
+    rawIntentWords: parsed.rawIntentWords
   };
+}
+
+/**
+ * Extract EVERY plausible medicine request from one mixed conversational
+ * message. Customers routinely mix small talk with orders ("bhai kal aa raha
+ * hu, dolo 650 aur telma 40 chahiye") — a single joined query fails them all.
+ *
+ * Segments split on punctuation/newlines first, then on conjunction words.
+ * Each segment independently runs the same token parser as parseMessage and
+ * each surviving name must clear isPlausibleMedicineName — chit-chat segments
+ * ("kal mil jayega?") can never become candidates. Deduplication keeps the
+ * first occurrence; results capped at MAX_CANDIDATES.
+ */
+export function extractMedicineCandidates(text: string): MedicineCandidate[] {
+  if (!text || !text.trim()) return [];
+
+  const results: MedicineCandidate[] = [];
+  const seen = new Set<string>();
+
+  const roughParts = text.replace(/\r?\n/g, ',').split(/[,;•|]+/);
+  for (const part of roughParts) {
+    const words = part.trim().split(/\s+/).filter(Boolean);
+    if (words.length === 0) continue;
+
+    // Further split on conjunction tokens ("aur", "and", "bhi", …)
+    const groups: string[][] = [[]];
+    for (const w of words) {
+      if (SEGMENT_SPLIT_WORDS.has(w.toLowerCase())) groups.push([]);
+      else groups[groups.length - 1].push(w);
+    }
+
+    for (const group of groups) {
+      if (group.length === 0) continue;
+      const p = parseTokenList(group);
+      if (!p.isValidMedicineName || !p.medicineName) continue;
+      const key = p.medicineName.toLowerCase().replace(/\s+/g, ' ');
+      if (seen.has(key)) continue;
+      seen.add(key);
+      results.push({
+        medicineName: p.medicineName,
+        quantity: p.quantity || 1,
+        unit: p.unit || ''
+      });
+      if (results.length >= MAX_CANDIDATES) return results;
+    }
+  }
+  return results;
 }
 
 /**

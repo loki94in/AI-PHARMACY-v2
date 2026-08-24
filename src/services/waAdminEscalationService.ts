@@ -9,6 +9,8 @@ interface EscalationPayload {
   unit: string;
   dosageForm?: string;
   localMatches: string[];
+  inventoryStock?: Record<string, number>;
+  availability?: 'IN_STOCK' | 'REGISTERED_NO_STOCK' | 'EXTERNAL_ONLY';
   catalogResults: { mapped: any[]; nonMapped: any[] } | null;
   confidence: number;
   isRepeat: boolean;
@@ -302,14 +304,40 @@ ${phoneLine}
     const formLine = payload.dosageForm ? `\n🩹 *Form*: ${payload.dosageForm}` : '';
 
     if (outcome === 'found_local') {
-      messageText = `🔔 *Prescription Medicine Extracted*
+      // Truthful stock reporting — a medicines-master match is NOT shelf
+      // presence. Show per-name active stock; when the master has the name but
+      // the shelf is empty, say so and surface distributor matches instead.
+      const inStock = payload.availability !== 'REGISTERED_NO_STOCK';
+      const fmtStock = (name: string) => {
+        const units = payload.inventoryStock?.[String(name).toLowerCase()];
+        return units === undefined ? name : `${name} — ${units} unit${units === 1 ? '' : 's'}`;
+      };
+      if (inStock) {
+        messageText = `🔔 *Prescription Medicine Extracted*
 
 ${customerBlock}
 
  💊 *Extracted Medicine*: ${payload.medicineName}
  📦 *Quantity*: ${payload.quantity} ${payload.unit}${formLine}
  ⭐ *Match Confidence*: ${Math.round(payload.confidence)}%
-✅ *In Stock (local)*: ${payload.localMatches.slice(0, 3).join(', ')}${contextBlock}`;
+✅ *In Stock*: ${payload.localMatches.slice(0, 3).map(fmtStock).join(', ')}${contextBlock}`;
+      } else {
+        const mappedTop = (payload.catalogResults?.mapped || []).slice(0, 3);
+        const nonMappedTop = (payload.catalogResults?.nonMapped || []).slice(0, mappedTop.length > 0 ? 2 : 5);
+        const distLines = [...mappedTop, ...nonMappedTop]
+          .map((p: any, i: number) => `${i + 1}. ${p.name || p.productName || 'Unknown'} | MRP ₹${p.mrp ?? p.MRP ?? '-'} | ${p.distributor || p.storeName || 'Unknown'}`)
+          .join('\n');
+        messageText = `⚠️ *Medicine Registered in DB but NOT in Physical Stock*
+
+${customerBlock}
+
+ 💊 *Extracted Medicine*: ${payload.medicineName}
+ 📦 *Quantity*: ${payload.quantity} ${payload.unit}${formLine}
+ ⭐ *Match Confidence*: ${Math.round(payload.confidence)}%
+🗄️ *DB match (0 on shelf)*: ${payload.localMatches.slice(0, 3).join(', ')}
+${distLines ? `\n🚚 *Distributor options*:\n${distLines}\n` : ''}
+👉 Needs a purchase order before confirming to the customer.${contextBlock}`;
+      }
     } else {
       // PharmaRack outcome — mapped distributors first, then non-mapped,
       // each line: name | company | pack | MRP | distributor | match%

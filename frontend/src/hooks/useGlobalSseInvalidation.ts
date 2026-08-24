@@ -15,15 +15,15 @@ import { useQueryClient } from '@tanstack/react-query';
 // SSE event type -> react-query cache keys to invalidate
 const SSE_QUERY_MAP: Record<string, string[][]> = {
   sale_created: [['dashboard'], ['reports'], ['sales'], ['invoices'], ['sells-list'], ['investigation-list']],
-  invoice_saved: [['purchases'], ['purchase-history'], ['purchase-history-list'], ['inventory'], ['inventory-list'], ['dashboard'], ['reports'], ['investigation-list']],
+  invoice_saved: [['purchases'], ['purchase-history'], ['purchase-history-list'], ['inventory'], ['inventory-list'], ['dashboard'], ['reports'], ['investigation-list'], ['schedule-drugs-list']],
   return_created: [['returns'], ['returns-history'], ['customer-returns'], ['pending-returns'], ['inventory'], ['inventory-list'], ['dashboard'], ['reports']],
-  inventory_changed: [['inventory'], ['inventory-list'], ['compact-inventory'], ['pos-inventory'], ['expiry']],
+  inventory_changed: [['inventory'], ['inventory-list'], ['compact-inventory'], ['pos-inventory'], ['expiry'], ['schedule-drugs-list']],
   expiry_list_changed: [['expiry'], ['expiry-reviews']],
   order_updated: [['orders'], ['pos-special-orders']],
   refill_updated: [['refills'], ['crm-refills']],
   email_new: [['mail-inbox'], ['mail']],
   dispatch_updated: [['dispatch-orders'], ['delivery-boys'], ['distributor-reminders']],
-  catalog_job_done: [['catalog-jobs'], ['medicines']],
+  catalog_job_done: [['catalog-jobs'], ['medicines'], ['schedule-drugs-summary']],
   sales_sync: [['sells-list'], ['investigation-list']],
   purchases_sync: [['purchase-history-list'], ['investigation-list']],
 };

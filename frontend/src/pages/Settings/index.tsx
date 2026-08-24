@@ -753,13 +753,14 @@ function IntegrationsCredentialsTab({ rawSettings, refetchSettings, isVisible }:
   const [pharmarackPass, setPharmarackPass] = useState(rawSettings.pharmarack_password || '');
   const [pharmarackRefreshing, setPharmarackRefreshing] = useState(false);
   const [reorderWindowMonths, setReorderWindowMonths] = useState(rawSettings.pharmarack_reorder_window_months || '2');
+  const [waIdleSleepMin, setWaIdleSleepMin] = useState(rawSettings.whatsapp_idle_sleep_min || '15');
 
   const [saving, setSaving] = useState(false);
   const queryClient = useQueryClient();
 
   // WhatsApp Web QR & Status — P1 "events, not timers": poll rapidly ONLY while
   // connecting (QR scan in progress). Once ready, refresh via SSE push / focus.
-  const [waStatus, setWaStatus] = useState<{ status: string; qr?: string }>({ status: 'UNKNOWN' });
+  const [waStatus, setWaStatus] = useState<{ status: string; qr?: string; message?: string }>({ status: 'UNKNOWN' });
   const fetchWaStatus = useCallback(async () => {
     if (!isVisible) return;
     try {
@@ -807,6 +808,7 @@ function IntegrationsCredentialsTab({ rawSettings, refetchSettings, isVisible }:
     setPharmarackUser(rawSettings.pharmarack_username || '');
     setPharmarackPass(rawSettings.pharmarack_password || '');
     setReorderWindowMonths(rawSettings.pharmarack_reorder_window_months || '2');
+    setWaIdleSleepMin(rawSettings.whatsapp_idle_sleep_min || '15');
     toastEvent.trigger('Integration credentials reset to saved parameters', 'info');
   };
 
@@ -828,7 +830,8 @@ function IntegrationsCredentialsTab({ rawSettings, refetchSettings, isVisible }:
         pharmarack_username: pharmarackUser,
         pharmarack_password: pharmarackPass,
         pharmarack_mode: 'Live',
-        pharmarack_reorder_window_months: reorderWindowMonths
+        pharmarack_reorder_window_months: reorderWindowMonths,
+        whatsapp_idle_sleep_min: waIdleSleepMin
       };
 
       await apiClient.post('/settings/save', payload);
@@ -911,10 +914,37 @@ function IntegrationsCredentialsTab({ rawSettings, refetchSettings, isVisible }:
                 <div className="flex items-center justify-between text-xs">
                   <span className="font-semibold text-text">Web Status:</span>
                   <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                    waStatus.status === 'READY' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400'
+                    waStatus.status === 'READY'
+                      ? 'bg-emerald-500/20 text-emerald-400'
+                      : waStatus.status === 'SLEEPING'
+                        ? 'bg-sky-500/20 text-sky-400'
+                        : 'bg-amber-500/20 text-amber-400'
                   }`}>
                     {waStatus.status}
                   </span>
+                </div>
+                {waStatus.status === 'SLEEPING' && (
+                  <p className="text-[11px] text-muted">
+                    Browser closed to save memory. It wakes automatically when you send a message.
+                  </p>
+                )}
+                <div>
+                  <label className="block text-xs font-semibold text-text mb-1" htmlFor="wa-idle-sleep-min">
+                    Sleep browser after idle (minutes)
+                  </label>
+                  <input
+                    id="wa-idle-sleep-min"
+                    type="number"
+                    min={0}
+                    max={480}
+                    value={waIdleSleepMin}
+                    onChange={(e) => setWaIdleSleepMin(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl bg-bg border border-border text-text text-xs focus:border-primary focus:outline-none"
+                    placeholder="15"
+                  />
+                  <p className="text-[10px] text-muted mt-1">
+                    Frees ~250–400 MB RAM while idle. Queued messages wake it automatically. 0 = never sleep.
+                  </p>
                 </div>
                 {waStatus.qr && (
                   <div className="flex flex-col items-center py-2 bg-white rounded-lg">

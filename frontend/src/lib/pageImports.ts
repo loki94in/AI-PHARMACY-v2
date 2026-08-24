@@ -20,6 +20,7 @@ export const pageImports: Record<string, () => Promise<{ default: ComponentType 
   '/phone-sales': () => import('../pages/PhoneSales'),
   '/dispatch': () => import('../pages/Dispatch'),
   '/compliance': () => import('../pages/Compliance'),
+  '/schedule-drugs': () => import('../pages/ScheduleDrugs'),
   '/learning': () => import('../pages/Learning'),
   '/audit': () => import('../pages/AuditCenter'),
 };

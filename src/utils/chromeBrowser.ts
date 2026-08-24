@@ -61,11 +61,13 @@ const PROFILE_SKIP_NAMES = new Set([
 /**
  * Recursively copy a Chrome profile folder, omitting caches/locks so the copy
  * can be opened by a second browser instance without profile-lock crashes.
+ * Async (fs.promises) so large profiles never block the Node event loop while
+ * POS/SSE traffic keeps flowing during lock-fallback refreshes.
  */
-export function copyProfileFolder(src: string, dest: string, logPrefix = '[ChromeProfile]'): void {
+export async function copyProfileFolder(src: string, dest: string, logPrefix = '[ChromeProfile]'): Promise<void> {
   if (!fs.existsSync(src)) return;
-  fs.mkdirSync(dest, { recursive: true });
-  const entries = fs.readdirSync(src, { withFileTypes: true });
+  await fs.promises.mkdir(dest, { recursive: true });
+  const entries = await fs.promises.readdir(src, { withFileTypes: true });
 
   for (const entry of entries) {
     const lowerName = entry.name.toLowerCase();
@@ -77,10 +79,10 @@ export function copyProfileFolder(src: string, dest: string, logPrefix = '[Chrom
     const destPath = path.join(dest, entry.name);
 
     if (entry.isDirectory()) {
-      copyProfileFolder(srcPath, destPath, logPrefix);
+      await copyProfileFolder(srcPath, destPath, logPrefix);
     } else {
       try {
-        fs.copyFileSync(srcPath, destPath);
+        await fs.promises.copyFile(srcPath, destPath);
       } catch (err: any) {
         console.warn(`${logPrefix} Warning: Could not copy file ${srcPath}: ${err.message}`);
       }

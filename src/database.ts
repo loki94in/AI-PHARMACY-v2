@@ -210,6 +210,9 @@ export async function ensureSchema(dbPath: string) {
       // Bare-ORDER-BY list endpoints previously full-scanned these tables per request:
       await db.run('CREATE INDEX IF NOT EXISTS idx_dispatch_orders_created ON dispatch_orders(created_at DESC)');
       await db.run('CREATE INDEX IF NOT EXISTS idx_special_orders_date ON special_orders(date DESC)');
+      // Schedule Drugs hub: filter-by-schedule + name-ordered pages over the
+      // 291k master catalog (composite covers equality lookups on schedule_type)
+      await db.run('CREATE INDEX IF NOT EXISTS idx_medicines_schedule_type_name ON medicines(schedule_type, name)');
       await ensureMedicinesFts(db);
       return;
     }

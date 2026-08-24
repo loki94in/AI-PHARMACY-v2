@@ -122,6 +122,12 @@ export class TokenRefreshScheduler {
   private hasLoggedNoToken = false;
   private firstRefreshDone = false;
   private firstRefreshCallbacks: Array<() => void> = [];
+  // Single-flight mutex for browser session restores: a cron tick, a 401 retry
+  // from fetchPharmarack and a catalog-cache refresh could previously overlap and
+  // spawn two concurrent headless Chromes. They now share one in-flight promise.
+  private refreshPromise: Promise<string | null> | null = null;
+  private heartbeatInFlight = false;
+  private lastHeartbeatAt: number | null = null;
 
   /**
    * Invoke cb once the first boot refresh attempt settles (success, failure or skip).
@@ -150,7 +156,7 @@ export class TokenRefreshScheduler {
   }
 
   public async logSessionRefresh(
-    triggerType: 'background_random' | 'manual_reauth' | 'monthly_autosync' | 'boot',
+    triggerType: 'background_random' | 'manual_reauth' | 'monthly_autosync' | 'boot' | 'heartbeat',
     nextScheduledMinutes: number | null,
     status: 'success' | 'failed',
     errorMessage: string | null = null
@@ -178,7 +184,8 @@ export class TokenRefreshScheduler {
       isLoginWindowActive: this.isLoginWindowActive,
       lastCapturedAt: this.lastCapturedAt,
       lastError: this.lastError,
-      nextScheduledMinutes: this.nextScheduledMinutes
+      nextScheduledMinutes: this.nextScheduledMinutes,
+      lastHeartbeatAt: this.lastHeartbeatAt
     };
   }
 
@@ -204,9 +211,11 @@ export class TokenRefreshScheduler {
     } catch (_) {}
 
     if (this.timeoutId) return;
-    console.log('[TokenRefreshScheduler] Starting dynamic background token refresh scheduler...');
-    // Run initial check on boot
-    this.refreshIfNeeded('boot');
+    console.log('[TokenRefreshScheduler] Starting REST session heartbeat scheduler (browser only on demand)...');
+    // Boot validation is REST-first now: one cheap authenticated probe confirms the
+    // session; a headless Chrome launches ONLY if that probe returns 401/403 or no
+    // token exists but cookies do (legacy capture path).
+    this.runSessionHeartbeat('boot');
     // Schedule next execution
     this.scheduleNextRun();
   }
@@ -229,16 +238,15 @@ export class TokenRefreshScheduler {
       }
     } catch (_) {}
 
-    // Add a slight ±2 minute anti-detection jitter around targetInterval
-    const jitter = Math.floor(Math.random() * 5) - 2;
-    const randomMinutes = Math.max(5, targetInterval + jitter);
-    this.nextScheduledMinutes = randomMinutes;
-    const delayMs = randomMinutes * 60 * 1000;
+    // No jitter needed anymore: a REST keep-alive probe is indistinguishable from
+    // the retailer web app's own polling — nothing to anti-detect.
+    this.nextScheduledMinutes = targetInterval;
+    const delayMs = targetInterval * 60 * 1000;
 
-    console.log(`[TokenRefreshScheduler] Next background session refresh scheduled in ${randomMinutes} minutes (configured: ${targetInterval}m).`);
+    console.log(`[TokenRefreshScheduler] Next session heartbeat in ${targetInterval} minutes.`);
 
     this.timeoutId = setTimeout(() => {
-      this.refreshIfNeeded('background_random');
+      this.runSessionHeartbeat('heartbeat');
       this.scheduleNextRun();
     }, delayMs);
   }
@@ -312,7 +320,130 @@ export class TokenRefreshScheduler {
     return resToken;
   }
 
-  public async executeRefresh(): Promise<string | null> {
+  /**
+   * REST session keep-alive (replaces the periodic headless-Chrome refresh).
+   *
+   * Fires ONE cheap authenticated probe against GetUserCartDetails — the same
+   * endpoint the retailer web app itself polls — so it is indistinguishable from
+   * normal usage and strictly LESS detectable than the old repeated automation
+   * launches (owner zero-ban-risk requirement). A headless Chrome session restore
+   * is launched ONLY when the probe proves auth death (401/403) or when a browser
+   * profile exists without any stored token (legacy silent-capture path).
+   *
+   * P4 exemption (credentials are sacred): runs even while idle — its whole
+   * purpose is overnight session survival so no morning OTP re-login is needed.
+   * Cost: ~1 small request per interval. Only mode='off' suppresses it.
+   */
+  public async runSessionHeartbeat(trigger: 'boot' | 'heartbeat' = 'heartbeat'): Promise<boolean> {
+    if (this.heartbeatInFlight || this.isLoginWindowActive) return false;
+    this.heartbeatInFlight = true;
+
+    let ok = false;
+    let errorMsg: string | null = null;
+    let skipped = false;
+
+    try {
+      const { getBackendFetchMode } = await import('./dataFetchControl.js');
+      const mode = await getBackendFetchMode('bg.pharmarackTokenRefresh', 'auto');
+      if (mode === 'off') {
+        skipped = true;
+        return false;
+      }
+
+      const db = await dbManager.getConnection();
+      const tokenRow = await db.get("SELECT value FROM app_settings WHERE key = 'pharmarack_session_token'");
+      const token: string = tokenRow?.value || '';
+
+      const mainProfilePath = path.resolve(getAppDataDir(), 'data', 'pharmarack_profile');
+      const hasStoredProfile = fs.existsSync(mainProfilePath) && fs.readdirSync(mainProfilePath).length > 0;
+
+      if (!token && !hasStoredProfile) {
+        skipped = true;
+        if (!this.hasLoggedNoToken) {
+          console.log('[TokenRefreshScheduler] No token or browser profile found. Heartbeat standing by until user logs in.');
+          this.hasLoggedNoToken = true;
+        }
+        return false;
+      }
+      this.hasLoggedNoToken = false;
+
+      if (token) {
+        console.log(`[TokenRefreshScheduler] Session heartbeat probe (${trigger})...`);
+        try {
+          const res = await fetch('https://pharmretail-api.pharmarack.com/cart/api/v1/GetUserCartDetails', {
+            method: 'GET',
+            headers: {
+              'Authorization': token.startsWith('Bearer ') ? token : `Bearer ${token}`,
+              'Content-Type': 'application/json',
+              'devicetype': 'web',
+              'Accept': 'application/json, text/plain, */*',
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              'Referer': 'https://retailers.pharmarack.com/',
+              'Origin': 'https://retailers.pharmarack.com'
+            },
+            signal: AbortSignal.timeout(12_000)
+          });
+
+          if (res.ok) {
+            ok = true;
+            this.lastError = null;
+            // Keep UI truth fresh — a previously stale/expired session just proved alive.
+            try {
+              await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('pharmarack_session_status', 'active')");
+            } catch (_) {}
+          } else if (res.status === 401 || res.status === 403) {
+            console.log('[TokenRefreshScheduler] Heartbeat got 401/403 → launching on-demand browser session restore...');
+            const fresh = await this.executeRefresh();
+            ok = !!fresh;
+            if (!ok) errorMsg = this.lastError || 'Session restore after heartbeat auth failure failed';
+          } else {
+            // Soft failure (network blip / upstream 5xx): do NOT burn a Chrome
+            // launch on it. Next tick retries; real usage gets the reactive 401 path.
+            errorMsg = `Heartbeat HTTP ${res.status}`;
+          }
+        } catch (probeErr: any) {
+          errorMsg = probeErr?.message || 'Heartbeat probe error';
+        }
+      } else {
+        // Profile cookies exist but no stored token — legacy one-shot capture attempt.
+        console.log('[TokenRefreshScheduler] Token missing but profile present → on-demand browser capture...');
+        const fresh = await this.executeRefresh();
+        ok = !!fresh;
+        if (!ok) errorMsg = this.lastError || 'Browser token capture failed';
+      }
+    } catch (err: any) {
+      console.error('[TokenRefreshScheduler] Heartbeat error:', err.message);
+      errorMsg = err.message || 'Heartbeat error';
+    } finally {
+      this.heartbeatInFlight = false;
+      if (!skipped) {
+        this.lastHeartbeatAt = Date.now();
+        const status = ok ? 'success' : 'failed';
+        await this.logSessionRefresh(trigger, this.nextScheduledMinutes, status, errorMsg);
+        // P1 push event: services-status UI updates without polling
+        try {
+          const { eventService } = await import('./eventService.js');
+          eventService.broadcast('pharmarack_session_refreshed', { status, error: errorMsg });
+        } catch (_) {}
+      }
+      // Signal boot-phase listeners (startup live-cart warm-up) that the first
+      // keep-alive window settled — success, failure AND skip paths alike.
+      this.releaseFirstRefreshCallbacks();
+    }
+    return ok;
+  }
+
+  /** Single-flight mutex: overlapping callers (cron, 401 retry, catalog cache)
+   *  share ONE browser session restore instead of spawning concurrent Chromes. */
+  public executeRefresh(): Promise<string | null> {
+    if (this.refreshPromise) return this.refreshPromise;
+    this.refreshPromise = this.executeRefreshInternal().finally(() => {
+      this.refreshPromise = null;
+    });
+    return this.refreshPromise;
+  }
+
+  private async executeRefreshInternal(): Promise<string | null> {
     // P4 decision (API_OPTIMIZATION_IMPLEMENTATION_PLAN.md Phase 1.3): refresh runs
     // even when the user is idle — its whole purpose is keeping the Pharmarack
     // session alive overnight so no morning OTP re-login is needed.
@@ -365,7 +496,7 @@ export class TokenRefreshScheduler {
         console.log('[TokenRefreshScheduler] Main profile is locked. Copying to temp profile...', launchErr.message);
         const randomSuffix = Math.floor(Math.random() * 1000000);
         const tempProfilePath = path.resolve(getAppDataDir(), 'data', `pharmarack_profile_temp_${Date.now()}_${randomSuffix}`);
-        copyProfileFolder(mainProfilePath, tempProfilePath, '[TokenRefreshScheduler]');
+        await copyProfileFolder(mainProfilePath, tempProfilePath, '[TokenRefreshScheduler]');
         cleanProfileLockFiles(tempProfilePath);
         browser = await puppeteer.launch({
           executablePath: chromePath,
@@ -464,7 +595,7 @@ export class TokenRefreshScheduler {
         try {
           if (holder.token) {
             console.log('[TokenRefreshScheduler] Copying updated session back to main profile...');
-            copyProfileFolder(tempProfilePathToDelete, mainProfilePath, '[TokenRefreshScheduler]');
+            await copyProfileFolder(tempProfilePathToDelete, mainProfilePath, '[TokenRefreshScheduler]');
           }
         } catch (copyBackErr: any) {
           console.warn('[TokenRefreshScheduler] Could not copy temp profile back to main profile:', copyBackErr.message);

@@ -40,8 +40,8 @@ async function getPharmarackSettings() {
   return settings;
 }
 
-function copyProfileFolder(src: string, dest: string) {
-  copyChromeProfileFolder(src, dest, '[Pharmarack Sync]');
+async function copyProfileFolder(src: string, dest: string) {
+  await copyChromeProfileFolder(src, dest, '[Pharmarack Sync]');
 }
 
 
@@ -436,7 +436,7 @@ router.post('/login-window', async (req, res) => {
         console.warn('Failed to launch Chrome with main profile, attempting temp profile fallback...', launchErr.message);
         const randomSuffix = Math.floor(Math.random() * 1000000);
         const tempProfilePath = path.resolve(getAppDataDir(), 'data', `pharmarack_profile_temp_${Date.now()}_${randomSuffix}`);
-        copyProfileFolder(mainProfilePath, tempProfilePath);
+        await copyProfileFolder(mainProfilePath, tempProfilePath);
         cleanProfileLockFiles(tempProfilePath);
         browser = await puppeteer.launch({
           executablePath: chromePath,
@@ -693,7 +693,7 @@ router.post('/login-window', async (req, res) => {
       if (tempProfilePathToDelete) {
         try {
           console.log('[Pharmarack Login Window] Copying updated session back to main profile...');
-          copyProfileFolder(tempProfilePathToDelete, mainProfilePath);
+          await copyProfileFolder(tempProfilePathToDelete, mainProfilePath);
         } catch (copyBackErr: any) {
           console.warn('[Pharmarack Login Window] Could not copy temp profile back to main profile:', copyBackErr.message);
         }

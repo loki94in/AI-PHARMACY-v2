@@ -43,6 +43,7 @@ const InvestigationCenter = lazy(pageImports['/investigation']);
 const PhoneSales = lazy(pageImports['/phone-sales']);
 const DispatchPage = lazy(pageImports['/dispatch']);
 const CompliancePage = lazy(pageImports['/compliance']);
+const ScheduleDrugsPage = lazy(pageImports['/schedule-drugs']);
 const Learning = lazy(pageImports['/learning']);
 const AuditCenter = lazy(pageImports['/audit']);
 
@@ -60,6 +61,7 @@ const pageRoutes: KeepAliveRoute[] = [
   { path: '/purchase-history', element: <PurchaseHistory /> },
   { path: '/crm', element: <CRM /> },
   { path: '/compliance', element: <CompliancePage /> },
+  { path: '/schedule-drugs', element: <ScheduleDrugsPage /> },
   { path: '/pharmarack-cart', element: <PharmarackCart /> },
   { path: '/migration', element: <Migration /> },
   { path: '/reports', element: <Reports /> },

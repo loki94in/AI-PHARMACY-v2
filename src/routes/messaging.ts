@@ -56,17 +56,29 @@ router.get('/qr', async (req, res) => {
     }
 
     if (isReady) {
-      return res.json({ isReady: true, qrUrl: null, initializing: false });
+      return res.json({ isReady: true, qrUrl: null, initializing: false, status: 'READY' });
     }
 
     const status = await getWhatsAppStatus();
     if (status.initializing) {
-      return res.json({ isReady: false, qrUrl: null, initializing: true, message: 'WhatsApp client is initializing...' });
+      return res.json({ isReady: false, qrUrl: null, initializing: true, status: 'CONNECTING', message: 'WhatsApp client is initializing...' });
+    }
+
+    // Idle-sleep truthfulness: a deliberately slept browser must NOT auto-restore
+    // from this status poll — demand-driven paths (send / queue drain) wake it.
+    if (status.sleeping) {
+      return res.json({
+        isReady: false,
+        qrUrl: null,
+        initializing: false,
+        status: 'SLEEPING',
+        message: 'Sleeping to save memory (session saved). It wakes automatically on the next message send.'
+      });
     }
 
     if (currentQr) {
       const qrUrl = await QRCode.toDataURL(currentQr);
-      return res.json({ isReady: false, qrUrl, initializing: false });
+      return res.json({ isReady: false, qrUrl, initializing: false, status: 'SCAN_QR' });
     }
 
     if (hasSavedSession()) {
@@ -77,10 +89,10 @@ router.get('/qr', async (req, res) => {
           console.warn('[WhatsApp Session] Auto-restore notice:', err?.message || err);
         }
       });
-      return res.json({ isReady: false, qrUrl: null, initializing: true, message: 'Auto-connecting saved WhatsApp session...' });
+      return res.json({ isReady: false, qrUrl: null, initializing: true, status: 'CONNECTING', message: 'Auto-connecting saved WhatsApp session...' });
     }
 
-    res.json({ isReady: false, qrUrl: null, initializing: false, message: 'WhatsApp is not connected. Click "Connect WhatsApp" to scan QR code.' });
+    res.json({ isReady: false, qrUrl: null, initializing: false, status: 'DISCONNECTED', message: 'WhatsApp is not connected. Click "Connect WhatsApp" to scan QR code.' });
   } catch (err) {
     console.error('QR check error:', err);
     res.status(500).json({ error: 'Failed to check QR status' });

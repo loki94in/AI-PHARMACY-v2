@@ -146,6 +146,7 @@ const Sidebar = memo(({
     { path: '/pharmarack-cart', label: 'Pharmarack Cart', icon: <ShoppingCart size={18} /> },
     { path: '/investigation', label: 'Investigation Center', icon: <PackageSearch size={18} /> },
     { path: '/compliance', label: 'H1 Compliance', icon: <FileText size={18} /> },
+    { path: '/schedule-drugs', label: 'Schedule Drugs', icon: <ShieldCheckIcon size={18} /> },
     { path: '/composition-queue', label: 'Composition Queue', icon: <Beaker size={18} /> },
     { path: '/learning', label: 'AI Learning', icon: <Brain size={18} /> },
     { path: '/dispatch', label: 'Dispatch', icon: <Truck size={18} /> },
@@ -1021,7 +1022,7 @@ const Topbar = memo(({
 
   const [servicesStatus, setServicesStatus] = useState<{
     pharmarack: { connected: boolean; isRefreshing: boolean; lastError: string | null };
-    whatsapp: { connected: boolean; initializing: boolean; isSyncing: boolean; pendingQueueCount: number };
+    whatsapp: { connected: boolean; initializing: boolean; isSyncing: boolean; pendingQueueCount: number; sleeping?: boolean };
     gaters?: { automation: boolean; whatsapp: boolean; telegram: boolean; email: boolean };
   } | null>(null);
   const servicesStatusRef = useRef(servicesStatus);

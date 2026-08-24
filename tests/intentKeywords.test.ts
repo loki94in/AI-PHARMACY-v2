@@ -1,4 +1,4 @@
-import { parseMessage, isPlausibleMedicineName } from '../src/services/intentKeywords.js';
+import { parseMessage, isPlausibleMedicineName, extractMedicineCandidates } from '../src/services/intentKeywords.js';
 
 describe('WhatsApp Intent Keywords Parsing Tests', () => {
   test('Filters out greetings and conversational noise', () => {
@@ -92,6 +92,44 @@ describe('WhatsApp Intent Keywords Parsing Tests', () => {
       expect(isPlausibleMedicineName('Novastat 20')).toBe(true);
       expect(isPlausibleMedicineName('AB Phylline')).toBe(true);
       expect(isPlausibleMedicineName('Dolo 650')).toBe(true);
+    });
+  });
+
+  describe('extractMedicineCandidates — mixed conversational messages', () => {
+    test('finds EVERY medicine in a Hinglish mixed message (production complaint)', () => {
+      const res = extractMedicineCandidates('bhai kal aa raha hu, dolo 650 aur telma 40 chahiye');
+      expect(res.map(c => c.medicineName)).toEqual(['dolo 650', 'telma 40']);
+    });
+
+    test('splits on commas and "and"/"bhi"', () => {
+      const res = extractMedicineCandidates('need azithral 500, crocin advance bhi pantocid 40 and shelcal 250');
+      const names = res.map(c => c.medicineName);
+      expect(names).toContain('azithral 500');
+      expect(names).toContain('crocin advance');
+      expect(names).toContain('pantocid 40');
+      expect(names).toContain('shelcal 250');
+    });
+
+    test('captures per-segment quantity + unit', () => {
+      const res = extractMedicineCandidates('2 strips dolo aur 1 telma');
+      expect(res).toEqual([
+        { medicineName: 'dolo', quantity: 2, unit: 'strip' },
+        { medicineName: 'telma', quantity: 1, unit: '' }
+      ]);
+    });
+
+    test('pure chatter yields zero candidates', () => {
+      expect(extractMedicineCandidates('hii good morning, kal mil jayega thik aahe')).toEqual([]);
+    });
+
+    test('chit-chat mixed WITH a real order only surfaces the medicine', () => {
+      const res = extractMedicineCandidates('hello sir kaise ho, mujhe novastat 20 chahiye, thank you');
+      expect(res.map(c => c.medicineName)).toEqual(['novastat 20']);
+    });
+
+    test('deduplicates repeated names case-insensitively', () => {
+      const res = extractMedicineCandidates('dolo 650 aur DOLO 650');
+      expect(res).toHaveLength(1);
     });
   });
 });

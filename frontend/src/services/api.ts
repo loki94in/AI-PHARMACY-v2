@@ -546,6 +546,52 @@ export interface ComplianceLogRow {
   missing_license?: number;
 }
 
+export interface ScheduleDrugItem {
+  id: number;
+  name: string;
+  generic_name: string | null;
+  manufacturer: string | null;
+  mrp: number | null;
+  pack_unit: string | null;
+  packaging: string | null;
+  schedule_type: string | null;
+  stock: number | null;
+}
+
+export interface ScheduleUnclassifiedItem {
+  id: number;
+  name: string;
+  generic_name: string | null;
+  manufacturer: string | null;
+  packaging: string | null;
+  source: string | null;
+}
+
+export interface ScheduleResearchMatch {
+  word: string;
+  keyword: string;
+  schedule: 'H1' | 'H' | 'X';
+  exact: boolean;
+  distance: number;
+  bbox?: { x0: number; y0: number; x1: number; y1: number };
+}
+
+export interface ScheduleResearchResponse {
+  success: boolean;
+  medicine: { id: number; name: string };
+  query: string;
+  imageDataUrl: string;
+  imageWidth: number;
+  imageHeight: number;
+  matches: ScheduleResearchMatch[];
+  suggestion: 'H1' | 'H' | 'X' | null;
+  ignoredWords: string[];
+  ocrWordCount: number;
+  likelyNonDrug: boolean;
+  googleBlocked: boolean;
+  engine: 'google' | 'duckduckgo';
+}
+
 export interface QuickEditMedicinePayload {
   name?: string;
   generic_name?: string;
@@ -1327,7 +1373,7 @@ export const api = {
     services: {
       internet: { connected: boolean };
       pharmarack: { connected: boolean; hasToken: boolean; isRefreshing: boolean; lastCapturedAt: number | null; lastError: string | null; mode: string };
-      whatsapp: { connected: boolean; initializing: boolean; isSyncing: boolean; pendingQueueCount: number; hasQr: boolean };
+      whatsapp: { connected: boolean; initializing: boolean; isSyncing: boolean; pendingQueueCount: number; hasQr: boolean; sleeping?: boolean };
     };
   }>('/system/services-status').then(res => res.data),
 
@@ -1395,6 +1441,17 @@ export const api = {
   getComplianceDashboard: () => apiClient.get<{ success: boolean; todayH1Sales: number; monthlyH1Sales: number; pendingDoctorAssignments: number; totalComplianceLogs: number }>('/compliance/dashboard').then(res => res.data),
   getH1Register: (params?: { startDate?: string; endDate?: string; search?: string; doctor?: string; scheduleType?: string }) => apiClient.get<ComplianceLogRow[]>('/compliance/h1-register', { params }).then(res => res.data),
   updateComplianceDoctor: (id: number, data: { doctor_name: string; license_no?: string }) => apiClient.put<{ success: boolean; message: string }>(`/compliance/${id}/doctor`, data).then(res => res.data),
+
+  // Schedule Drugs Hub API (Drugs & Cosmetics Rules H / H1 / X master classification)
+  getScheduleDrugSummary: () => apiClient.get<{ success: boolean; h1: number; h: number; x: number; total: number }>('/schedule-drugs/summary').then(res => res.data),
+  getScheduleDrugs: (params?: { type?: string; q?: string; stock?: string; page?: number; limit?: number }) =>
+    apiClient.get<{ success: boolean; page: number; limit: number; hasMore: boolean; items: ScheduleDrugItem[] }>('/schedule-drugs', { params }).then(res => res.data),
+  getScheduleDrugReviewQueue: (params?: { q?: string; page?: number; limit?: number }) =>
+    apiClient.get<{ success: boolean; page: number; limit: number; hasMore: boolean; items: ScheduleUnclassifiedItem[] }>('/schedule-drugs/unclassified', { params }).then(res => res.data),
+  researchScheduleDrug: (id: number) =>
+    apiClient.get<ScheduleResearchResponse>('/schedule-drugs/research', { params: { id }, timeout: 120_000 }).then(res => res.data),
+  classifyScheduleDrug: (id: number, schedule_type: 'H1' | 'H' | 'X' | 'NONE', evidence?: { keywords: string[] }) =>
+    apiClient.post<{ success: boolean; id: number; schedule_type: string }>('/schedule-drugs/classify', { id, schedule_type, evidence }).then(res => res.data),
 
   // Therapeutic Search API
   searchByTherapeutic: (query: string) => apiClient.get<Array<Medicine & { inventory_id?: number; quantity?: number; batch_no?: string; rate?: number; rack_location?: string }>>('/inventory/therapeutic-search', { params: { query } }).then(res => res.data),
