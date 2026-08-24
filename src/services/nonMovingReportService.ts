@@ -34,17 +34,40 @@ export interface NonMovingReport {
   items: NonMovingItem[];
 }
 
+// Result cache keyed by periodDays. The triple-scan CTE is the heaviest report
+// query in the app (stock_ledger alone is 1M+ rows on long-lived installs); a
+// 5-minute TTL lets /non-moving/data and ALL three export handlers share ONE
+// computation instead of recomputing per request. Invalidated by any
+// transactional write via invalidateNonMovingReportCache() (wired into the
+// write interceptor in database/connection.ts).
+const NON_MOVING_CACHE_TTL_MS = 5 * 60_000;
+const nonMovingCache = new Map<number, { at: number; items: NonMovingItem[] }>();
+
+export function invalidateNonMovingReportCache() {
+  nonMovingCache.clear();
+}
+
 export class NonMovingReportService {
   /**
    * Get non-moving inventory items (no sales or ledger transactions in specified period, default 200 days).
    * Isolates each inventory record by medicine, batch_no, and purchase/inward date.
+   *
+   * READ-ONLY: uses a plain connection — never dbManager.transaction(), whose
+   * BEGIN IMMEDIATE held the database WRITE lock for the full multi-second scan
+   * and stalled POS saves/purchases while it ran.
    */
   async getNonMovingItems(periodDays: number = 200): Promise<NonMovingItem[]> {
-    return await dbManager.transaction(async (db) => {
-      // Calculate the cutoff date
-      const cutoffDate = new Date();
-      cutoffDate.setDate(cutoffDate.getDate() - periodDays);
-      const cutoffDateString = cutoffDate.toISOString().split('T')[0]; // YYYY-MM-DD
+    const cached = nonMovingCache.get(periodDays);
+    if (cached && Date.now() - cached.at < NON_MOVING_CACHE_TTL_MS) {
+      cached.at = Date.now();
+      return cached.items;
+    }
+
+    const db = await dbManager.getConnection();
+    // Calculate the cutoff date
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - periodDays);
+    const cutoffDateString = cutoffDate.toISOString().split('T')[0]; // YYYY-MM-DD
 
       // The original version scanned sale_items and stock_ledger TWICE each — once in
       // active_sales/active_ledger (recent-activity flag) and again in latest_sales/latest_ledger
@@ -159,8 +182,13 @@ export class NonMovingReportService {
         (b.daysSinceLastTransaction || 0) - (a.daysSinceLastTransaction || 0)
       );
 
+      nonMovingCache.set(periodDays, { at: Date.now(), items: nonMovingItems });
+      if (nonMovingCache.size > 8) {
+        const oldestKey = nonMovingCache.keys().next().value;
+        if (oldestKey !== undefined) nonMovingCache.delete(oldestKey);
+      }
+
       return nonMovingItems;
-    });
   }
 
   /**

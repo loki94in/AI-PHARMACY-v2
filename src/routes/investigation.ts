@@ -5,6 +5,30 @@ import { rebuildPurchaseSummaryCache, triggerBackgroundSummaryRebuild } from '..
 
 const router = express.Router();
 
+// Timeline result cache (filter-signature keyed, 60s TTL). One computation
+// serves every infinite-scroll page request (pages 2..N become O(1) slices)
+// instead of re-running 4 unbounded SELECTs + the running-stock replay each time.
+const TIMELINE_CACHE_TTL_MS = 60_000;
+const TIMELINE_CACHE_MAX_ENTRIES = 40;
+const timelineCache = new Map<string, { at: number; filtered: any[]; totalItems: number }>();
+
+export function invalidateInvestigationTimelineCache() {
+  timelineCache.clear();
+}
+
+const nextDayString = (day: string): string => {
+  const d = new Date(`${day}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+};
+
+// Numeric timestamp parsed ONCE per row (dates arrive in mixed formats:
+// ISO-T vs space-separated), so sorts/filtering never re-parse strings.
+const rowTs = (value: unknown): number => {
+  const t = Date.parse(String(value ?? ''));
+  return Number.isNaN(t) ? 0 : t;
+};
+
 // Helper to log changes to action_logs. `metadata` is stored as structured JSON
 // alongside the human-readable description so forensics/compliance reads (see
 // /timeline below) don't depend on regex-parsing the description text.
@@ -189,25 +213,29 @@ router.get('/timeline', async (req, res) => {
     }
 
     if (sqlDateFilter) {
+      // Sargable range bounds (bare column vs 'YYYY-MM-DD' strings prune via
+      // idx_sales_invoices_date / idx_purchases_date_dist / idx_returns_date).
+      // DATE(col) wrappers defeated those indexes and full-scanned per request.
       if (dateFrom) {
-        salesQuery += ` AND DATE(sinv.date) >= DATE(?)`;
+        salesQuery += ` AND sinv.date >= ?`;
         salesParams.push(dateFrom);
-        purchasesQuery += ` AND DATE(p.date) >= DATE(?)`;
+        purchasesQuery += ` AND p.date >= ?`;
         purchasesParams.push(dateFrom);
-        returnsQuery += ` AND DATE(r.date) >= DATE(?)`;
+        returnsQuery += ` AND r.date >= ?`;
         returnsParams.push(dateFrom);
-        logsQuery += ` AND DATE(al.created_at) >= DATE(?)`;
+        logsQuery += ` AND al.created_at >= ?`;
         logsParams.push(dateFrom);
       }
       if (dateTo) {
-        salesQuery += ` AND DATE(sinv.date) <= DATE(?)`;
-        salesParams.push(dateTo);
-        purchasesQuery += ` AND DATE(p.date) <= DATE(?)`;
-        purchasesParams.push(dateTo);
-        returnsQuery += ` AND DATE(r.date) <= DATE(?)`;
-        returnsParams.push(dateTo);
-        logsQuery += ` AND DATE(al.created_at) <= DATE(?)`;
-        logsParams.push(dateTo);
+        const toExclusive = nextDayString(String(dateTo));
+        salesQuery += ` AND sinv.date < ?`;
+        salesParams.push(toExclusive);
+        purchasesQuery += ` AND p.date < ?`;
+        purchasesParams.push(toExclusive);
+        returnsQuery += ` AND r.date < ?`;
+        returnsParams.push(toExclusive);
+        logsQuery += ` AND al.created_at < ?`;
+        logsParams.push(toExclusive);
       }
     }
 
@@ -216,6 +244,26 @@ router.get('/timeline', async (req, res) => {
     const queryPurchases = !type || type === 'All' || type === 'Purchase';
     const queryReturns = !type || type === 'All' || type === 'Return';
     const queryLogs = !type || type === 'All' || type === 'Adjustment';
+
+    // Filter-signature cache: identical filters (any page) reuse one computation
+    const cacheSig = JSON.stringify([
+      q, dateFrom, dateTo, medicineName, batchNo, salesBillNo,
+      purchaseBillNo, patientName, distributor, reference, party, type
+    ]);
+    const cachedEntry = timelineCache.get(cacheSig);
+    if (cachedEntry && Date.now() - cachedEntry.at < TIMELINE_CACHE_TTL_MS) {
+      cachedEntry.at = Date.now();
+      const page = parseInt(req.query.page as string) || 1;
+      const limit = parseInt(req.query.limit as string) || 100;
+      const totalPages = Math.ceil(cachedEntry.totalItems / limit);
+      const offset = (page - 1) * limit;
+      return res.json({
+        data: cachedEntry.filtered.slice(offset, offset + limit),
+        totalPages,
+        currentPage: page,
+        totalItems: cachedEntry.totalItems
+      });
+    }
 
     const salesPromise = querySales ? db.all(salesQuery, salesParams) : Promise.resolve([]);
     const purchasesPromise = queryPurchases ? db.all(purchasesQuery, purchasesParams) : Promise.resolve([]);
@@ -230,13 +278,24 @@ router.get('/timeline', async (req, res) => {
       logsPromise
     ]);
 
-    // Fetch medicine and inventory master caches to resolve adjustment medicine_ids and inventory_ids
-    const medicinesList = await db.all('SELECT id, name FROM medicines');
-    const medMapByName = new Map(medicinesList.map(m => [m.name.toLowerCase().trim(), m.id]));
-
-    const inventoryList = await db.all('SELECT id, medicine_id, batch_no, expiry_date, mrp FROM inventory_master');
-    // Map by inventory ID
-    const invMapById = new Map(inventoryList.map(im => [im.id, im]));
+    // Master caches resolve adjustment medicine/inventory references. They are
+    // LAZY: 291k medicines + 37k inventory rows are only loaded when adjustment
+    // logs actually exist — never on the hot sale/purchase/return path.
+    let medicinesList: Array<{ id: number; name: string }> = [];
+    const medMapByName = new Map<string, number>();
+    const medMapById = new Map<number, string>();
+    const invMapById = new Map<number, { medicine_id: number; batch_no: string; expiry_date: string; mrp: number }>();
+    if (logs.length > 0) {
+      medicinesList = await db.all('SELECT id, name FROM medicines');
+      for (const m of medicinesList) {
+        medMapByName.set(String(m.name).toLowerCase().trim(), m.id);
+        medMapById.set(m.id, m.name);
+      }
+      const inventoryList = await db.all('SELECT id, medicine_id, batch_no, expiry_date, mrp FROM inventory_master');
+      for (const im of inventoryList) {
+        invMapById.set(im.id, im);
+      }
+    }
 
     // Map logs to timeline items
     const adjustments: any[] = [];
@@ -274,8 +333,8 @@ router.get('/timeline', async (req, res) => {
       // Find medicine name
       let medicine_name = '';
       if (medicine_id) {
-        const med = medicinesList.find(m => m.id === medicine_id);
-        if (med) medicine_name = med.name;
+        const medName = medMapById.get(medicine_id);
+        if (medName) medicine_name = medName;
       }
 
       adjustments.push({
@@ -401,8 +460,12 @@ router.get('/timeline', async (req, res) => {
       });
     }
 
-    // Sort all chronologically (oldest first) to compute running totals
-    allTransactions.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    // Sort all chronologically (oldest first) to compute running totals.
+    // Timestamps are precomputed once per row — never inside the comparator.
+    for (const tx of allTransactions) {
+      tx._ts = rowTs(tx.date);
+    }
+    allTransactions.sort((a, b) => a._ts - b._ts);
 
     // Maps for tracking running totals
     // Key: medicine_id + '_' + batch_no
@@ -493,16 +556,17 @@ router.get('/timeline', async (req, res) => {
       );
     }
 
-    if (dateFrom) {
-      const fromDate = new Date(dateFrom as string);
-      fromDate.setHours(0,0,0,0);
-      filtered = filtered.filter(tx => new Date(tx.date) >= fromDate);
-    }
-
-    if (dateTo) {
-      const toDate = new Date(dateTo as string);
-      toDate.setHours(23,59,59,999);
-      filtered = filtered.filter(tx => new Date(tx.date) <= toDate);
+    // In-memory date bounds are only needed when SQL skipped them (medicine/batch
+    // full-history mode); with _ts precomputed they cost one numeric compare.
+    if (!sqlDateFilter) {
+      if (dateFrom) {
+        const fromTs = rowTs(`${dateFrom}T00:00:00`);
+        filtered = filtered.filter(tx => tx._ts >= fromTs);
+      }
+      if (dateTo) {
+        const toTs = rowTs(`${nextDayString(String(dateTo))}T00:00:00`);
+        filtered = filtered.filter(tx => tx._ts < toTs);
+      }
     }
 
     if (medicineName) {
@@ -549,13 +613,22 @@ router.get('/timeline', async (req, res) => {
       filtered = filtered.filter(tx => tx.type === type);
     }
 
-    // Sort descending by date/time (newest first)
-    filtered.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    // Descending display order via reverse of the ascending running-stock sort —
+    // a second full sort (with per-comparison date parsing) is pure waste.
+    filtered.reverse();
+
+    const totalItems = filtered.length;
+
+    // Store for sibling page requests (any page/limit combination)
+    timelineCache.set(cacheSig, { at: Date.now(), filtered, totalItems });
+    if (timelineCache.size > TIMELINE_CACHE_MAX_ENTRIES) {
+      const oldestKey = timelineCache.keys().next().value;
+      if (oldestKey !== undefined) timelineCache.delete(oldestKey);
+    }
 
     // Paginate results
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 100;
-    const totalItems = filtered.length;
     const totalPages = Math.ceil(totalItems / limit);
     const offset = (page - 1) * limit;
     const paginated = filtered.slice(offset, offset + limit);
@@ -817,6 +890,7 @@ router.put('/inventory/:inventoryId', async (req, res) => {
 
     await db.run('COMMIT');
     inventoryCache.invalidate();
+    invalidateInvestigationTimelineCache();
     res.json({ success: true, message: 'Inventory record corrected successfully' });
   } catch (error) {
     if (db) await db.run('ROLLBACK');
@@ -1047,6 +1121,7 @@ router.put('/sales/:invoiceId', async (req, res) => {
 
     await db.run('COMMIT');
     inventoryCache.invalidate();
+    invalidateInvestigationTimelineCache();
 
     try {
       const { eventService } = await import('../services/eventService.js');
@@ -1245,6 +1320,7 @@ router.put('/purchases/:purchaseId', async (req, res) => {
 
     await db.run('COMMIT');
     inventoryCache.invalidate();
+    invalidateInvestigationTimelineCache();
     await rebuildPurchaseSummaryCache();
     triggerBackgroundSummaryRebuild();
 

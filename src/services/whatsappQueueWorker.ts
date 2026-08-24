@@ -21,6 +21,10 @@ export interface QueueWorkerState {
   isProcessing: boolean;
   isPaused: boolean;
   isOnline: boolean;
+  // Truthful status contract: idle RAM-sleep (session intact, auto-wakes on
+  // send) and the boot restore window are NOT disconnections.
+  sleeping: boolean;
+  initializing: boolean;
   nextDispatchCountdownMs: number;
   nextDispatchCountdownSeconds: number;
   nextDispatchTimestamp: number | null;
@@ -956,6 +960,11 @@ class WhatsAppQueueWorker {
       isProcessing: this.isProcessing,
       isPaused: this.isPaused,
       isOnline: waStatus.isReady,
+      // Truthful status contract: idle RAM-sleep and the boot restore window are
+      // NOT disconnections — surface them so the UI never labels a healthy
+      // saved session as "Offline / Reconnecting".
+      sleeping: waStatus.sleeping === true,
+      initializing: waStatus.initializing === true,
       nextDispatchCountdownMs: countdownSec * 1000,
       nextDispatchCountdownSeconds: countdownSec,
       nextDispatchTimestamp: this.nextDispatchTimestamp,

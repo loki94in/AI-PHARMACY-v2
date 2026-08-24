@@ -1839,6 +1839,22 @@ router.get('/medicine-batches', async (req, res) => {
     db = await dbManager.getConnection();
     let medicineIds: number[] = [];
 
+    // Sibling-name expansion (owner contract): history must follow the
+    // medicine NAME, not whichever duplicate master id happens to be selected.
+    // The catalog still holds a few legacy duplicate-name groups; without this,
+    // picking twin A hides every batch saved under twin B.
+    const expandSiblingIds = async (ids: number[]): Promise<number[]> => {
+      if (ids.length === 0) return ids;
+      const conn = await dbManager.getConnection();
+      const nameRows = await conn.all(
+        `SELECT id FROM medicines WHERE LOWER(TRIM(name)) IN (SELECT LOWER(TRIM(name)) FROM medicines WHERE id IN (${ids.map(() => '?').join(',')}))`,
+        ids
+      ).catch(() => []);
+      const all = new Set<number>(ids);
+      for (const r of nameRows) all.add(r.id);
+      return Array.from(all);
+    };
+
     if (medicineIdParam) {
       medicineIds = [parseInt(medicineIdParam, 10)];
     } else {
@@ -1854,6 +1870,12 @@ router.get('/medicine-batches', async (req, res) => {
         );
         medicineIds = infixRows.map((m: any) => m.id);
       }
+    }
+
+    // Expand BOTH resolution paths through sibling names so the history
+    // IN-list covers every master id sharing the exact normalized name.
+    if (medicineIds.length > 0) {
+      medicineIds = await expandSiblingIds(medicineIds);
     }
 
     if (medicineIds.length === 0) {

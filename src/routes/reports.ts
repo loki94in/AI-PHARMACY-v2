@@ -7,9 +7,30 @@ import { getReportCutoverDate, effectiveReportFromDate } from '../utils/reportCu
 
 const router = express.Router();
 
+// Summary response cache (60s). The sales/purchases summary each full-scan
+// their tables through COALESCE date expressions; repeat tab switches and
+// range re-selects within a minute reuse one computation. Invalidated by any
+// transactional write via invalidateReportsSummaryCache() (write interceptor).
+const REPORTS_SUMMARY_TTL_MS = 60_000;
+const REPORTS_SUMMARY_CACHE_MAX = 60;
+const reportsSummaryCache = new Map<string, { at: number; payload: any }>();
+
+export function invalidateReportsSummaryCache() {
+  reportsSummaryCache.clear();
+}
+
 async function resolveFromDate(requestedFrom: string, db?: any): Promise<string> {
-  let from = (requestedFrom && requestedFrom.trim()) ? requestedFrom.trim() : '1970-01-01';
-  return from;
+  const requested = (requestedFrom && requestedFrom.trim()) ? requestedFrom.trim() : '';
+  if (requested || !db) return requested || '1970-01-01';
+  // Migration cutover clamp: when the caller sends no from-date (or the UI
+  // "All time" preset), start from the configured report cutover date instead
+  // of scanning pre-migration history back to 1970.
+  try {
+    const cutover = await getReportCutoverDate(db);
+    return effectiveReportFromDate(requested, cutover);
+  } catch {
+    return '1970-01-01';
+  }
 }
 
 // Helper SQL snippet for sales date resolution
@@ -26,9 +47,25 @@ router.get('/', async (req, res) => {
   const reportType = type ? String(type) : 'sales';
 
   try {
+    const summarySig = `${reportType}|${fromDate || ''}|${toDate || ''}`;
+    const cachedSummary = reportsSummaryCache.get(summarySig);
+    if (cachedSummary && Date.now() - cachedSummary.at < REPORTS_SUMMARY_TTL_MS) {
+      cachedSummary.at = Date.now();
+      return res.json(cachedSummary.payload);
+    }
+
     const db = await dbManager.getConnection();
     const from = await resolveFromDate(fromDate ? String(fromDate) : '', db);
     const to = toDate ? String(toDate) : '9999-12-31';
+
+    const finishSummary = (payload: any) => {
+      reportsSummaryCache.set(summarySig, { at: Date.now(), payload });
+      if (reportsSummaryCache.size > REPORTS_SUMMARY_CACHE_MAX) {
+        const oldestKey = reportsSummaryCache.keys().next().value;
+        if (oldestKey !== undefined) reportsSummaryCache.delete(oldestKey);
+      }
+      res.json(payload);
+    };
     
     if (reportType === 'sales') {
       const salesRow = await db.get(
@@ -51,7 +88,7 @@ router.get('/', async (req, res) => {
       const netProfit = revenue - cost;
       const profitMargin = revenue > 0 ? Math.round((netProfit / revenue) * 100) : 0;
 
-      return res.json({
+      return finishSummary({
         totalSales: salesRow.total || 0,
         cogs: cost,
         profitMargin: profitMargin,
@@ -77,7 +114,7 @@ router.get('/', async (req, res) => {
       const qty = itemsRow.qty || 0;
       const avgItemPrice = qty > 0 ? (total / qty) : 0;
 
-      return res.json({
+      return finishSummary({
         totalPurchases: total,
         itemsPurchased: qty,
         suppliersCount: purchasesRow.suppliers || 0,
@@ -95,7 +132,7 @@ router.get('/', async (req, res) => {
         WHERE quantity > 0
       `);
 
-      return res.json({
+      return finishSummary({
         totalStock: invRow.qty || 0,
         holdValuationCost: invRow.cost_val || 0,
         holdValuationMrp: invRow.mrp_val || 0,
@@ -129,7 +166,7 @@ router.get('/', async (req, res) => {
 
       const expRow = await db.get(countQuery, params);
 
-      return res.json({
+      return finishSummary({
         expiringMedicines: expRow.items || 0,
         expiringStockQty: expRow.qty || 0,
         expiringCostValue: expRow.cost_val || 0,
@@ -138,7 +175,7 @@ router.get('/', async (req, res) => {
     }
 
     // Default fallback
-    res.json({
+    finishSummary({
       totalSales: 0,
       totalPurchases: 0,
       profitMargin: 0,
@@ -511,49 +548,62 @@ router.get('/non-moving/data', async (req, res) => {
 
 // Product Trace audit endpoint (searches purchases & sales all-in-one)
 router.get('/product-trace', async (req, res) => {
-  const query = req.query.q as string;
-  if (!query) {
+  const query = (req.query.q as string || '').trim();
+  if (!query || query.length < 2) {
     return res.json({ purchases: [], sales: [] });
   }
 
   try {
     const db = await dbManager.getConnection();
-    const likeQuery = `%${query}%`;
 
-    const purchases = await db.all(`
-      SELECT pi.id, pi.batch_no, pi.expiry_date, pi.quantity, pi.cost_price, pi.mrp,
-             p.invoice_no, p.date as transaction_date, d.name as distributor_name,
-             m.name as medicine_name
-      FROM purchase_items pi
-      JOIN purchases p ON pi.purchase_id = p.id
-      JOIN distributors d ON p.distributor_id = d.id
-      JOIN medicines m ON pi.medicine_id = m.id
-      WHERE m.name LIKE ? 
-         OR pi.batch_no LIKE ? 
-         OR p.invoice_no LIKE ? 
-         OR d.name LIKE ?
-      ORDER BY p.date DESC
-      LIMIT 100
-    `, [likeQuery, likeQuery, likeQuery, likeQuery]);
+    // Prefix-first (index-usable on idx_medicines_name / invoice lookups);
+    // leading-wildcard containment only when the prefix pass finds nothing.
+    const buildLike = (prefixOnly: boolean) => prefixOnly ? `${query}%` : `%${query}%`;
 
-    const sales = await db.all(`
-      SELECT si.id, COALESCE(si.batch_no, im.batch_no) as batch_no, im.expiry_date, si.quantity, si.unit_price, si.mrp,
-             inv.invoice_no, inv.date as transaction_date, c.name as customer_name,
-             m.name as medicine_name
-      FROM sale_items si
-      JOIN sales_invoices inv ON si.invoice_id = inv.id
-      LEFT JOIN customers c ON inv.customer_id = c.id
-      JOIN inventory_master im ON si.inventory_id = im.id
-      JOIN medicines m ON im.medicine_id = m.id
-      WHERE m.name LIKE ?
-         OR COALESCE(si.batch_no, im.batch_no) LIKE ?
-         OR inv.invoice_no LIKE ?
-         OR c.name LIKE ?
-      ORDER BY inv.date DESC
-      LIMIT 100
-    `, [likeQuery, likeQuery, likeQuery, likeQuery]);
+    const runPass = async (prefixOnly: boolean) => {
+      const likeQuery = buildLike(prefixOnly);
+      const [purchases, sales] = await Promise.all([
+        db.all(`
+          SELECT pi.id, pi.batch_no, pi.expiry_date, pi.quantity, pi.cost_price, pi.mrp,
+                 p.invoice_no, p.date as transaction_date, d.name as distributor_name,
+                 m.name as medicine_name
+          FROM purchase_items pi
+          JOIN purchases p ON pi.purchase_id = p.id
+          JOIN distributors d ON p.distributor_id = d.id
+          JOIN medicines m ON pi.medicine_id = m.id
+          WHERE m.name LIKE ?
+             OR pi.batch_no LIKE ?
+             OR p.invoice_no LIKE ?
+             OR d.name LIKE ?
+          ORDER BY p.date DESC
+          LIMIT 100
+        `, [likeQuery, likeQuery, likeQuery, likeQuery]),
+        db.all(`
+          SELECT si.id, COALESCE(si.batch_no, im.batch_no) as batch_no, im.expiry_date, si.quantity, si.unit_price, si.mrp,
+                 inv.invoice_no, inv.date as transaction_date, c.name as customer_name,
+                 m.name as medicine_name
+          FROM sale_items si
+          JOIN sales_invoices inv ON si.invoice_id = inv.id
+          LEFT JOIN customers c ON inv.customer_id = c.id
+          JOIN inventory_master im ON si.inventory_id = im.id
+          JOIN medicines m ON im.medicine_id = m.id
+          WHERE m.name LIKE ?
+             OR COALESCE(si.batch_no, im.batch_no) LIKE ?
+             OR inv.invoice_no LIKE ?
+             OR c.name LIKE ?
+          ORDER BY inv.date DESC
+          LIMIT 100
+        `, [likeQuery, likeQuery, likeQuery, likeQuery])
+      ]);
+      return { purchases, sales };
+    };
 
-    res.json({ purchases, sales });
+    let result = await runPass(true);
+    if (result.purchases.length === 0 && result.sales.length === 0) {
+      result = await runPass(false);
+    }
+
+    res.json(result);
   } catch (err: any) {
     console.error('Error tracing product:', err);
     res.status(500).json({ error: 'Internal server error' });

@@ -545,11 +545,13 @@ router.get('/catalog-search', async (req, res) => {
     db = await dbManager.getConnection();
 
     if (!q || q.length < 2) {
-      // Empty or 1-char query: return top 30 master medicines list
+      // Empty or 1-char query: return a seed slice of master medicines for the
+      // Purchases page's module-cache pre-hydration (instant local list before
+      // the first debounced query lands).
       const defaultRows = await db.all(
         `SELECT id, name, item_code, manufacturer, strength, packaging, pack_unit, mrp, rate, cgst_per, sgst_per, hsn_code, generic_name
          FROM medicines
-         ORDER BY name ASC LIMIT 30`
+         ORDER BY name ASC LIMIT 150`
       );
       return res.json(defaultRows);
     }
@@ -642,6 +644,32 @@ router.get('/catalog-search', async (req, res) => {
         r.stock_qty = s ? s.stock_qty : 0;
         r.loose_qty = s ? s.loose_qty : 0;
       }
+
+      // Purchases-dropdown contract (owner request): ONE row per medicine NAME.
+      // The 291k master catalog still contains a handful of legacy duplicate
+      // name groups (different ids, identical names) — collapse them here so
+      // the dropdown never shows the same medicine twice. Preference: in-stock
+      // row wins, then the lower id (oldest canonical record).
+      const byName = new Map<string, any>();
+      const collapsed: any[] = [];
+      for (const r of rows) {
+        const key = String(r.name || '').toLowerCase().replace(/\s+/g, ' ').trim();
+        const existing = byName.get(key);
+        if (!existing) {
+          byName.set(key, r);
+          collapsed.push(r);
+          continue;
+        }
+        const eStock = ((existing.stock_qty as number) || 0) + ((existing.loose_qty as number) || 0);
+        const rStock = ((r.stock_qty as number) || 0) + ((r.loose_qty as number) || 0);
+        const winner = (rStock > 0 && eStock <= 0) ? r : (r.id < existing.id ? r : existing);
+        if (winner === r) {
+          byName.set(key, r);
+          collapsed.splice(collapsed.indexOf(existing), 1, r);
+        }
+      }
+      rows.length = 0;
+      rows.push(...collapsed);
     }
 
     res.json(rows);

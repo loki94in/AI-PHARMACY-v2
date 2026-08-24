@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { 
   BarChart3, 
@@ -28,7 +28,7 @@ import { api, apiClient, type NonMovingReportItem, type ProductTracePurchaseRow,
 import { useApiQuery } from '../../hooks/useApiQuery';
 import { getTodayString, getNDaysAgoString, toDateInputValue } from '../../utils/date';
 import { exportToCSV, exportToPDF } from '../../utils/export';
-import { messageSendEvent } from '../../services/events';
+import { toastEvent, messageSendEvent } from '../../services/events';
 
 interface LocalReportSummary {
   [key: string]: number | undefined;
@@ -138,7 +138,7 @@ const Reports = () => {
     setIsExporting(true);
     try {
       if (activeTab === 'trace') {
-        alert('Product Trace cannot be exported directly. Use print/screenshot or export standard inventory logs.');
+        toastEvent.trigger('Product Trace cannot be exported directly. Use print/screenshot or export standard inventory logs.', 'error', '/reports');
         setIsExporting(false);
         return;
       }
@@ -238,7 +238,7 @@ const Reports = () => {
       setShowExportModal(false);
     } catch (err) {
       console.error(`Error exporting ${exportFormat}:`, err);
-      alert(`Failed to export ${exportFormat.toUpperCase()} report.`);
+      toastEvent.trigger(`Failed to export ${exportFormat.toUpperCase()} report.`, 'error', '/reports');
     } finally {
       setIsExporting(false);
     }
@@ -260,13 +260,13 @@ const Reports = () => {
         deliveryFormat: overrideFormat || 'combined'
       });
       if (res.data?.success) {
-        alert('Report sent successfully to WhatsApp!');
+        toastEvent.trigger('Report sent successfully to WhatsApp!', 'success', '/reports');
       } else {
-        alert(res.data?.message || 'Failed to send report');
+        toastEvent.trigger(res.data?.message || 'Failed to send report', 'error', '/reports');
       }
     } catch (err) {
       const e = err as LocalApiError;
-      alert(e.response?.data?.message || 'Error sending report via WhatsApp');
+      toastEvent.trigger(e.response?.data?.message || 'Error sending report via WhatsApp', 'error', '/reports');
     } finally {
       setSendingWhatsapp(false);
     }
@@ -359,18 +359,9 @@ const Reports = () => {
     }
   };
 
-  useEffect(() => {
-    const handleReportUpdate = () => {
-      Object.keys(cachedReportsMap).forEach(k => delete cachedReportsMap[k]);
-      refetch();
-    };
-    window.addEventListener('stock-write-completed', handleReportUpdate);
-    window.addEventListener('price-updated', handleReportUpdate);
-    return () => {
-      window.removeEventListener('stock-write-completed', handleReportUpdate);
-      window.removeEventListener('price-updated', handleReportUpdate);
-    };
-  }, [refetch]);
+  // Freshness: SSE (sale_created / invoice_saved / return_created) mark-stales
+  // ['reports'] via the global listener; PageQueryTracker refetches this page's
+  // own keys on activation — no eager window-event refetch loops here.
 
   const handleGenerate = (e?: React.SyntheticEvent) => {
     if (e) {

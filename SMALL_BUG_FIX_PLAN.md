@@ -7,6 +7,39 @@
 
 ## Fixed
 
+### [Fixed] P2-04 — Investigation Center & Reports pages slow; Purchases dropdown showed duplicate medicines and hid saved batches
+
+| Field | Content |
+|-------|---------|
+| **What the user saw** | (a) Investigation Center took seconds per page/scroll; (b) Reports tabs (esp. Non-Moving) hung for seconds AND stalled POS saves while loading; (c) Purchases medicine dropdown listed the same medicine name twice (18 legacy duplicate master-name pairs) and, after selecting one twin, Old Batches came up empty because history was saved under the other twin's id. |
+| **Root cause** | Timeline route re-ran 4 unbounded SELECTs + loaded all 291k medicines + 37k inventory rows into JS Maps on EVERY request (even without adjustments), paginated LAST, used non-sargable `DATE(col)` predicates, double-sorted with `new Date()` in comparators, zero caching. Non-Moving ran its triple full scan inside `BEGIN IMMEDIATE` (held the DB write lock). Reports wrapped every date in COALESCE expressions no index could serve; expiry ignored `expiry_month`; exports recomputed Non-Moving. Batch lookup matched strictly by selected id with no sibling expansion. |
+| **How it was fixed** | Investigation: filter-signature 60s TTL cache (pages 2..N = O(1) slices) invalidated by correction PUTs + write interceptor; lazy master loads; sargable range bounds (99.8ms -> 1.1ms measured); single sort via precomputed `_ts` + `.reverse()`. Non-Moving: plain read connection (no write lock), 5-min TTL shared by data+all 3 export handlers. Reports: expression indexes `idx_sales_report_day`/`idx_purchases_report_day` (12.8ms -> 0.3ms, EXPLAIN-verified), summary TTL cache, cutover clamp for missing from-date, product-trace prefix-first + parallel. New indexes on return_items(x2) + purchase_items(med,batch). Purchases: catalog-search collapses rows by normalized name (in-stock wins); `/purchases/medicine-batches` expands to sibling ids sharing the exact normalized name; frontend mirrors dedupe in `getMergedCatalog()`/response merge; row hover arms the same single-flight cached history load; seed list 30->150. |
+| **Priority** | P2 |
+| **What not to touch** | The 60s timeline / 5-min nonMoving / 60s summary cache invalidation wiring in `database/connection.ts`; expression indexes MUST track any future change to SALES_DATE_EXPR/PURCHASES_DATE_EXPR; sibling expansion in medicine-batches; PurchaseSaveVerificationModal as the only bill-commit path (no autosave introduced); UI-level duplicate hiding only — no DB merge of the 18 twin groups (owner decision). |
+| **Verified by** | Backend `npx tsc --noEmit` clean; frontend build + eslint clean; `npm run guardrails` PASS; live A/B timings above with identical result counts (2583 rows both timeline variants); sibling expansion returns both twins [285906,285907] and their batches; EXPLAIN shows index seek. |
+
+### [Fixed] P1-07 — Shared medicine photo fails to download ("could not download it after attempts")
+
+| Field | Content |
+|-------|---------|
+| **What the user saw** | A customer-shared WhatsApp medicine image was not processed: `data/inbound_media` stayed empty and the admin escalation said the image could not be downloaded after repeated attempts. |
+| **Root cause** | DB evidence (`whatsapp_messages` cache): every failing image came from an **@lid chat** and `downloadMedia()` threw whatsapp-web.js's minified internal `Error("r")` on EVERY attempt (v1.34.7) — event-emitted Message objects lose their media-decrypt context for LID-migrated accounts, so retrying the identical call could never succeed (inbound_media stayed empty; escalations fired 13:00 + 13:22 on 2026-08-24). A readiness gate (added first) was necessary but not sufficient. |
+| **How it was fixed** | Three-step download ladder in `handleInbound`: (1) direct retries, (2) `msg.getChat()` store-hydration + retries, (3) NEW `downloadMessageMediaById(serializedId)` in `src/whatsappClient.ts` — a FRESH Message re-hydrated via `client.getMessageById()` whose `downloadMedia()` works even when the event object cannot. Per-attempt failures now log with real messages, and the owner escalation carries the full error chain (`direct: r \| hydrated: r \| ...`). Readiness gate from the first pass retained (60 s single-flight wait when not ready). |
+| **Priority** | P1 |
+| **What not to touch** | Idle-sleep evaluator/wake paths, boot T+45s auto-init, `downloadMediaWithRetry` signature/export (unit-tested), OCR queue flow, thumbnail endpoint. |
+| **Verified by** | Backend `npx tsc --noEmit` clean; code-path review: no-ready arrivals now wait on single-flight restore instead of failing; escalation reason includes real error. |
+
+### [Fixed] P2-03 — WhatsApp Live Queue Controller shows "Offline / Reconnecting" after restart / during idle sleep
+
+| Field | Content |
+|-------|---------|
+| **What the user saw** | After closing and reopening the app (cold boot), the WhatsApp Live Queue Controller header showed "Offline / Reconnecting" as if the saved session had failed to reconnect — and it also flipped to that state whenever the app had been idle for a while. |
+| **Root cause** | Truthful-status gap after the idle-sleep feature shipped: `getWhatsAppStatus()` exposes `sleeping` and `initializing`, but the queue worker's state payload (`src/services/whatsappQueueWorker.ts` getState) only surfaced `isOnline: waStatus.isReady`. The popover (`WhatsAppQueuePopover.tsx`) therefore rendered a binary chip: any non-ready moment — (a) the normal T+45s boot session-restore window, or (b) idle RAM-sleep after ~15 min (session intact on disk, auto-wakes on send) — was labeled "Offline / Reconnecting", falsely implying a broken reconnection. Boot auto-restore itself was working (`server.ts` T+45s `hasSavedSession()` → `initClient()`, profile-lock cleanup + 60 s silent retry already in place). |
+| **How it was fixed** | Worker state now carries `sleeping` + `initializing`; `WhatsAppQueueStatus` interface extended; popover header derives a four-state connection chip — Online (green) · Sleeping · Auto-wakes on send (sky, moon icon; subtitle notes queued messages wake dispatch automatically) · Connecting… (sky, spinner) · Offline / Reconnecting (amber, only when genuinely neither ready/sleeping/connecting). No polling added; status still rides the existing queue-state fetch + SSE. |
+| **Priority** | P2 |
+| **What not to touch** | Idle-sleep evaluator/wake paths (demand-driven only), boot T+45s auto-init, profile-lock cleanup, queue worker pacing/dedupe semantics, Layout staged-notification card (uses isPaused, untouched). |
+| **Verified by** | Backend `npx tsc --noEmit` clean; frontend `tsc --noEmit` + eslint clean on touched files; code-path review: sleeping/initializing flags flow worker→API→popover; no status poll can wake a sleeping client (contract intact). |
+
 ### [Fixed] P1-06 — Mobile app saves random/unwanted phantom bills on the PC after reconnect ("login")
 
 | Field | Content |

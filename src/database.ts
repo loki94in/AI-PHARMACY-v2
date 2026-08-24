@@ -210,6 +210,16 @@ export async function ensureSchema(dbPath: string) {
       // Bare-ORDER-BY list endpoints previously full-scanned these tables per request:
       await db.run('CREATE INDEX IF NOT EXISTS idx_dispatch_orders_created ON dispatch_orders(created_at DESC)');
       await db.run('CREATE INDEX IF NOT EXISTS idx_special_orders_date ON special_orders(date DESC)');
+      // Investigation timeline joins that previously had no index path
+      // (return_items had ZERO indexes; purchase bill join keyed med+batch):
+      await db.run('CREATE INDEX IF NOT EXISTS idx_return_items_return_id ON return_items(return_id)');
+      await db.run('CREATE INDEX IF NOT EXISTS idx_return_items_medicine_id ON return_items(medicine_id)');
+      await db.run('CREATE INDEX IF NOT EXISTS idx_purchase_items_med_batch ON purchase_items(medicine_id, batch_no)');
+      // Reports route date predicates wrap columns in COALESCE(date(...)) which
+      // defeats plain date indexes; these EXPRESSION indexes match that exact
+      // expression so SQLite can range-scan instead of full-scanning per request.
+      await db.run("CREATE INDEX IF NOT EXISTS idx_sales_report_day ON sales_invoices(COALESCE(date(business_date), date(date), date(substr(date, 1, 10)), date(substr(business_date, 1, 10))))");
+      await db.run("CREATE INDEX IF NOT EXISTS idx_purchases_report_day ON purchases(COALESCE(date(date), date(business_date), date(substr(date, 1, 10)), date(substr(business_date, 1, 10))))");
       // Schedule Drugs hub: filter-by-schedule + name-ordered pages over the
       // 291k master catalog (composite covers equality lookups on schedule_type)
       await db.run('CREATE INDEX IF NOT EXISTS idx_medicines_schedule_type_name ON medicines(schedule_type, name)');
@@ -666,6 +676,7 @@ export async function ensureSchema(dbPath: string) {
     );
     CREATE INDEX IF NOT EXISTS idx_purchase_items_medicine_id ON purchase_items (medicine_id);
     CREATE INDEX IF NOT EXISTS idx_purchase_items_purchase_id ON purchase_items (purchase_id);
+    CREATE INDEX IF NOT EXISTS idx_purchase_items_med_batch ON purchase_items (medicine_id, batch_no);
 
     CREATE TABLE IF NOT EXISTS return_items (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -684,6 +695,8 @@ export async function ensureSchema(dbPath: string) {
       FOREIGN KEY(return_id) REFERENCES returns(id),
       FOREIGN KEY(medicine_id) REFERENCES medicines(id)
     );
+    CREATE INDEX IF NOT EXISTS idx_return_items_return_id ON return_items (return_id);
+    CREATE INDEX IF NOT EXISTS idx_return_items_medicine_id ON return_items (medicine_id);
 
     CREATE TABLE IF NOT EXISTS special_orders (
       id INTEGER PRIMARY KEY AUTOINCREMENT,

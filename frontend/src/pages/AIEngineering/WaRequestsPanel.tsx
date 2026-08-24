@@ -16,6 +16,8 @@ interface PrHit {
   score?: number;
 }
 
+interface RelatedMedicine { name: string; registered: boolean; inventoryStock: number }
+
 interface WaMatchRow {
   customerName: string;
   customerPhone: string;
@@ -31,6 +33,8 @@ interface WaMatchRow {
   source: string;
   messageBody: string;
   pharmaHits: PrHit[];
+  mediaId: string;
+  relatedMedicines: RelatedMedicine[];
   ts: number;
 }
 
@@ -78,6 +82,16 @@ const recordIncomingMatch = (frame: unknown): void => {
   const pharmaHits = Array.isArray(f.livePharmarackResults)
     ? f.livePharmarackResults.slice(0, 6).map(normalizeHit)
     : [];
+  const relatedRaw = Array.isArray(f.relatedMedicines) ? f.relatedMedicines : [];
+  const relatedMedicines: RelatedMedicine[] = relatedRaw
+    .filter((r): r is Record<string, unknown> => !!r && typeof r === 'object')
+    .slice(0, 4)
+    .map((r) => ({
+      name: str(r.name),
+      registered: r.registered === true,
+      inventoryStock: num(r.inventoryStock),
+    }))
+    .filter((r) => r.name);
   feedCache.unshift({
     customerName: str(customer.name),
     customerPhone: str(customer.phone),
@@ -93,6 +107,8 @@ const recordIncomingMatch = (frame: unknown): void => {
     source: str(f.source) || 'text',
     messageBody: str(f.messageBody),
     pharmaHits,
+    mediaId: typeof f.mediaId === 'string' || typeof f.mediaId === 'number' ? String(f.mediaId) : '',
+    relatedMedicines,
     ts: Date.now(),
   });
   if (feedCache.length > FEED_CAP) feedCache.length = FEED_CAP;
@@ -130,6 +146,40 @@ const timeAgo = (ts: number): string => {
   return `${Math.floor(s / 3600)}h ago`;
 };
 
+// Module-level thumbnail cache: one network fetch per shared photo, ever.
+const waMediaCache = new Map<string, string>();
+const getCachedWaMedia = (id: string): string | null => waMediaCache.get(id) || null;
+const cacheWaMedia = (id: string, dataUrl: string): void => { waMediaCache.set(id, dataUrl); };
+
+const WaThumb: React.FC<{ mediaId: string }> = ({ mediaId }) => {
+  const [fetched, setFetched] = useState<string | null>(null);
+  // Cached hits derive during render — only real network results use state.
+  const cached = mediaId ? getCachedWaMedia(mediaId) : null;
+  const src = cached ?? fetched;
+
+  useEffect(() => {
+    if (!mediaId || getCachedWaMedia(mediaId)) return;
+    let alive = true;
+    api.getWaMedia(mediaId)
+      .then((m) => {
+        const dataUrl = `data:${m.mimetype || 'image/jpeg'};base64,${m.data}`;
+        cacheWaMedia(mediaId, dataUrl);
+        if (alive) setFetched(dataUrl);
+      })
+      .catch(() => { /* photo stays hidden — a failed fetch is never fabricated */ });
+    return () => { alive = false; };
+  }, [mediaId]);
+
+  if (!src) return null;
+  return (
+    <img
+      src={src}
+      alt="Shared medicine strip"
+      className="w-full max-h-52 object-contain rounded-xl border border-glass-border bg-bg3/40"
+    />
+  );
+};
+
 const WaMatchCard: React.FC<{ row: WaMatchRow }> = ({ row }) => {
   const avail = availabilityBadge(row);
   return (
@@ -146,7 +196,7 @@ const WaMatchCard: React.FC<{ row: WaMatchRow }> = ({ row }) => {
             {row.isNewCustomer && (
               <span className="px-2 py-0.5 rounded-full bg-sky-500/15 text-sky-400 border border-sky-500/30 text-[9px] font-black uppercase">New</span>
             )}
-            {row.source === 'image' && <ImageIcon size={12} className="text-muted" title="Photo request" />}
+            {row.source === 'image' && <span title="Photo request" className="inline-flex"><ImageIcon size={12} className="text-muted" /></span>}
           </div>
           {row.messageBody && (
             <p className="text-[11px] text-muted mt-1 truncate italic">&ldquo;{row.messageBody}&rdquo;</p>
@@ -156,6 +206,9 @@ const WaMatchCard: React.FC<{ row: WaMatchRow }> = ({ row }) => {
           {avail.label}
         </span>
       </div>
+
+      {/* Shared photo (when the request came with an image) */}
+      <WaThumb mediaId={row.mediaId} />
 
       {/* Medicine asked */}
       <div className="flex items-center gap-2 flex-wrap">
@@ -167,6 +220,34 @@ const WaMatchCard: React.FC<{ row: WaMatchRow }> = ({ row }) => {
           <span className="ml-auto text-[10px] font-mono text-muted">match {row.confidence}%</span>
         )}
       </div>
+
+      {/* Extra medicines seen on the same strip / caption — resolved
+          LOCAL-ONLY by the pipeline, never re-searched from here */}
+      {row.relatedMedicines.length > 0 && (
+        <div>
+          <p className="text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5">Also on this strip</p>
+          <div className="flex flex-wrap gap-1.5">
+            {row.relatedMedicines.map((r) => {
+              const cls = !r.registered
+                ? 'bg-bg3 text-muted border-glass-border'
+                : r.inventoryStock > 0
+                  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                  : 'bg-amber-500/10 text-amber-400 border-amber-500/20';
+              const label = !r.registered
+                ? `${r.name} · not registered`
+                : r.inventoryStock > 0
+                  ? `${r.name} · ${r.inventoryStock} in stock`
+                  : `${r.name} · 0 on shelf`;
+              return (
+                <span key={r.name} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${cls}`}>
+                  {r.registered && r.inventoryStock > 0 ? <PackageCheck size={10} /> : <PackageX size={10} />}
+                  {label}
+                </span>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Registered-in-app matches with real shelf stock */}
       {row.localMatches.length > 0 && (

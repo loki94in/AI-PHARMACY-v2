@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { 
-  X, RefreshCw, Send, AlertTriangle, CheckCircle2, Clock, 
-  WifiOff, Edit3, Play, Pause, ShieldAlert, ChevronDown, ChevronUp, Zap, Truck, Building2, MessageSquare, Calendar, Trash2, CheckCheck
+import {
+  X, RefreshCw, Send, AlertTriangle, CheckCircle2, Clock,
+  WifiOff, Edit3, Play, Pause, ShieldAlert, ChevronDown, ChevronUp, Zap, Truck, Building2, MessageSquare, Calendar, Trash2, CheckCheck,
+  Moon, Loader2
 } from 'lucide-react';
 import { api, apiClient, peekWhatsAppQueueStatusCache, type WhatsAppQueueItem, type WhatsAppQueueStatus } from '../services/api';
 import { toastEvent, whatsappQueueEvent, messageSendEvent } from '../services/events';
@@ -641,41 +642,69 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
     );
   };
 
+  // Truthful connection state (status contract): idle RAM-sleep keeps the saved
+  // session intact and auto-wakes on the next send; the boot restore window is
+  // a normal connecting phase. Neither may be labeled "Offline".
+  const waConnState: 'online' | 'sleeping' | 'connecting' | 'offline' =
+    queueState?.isOnline
+      ? 'online'
+      : queueState?.sleeping
+        ? 'sleeping'
+        : queueState?.initializing
+          ? 'connecting'
+          : 'offline';
+
   return createPortal(
     <div className="fixed inset-0 z-global-modal flex items-center justify-center p-4 sm:p-6 bg-black/75 backdrop-blur-md transition-all duration-300 animate-in fade-in">
       <div className="relative bg-bg3 border border-glass-border shadow-[0_25px_60px_rgba(0,0,0,0.6)] rounded-3xl w-full max-w-3xl overflow-hidden flex flex-col max-h-[88vh] animate-in zoom-in-95 duration-200">
-        
+
         {/* Header */}
         <div className="p-4 border-b border-glass-border/30 flex items-center justify-between gap-3 bg-bg2/80 shrink-0">
           <div className="flex items-center gap-3 min-w-0 flex-1">
             <div className={`p-2 rounded-xl border shrink-0 ${
-              !queueState?.isOnline 
-                ? 'bg-amber-500/10 border-amber-500/20 text-amber-400' 
-                : pendingTotal > 0 
-                  ? 'bg-sky-500/10 border-sky-500/20 text-sky-400' 
-                  : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
+              waConnState === 'sleeping'
+                ? 'bg-sky-500/10 border-sky-500/20 text-sky-400'
+                : waConnState === 'connecting'
+                  ? 'bg-sky-500/10 border-sky-500/20 text-sky-400'
+                  : waConnState === 'offline'
+                    ? 'bg-amber-500/10 border-amber-500/20 text-amber-400'
+                    : pendingTotal > 0
+                      ? 'bg-sky-500/10 border-sky-500/20 text-sky-400'
+                      : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
             }`}>
-              {!queueState?.isOnline ? <WifiOff size={18} /> : <Send size={18} />}
+              {waConnState === 'sleeping' && <Moon size={18} />}
+              {waConnState === 'connecting' && <Loader2 size={18} className="animate-spin" />}
+              {waConnState === 'offline' && <WifiOff size={18} />}
+              {waConnState === 'online' && <Send size={18} />}
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2 flex-wrap">
                 <h3 className="font-bold text-sm text-text shrink-0">
                   WhatsApp Live Queue Controller
                 </h3>
-                {!queueState?.isOnline ? (
-                  <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-full shrink-0 font-semibold">Offline / Reconnecting</span>
-                ) : (
+                {waConnState === 'online' && (
                   <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full shrink-0 font-semibold">Online</span>
+                )}
+                {waConnState === 'sleeping' && (
+                  <span className="text-[10px] bg-sky-500/15 text-sky-300 border border-sky-500/30 px-2 py-0.5 rounded-full shrink-0 font-semibold">Sleeping · Auto-wakes on send</span>
+                )}
+                {waConnState === 'connecting' && (
+                  <span className="text-[10px] bg-sky-500/15 text-sky-300 border border-sky-500/30 px-2 py-0.5 rounded-full shrink-0 font-semibold">Connecting…</span>
+                )}
+                {waConnState === 'offline' && (
+                  <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-full shrink-0 font-semibold">Offline / Reconnecting</span>
                 )}
               </div>
               <p className="text-[11px] text-muted truncate">
-                {pendingTotal > 0
-                  ? `${pendingTotal} message(s) queued for paced dispatch`
-                  : failedTotal > 0
-                    ? `${failedTotal} message(s) failed delivery — see details below or retry`
-                    : (counts.sent || 0) > 0
-                      ? `All ${counts.sent} queued message(s) delivered successfully`
-                      : 'Queue is empty'}
+                {waConnState === 'sleeping' && pendingTotal > 0
+                  ? `${pendingTotal} message(s) queued — dispatch wakes WhatsApp automatically`
+                  : pendingTotal > 0
+                    ? `${pendingTotal} message(s) queued for paced dispatch`
+                    : failedTotal > 0
+                      ? `${failedTotal} message(s) failed delivery — see details below or retry`
+                      : (counts.sent || 0) > 0
+                        ? `All ${counts.sent} queued message(s) delivered successfully`
+                        : 'Queue is empty'}
               </p>
             </div>
           </div>

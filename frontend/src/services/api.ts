@@ -359,6 +359,10 @@ export interface WhatsAppQueueStatus {
   isProcessing: boolean;
   isPaused?: boolean;
   isOnline: boolean;
+  // Truthful status: idle RAM-sleep (session intact, auto-wakes on send) and
+  // the boot restore window — neither is a real disconnection.
+  sleeping?: boolean;
+  initializing?: boolean;
   nextDispatchCountdownMs: number;
   nextDispatchTimestamp: number | null;
   currentPacingMinMs: number;
@@ -1123,6 +1127,7 @@ export const api = {
 
   // WhatsApp Custom UI
   getWhatsappStatus: () => apiClient.get('/messaging/qr').then(res => res.data),
+  getWaMedia: (msgId: string) => apiClient.get<{ mimetype: string; data: string }>(`/messaging/wa-media/${encodeURIComponent(msgId)}`).then(res => res.data),
   connectWhatsapp: () => apiClient.post('/messaging/connect').then(res => res.data),
   reconnectWhatsapp: () => apiClient.post('/messaging/reconnect').then(res => res.data),
   logoutWhatsapp: () => apiClient.post('/messaging/logout').then(res => res.data),

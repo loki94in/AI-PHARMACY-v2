@@ -459,6 +459,29 @@ router.get('/chats/:chatId/messages/:messageId/media', async (req, res) => {
   }
 });
 
+// GET /messaging/wa-media/:msgId — READ-ONLY thumbnail of a saved inbound
+// WhatsApp photo (data/inbound_media/<safeId>.jpg, written by
+// saveInboundMedia). Same id sanitization as the writer so no path traversal
+// is possible. Never writes anything; 404 when the photo is absent.
+router.get('/wa-media/:msgId', async (req, res) => {
+  try {
+    const safeId = String(req.params.msgId || '').replace(/[^a-zA-Z0-9_-]/g, '_');
+    if (!safeId) {
+      return res.status(400).json({ error: 'Invalid media id' });
+    }
+    const dir = path.resolve(process.cwd(), 'data', 'inbound_media');
+    const filePath = path.join(dir, `${safeId}.jpg`);
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: 'Media not found' });
+    }
+    const data = await fs.promises.readFile(filePath);
+    res.json({ mimetype: 'image/jpeg', data: data.toString('base64') });
+  } catch (err: any) {
+    console.error('Error fetching WA inbound media:', err);
+    res.status(500).json({ error: err.message || 'Failed to fetch media' });
+  }
+});
+
 // GET list of ignored numbers
 router.get('/ignored-phones', async (req, res) => {
   try {

@@ -368,6 +368,30 @@ const historyRowsAsPriceRecords = (rows: MedicineBatchHistoryRow[] | null): Pric
   }));
 };
 
+// ONE row per medicine NAME in the Purchases dropdown. The master catalog
+// still contains a few legacy duplicate-name groups (same medicine, different
+// ids); backend collapses them, this guards stale module caches mid-session.
+// Preference: in-stock entry wins, then the lower id.
+const dedupeMedicinesByName = (list: Medicine[]): Medicine[] => {
+  const byName = new Map<string, Medicine>();
+  const out: Medicine[] = [];
+  for (const m of list) {
+    const key = String(m.name || '').toLowerCase().replace(/\s+/g, ' ').trim();
+    if (!key) { out.push(m); continue; }
+    const existing = byName.get(key);
+    if (!existing) { byName.set(key, m); out.push(m); continue; }
+    const eStock = ((existing.stock_qty as number) || 0) + ((existing.loose_qty as number) || 0);
+    const mStock = ((m.stock_qty as number) || 0) + ((m.loose_qty as number) || 0);
+    const preferNew = (mStock > 0 && eStock <= 0) ||
+      (mStock <= 0 && eStock <= 0 && ((m.id as number) ?? 0) < ((existing.id as number) ?? 0));
+    if (preferNew) {
+      byName.set(key, m);
+      out.splice(out.indexOf(existing), 1, m);
+    }
+  }
+  return out;
+};
+
 const getMergedCatalog = (): Medicine[] => {
   const compact = getCompactInventoryCache();
   if (cachedMergedCatalog && lastMasterLength === cachedMasterCatalog.length && lastCompactLength === compact.length) {
@@ -415,7 +439,7 @@ const getMergedCatalog = (): Medicine[] => {
       }
     }
   }
-  cachedMergedCatalog = Array.from(map.values());
+  cachedMergedCatalog = dedupeMedicinesByName(Array.from(map.values()));
   lastMasterLength = cachedMasterCatalog.length;
   lastCompactLength = compact.length;
   return cachedMergedCatalog;
@@ -1549,13 +1573,15 @@ const Purchases: React.FC = () => {
             };
           });
           // In-stock inventory first; master-database entries grouped after.
-          enrichedResponse.sort((a, b) => {
+          // Name-dedupe guards against stale cached twins resurfacing.
+          const deduped = dedupeMedicinesByName(enrichedResponse as Medicine[]);
+          deduped.sort((a, b) => {
             const aStock = (((a.stock_qty as number) || 0) + ((a.loose_qty as number) || 0)) > 0 ? 1 : 0;
             const bStock = (((b.stock_qty as number) || 0) + ((b.loose_qty as number) || 0)) > 0 ? 1 : 0;
             if (aStock !== bStock) return bStock - aStock;
             return String(a.name || '').localeCompare(String(b.name || ''));
           });
-          setSearchResults(enrichedResponse as Medicine[]);
+          setSearchResults(deduped);
           setSearchHighlightIndex(-1);
         }
       } catch (error) {
@@ -3338,7 +3364,23 @@ const Purchases: React.FC = () => {
                     const sgstAmount = taxableAmount * sgstPerVal / 100;
                     const rowAmount = taxableAmount + cgstAmount + sgstAmount;
                     return (
-                      <tr key={item.id} data-medicine-id={item.medicine_id} className="border-b border-white/10 align-top">
+                      <tr
+                        key={item.id}
+                        data-medicine-id={item.medicine_id}
+                        className="border-b border-border align-top"
+                        onMouseEnter={() => {
+                          // Cursor-move history guarantee: hovering a row whose
+                          // medicine is already selected arms the SAME one-shot,
+                          // module-cached, single-flight history load used by
+                          // selection and batch-focus — zero repeat network, no
+                          // other endpoint ever fires. Cold cache warms silently;
+                          // hover intel + Old Batches then render instantly.
+                          if (item.medicine_id || item.medicine_name) {
+                            loadMedicineHistory(item.medicine_id ?? undefined, item.medicine_name ?? undefined, selectedDistributor)
+                              .catch(() => {});
+                          }
+                        }}
+                      >
                       <td className="py-2.5 text-gray-300">
                         <div className="h-8 flex items-center">{index + 1}</div>
                       </td>

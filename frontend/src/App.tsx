@@ -133,33 +133,14 @@ function App() {
       });
     }, 1500);
 
-    // Pre-fetch data for key pages so they show instantly with no loading spinner on first visit.
-    // Runs 8s after startup — after compact cache + settings load on cold boot.
-    const dataTimer = setTimeout(() => {
-      // Dashboard — single query
-      queryClient.prefetchQuery({
-        queryKey: ['dashboard'],
-        queryFn: () => api.getDashboard(),
-        staleTime: 5 * 60_000,
-      }).catch(() => {});
-
-      // Reports — pre-fetch default sales tab for last 30 days
-      const today = getTodayString();
-      const from30 = getNDaysAgoString(30);
-      queryClient.prefetchQuery({
-        queryKey: ['reports', 'sales', from30, today],
-        queryFn: () => Promise.all([
-          api.getReportsSummary({ type: 'sales', fromDate: from30, toDate: today }),
-          api.getReportsData({ type: 'sales', fromDate: from30, toDate: today }),
-        ]).then(([summary, records]) => ({ summary, records })),
-        staleTime: 5 * 60_000,
-      }).catch(() => {});
-    }, 8000);
+    // Data prefetch for key pages now rides the IDLE warm-mount gate below
+    // (first idle>45s + visible window) instead of firing unconditionally at
+    // T+8s on every boot — the ungated Reports sales prefetch full-scanned the
+    // invoices table on every startup whether or not /reports was ever opened.
 
     return () => {
       clearTimeout(timer);
       batchTimers.forEach((t) => clearTimeout(t));
-      clearTimeout(dataTimer);
     };
   }, []);
 
@@ -178,6 +159,27 @@ function App() {
       if (idx >= WARMUP_PATHS.length) return;
       const idleFor = Date.now() - lastInteraction;
       if (document.visibilityState === 'visible' && idleFor > 45_000) {
+        // One-time data prefetch rides the FIRST idle window: dashboard
+        // (landing query) + default Reports sales tab — both only after the
+        // user has actually been idle, never during the boot-critical phase.
+        if (idx === 0) {
+          queryClient.prefetchQuery({
+            queryKey: ['dashboard'],
+            queryFn: () => api.getDashboard(),
+            staleTime: 5 * 60_000,
+          }).catch(() => {});
+
+          const today = getTodayString();
+          const from30 = getNDaysAgoString(30);
+          queryClient.prefetchQuery({
+            queryKey: ['reports', 'sales', from30, today],
+            queryFn: () => Promise.all([
+              api.getReportsSummary({ type: 'sales', fromDate: from30, toDate: today }),
+              api.getReportsData({ type: 'sales', fromDate: from30, toDate: today }),
+            ]).then(([summary, records]) => ({ summary, records })),
+            staleTime: 5 * 60_000,
+          }).catch(() => {});
+        }
         prewarmRoute(WARMUP_PATHS[idx]);
         idx += 1;
         timer = setTimeout(step, 8000);

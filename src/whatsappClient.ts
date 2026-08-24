@@ -1437,8 +1437,7 @@ export async function getChatMessages(chatId: string, limit: number = 500): Prom
 
 
 /** Retrieve cached media file from local storage */
-export async function getMessageMedia(chatId: string, messageId: string): Promise<{ mimetype: string; data: string; filename?: string }> {
-  if (!fs.existsSync(UPLOADS_DIR)) {
+export async function getMessageMedia(chatId: string, messageId: string): Promise<{ mimetype: string; data: string; filename?: string }> {  if (!fs.existsSync(UPLOADS_DIR)) {
     fs.mkdirSync(UPLOADS_DIR, { recursive: true });
   }
 
@@ -1465,4 +1464,20 @@ export async function getMessageMedia(chatId: string, messageId: string): Promis
     data,
     filename: matchedFile
   };
+}
+
+/**
+ * Download media for an inbound message by re-hydrating a FRESH Message
+ * instance from the client store via getMessageById(). Event-emitted Message
+ * objects frequently lose their media-decrypt context (whatsapp-web.js throws
+ * minified internals like Error("r") — observed on @lid chats and after
+ * idle-sleep wakes), while a store-fresh instance still downloads fine.
+ * Returns undefined when no ready client exists; never throws for
+ * missing/unreachable messages beyond what downloadMedia itself raises.
+ */
+export async function downloadMessageMediaById(serializedId: string): Promise<{ data?: string; mimetype?: string } | undefined> {
+  if (!clientInstance || !isReady || !serializedId) return undefined;
+  const fresh: any = await clientInstance.getMessageById(serializedId);
+  if (!fresh) return undefined;
+  return await fresh.downloadMedia();
 }

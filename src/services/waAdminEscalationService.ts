@@ -1,6 +1,8 @@
 import { dbManager } from '../database/connection.js';
 import { whatsappQueueWorker } from './whatsappQueueWorker.js';
 
+interface RelatedMedicineInfo { name: string; registered: boolean; inventoryStock: number }
+
 interface EscalationPayload {
   customer: { id: number; name: string; phone: string } | null;
   isNewCustomer: boolean;
@@ -20,6 +22,13 @@ interface EscalationPayload {
   msgId?: string;
   phone?: string;
   chatId?: string;
+  // One-photo-one-result (owner rule): extra medicines seen on the shared
+  // strip / caption, resolved LOCAL-ONLY by whatsappIntentService — no
+  // network was spent on them and they ride along on the primary card.
+  relatedMedicines?: RelatedMedicineInfo[];
+  // Saved inbound photo (data/inbound_media/<msgId>.jpg) — attached to the
+  // owner's WhatsApp message when present so the human sees the real strip.
+  imagePath?: string;
   context?: {
     purchases: Array<{ date: string; name: string; quantity: number }>;
     refills: Array<{ medicine_name: string; next_refill_date: string | null; last_refill_date: string | null }>;
@@ -96,6 +105,40 @@ export async function resolveAdminWhatsappNumber(db: any): Promise<string> {
     }
   }
   return '';
+}
+
+/**
+ * Shared escalation guards: wa_auto_share_admin toggle + admin number
+ * resolution + self-send guard (a request from the owner's own number must
+ * never loop back to itself). Returns null when the note must not be sent.
+ */
+async function escalateGuard(
+  db: any,
+  senderPhone: string | undefined,
+  customerPhoneFallback?: string
+): Promise<{ adminWhatsapp: string } | null> {
+  try {
+    const toggle = await db.get('SELECT value FROM app_settings WHERE key = ?', ['wa_auto_share_admin']);
+    if (toggle && toggle.value === 'false') return null;
+  } catch { /* settings table always exists; defensive only */ }
+
+  const adminWhatsapp = await resolveAdminWhatsappNumber(db);
+  if (!adminWhatsapp) return null;
+
+  const sender = String(senderPhone || customerPhoneFallback || '');
+  const cleanPhone = (p: string) => p.replace(/\D/g, '').slice(-10);
+  if (sender && cleanPhone(sender) === cleanPhone(adminWhatsapp)) return null;
+
+  return { adminWhatsapp };
+}
+
+/** Truthful "also seen on this strip" lines for extra photo candidates. */
+function buildRelatedBlock(related: RelatedMedicineInfo[] | undefined): string {
+  if (!related || related.length === 0) return '';
+  const fmt = (r: RelatedMedicineInfo) => r.registered
+    ? `${r.name} — ${r.inventoryStock > 0 ? `✅ ${r.inventoryStock} in stock` : '🗄️ DB · 0 on shelf'}`
+    : `${r.name} — ❔ not registered`;
+  return `\n🧩 *Also on this strip*:\n${related.map(fmt).join('\n')}`;
 }
 
 /**
@@ -302,6 +345,7 @@ ${phoneLine}
     }
     const contextBlock = contextLines.length > 0 ? `\n\n${contextLines.join('\n')}` : '';
     const formLine = payload.dosageForm ? `\n🩹 *Form*: ${payload.dosageForm}` : '';
+    const relatedBlock = buildRelatedBlock(payload.relatedMedicines);
 
     if (outcome === 'found_local') {
       // Truthful stock reporting — a medicines-master match is NOT shelf
@@ -320,7 +364,7 @@ ${customerBlock}
  💊 *Extracted Medicine*: ${payload.medicineName}
  📦 *Quantity*: ${payload.quantity} ${payload.unit}${formLine}
  ⭐ *Match Confidence*: ${Math.round(payload.confidence)}%
-✅ *In Stock*: ${payload.localMatches.slice(0, 3).map(fmtStock).join(', ')}${contextBlock}`;
+✅ *In Stock*: ${payload.localMatches.slice(0, 3).map(fmtStock).join(', ')}${relatedBlock}${contextBlock}`;
       } else {
         const mappedTop = (payload.catalogResults?.mapped || []).slice(0, 3);
         const nonMappedTop = (payload.catalogResults?.nonMapped || []).slice(0, mappedTop.length > 0 ? 2 : 5);
@@ -334,8 +378,8 @@ ${customerBlock}
  💊 *Extracted Medicine*: ${payload.medicineName}
  📦 *Quantity*: ${payload.quantity} ${payload.unit}${formLine}
  ⭐ *Match Confidence*: ${Math.round(payload.confidence)}%
-🗄️ *DB match (0 on shelf)*: ${payload.localMatches.slice(0, 3).join(', ')}
-${distLines ? `\n🚚 *Distributor options*:\n${distLines}\n` : ''}
+ 🗄️ *DB match (0 on shelf)*: ${payload.localMatches.slice(0, 3).join(', ')}
+${distLines ? `\n🚚 *Distributor options*:\n${distLines}\n` : ''}${relatedBlock}
 👉 Needs a purchase order before confirming to the customer.${contextBlock}`;
       }
     } else {
@@ -368,14 +412,15 @@ ${distLines ? `\n🚚 *Distributor options*:\n${distLines}\n` : ''}
 ${customerBlock}
  🔍 *Searched*: ${payload.medicineName}${payload.dosageForm ? ` (${payload.dosageForm})` : ''}${payload.confidence ? ` — best match ${Math.round(payload.confidence)}%` : ''}
 
-${matchBlock}${contextBlock}
+${matchBlock}${relatedBlock}${contextBlock}
 
 📋 Added to approval queue (Review #${reviewId}). Approve in the app to add to inventory.`;
     }
 
-    // 6. Enqueue WhatsApp message in centralized queue
+    // 6. Enqueue WhatsApp message in centralized queue — attach the actual
+    // shared photo when we have it, so the owner sees the real strip.
     try {
-      await whatsappQueueWorker.enqueue(adminWhatsapp, messageText, 'admin_escalation', 'Admin / Store Owner');
+      await whatsappQueueWorker.enqueue(adminWhatsapp, messageText, 'admin_escalation', 'Admin / Store Owner', undefined, payload.imagePath);
       await db.run(`UPDATE wa_admin_escalations SET status = 'sent' WHERE id = ?`, [escalationId]);
       console.log(`[Admin Escalation] Enqueued escalation for "${payload.medicineName}" to admin ${adminWhatsapp}.`);
     } catch (sendErr: any) {
@@ -388,4 +433,81 @@ ${matchBlock}${contextBlock}
   }
 }
 
-export const waAdminEscalationService = { maybeEscalate, notifyAdminOfUnprocessedMedia, resolveAdminWhatsappNumber };
+interface NonAllopathicNotePayload {
+  customer: { id: number; name: string; phone: string } | null;
+  medicineName: string;
+  productKind: string;
+  quantity?: number;
+  unit?: string;
+  messageBody?: string;
+  source: 'text' | 'ocr' | 'both';
+  msgId?: string;
+  phone?: string;
+  chatId?: string;
+  imagePath?: string;
+}
+
+/**
+ * Short one-line owner note for cosmetic / ayurvedic / homeopathy requests
+ * (owner decision 2026-08): the pipeline deliberately skipped Pharmarack
+ * searches for these — the note keeps every request visible on WhatsApp
+ * without burning search budget or shortage tracking. Same guards as
+ * maybeEscalate: wa_auto_share_admin toggle, admin-number resolution,
+ * self-send guard and the 24h per-customer+medicine dedupe.
+ */
+export async function notifyAdminOfNonAllopathic(payload: NonAllopathicNotePayload): Promise<void> {
+  try {
+    const db = await dbManager.getConnection();
+    const guard = await escalateGuard(db, payload.phone || payload.customer?.phone, payload.customer?.phone);
+    if (!guard) return;
+    const adminWhatsapp = guard.adminWhatsapp;
+
+    const customerPhoneRaw = payload.phone || payload.customer?.phone || '';
+    if (!customerPhoneRaw) return;
+
+    // Same dedupe key space as real escalations so a repeat ask within 24h
+    // never re-pings the owner.
+    const medicineKey = payload.medicineName.toLowerCase().trim();
+    const msgId = payload.msgId || '';
+    const dup = await db.get(
+      `SELECT 1 FROM wa_admin_escalations
+       WHERE status != 'failed' AND medicine_key = ?
+         AND ( (msg_id = ? AND msg_id != '')
+            OR (customer_phone = ? AND created_at > datetime('now','-24 hours')) )
+       LIMIT 1`,
+      [medicineKey, msgId, customerPhoneRaw]
+    );
+    if (dup) return;
+
+    await db.run(
+      `INSERT INTO wa_admin_escalations (msg_id, customer_phone, medicine_key, outcome, status)
+       VALUES (?, ?, ?, 'non_allopathic', 'pending')`,
+      [msgId, customerPhoneRaw, medicineKey]
+    );
+
+    const { display: displayPhone, waDigits } = await resolvePhone(db, customerPhoneRaw, payload.chatId, payload.customer?.phone);
+    const phoneLine = waDigits ? `${displayPhone} — https://wa.me/${waDigits}` : displayPhone;
+    const kindLabel = String(payload.productKind || 'non-allopathic').toUpperCase();
+    const kindEmoji = kindLabel === 'AYURVEDIC' ? '🌿' : kindLabel === 'HOMEOPATHY' ? '💧' : '🧴';
+
+    const messageText = `${kindEmoji} *Non-Allopathic Request* (${kindLabel})
+
+👤 ${payload.customer?.name || 'Customer'}
+📞 ${phoneLine}
+📝 *Original*: "${payload.messageBody || 'N/A'}"
+
+💊 *Asked for*: ${payload.medicineName}${payload.quantity ? ` × ${payload.quantity}${payload.unit ? ` ${payload.unit}` : ''}` : ''}
+ℹ️ Pharmarack search skipped — not an allopathic medicine.`;
+
+    try {
+      await whatsappQueueWorker.enqueue(adminWhatsapp, messageText, 'admin_escalation_non_allopathic', 'Admin / Store Owner', undefined, payload.imagePath);
+      console.log(`[Admin Escalation] Non-allopathic note sent for "${payload.medicineName}" (${kindLabel}).`);
+    } catch (sendErr: any) {
+      console.error('[Admin Escalation] Failed to enqueue non-allopathic note:', sendErr);
+    }
+  } catch (err) {
+    console.error('[Admin Escalation] Error in notifyAdminOfNonAllopathic:', err);
+  }
+}
+
+export const waAdminEscalationService = { maybeEscalate, notifyAdminOfUnprocessedMedia, resolveAdminWhatsappNumber, notifyAdminOfNonAllopathic };

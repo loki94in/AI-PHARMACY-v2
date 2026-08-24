@@ -232,6 +232,19 @@ class DatabaseManager {
           import('../routes/inventory.js')
             .then(m => m.invalidateInventoryCountCache())
             .catch(() => {});
+          // Investigation timeline cache: any transactional write (sales,
+          // purchases, returns, inventory) invalidates cached ledger pages so
+          // the next fetch recomputes with fresh data instead of serving a
+          // stale 60s entry after a stock-affecting change.
+          import('../routes/investigation.js')
+            .then(m => m.invalidateInvestigationTimelineCache())
+            .catch(() => {});
+          import('../services/nonMovingReportService.js')
+            .then(m => m.invalidateNonMovingReportCache())
+            .catch(() => {});
+          import('../routes/reports.js')
+            .then(m => m.invalidateReportsSummaryCache())
+            .catch(() => {});
         }
       }
       return originalRun(sql, ...params);

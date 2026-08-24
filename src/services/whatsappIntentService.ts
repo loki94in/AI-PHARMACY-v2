@@ -56,6 +56,9 @@ export async function downloadMediaWithRetry(
     } catch (err) {
       lastErr = err;
     }
+    // Per-attempt visibility: silent retries made media failures undiagnosable
+    // (the surfaced error was often a bare minified token like "r").
+    console.warn(`[Intent Service] Media download attempt ${attempt}/${maxAttempts} failed:`, lastErr instanceof Error ? lastErr.message : lastErr);
     if (attempt < maxAttempts) {
       await sleep(delayMs);
     }
@@ -317,10 +320,52 @@ export async function handleInbound(msg: any): Promise<void> {
     // 5. MEDIA CHECK — if has image, queue for OCR
     if (hasMedia) {
       try {
-        // whatsapp-web.js's downloadMedia() is commonly not ready the instant
-        // the event fires (decryption keys not yet available, especially for
-        // @lid-addressed chats) — retry before giving up.
-        const media = await downloadMediaWithRetry(() => msg.downloadMedia());
+        // Media decryption requires a READY client. Images arriving during the
+        // boot session-restore window (T+45s+) or right after an idle-sleep
+        // wake fail every early attempt — join the single-flight restore with
+        // a bounded wait instead of burning the retry budget uselessly.
+        const waClient = await import('../whatsappClient.js');
+        const waStatus = await waClient.getWhatsAppStatus();
+        if (!waStatus.isReady) {
+          console.log(`[Intent Service] Image arrived before WhatsApp was ready (initializing=${waStatus.initializing}, sleeping=${waStatus.sleeping}) — waiting for session restore before download...`);
+          await waClient.waitForWhatsAppReady(60_000);
+        }
+        // Late decryption keys are common for @lid chats / big photos — give
+        // the download itself a wider bounded budget (3 × 1.5s) before the
+        // deeper fallbacks below.
+        const serializedId = typeof msg?.id?._serialized === 'string' ? msg.id._serialized : '';
+        const downloadErrors: string[] = [];
+        let media: { data?: string } | undefined;
+        try {
+          media = await downloadMediaWithRetry(() => msg.downloadMedia(), { maxAttempts: 3, delayMs: 1500 });
+        } catch (primaryErr) {
+          const pMsg = primaryErr instanceof Error ? primaryErr.message : String(primaryErr);
+          downloadErrors.push(`direct: ${pMsg}`);
+          console.warn(`[Intent Service] Direct downloadMedia failed (${pMsg}) — hydrating chat store and retrying...`);
+          // Step A: event objects on @lid chats often lack the chat's decrypt
+          // roster until the chat itself is hydrated in the store.
+          try { await msg.getChat?.(); } catch { /* hydration is best-effort */ }
+          try {
+            media = await downloadMediaWithRetry(() => msg.downloadMedia(), { maxAttempts: 2, delayMs: 1500 });
+          } catch (hydrateErr) {
+            const hMsg = hydrateErr instanceof Error ? hydrateErr.message : String(hydrateErr);
+            downloadErrors.push(`hydrated: ${hMsg}`);
+            // Step B (last resort): a FRESH instance re-hydrated from the
+            // client store by id downloads even when the event object cannot.
+            if (serializedId) {
+              console.warn('[Intent Service] Hydrated retry failed — trying store-fresh getMessageById copy...');
+              try {
+                media = await waClient.downloadMessageMediaById(serializedId);
+                if (!media?.data) downloadErrors.push('store-fresh: no data');
+              } catch (freshErr) {
+                downloadErrors.push(`store-fresh: ${freshErr instanceof Error ? freshErr.message : String(freshErr)}`);
+              }
+            }
+          }
+        }
+        if (!media?.data) {
+          throw new Error(downloadErrors.join(' | ') || 'downloadMedia returned no data');
+        }
         if (media?.data) {
           const buffer = Buffer.from(media.data, 'base64');
           let imagePath: string | undefined;
@@ -334,12 +379,13 @@ export async function handleInbound(msg: any): Promise<void> {
         }
       } catch (mediaErr) {
         console.error('[Intent Service] Failed to download media after retries:', mediaErr);
+        const downloadDetail = mediaErr instanceof Error ? mediaErr.message : String(mediaErr);
         try {
           const db = await dbManager.getConnection();
           await waAdminEscalationService.notifyAdminOfUnprocessedMedia(db, {
             phone,
             chatId,
-            reason: 'Received an image from this customer but could not download it after 3 attempts.'
+            reason: `Received an image from this customer but could not download it after repeated attempts (${downloadDetail.slice(0, 140)}).`
           });
         } catch (notifyErr) {
           console.error('[Intent Service] Failed to notify admin of media download failure:', notifyErr);
@@ -473,6 +519,10 @@ async function searchAndBroadcast(opts: {
   chatId?: string;
   hasIntentWords?: boolean;
   imagePath?: string;
+  // One-photo-one-result (owner rule): extra medicines seen on the shared
+  // strip / caption, already resolved LOCAL-ONLY by resolveRelatedMedicinesLocal.
+  // They ride along on the primary card + owner message — zero extra network.
+  relatedMedicines?: Array<{ name: string; registered: boolean; inventoryStock: number }>;
 }): Promise<void> {
   const { medicineName, quantity, unit, customer, isNewCustomer, messageBody, source, dosageForm, mrp, msgId, phone, chatId, imagePath } = opts;
   const hasIntentWords = !!opts.hasIntentWords;
@@ -527,7 +577,24 @@ async function searchAndBroadcast(opts: {
       confidence: Math.round((filterResult.topScore ?? 0) * 100),
       source,
       messageBody,
+      mediaId: msgId || null,
+      relatedMedicines: opts.relatedMedicines || [],
     });
+    // Owner still gets a short one-line note (owner decision) so every
+    // request is visible on WhatsApp — without any Pharmarack spend.
+    waAdminEscalationService.notifyAdminOfNonAllopathic({
+      customer,
+      medicineName,
+      productKind: nonAllopathicKind,
+      quantity,
+      unit,
+      messageBody,
+      source,
+      msgId,
+      phone,
+      chatId,
+      imagePath,
+    }).catch(err => console.error('[Intent Service] Non-allopathic admin note failed:', err));
     return;
   }
 
@@ -639,7 +706,9 @@ async function searchAndBroadcast(opts: {
     source,
     messageBody,
     history,
-    livePharmarackResults
+    livePharmarackResults,
+    mediaId: msgId || null,
+    relatedMedicines: opts.relatedMedicines || []
   });
 
   // Fire-and-forget escalation logic
@@ -662,7 +731,9 @@ async function searchAndBroadcast(opts: {
     msgId,
     phone,
     chatId,
-    context
+    context,
+    relatedMedicines: opts.relatedMedicines,
+    imagePath
   }).catch(err => console.error('[Intent Service] Admin escalation failed:', err));
 
   // Track pending shortage request for >23 hour admin reminder if local stock
@@ -800,47 +871,95 @@ export function handleOcrComplete(data: any): void {
   Promise.all([
     lookupCustomer(phone),
     dbManager.getConnection().then(db => db.all('SELECT api FROM api_substances'))
-  ]).then(([customer, rows]) => {
+  ]).then(async ([customer, rows]) => {
     const knownApis = new Set(rows.map(r => (r.api || '').toLowerCase()));
     // Primary name first, then extra image/caption candidates — every one
     // independently through the V2 gate so a second product on a strip or a
     // caption medicine is found, while tickets/bills still get skipped whole.
     const allNames = [finalName, ...cappedExtras];
     const captionCandidates = extractMedicineCandidates(messageBody || '');
-    let anyIdentified = false;
+    const passingNames: string[] = [];
     for (const candName of allNames) {
       const decision = resolveOcrGateDecision(ocrRaw, candName, knownApis);
       if (decision === 'skip') continue;
       if (candName !== finalName) {
         console.log(`[Intent Service] OCR extra candidate identified: "${candName}" (chat=${chatId})`);
       }
-      anyIdentified = true;
-      const isPrimary = candName === finalName;
-      const captionHit = captionCandidates
-        .find(c => c.medicineName.toLowerCase() === candName.toLowerCase());
-      searchAndBroadcast({
-        medicineName: candName,
-        quantity: (isPrimary ? textParsed.quantity : captionHit?.quantity) || 1,
-        unit: (isPrimary ? textParsed.unit : captionHit?.unit) || '',
-        customer,
-        isNewCustomer: !customer,
-        messageBody: messageBody || '',
-        source: textParsed.medicineName ? 'both' : 'ocr',
-        dosageForm,
-        mrp: isPrimary ? mrp : undefined,
-        msgId,
-        phone,
-        chatId,
-        imagePath: isPrimary ? imagePath : undefined,
-        hasIntentWords: textParsed.rawIntentWords.length > 0
-      }).catch(err => console.error('[Intent Service] OCR post-search failed:', err));
+      passingNames.push(candName);
     }
-    if (!anyIdentified) {
+    if (passingNames.length === 0) {
       console.log(`[Intent Service] Scan gate (V2): skipped non-medicine image (name="${finalName}", chat=${chatId}).`);
+      return;
     }
+
+    // ONE-PHOTO-ONE-RESULT (owner rule): only the PRIMARY candidate runs the
+    // full pipeline — the single possible live Pharmarack search per photo.
+    // Extra medicines on the strip / caption are resolved LOCAL-ONLY and ride
+    // along as relatedMedicines on the primary card + owner WhatsApp message.
+    const relatedMedicines = await resolveRelatedMedicinesLocal(passingNames.slice(1));
+    const captionHit = captionCandidates
+      .find(c => c.medicineName.toLowerCase() === finalName.toLowerCase());
+    searchAndBroadcast({
+      medicineName: finalName,
+      quantity: textParsed.quantity || captionHit?.quantity || 1,
+      unit: textParsed.unit || captionHit?.unit || '',
+      customer,
+      isNewCustomer: !customer,
+      messageBody: messageBody || '',
+      source: textParsed.medicineName ? 'both' : 'ocr',
+      dosageForm,
+      mrp,
+      msgId,
+      phone,
+      chatId,
+      imagePath,
+      hasIntentWords: textParsed.rawIntentWords.length > 0,
+      relatedMedicines
+    }).catch(err => console.error('[Intent Service] OCR post-search failed:', err));
   }).catch(err => {
     console.error('[Intent Service] Error in handleOcrComplete lookup:', err);
   });
+}
+
+interface RelatedMedicineInfo { name: string; registered: boolean; inventoryStock: number }
+
+/**
+ * Local-only resolution for extra photo candidates (one-photo-one-result).
+ * Uses the local FTS/fuzzy matcher + the batched shelf-stock query ONLY —
+ * never the catalog/live Pharmarack paths, so one photo can never fan out
+ * into multiple external searches. Failures degrade to "not registered".
+ */
+async function resolveRelatedMedicinesLocal(names: string[]): Promise<RelatedMedicineInfo[]> {
+  if (names.length === 0) return [];
+  const results: RelatedMedicineInfo[] = [];
+  try {
+    const db = await dbManager.getConnection();
+    for (const name of names) {
+      try {
+        const fr = await productNameFilterService.filterProductNames(name, { minConfidenceThreshold: 0.6 });
+        const matches: string[] = Array.isArray(fr.matches) ? fr.matches : [];
+        if (matches.length === 0) {
+          results.push({ name, registered: false, inventoryStock: 0 });
+          continue;
+        }
+        let stock: Record<string, number> = {};
+        try {
+          stock = await resolveInventoryStock(matches.slice(0, 3), db);
+        } catch { /* stock stays empty → reported as 0 on shelf */ }
+        const best = matches[0];
+        results.push({
+          name: best,
+          registered: true,
+          inventoryStock: stock[String(best).toLowerCase()] ?? 0,
+        });
+      } catch {
+        results.push({ name, registered: false, inventoryStock: 0 });
+      }
+    }
+  } catch (err) {
+    console.warn('[Intent Service] Related-medicine local resolution failed:', err);
+  }
+  return results;
 }
 
 export const whatsappIntentService = { handleInbound, handleOcrComplete, searchAndBroadcast };
