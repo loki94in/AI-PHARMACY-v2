@@ -902,7 +902,7 @@ export async function destroyClient(): Promise<void> {
     try {
       await Promise.race([
         activeClient.destroy(),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('client.destroy() timed out')), 5000))
+        new Promise((_, reject) => setTimeout(() => reject(new Error('client.destroy() timed out')), 15000))
       ]);
     } catch (err) {
       console.error('[WhatsApp] Error destroying client:', err);
@@ -926,7 +926,7 @@ export async function forceReconnect(): Promise<void> {
     try {
       await Promise.race([
         activeClient.destroy(),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('client.destroy() timed out')), 5000))
+        new Promise((_, reject) => setTimeout(() => reject(new Error('client.destroy() timed out')), 15000))
       ]);
     } catch (err) {
       console.error('[WhatsApp] Error destroying client (non-fatal):', err);
