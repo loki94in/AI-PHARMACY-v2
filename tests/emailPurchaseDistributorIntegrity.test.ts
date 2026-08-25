@@ -12,7 +12,18 @@ jest.unstable_mockModule('../src/whatsappClient.js', () => ({
   shouldRouteToBusiness: jest.fn(() => Promise.resolve(false)),
   isPuppeteerDetachedError: jest.fn(() => false),
   hasSavedSession: jest.fn(() => false),
-  getWhatsAppStatus: jest.fn(() => Promise.resolve({ isReady: false, initializing: false }))
+  getWhatsAppStatus: jest.fn(() => Promise.resolve({ isReady: false, initializing: false })),
+  markWhatsAppActivity: jest.fn(),
+  isWhatsAppExplicitlyDisabled: jest.fn(() => Promise.resolve(false)),
+  setCurrentQr: jest.fn(),
+  setIsReady: jest.fn(),
+  reconnectClient: jest.fn(() => Promise.resolve(undefined)),
+  hashMessageBody: jest.fn((b: any) => String(b ?? '').length),
+  normalizeWhatsAppPhone: jest.fn((p: string) => p ? String(p).replace(/\D/g, '') : ''),
+  getChats: jest.fn(() => Promise.resolve([])),
+  getChatMessages: jest.fn(() => Promise.resolve([])),
+  getMessageMedia: jest.fn(() => Promise.resolve({ mimetype: 'image/jpeg', data: '' })),
+  downloadMessageMediaById: jest.fn(() => Promise.resolve(undefined))
 }));
 
 jest.unstable_mockModule('../src/telegramBot.js', () => ({
@@ -53,6 +64,11 @@ describe('Email Purchase Distributor Integrity Tests', () => {
     await db.run(
       'INSERT INTO distributors (id, name, email) VALUES (20, "Nitin Agency", "billing@nitinagency.com")'
     );
+    // Strict purchase-resolution contract: staged item names must exist in the
+    // master before approve.
+    await db.run(`INSERT INTO medicines (name) VALUES ('Cetirizine 10mg')`);
+    await db.run(`INSERT INTO medicines (name) VALUES ('Pantoprazole 40mg')`);
+    await db.run(`INSERT INTO medicines (name) VALUES ('Amoxicillin 500mg')`);
 
     // Seed test emails:
     // Email 101: Known distributor by email

@@ -56,7 +56,11 @@ router.post('/', async (req, res) => {
   if (!key) return res.status(400).json({ error: 'key required' });
   try {
     const db = await dbManager.getConnection();
-    const saveValue = key === 'pharmarack_mode' ? 'Live' : (value ?? '');
+    let saveValue = key === 'pharmarack_mode' ? 'Live' : (value ?? '');
+    // Same PBKDF2 guard as POST /save — a plaintext admin_password must never land in app_settings.
+    if (key === 'admin_password' && saveValue && !String(saveValue).startsWith('pbkdf2:')) {
+      saveValue = hashPassword(String(saveValue));
+    }
     await db.run('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)', [key, saveValue]);
 
     if (key === 'pharmarack_reorder_window_months') {
@@ -95,7 +99,11 @@ router.post('/save-single', async (req, res) => {
   if (!key) return res.status(400).json({ error: 'key required' });
   try {
     const db = await dbManager.getConnection();
-    const saveValue = key === 'pharmarack_mode' ? 'Live' : (value ?? '');
+    let saveValue = key === 'pharmarack_mode' ? 'Live' : (value ?? '');
+    // Same PBKDF2 guard as POST /save — a plaintext admin_password must never land in app_settings.
+    if (key === 'admin_password' && saveValue && !String(saveValue).startsWith('pbkdf2:')) {
+      saveValue = hashPassword(String(saveValue));
+    }
     await db.run('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)', [key, saveValue]);
 
     if (key === 'pharmarack_reorder_window_months') {

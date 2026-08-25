@@ -3,12 +3,26 @@ import { jest } from '@jest/globals';
 // Mock WhatsApp dependency BEFORE any other imports that might cause it to be loaded
 jest.unstable_mockModule('../src/whatsappClient.js', () => ({
   __esModule: true,
-  sendMessage: jest.fn(() => Promise.resolve(true)),
+  sendMessage: jest.fn(() => Promise.resolve({ sent: true })),
   initClient: jest.fn(() => Promise.resolve(true)),
-  getWhatsAppStatus: jest.fn(() => Promise.resolve({ isConnected: true, status: 'CONNECTED' })),
+  getWhatsAppStatus: jest.fn(() => Promise.resolve({ isConnected: true, isReady: true, sleeping: false, initializing: false, status: 'CONNECTED' })),
   shouldRouteToBusiness: jest.fn(() => false),
   hashMessageBody: jest.fn(() => 'mock-hash'),
-  normalizeWhatsAppPhone: jest.fn((p: string) => p ? String(p).replace(/\D/g, '') : '')
+  normalizeWhatsAppPhone: jest.fn((p: string) => p ? String(p).replace(/\D/g, '') : ''),
+  hasSavedSession: jest.fn(() => true),
+  waitForWhatsAppReady: jest.fn(() => Promise.resolve(true)),
+  markWhatsAppActivity: jest.fn(),
+  isWhatsAppExplicitlyDisabled: jest.fn(() => Promise.resolve(false)),
+  isPuppeteerDetachedError: jest.fn(() => false),
+  setCurrentQr: jest.fn(),
+  setIsReady: jest.fn(),
+  destroyClient: jest.fn(() => Promise.resolve(undefined)),
+  forceReconnect: jest.fn(() => Promise.resolve(undefined)),
+  reconnectClient: jest.fn(() => Promise.resolve(undefined)),
+  getChats: jest.fn(() => Promise.resolve([])),
+  getChatMessages: jest.fn(() => Promise.resolve([])),
+  getMessageMedia: jest.fn(() => Promise.resolve({ mimetype: 'image/jpeg', data: '' })),
+  downloadMessageMediaById: jest.fn(() => Promise.resolve(undefined))
 }));
 
 import request from 'supertest';
@@ -117,10 +131,19 @@ describe('Smart Auto Reminder & Communication Center APIs', () => {
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
 
-    // Give the async queue process time to run
-    await new Promise(resolve => setTimeout(resolve, 200));
+    // Give the async queue process time to run (poll instead of a fixed sleep so the
+    // assertion stays reliable under parallel-test CPU load)
+    await new Promise<void>(resolve => {
+      const started = Date.now();
+      const poll = () => {
+        if (mockSendMessage.mock.calls.length > 0 || Date.now() - started > 5000) resolve();
+        else setTimeout(poll, 50);
+      };
+      poll();
+    });
 
-    expect(mockSendMessage).toHaveBeenCalledWith('919999999999', undefined, 'Time for refill!');
+    // Queue-worker dispatch signature: sendMessage(number, mediaUrl|undefined, message, file|undefined)
+    expect(mockSendMessage).toHaveBeenCalledWith('919999999999', undefined, 'Time for refill!', undefined);
 
     // Query DB to verify status is updated
     const { open } = await import('sqlite');
@@ -203,11 +226,20 @@ describe('Smart Auto Reminder & Communication Center APIs', () => {
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
 
-    // Verify WhatsApp was called
+    // Verify WhatsApp was called (queue-worker drain is async — poll up to 5s)
+    await new Promise<void>(resolve => {
+      const started = Date.now();
+      const poll = () => {
+        if (mockSendMessage.mock.calls.length > 0 || Date.now() - started > 5000) resolve();
+        else setTimeout(poll, 50);
+      };
+      poll();
+    });
     expect(mockSendMessage).toHaveBeenCalledWith(
       '917777777777',
       undefined,
-      expect.stringContaining('Jane Doe')
+      expect.stringContaining('Jane Doe'),
+      undefined
     );
 
     // Check DB for new log entry

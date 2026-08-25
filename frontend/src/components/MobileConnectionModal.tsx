@@ -142,7 +142,7 @@ export const MobileConnectionModal: React.FC<Props> = ({ onClose }) => {
       />
       
       {/* Modal Content */}
-      <div className="relative bg-[#18181b] border border-glass-border rounded-2xl w-full max-w-lg flex flex-col shadow-2xl overflow-hidden slide-up max-h-[90vh]">
+      <div className="relative bg-glass-bg border border-glass-border rounded-2xl w-full max-w-lg flex flex-col shadow-2xl overflow-hidden slide-up max-h-[90vh]">
         {/* Header */}
         <div className="p-5 border-b border-glass-border bg-white/5 flex justify-between items-center shrink-0">
           <div className="flex items-center gap-3">
@@ -214,7 +214,7 @@ export const MobileConnectionModal: React.FC<Props> = ({ onClose }) => {
                                 <Smartphone size={18} />
                               </div>
                               <span
-                                className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-[#18181b] ${
+                                className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-transparent ${
                                   isOnline ? 'bg-emerald-500' : 'bg-rose-500'
                                 }`}
                               />

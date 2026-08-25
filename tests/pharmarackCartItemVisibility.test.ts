@@ -4,7 +4,25 @@ const mockSendMessage = jest.fn((..._args: any[]) => Promise.resolve(true));
 jest.unstable_mockModule('../src/whatsappClient.js', () => ({
   __esModule: true,
   sendMessage: mockSendMessage,
-  initClient: jest.fn(() => Promise.resolve(true))
+  initClient: jest.fn(() => Promise.resolve(true)),
+  hasSavedSession: jest.fn(() => true),
+  waitForWhatsAppReady: jest.fn(() => Promise.resolve(true)),
+  markWhatsAppActivity: jest.fn(),
+  getWhatsAppStatus: jest.fn(() => Promise.resolve({ isConnected: true, isReady: true, status: 'CONNECTED' })),
+  shouldRouteToBusiness: jest.fn(() => false),
+  isWhatsAppExplicitlyDisabled: jest.fn(() => Promise.resolve(false)),
+  isPuppeteerDetachedError: jest.fn(() => false),
+  hashMessageBody: jest.fn((b: any) => String(b ?? '').length),
+  normalizeWhatsAppPhone: jest.fn((p: string) => p ? String(p).replace(/\D/g, '') : ''),
+  setCurrentQr: jest.fn(),
+  setIsReady: jest.fn(),
+  destroyClient: jest.fn(() => Promise.resolve(undefined)),
+  forceReconnect: jest.fn(() => Promise.resolve(undefined)),
+  reconnectClient: jest.fn(() => Promise.resolve(undefined)),
+  getChats: jest.fn(() => Promise.resolve([])),
+  getChatMessages: jest.fn(() => Promise.resolve([])),
+  getMessageMedia: jest.fn(() => Promise.resolve({ mimetype: 'image/jpeg', data: '' })),
+  downloadMessageMediaById: jest.fn(() => Promise.resolve(undefined))
 }));
 
 import fs from 'fs';

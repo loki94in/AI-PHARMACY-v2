@@ -35,6 +35,15 @@ describe('inventoryParser', () => {
 
         // Ensure the database schema matches the production schema
         await ensureSchema(TEST_DB_PATH);
+
+        // Strict migration contract: legacy stock lines resolve against the medicines
+        // master and are SKIPPED (audited) when the id is unknown — register the ids
+        // the fixtures use, exactly like a real migration runs after master import.
+        await db.run(`INSERT INTO medicines (id, name) VALUES (101, 'Legacy Medicine 101')`);
+        await db.run(`INSERT INTO medicines (id, name) VALUES (202, 'Legacy Medicine 202')`);
+        await db.run(`INSERT INTO medicines (id, name) VALUES (303, 'Legacy Medicine 303')`);
+        await db.run(`INSERT INTO medicines (id, name) VALUES (404, 'Legacy Medicine 404')`);
+        await db.run(`INSERT INTO medicines (id, name) VALUES (505, 'Legacy Medicine 505')`);
     });
 
     afterAll(async () => {

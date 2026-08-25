@@ -15,6 +15,7 @@ import { dbManager } from './database/connection.js';
 import { ensureSchema } from './database.js';
 import { registerProcessGuardian } from './process/processGuardian.js';
 import { activityTracker } from './utils/activityTracker.js';
+import { runHeavyJob } from './utils/backgroundJobLane.js';
 import { getBackendFetchMode } from './services/dataFetchControl.js';
 import { config, getAppDataDir, isPackagedApp } from './config/index.js';
 
@@ -784,13 +785,17 @@ async function setupCrons(db: any) {
   }
 
   // Pharmarack daily batch dispatch: runs every minute during the 11 AM hour.
-  cron.schedule('* 11 * * *', async () => {
-    try {
-      const { tryDailySend } = await import('./services/pharmarackDailyDispatchService.js');
-      await tryDailySend();
-    } catch (err) {
-      console.error('[PharmarackBatch] 11AM cron error:', err);
-    }
+  // Lane-routed (2026-08): this minute-tick colliding with other jobs caused
+  // node-cron "missed execution" warnings — heavy jobs must never run concurrently.
+  cron.schedule('* 11 * * *', () => {
+    void runHeavyJob('pharmarack_daily_dispatch', async () => {
+      try {
+        const { tryDailySend } = await import('./services/pharmarackDailyDispatchService.js');
+        await tryDailySend();
+      } catch (err) {
+        console.error('[PharmarackBatch] 11AM cron error:', err);
+      }
+    });
   });
 
   // Register OCR completion listener for WhatsApp intent service

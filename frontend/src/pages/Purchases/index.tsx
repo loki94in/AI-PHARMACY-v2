@@ -3283,7 +3283,7 @@ const Purchases: React.FC = () => {
             const hasOriginalName = items.some(i => Boolean(i.original_name && i.original_name.trim() !== ''));
             return (
               <table className="w-full">
-                <thead className="sticky top-0 z-20 bg-[#18181b]/95 backdrop-blur-sm shadow-sm">
+                <thead className="sticky top-0 z-20 bg-glass-bg backdrop-blur-sm shadow-sm">
                   <tr className="text-left text-gray-300 border-b border-white/20">
                     <th className="pb-3">
                       <button
@@ -3842,7 +3842,7 @@ const Purchases: React.FC = () => {
                     )}
                     {item.medicine_name && (
                       <div className="absolute z-dropdown top-full left-0 mt-2 hidden group-hover/btn:block min-w-[320px]">
-                        <div className="bg-gray-900 border border-blue-500 rounded-lg p-2 shadow-xl">
+                        <div className="bg-bg3 border border-blue-500/50 rounded-lg p-2 shadow-xl">
                           <HoverPriceIntelTable
                             medicineName={item.medicine_name}
                             records={historyRowsAsPriceRecords(getCachedMedicineHistory(item.medicine_id, selectedDistributor))}
@@ -3885,7 +3885,7 @@ const Purchases: React.FC = () => {
                     })()}
                     {item.medicine_name && (
                       <div className="absolute z-dropdown top-full left-0 mt-2 hidden group-hover/btn:block min-w-[320px]">
-                        <div className="bg-gray-900 border border-purple-500 rounded-lg p-2 shadow-xl">
+                        <div className="bg-bg3 border border-purple-500/50 rounded-lg p-2 shadow-xl">
                           {hoveredPriceRow === item.id && (
                             <HoverPriceIntelTable
                               medicineName={item.medicine_name}
@@ -4094,20 +4094,20 @@ const Purchases: React.FC = () => {
       {/* Upload Modal */}
       {showUploadModal && createPortal(
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-modal">
-          <div className="bg-gray-800 rounded-xl p-6 w-full max-w-md">
-            <h3 className="text-lg font-semibold text-white mb-4">Upload or Capture Invoice</h3>
-            <p className="text-gray-400 mb-4">Upload PDF, CSV, Excel, ZIP, DAV, DAC, or Image scans. You can also capture a window (like Word or an email) using the Screen Capture button.</p>
+          <div className="bg-bg2 border border-border rounded-xl p-6 w-full max-w-md">
+            <h3 className="text-lg font-semibold text-text mb-4">Upload or Capture Invoice</h3>
+            <p className="text-muted mb-4">Upload PDF, CSV, Excel, ZIP, DAV, DAC, or Image scans. You can also capture a window (like Word or an email) using the Screen Capture button.</p>
             
             <div className="flex flex-col gap-4 mb-4">
               <input
                 type="file"
                 accept=".pdf,.csv,.xlsx,.xls,.zip,.dav,.dac,image/*"
                 onChange={(e) => setUploadedFile(e.target.files?.[0] || null)}
-                className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white"
+                className="w-full bg-bg3 border border-border rounded-lg px-4 py-2 text-text"
               />
               
               <div className="flex items-center gap-2">
-                <span className="text-gray-400 text-sm">OR</span>
+                <span className="text-muted text-sm">OR</span>
                 <button
                   onClick={captureScreen}
                   className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg text-sm flex items-center gap-2"
@@ -4119,9 +4119,9 @@ const Purchases: React.FC = () => {
               </div>
 
               {uploadedFile && (
-                <div className="bg-white/5 border border-white/10 p-2 rounded text-sm text-green-400 flex justify-between items-center">
+                <div className="bg-emerald-500/10 border border-emerald-500/20 p-2 rounded text-sm text-emerald-400 flex justify-between items-center">
                   <span className="truncate max-w-[250px]">{uploadedFile.name}</span>
-                  <button onClick={() => setUploadedFile(null)} className="text-red-400 hover:text-red-300 ml-2">✕</button>
+                  <button onClick={() => setUploadedFile(null)} className="hover:text-red ml-2">✕</button>
                 </div>
               )}
             </div>
@@ -4129,7 +4129,7 @@ const Purchases: React.FC = () => {
             <div className="flex justify-end gap-3">
               <button
                 onClick={() => { setShowUploadModal(false); setUploadedFile(null); }}
-                className="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg"
+                className="border border-border text-muted hover:text-text hover:bg-bg3 px-4 py-2 rounded-lg transition-colors"
               >
                 Cancel
               </button>
@@ -4149,17 +4149,17 @@ const Purchases: React.FC = () => {
       {/* Add/Edit Distributor Modal */}
       {showDistributorModal && createPortal(
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-modal flex items-center justify-center p-4 animate-in fade-in">
-          <div className="bg-gray-900 border border-white/10 rounded-xl p-6 w-full max-w-md shadow-2xl">
-            <h3 className="text-lg font-semibold text-white mb-4">{editDistributorId ? 'Edit Distributor' : 'Add New Distributor'}</h3>
+          <div className="bg-bg2 border border-border rounded-xl p-6 w-full max-w-md shadow-2xl">
+            <h3 className="text-lg font-semibold text-text mb-4">{editDistributorId ? 'Edit Distributor' : 'Add New Distributor'}</h3>
             
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">Name *</label>
+                <label className="block text-sm font-medium text-muted mb-2">Name *</label>
                 <input
                   type="text"
                   value={newDistributor.name}
                   onChange={(e) => setNewDistributor({ ...newDistributor, name: e.target.value })}
-                  className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full bg-bg3 border border-border rounded-lg px-4 py-2 text-text focus:outline-none focus:border-primary/50"
                   placeholder="Distributor name"
                 />
               </div>
@@ -4174,33 +4174,33 @@ const Purchases: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">Email (Optional)</label>
+                <label className="block text-sm font-medium text-muted mb-2">Email (Optional)</label>
                 <input
                   type="email"
                   value={newDistributor.email}
                   onChange={(e) => setNewDistributor({ ...newDistributor, email: e.target.value })}
-                  className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full bg-bg3 border border-border rounded-lg px-4 py-2 text-text focus:outline-none focus:border-primary/50"
                   placeholder="distributor@example.com"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">Address (Optional)</label>
+                <label className="block text-sm font-medium text-muted mb-2">Address (Optional)</label>
                 <textarea
                   value={newDistributor.address}
                   onChange={(e) => setNewDistributor({ ...newDistributor, address: e.target.value })}
-                  className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full bg-bg3 border border-border rounded-lg px-4 py-2 text-text focus:outline-none focus:border-primary/50"
                   placeholder="Full address"
                   rows={3}
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">State Code (Optional)</label>
+                <label className="block text-sm font-medium text-muted mb-2">State Code (Optional)</label>
                 <select
                   value={newDistributor.state_code}
                   onChange={(e) => setNewDistributor({ ...newDistributor, state_code: e.target.value })}
-                  className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full bg-bg3 border border-border rounded-lg px-4 py-2 text-text focus:outline-none focus:border-primary/50"
                 >
                   <option value="">Select State Code (Optional)</option>
                   {INDIAN_STATE_CODES.sort((a, b) => a.name.localeCompare(b.name)).map((state) => (
@@ -4229,7 +4229,7 @@ const Purchases: React.FC = () => {
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => setShowDistributorModal(false)}
-                  className="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg text-xs font-bold"
+                  className="border border-border text-muted hover:text-text hover:bg-bg3 px-4 py-2 rounded-lg text-xs font-bold transition-colors"
                 >
                   Cancel
                 </button>
@@ -4249,7 +4249,7 @@ const Purchases: React.FC = () => {
 
       {/* Sliding Details Drawer for OpenFDA Enrichment */}
       {createPortal(
-        <div className={`fixed top-0 right-0 h-full w-full max-w-[450px] bg-[#121214]/95 backdrop-blur-xl border-l border-glass-border shadow-[-8px_0_30px_rgba(0,0,0,0.5)] transition-transform duration-300 ease-in-out z-drawer flex flex-col pt-16 ${panelOpen ? 'translate-x-0' : 'translate-x-full'}`}>
+        <div className={`fixed top-0 right-0 h-full w-full max-w-[450px] bg-glass-bg backdrop-blur-xl border-l border-glass-border shadow-[-8px_0_30px_rgba(0,0,0,0.5)] transition-transform duration-300 ease-in-out z-drawer flex flex-col pt-16 ${panelOpen ? 'translate-x-0' : 'translate-x-full'}`}>
           {selectedEnrichedItem && (
             <>
               {/* Header */}

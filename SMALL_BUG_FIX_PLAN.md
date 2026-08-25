@@ -7,6 +7,93 @@
 
 ## Fixed
 
+### [Fixed] S-01 — Single-key settings endpoints stored `admin_password` as plaintext (hashing only existed on the bulk `/save` path)
+
+| Field | Content |
+|-------|---------|
+| **What the user saw** | Nothing directly — found during the 2026-08-25 security/settings audit. `POST /settings/save` (the path the Settings UI uses) PBKDF2-hashes `admin_password`, but the sibling single-key endpoints `POST /settings/` and `POST /settings/save-single` wrote whatever they received verbatim, so any future/alternate caller would silently store a plaintext password (login kept working via `verifyPassword`'s legacy plaintext fallback, masking the mistake). |
+| **Root cause** | The hashing guard added to the bulk save was never mirrored onto the two single-key upsert handlers in `src/routes/settings.ts`. |
+| **How it was fixed** | Both handlers now apply the identical guard: if `key === 'admin_password'` and the value is non-empty and not already `pbkdf2:`, it is hashed with the shared `hashPassword` before the upsert. No API shape change; already-hashed values pass through untouched. |
+| **Priority** | P2 (defense-in-depth; server binds 127.0.0.1 so remote exposure is nil) |
+| **What not to touch** | `verifyPassword`'s legacy plaintext fallback must stay until a one-shot migration hashes existing rows — removing it now could lock out owners whose password predates hashing. Do not "mask secrets" in `GET /api/settings` without an owner decision: the Settings page pre-fills integration fields from it. |
+| **Verified by** | `npm run build` clean; `npm run guardrails` PASS; knowledge graph updated. |
+
+### [Fixed] P1-09 — Catalog pipeline crashed on every install: `catalog_jobs` table missing 12 columns the worker/routes require
+
+| Field | Content |
+|-------|---------|
+| **What the user saw** | Any catalog upload/OCR/review flow hit `SQLITE_ERROR: no such column: original_filename / mapping_config / matched_previous_job_id …`; job analysis flipped to `failed`. Present on fresh test DBs AND the long-lived live dev database. Surfaced by catalogPipeline/duplicateCatalog suites during the 2026-08-25 all-tests sweep. |
+| **Root cause** | `CREATE TABLE catalog_jobs` (database.ts) predates the OCR pipeline and only defines id/file_path/status/created_at, while `catalogWorker.ts` + `routes/catalog.ts` read/write 12 more columns (original_filename, extracted_data, mapping_config, data_filters, error_log, progress, total_count, processed_count, new_count, existing_count, duplicate_count, matched_previous_job_id, newly_detected_columns). Same silent-missing-columns class as the earlier stock_ledger bug. |
+| **How it was fixed** | All 12 columns added to the declarative guarded-ALTER list in `ensureSchema` (PRAGMA pre-checked, idempotent every boot) — fixes fresh installs AND upgrades existing databases with zero migration step. Verified by catalogPipeline (4/4) + duplicateCatalog (2/2) suites passing. |
+| **Priority** | P1 |
+| **What not to touch** | New catalog_jobs columns MUST be added to the alterStatements list, not just the CREATE block — installs upgrade in place. Never reference a new column in worker/route SQL without registering it there. |
+| **Verified by** | Full suite: 72/72 suites, 433/433 tests PASS parallel; `npm run build` clean; guardrails PASS. |
+
+### [Fixed] P2-08 — Corrupt/wrong phone numbers in special_orders (`@c.us@c.us` suffixes; arrival WhatsApp going to the wrong customer)
+
+| Field | Content |
+|-------|---------|
+| **What the user saw** | Walk-in WhatsApp orders stored phones like `919090636314@c.us@c.us`; order #36 ("NAKUL MANDAL 9074207738") carried ANOTHER customer's number, so its arrival messages were queued to 9130558910. |
+| **Root cause** | Three unclean write paths: `whatsappIntentService` copied chat-id-style phones into shortage requests, `shortageReminderService.createSpecialOrderFromShortage` inserted `customer_phone` raw into `special_orders.phone`, and `PUT /api/orders/:id` stored client-supplied phones without the digit-cleaning its sibling POST routes already had. |
+| **How it was fixed** | All three sites now normalize to digits-only (suffixes/formatting stripped; missing stays missing). One-shot idempotent `scripts/normalizeSpecialOrderPhones.mjs` cleans existing rows and extracts a 10-digit number embedded in the requester name when it contradicts the stored value (fixed #36 → 9074207738); empty stays empty, nothing invented, `--dry-run` supported. Run once 2026-08-25: 5 rows fixed, re-run reports 0 changes. |
+| **Priority** | P2 |
+| **What not to touch** | Never "invent" a phone for empty rows; the name-extraction only fires on EXACTLY one 10-digit run in the name. Don't add boot-time auto-migration (owner chose one-shot script). |
+| **Verified by** | Dry-run → real run → idempotency check (second dry-run: 0 changes); live DB query shows 0 remaining non-digit phones incl. #26/#36/#44/#57/#58 corrected; `npm run build` clean; guardrails PASS. |
+
+### [Fixed] P1-08 — "Mark Ready" from the CRM edit modal / status buttons silently skipped the customer's arrival WhatsApp
+
+| Field | Content |
+|-------|---------|
+| **What the user saw** | User clicked Mark Ready for a customer's order; order showed Ready but the customer never received the arrival WhatsApp (observed 2026-08-25). No error toast — pure silent miss. |
+| **Root cause** | Two click-paths mark orders Ready: Quick Assist uses `POST /orders/:id/status` which queues the arrival WhatsApp via `enqueueArrivalWhatsApp`, but the CRM Special-Orders panel (`frontend/src/pages/CRM/index.tsx` handleUpdateStatus + edit-modal save) calls the generic `PUT /api/orders/:id`, and that backend route saved status WITHOUT any WhatsApp logic. Also, when queueing failed server-side (e.g. boot window ~04:54 with client offline), the error was console-only. |
+| **How it was fixed** | `PUT /orders/:id` now runs the SAME idempotent helper when status becomes Ready and `notified !== 1` (same try/catch isolation), sets `notified=1` only on success, and returns `whatsapp_queued`. CRM handlers toast truthfully from that field ("arrival WhatsApp queued" vs "no arrival WhatsApp queued") per the existing Quick Assist toast contract. One send per order is preserved across ALL paths via the notified flag. |
+| **Priority** | P1 |
+| **What not to touch** | Do not bypass `enqueueArrivalWhatsApp` or reintroduce a second enqueue site; do NOT auto-dispatch from workers (Strict Manual-Only Patient Messaging Contract stands — this is still inside the user-clicked request). |
+| **Verified by** | `tests/specialOrderArrival.test.ts` + `tests/ordersNotifiedFlag.test.ts` 13/13 PASS; `npm run build` clean; guardrails PASS. |
+
+### [Fixed] P2-07 — Resend button on failed-message cards errored "Queue item not found"
+
+| Field | Content |
+|-------|---------|
+| **What the user saw** | A permanently-failed customer message shown from the failure log (card id ≥ 900000) could never be re-sent from the WhatsApp Queue popover — clicking Resend returned "Queue item not found". |
+| **Root cause** | `getWorkerState()` merges `automation_notifications` rows into the list as id `900000 + n.id` (and direct outbound messages as `800000 + hash`), but `POST /whatsapp/queue/items/:id/resend` only looked up `whatsapp_send_queue`, so mapped rows always 404'd. |
+| **How it was fixed** | The resend endpoint resolves its source in order: (1) real `whatsapp_send_queue` row, (2) `automation_notifications` row via `id − 900000`, (3) explicit `{number,message,targetName}` payload passed by the popover for hash-mapped direct rows. Phone normalized + ≥10-digit validated with an actionable error, message-presence checked, enqueued with `skipDedupe` + `forceNext` as before. |
+| **Priority** | P2 |
+| **What not to touch** | Keep `skipDedupe: true` — resends must never be suppressed by same-day dedupe. Failure-log rows are left as-is (they truthfully document the failure); the resend creates a NEW queue item. |
+| **Verified by** | Manual API-shape review; `npm run build` clean; frontend eslint/tsc clean; guardrails PASS. |
+
+### [Fixed] P3-08 — Received WhatsApp voice notes could not be deleted from the inbox
+
+| Field | Content |
+|-------|---------|
+| **What the user saw** | Voice notes (type `ptt`/`audio`) customers sent rendered as a generic "📁 Media Attachment" with a pointless OCR-scan button and no way to remove them. |
+| **Root cause** | No delete route existed for single `whatsapp_messages` rows (only bulk-by-chat cleanup inside toggle-ignore), and the chat bubble renderer never inspected `message.type`. |
+| **How it was fixed** | New `DELETE /messaging/chats/:chatId/messages/:messageId` (messaging.ts owns the inbox surface): removes the LOCAL cached row + best-effort media files (`data/inbound_media/<safeId>.jpg`, `<appData>/uploads/<msgId>*`) using the writers' exact sanitization; NEVER touches the sender's own WhatsApp copy. Frontend: received voice notes show a 🎤 label, no OCR button, and a trash affordance that deletes then filters local state with a truthful toast. |
+| **Priority** | P3 |
+| **What not to touch** | Deletion stays local-cache-only and user-clicked; do not attempt remote revoke/unsend via whatsapp-web.js. OCR scan button remains for image media only. |
+| **Verified by** | Route follows existing messaging.ts conventions; frontend tsc/eslint clean; guardrails PASS. |
+
+### [Fixed] P3-09 — Remaining raw solid backgrounds broke Day mode; dead `.light` shim layer retired
+
+| Field | Content |
+|-------|---------|
+| **What the user saw** | Scattered opaque surfaces ignored the theme: Purchases upload/distributor modals (gray-800/900 islands with white-on-neutral text), HoverPriceIntel popovers (bg-gray-900), BackupCenterModal zinc-800 buttons, Dispatch avatar chip + toggle track (zinc-800/700), CatalogUpload mapping modal forcing bg-zinc-950 over its own glass token, PhoneSales timeline node (zinc-600), plus sticky table headers/floating widgets/drawers painted raw `#18181b`/`#121214`. Several had NO light-mode shim at all (zinc-800/600). |
+| **How it was fixed** | Whole-app sweep: every raw solid swapped to semantic tokens (`bg-bg2/bg-bg3/glass-bg`, `text-text/text-muted`, `border-border`; accent fills keep `text-white` per the P2-05 exception; camera stage/QR tiles/print DOM untouched). Sources fixed at origin, then the now-dead `.light` gray/zinc/hex shim blocks were verified-unused (0 hits) and deleted from index.css. Toggle knobs/dots (micro-elements) deliberately left. |
+| **Priority** | P3 |
+| **What not to touch** | Sanctioned solids stay: AICamera video stage, QR/barcode white tiles, print portal whites, opacity scrims. Never reintroduce bare `bg-white/bg-black/bg-gray-*/bg-zinc-*/bg-[#hex]` surfaces; new surfaces use semantic tokens only (guardrail F6 watches changed lines). |
+| **Verified by** | Repo-wide grep: 0 remaining raw palette sites; frontend tsc + eslint clean; `npm run guardrails` PASS; knowledge graph updated. |
+
+### [Fixed] P2-06 — Mail-arrival WhatsApp alerts showed sync time instead of mailbox arrival time, omitted Bill Amount, and printed raw mail ID instead of distributor name
+
+| Field | Content |
+|-------|---------|
+| **What the user saw** | A distributor mail arriving 7 AM but synced 10 AM produced an alert saying `Arrival Time: 10 AM`; order alerts often had no `Bill Amount:` line at all; and unresolved senders were displayed as a bare mail address (`billing@xyz.com`) even when that mail ID was already saved on the distributor profile in the AI Learning page. |
+| **Root cause** | `emailService.ts` delta-sync built the processed mail WITHOUT its date field, so `extractOrderInfo` fell back to `new Date()` (sync moment) for `timeStr`, and `notifyMailArrival` preferred that over the correct `parsedDate`. Bill Amount was appended only when subject/body regex matched — amounts living solely inside CSV/TXT attachments were invisible. Distributor resolution compared `distributors.email` with raw SQL equality only (display-formatted or multi-address entries never matched), then fell through to a legacy hardcoded keyword list (`'nitin'→'Nitin Agency'` etc.) and finally to the raw sender string; no learning back of observed mail IDs. |
+| **How it was fixed** | Delta-sync now carries the REAL arrival timestamp (IMAP INTERNALDATE preferred, sender Date header fallback) and all three alert surfaces (owner WhatsApp alert, in-app SSE toast, `sendDistributorWhatsAppAlert`) prefer it — sync time is last-resort only. Billing amount extraction reuses one shared pattern (`extractBillAmount`) over subject+body AND text attachments (CSV/TXT ≤100 KB); order alerts ALWAYS print `Bill Amount:` with honest `N/A` when undetectable (never invented). Resolver rewritten: priority 1 = clean-vs-clean email compare (`extractCleanEmail` both sides, handles `"Name <a@b.c>"` / multi-address storage); priority 2 = exact display-name match which LEARNS BACK the sender mail ID onto `distributors.email` (append-only, idempotent) so AI Learning layouts link permanently. Hardcoded keyword list deleted per owner decision. |
+| **Priority** | P2 |
+| **What not to touch** | Never reintroduce hardcoded sender-keyword→distributor-name mappings in `extractOrderInfo`. Learn-back must stay append-only and only fire on exact display-name match (no fuzzy distributor linking). `Bill Amount: N/A` is intentional truthful reporting — do not hide the line or fabricate totals from item rows. INTERNALDATE stays the preferred timestamp source (it IS "arrived in box"). |
+| **Verified by** | `tests/email_notifications.test.ts` 7/7 PASS (real-timestamp precedence, attachment amount extraction, N/A line, dirty-format resolution, learn-back merge/idempotency); adjacent suites `emailDistributorIntegrity` + `distributorSanitization` PASS; `emailPurchase*` failures confirmed identical on stashed baseline (pre-existing, unrelated); `npx tsc --noEmit` zero errors repo-wide; `npm run guardrails` PASS. |
+
 ### [Fixed] P2-05 — Day-mode text invisible on colored buttons ("font and background same colour"); secondary text too pale
 
 | Field | Content |

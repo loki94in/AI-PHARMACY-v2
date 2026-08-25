@@ -8,7 +8,20 @@ jest.unstable_mockModule('../src/whatsappClient.js', () => ({
   shouldRouteToBusiness: jest.fn(() => false),
   hashMessageBody: jest.fn(() => 'mock-hash'),
   normalizeWhatsAppPhone: jest.fn((p: string) => p ? String(p).replace(/\D/g, '') : ''),
-  isWhatsAppExplicitlyDisabled: jest.fn(() => Promise.resolve(false))
+  isWhatsAppExplicitlyDisabled: jest.fn(() => Promise.resolve(false)),
+  hasSavedSession: jest.fn(() => true),
+  waitForWhatsAppReady: jest.fn(() => Promise.resolve(true)),
+  markWhatsAppActivity: jest.fn(),
+  isPuppeteerDetachedError: jest.fn(() => false),
+  setCurrentQr: jest.fn(),
+  setIsReady: jest.fn(),
+  destroyClient: jest.fn(() => Promise.resolve(undefined)),
+  forceReconnect: jest.fn(() => Promise.resolve(undefined)),
+  reconnectClient: jest.fn(() => Promise.resolve(undefined)),
+  getChats: jest.fn(() => Promise.resolve([])),
+  getChatMessages: jest.fn(() => Promise.resolve([])),
+  getMessageMedia: jest.fn(() => Promise.resolve({ mimetype: 'image/jpeg', data: '' })),
+  downloadMessageMediaById: jest.fn(() => Promise.resolve(undefined))
 }));
 
 jest.unstable_mockModule('../src/telegramBot.js', () => ({

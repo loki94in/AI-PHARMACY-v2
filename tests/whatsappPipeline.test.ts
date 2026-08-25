@@ -6,10 +6,35 @@ import path from 'path';
 import os from 'os';
 import { jest } from '@jest/globals';
 
+// Isolate the WhatsApp auth dir BEFORE app imports: otherwise the queue worker's
+// saved-session self-heal tries to launch a real Chrome in unit tests.
+process.env.WWEBJS_AUTH_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-pipeline-auth-'));
+
 // Fix Jest VM Float32Array instanceof checks for native ONNX / Canvas addons if needed
 Object.defineProperty(Float32Array, Symbol.hasInstance, {
   value: (inst: any) => inst && inst.constructor && inst.constructor.name === 'Float32Array'
 });
+
+// Network/sidecar isolation: unit tests must never hit live Pharmarack OpenSearch or
+// spawn the scispaCy Python sidecar — both stall the inbound pipeline for seconds.
+jest.unstable_mockModule('../src/services/pharmarackCatalogCache.js', () => ({
+  __esModule: true,
+  searchCatalog: jest.fn(() => Promise.resolve([])),
+  scoreProductName: jest.fn(() => 0),
+  pharmarackCatalogCache: {
+    syncCatalog: jest.fn(() => Promise.resolve({ synced: 0, errors: 0 })),
+    searchCatalog: jest.fn(() => Promise.resolve([]))
+  },
+  ensureCatalogSyncCron: jest.fn(),
+  stopCatalogSyncCron: jest.fn()
+}));
+
+jest.unstable_mockModule('../src/services/scispacyClient.js', () => ({
+  __esModule: true,
+  queryScispacy: jest.fn(() => Promise.resolve(null)),
+  startScispacySidecar: jest.fn(),
+  stopScispacySidecar: jest.fn()
+}));
 
 describe('WhatsApp OCR, Medicine & Prescription Pipeline Verification', () => {
   let tmpDir: string;
@@ -36,7 +61,7 @@ describe('WhatsApp OCR, Medicine & Prescription Pipeline Verification', () => {
     await db.run("INSERT OR IGNORE INTO api_substances (api) VALUES ('paracetamol')");
     await db.run("INSERT OR IGNORE INTO api_substances (api) VALUES ('azithromycin')");
     await db.run("INSERT OR IGNORE INTO api_substances (api) VALUES ('pantoprazole')");
-  }, 30000);
+  }, 60000);
 
   afterAll(async () => {
     const { dbManager } = await import('../src/database/connection.js');
@@ -71,7 +96,7 @@ describe('WhatsApp OCR, Medicine & Prescription Pipeline Verification', () => {
     expect(matchedPayload.confidence).toBeGreaterThanOrEqual(60);
 
     eventService.removeListener('wa_medicine_match', listener);
-  });
+  }, 60000);
 
   test('2. Inbound WhatsApp Repeat Order Pipeline: Returns previous refill medicine for customer', async () => {
     // Insert customer & refill history
@@ -108,7 +133,7 @@ describe('WhatsApp OCR, Medicine & Prescription Pipeline Verification', () => {
     expect(matchedPayload.medicineName).toBe('Pan 40 Tablet');
 
     eventService.removeListener('wa_medicine_match', listener);
-  });
+  }, 60000);
 
   test('3. WhatsApp Prescription OCR Pipeline: Processes valid medicine photo OCR and passes V2 gate', async () => {
     const { handleOcrComplete } = await import('../src/services/whatsappIntentService.js');

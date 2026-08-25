@@ -1,4 +1,12 @@
 import { jest } from '@jest/globals';
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
+
+// Isolate the WhatsApp auth dir BEFORE any app import: this suite must never see (or
+// launch Chrome against) the developer's real saved session.
+process.env.WWEBJS_AUTH_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-routing-auth-'));
+
 
 // Mock whatsappBusinessService BEFORE importing any internal code
 jest.unstable_mockModule('../src/services/whatsappBusinessService.js', () => ({
@@ -9,9 +17,6 @@ jest.unstable_mockModule('../src/services/whatsappBusinessService.js', () => ({
   }
 }));
 
-import fs from 'fs';
-import path from 'path';
-import os from 'os';
 import { ensureSchema } from '../src/database.js';
 
 describe('WhatsApp Routing Logic Tests', () => {
@@ -85,7 +90,7 @@ describe('WhatsApp Routing Logic Tests', () => {
     await db.run("INSERT INTO app_settings (key, value) VALUES ('whatsapp_preferred_system', 'automated')");
 
     await expect(sendMessage('919876543210', undefined, 'Hello Automated')).rejects.toThrow(
-      'Client not initialized'
+      /WhatsApp is not connected/i
     );
   });
 });

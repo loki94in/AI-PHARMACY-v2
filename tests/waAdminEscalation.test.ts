@@ -5,7 +5,37 @@ const mockSendMessage = jest.fn((...args: any[]) => Promise.resolve());
 
 jest.unstable_mockModule('../src/whatsappClient.js', () => ({
   __esModule: true,
-  sendMessage: mockSendMessage
+  sendMessage: mockSendMessage,
+  initClient: jest.fn(() => Promise.resolve(true)),
+  hasSavedSession: jest.fn(() => true),
+  waitForWhatsAppReady: jest.fn(() => Promise.resolve(true)),
+  markWhatsAppActivity: jest.fn(),
+  getWhatsAppStatus: jest.fn(() => Promise.resolve({ isConnected: true, isReady: true, status: 'CONNECTED' })),
+  shouldRouteToBusiness: jest.fn(() => false),
+  isWhatsAppExplicitlyDisabled: jest.fn(() => Promise.resolve(false)),
+  isPuppeteerDetachedError: jest.fn(() => false),
+  hashMessageBody: jest.fn((b: any) => String(b ?? '').length),
+  normalizeWhatsAppPhone: jest.fn((p: string) => p ? String(p).replace(/\D/g, '') : ''),
+  setCurrentQr: jest.fn(),
+  setIsReady: jest.fn(),
+  destroyClient: jest.fn(() => Promise.resolve(undefined)),
+  forceReconnect: jest.fn(() => Promise.resolve(undefined)),
+  reconnectClient: jest.fn(() => Promise.resolve(undefined)),
+  getChats: jest.fn(() => Promise.resolve([])),
+  getChatMessages: jest.fn(() => Promise.resolve([])),
+  getMessageMedia: jest.fn(() => Promise.resolve({ mimetype: 'image/jpeg', data: '' })),
+  downloadMessageMediaById: jest.fn(() => Promise.resolve(undefined))
+}));
+
+// maybeEscalate dispatches through the centralized WhatsApp queue (never direct sendMessage)
+const mockEnqueue = jest.fn((..._args: any[]) => Promise.resolve(1234));
+jest.unstable_mockModule('../src/services/whatsappQueueWorker.js', () => ({
+  __esModule: true,
+  whatsappQueueWorker: {
+    enqueue: mockEnqueue,
+    forceNext: jest.fn(() => Promise.resolve(true)),
+    triggerProcessing: jest.fn()
+  }
 }));
 
 import fs from 'fs';
@@ -70,11 +100,11 @@ describe('WhatsApp Admin Auto-Escalation Service Tests', () => {
     });
 
     // Check mock called
-    expect(mockSendMessage).toHaveBeenCalledTimes(1);
-    expect(mockSendMessage.mock.calls[0][0]).toBe('919876543210');
-    expect(mockSendMessage.mock.calls[0][2]).toContain('🔔 *Prescription Medicine Extracted*');
-    expect(mockSendMessage.mock.calls[0][2]).toContain('Alice Test');
-    expect(mockSendMessage.mock.calls[0][2]).toContain('Paracetamol 650mg');
+    expect(mockEnqueue).toHaveBeenCalledTimes(1);
+    expect(mockEnqueue.mock.calls[0][0]).toBe('919876543210');
+    expect(mockEnqueue.mock.calls[0][1]).toContain('🔔 *Prescription Medicine Extracted*');
+    expect(mockEnqueue.mock.calls[0][1]).toContain('Alice Test');
+    expect(mockEnqueue.mock.calls[0][1]).toContain('Paracetamol 650mg');
 
     // Check DB record
     const row = await db.get('SELECT * FROM wa_admin_escalations WHERE msg_id = ?', ['msg-abc-123']);
@@ -117,7 +147,7 @@ describe('WhatsApp Admin Auto-Escalation Service Tests', () => {
       phone: '919000000001@c.us'
     });
 
-    expect(mockSendMessage).toHaveBeenCalledTimes(1); // Only first went through
+    expect(mockEnqueue).toHaveBeenCalledTimes(1); // Only first went through
   });
 
   test('rate-limits customer repeat query for same medicine key within 24 hours', async () => {
@@ -155,7 +185,7 @@ describe('WhatsApp Admin Auto-Escalation Service Tests', () => {
       phone: '919000000001@c.us'
     });
 
-    expect(mockSendMessage).toHaveBeenCalledTimes(1); // Muted by rate limiter
+    expect(mockEnqueue).toHaveBeenCalledTimes(1); // Muted by rate limiter
   });
 
   test('pharmarack outcome sends Type-2 message and inserts staged review review_id', async () => {
@@ -183,9 +213,9 @@ describe('WhatsApp Admin Auto-Escalation Service Tests', () => {
       phone: '919000000002@c.us'
     });
 
-    expect(mockSendMessage).toHaveBeenCalledTimes(1);
-    expect(mockSendMessage.mock.calls[0][2]).toContain('⚠️ *Medicine NOT in Local Stock — PharmaRack Matches*');
-    expect(mockSendMessage.mock.calls[0][2]).toContain('ASPIRIN 75MG TABLET');
+    expect(mockEnqueue).toHaveBeenCalledTimes(1);
+    expect(mockEnqueue.mock.calls[0][1]).toContain('⚠️ *Medicine NOT in Local Stock — PharmaRack Matches*');
+    expect(mockEnqueue.mock.calls[0][1]).toContain('ASPIRIN 75MG TABLET');
 
     // Staged review record must be created
     const review = await db.get("SELECT * FROM staged_medicine_reviews WHERE source = 'whatsapp'");
@@ -223,8 +253,8 @@ describe('WhatsApp Admin Auto-Escalation Service Tests', () => {
       phone: '919822012345@c.us'
     });
 
-    expect(mockSendMessage).toHaveBeenCalledTimes(1);
-    const text = mockSendMessage.mock.calls[0][2] as string;
+    expect(mockEnqueue).toHaveBeenCalledTimes(1);
+    const text = mockEnqueue.mock.calls[0][1] as string;
     expect(text).toContain('*Old Customer*: Ramesh Patil');
     expect(text).toContain('https://wa.me/919822012345');
     expect(text).toContain('✅ *Mapped distributors*');
@@ -271,10 +301,10 @@ describe('WhatsApp Admin Auto-Escalation Service Tests', () => {
       chatId: '123456789012345@lid'
     });
 
-    expect(mockSendMessage).toHaveBeenCalledTimes(1);
-    const text = mockSendMessage.mock.calls[0][2] as string;
+    expect(mockEnqueue).toHaveBeenCalledTimes(1);
+    const text = mockEnqueue.mock.calls[0][1] as string;
     expect(text).toContain('*New Customer*');
-    expect(text).toContain('+919923777352');
+    expect(text).toContain('+91 99237 77352');
     expect(text).toContain('https://wa.me/919923777352');
     expect(text).not.toContain('123456789012345');
   });
@@ -304,8 +334,8 @@ describe('WhatsApp Admin Auto-Escalation Service Tests', () => {
       }
     });
 
-    expect(mockSendMessage).toHaveBeenCalledTimes(1);
-    const text = mockSendMessage.mock.calls[0][2] as string;
+    expect(mockEnqueue).toHaveBeenCalledTimes(1);
+    const text = mockEnqueue.mock.calls[0][1] as string;
     expect(text).toContain('🧾 *Recent purchases*: Dolo 650 x2');
     expect(text).toContain('🔁 *Refills*: Telma 40');
     expect(text).toContain('💬 *Recent msgs*: "kal ka order aaya?"');
@@ -332,7 +362,7 @@ describe('WhatsApp Admin Auto-Escalation Service Tests', () => {
       context: { purchases: [], refills: [], lastMessages: [{ body: 'hello' }] }
     });
 
-    const text = mockSendMessage.mock.calls[0][2] as string;
+    const text = mockEnqueue.mock.calls[0][1] as string;
     expect(text).not.toContain('Recent msgs');
   });
 
@@ -357,7 +387,7 @@ describe('WhatsApp Admin Auto-Escalation Service Tests', () => {
       phone: '919000000001@c.us'
     });
 
-    expect(mockSendMessage).not.toHaveBeenCalled();
+    expect(mockEnqueue).not.toHaveBeenCalled();
     const count = await db.get('SELECT COUNT(*) as cnt FROM wa_admin_escalations');
     expect(count.cnt).toBe(0);
   });

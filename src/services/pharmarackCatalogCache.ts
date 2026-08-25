@@ -4,6 +4,7 @@
 import { dbManager } from '../database/connection.js';
 import { enhancedSimilarity } from './productNameFilterService.js';
 import { tokenRefreshScheduler } from './tokenRefreshScheduler.js';
+import { runHeavyJob } from '../utils/backgroundJobLane.js';
 
 // ── Periodic sync cron (owner rule 2026-08: credential-gated registration) ──
 // The 35-min background catalog sync is registered ONLY while a Pharmarack
@@ -23,23 +24,25 @@ export async function ensureCatalogSyncCron(): Promise<void> {
     const { activityTracker } = await import('../utils/activityTracker.js');
     const cron = (await import('node-cron')).default;
 
-    catalogSyncTask = cron.schedule('*/35 * * * *', async () => {
-      try {
-        const mode = await getBackendFetchMode('bg.catalogSync', 'auto');
-        if (mode === 'off') {
-          console.log('[Catalog Cache] Periodic sync is disabled (mode=off)');
-          return;
-        }
-        if (mode === 'manual' && activityTracker.isIdle()) {
-          console.log('[Catalog Cache] Periodic sync skipped (mode=manual, system is idle)');
-          return;
-        }
+    catalogSyncTask = cron.schedule('*/35 * * * *', () => {
+      void runHeavyJob('pharmarack_catalog_sync', async () => {
+        try {
+          const mode = await getBackendFetchMode('bg.catalogSync', 'auto');
+          if (mode === 'off') {
+            console.log('[Catalog Cache] Periodic sync is disabled (mode=off)');
+            return;
+          }
+          if (mode === 'manual' && activityTracker.isIdle()) {
+            console.log('[Catalog Cache] Periodic sync skipped (mode=manual, system is idle)');
+            return;
+          }
 
-        const result = await syncCatalog();
-        console.log(`[Catalog Cache] Periodic sync complete: ${result.synced} products, ${result.errors} errors`);
-      } catch (err) {
-        console.error('[Catalog Cache] Periodic sync cron failed:', err);
-      }
+          const result = await syncCatalog();
+          console.log(`[Catalog Cache] Periodic sync complete: ${result.synced} products, ${result.errors} errors`);
+        } catch (err) {
+          console.error('[Catalog Cache] Periodic sync cron failed:', err);
+        }
+      });
     });
     console.log('[Catalog Cache] Periodic sync cron registered (every 35 min, Pharmarack session active).');
   } catch (err) {

@@ -6,6 +6,7 @@ import AdmZip from 'adm-zip';
 import cron from 'node-cron';
 import { Jimp } from 'jimp';
 import { getAppDataDir } from '../config/index.js';
+import { runHeavyJob } from '../utils/backgroundJobLane.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -34,13 +35,13 @@ export class ImageArchiveService {
     // Run every day at 1:00 AM to clean temp files older than 6 months (180 days)
     cron.schedule('0 1 * * *', () => {
       console.log('Running daily cleanup job for temporary images...');
-      this.cleanTemporaryImages(180);
+      void runHeavyJob('image_archive_temp_cleanup', async () => this.cleanTemporaryImages(180));
     });
 
     // Run on the 1st of every month at 2:00 AM to zip the previous month's important files
     cron.schedule('0 2 1 * *', () => {
       console.log('Running monthly archiving job for important images...');
-      this.zipMonthlyImportantImages();
+      void runHeavyJob('image_archive_monthly_zip', async () => this.zipMonthlyImportantImages());
     });
 
     console.log('Image Archive Service background jobs initialized.');

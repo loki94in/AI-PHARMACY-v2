@@ -1,5 +1,7 @@
 import { dbManager } from '../database/connection.js';
 import { eventService } from '../services/eventService.js';
+import { activityTracker } from '../utils/activityTracker.js';
+import { runHeavyJob } from '../utils/backgroundJobLane.js';
 
 const SAFETY_FACTOR = 1.5;
 const DEFAULT_LEAD_TIME = 7;
@@ -294,7 +296,10 @@ export function startStockCalculatorWorker(intervalMs: number = 86400000): void 
   })();
 
   intervalId = setInterval(() => {
-    recalculateStockLimits().catch(err =>
+    // P3 gated worker: skip ticks while the user is idle >30 min; recalculation
+    // resumes automatically on the next tick after wake.
+    if (activityTracker.isIdle()) return;
+    runHeavyJob('stock_calculator', recalculateStockLimits).catch(err =>
       console.error('[StockCalculatorWorker] Periodic calculation failed:', err)
     );
   }, intervalMs);

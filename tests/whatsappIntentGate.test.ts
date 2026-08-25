@@ -10,7 +10,21 @@ jest.unstable_mockModule('../src/whatsappClient.js', () => ({
   shouldRouteToBusiness: jest.fn(() => Promise.resolve(false)),
   initClient: jest.fn(() => Promise.resolve()),
   hashMessageBody: (msg: string) => String(msg).slice(0, 16),
-  normalizeWhatsAppPhone: (phone: string) => String(phone).replace(/\D/g, '')
+  normalizeWhatsAppPhone: (phone: string) => String(phone).replace(/\D/g, ''),
+  hasSavedSession: jest.fn(() => true),
+  waitForWhatsAppReady: jest.fn(() => Promise.resolve(true)),
+  markWhatsAppActivity: jest.fn(),
+  isWhatsAppExplicitlyDisabled: jest.fn(() => Promise.resolve(false)),
+  isPuppeteerDetachedError: jest.fn(() => false),
+  setCurrentQr: jest.fn(),
+  setIsReady: jest.fn(),
+  destroyClient: jest.fn(() => Promise.resolve(undefined)),
+  forceReconnect: jest.fn(() => Promise.resolve(undefined)),
+  reconnectClient: jest.fn(() => Promise.resolve(undefined)),
+  getChats: jest.fn(() => Promise.resolve([])),
+  getChatMessages: jest.fn(() => Promise.resolve([])),
+  getMessageMedia: jest.fn(() => Promise.resolve({ mimetype: 'image/jpeg', data: '' })),
+  downloadMessageMediaById: jest.fn(() => Promise.resolve(undefined))
 }));
 
 describe('WhatsApp Intent Confidence Gate', () => {

@@ -26,6 +26,7 @@ const SSE_QUERY_MAP: Record<string, string[][]> = {
   catalog_job_done: [['catalog-jobs'], ['medicines'], ['schedule-drugs-summary']],
   sales_sync: [['sells-list'], ['investigation-list']],
   purchases_sync: [['purchase-history-list'], ['investigation-list']],
+  pharmarack_cart_changed: [['pharmarack-cart']],
 };
 
 // SSE event type -> DOM CustomEvents dispatched for non-react-query consumers
@@ -41,6 +42,9 @@ const SSE_CUSTOM_EVENTS: Record<string, string[]> = {
   ocr_scan_complete: ['sse-ocr-scan-complete'],
   auth_failure: ['sse-auth-failure'],
   pharmarack_session_refreshed: ['sse-pharmarack-refreshed'],
+  // Reuses the page's existing DOM event name — PharmarackCart, LiveCartAddModal
+  // and Layout already listen for 'refresh-pharmarack-cart'.
+  pharmarack_cart_changed: ['refresh-pharmarack-cart'],
   dispatch_updated: ['sse-dispatch-updated'],
   email_new: ['sse-email-new'],
   inventory_changed: ['sse-inventory-changed'],

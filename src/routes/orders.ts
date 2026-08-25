@@ -486,7 +486,9 @@ router.put('/:id', async (req, res) => {
     const newQty = qty !== undefined ? qty : existing.qty;
     const newProduct = product !== undefined ? product : existing.product;
     const newRequester = requester !== undefined ? requester : existing.requester;
-    const newPhone = phone !== undefined ? phone : existing.phone;
+    // Same digit-clean rule as the POST routes: chat-id suffixes / formatting must never
+    // reach special_orders.phone. Missing key keeps the stored value; empty stays empty.
+    const newPhone = phone !== undefined ? String(phone).replace(/\D/g, '') : existing.phone;
     const newDistributor = pharmarack_distributor !== undefined ? pharmarack_distributor : existing.pharmarack_distributor;
     const newRate = pharmarack_rate !== undefined ? pharmarack_rate : existing.pharmarack_rate;
     const newMrp = pharmarack_mrp !== undefined ? pharmarack_mrp : existing.pharmarack_mrp;
@@ -494,8 +496,20 @@ router.put('/:id', async (req, res) => {
     const newAdvancePayment = advance_payment !== undefined ? advance_payment : existing.advance_payment;
     const newCartAddError = cart_add_error !== undefined ? cart_add_error : existing.cart_add_error;
 
+    // Manual-only messaging contract: a status transition to 'Ready' through the generic
+    // update route (CRM edit-modal save / status buttons) must dispatch the SAME idempotent
+    // arrival WhatsApp as POST|PUT /:id/status — one send per order via notified===1.
+    let whatsappQueued = false;
+    if (newStatus === 'Ready' && Number(existing.notified) !== 1) {
+      try {
+        whatsappQueued = await enqueueArrivalWhatsApp(db, { ...existing, phone: newPhone, requester: newRequester, product: newProduct, qty: newQty });
+      } catch (waErr: any) {
+        console.error('Failed to queue arrival WhatsApp on order update:', waErr?.message || waErr);
+      }
+    }
+
     let newNotified = existing.notified;
-    if (newStatus === 'Fulfilled') {
+    if (newStatus === 'Fulfilled' || whatsappQueued) {
       newNotified = 1;
     }
 
@@ -519,7 +533,7 @@ router.put('/:id', async (req, res) => {
     }
 
     broadcastOrdersChanged();
-    res.json({ success: true, message: 'Order updated successfully' });
+    res.json({ success: true, message: 'Order updated successfully', whatsapp_queued: whatsappQueued });
   } catch (err) {
     console.error('Update order error:', err);
     res.status(500).json({ error: 'Internal server error' });

@@ -2544,6 +2544,7 @@ const WhatsAppSection: React.FC = () => {
   const [newChatNumber, setNewChatNumber] = useState('');
   const [scanningOcrId, setScanningOcrId] = useState<string | null>(null);
   const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
+  const [deletingWaMsgId, setDeletingWaMsgId] = useState<string | null>(null);
   // OCR results keyed by message ID (populated from DB via scannedResult or SSE)
   const [ocrResults, setOcrResults] = useState<Record<string, string>>({});
 
@@ -3248,6 +3249,7 @@ function isSameChat(chat: WaChatItem, targetChatId: string, resolvedNum?: string
                 ) : (
                   messages.map(m => {
                     const isOut = m.fromMe;
+                    const isVoiceNote = m.type === 'ptt' || m.type === 'audio' || m.type === 'audioMessage';
                     return (
                       <div
                         key={m.id}
@@ -3271,7 +3273,9 @@ function isSameChat(chat: WaChatItem, targetChatId: string, resolvedNum?: string
                                 toastEvent.trigger('Message copied to clipboard', 'success');
                                 setTimeout(() => setCopiedMsgId(null), 2000);
                               }}
-                              className={`absolute top-1.5 right-1.5 p-1 rounded-md transition-all ${
+                              className={`absolute top-1.5 p-1 rounded-md transition-all ${
+                                isVoiceNote && !isOut ? 'right-7' : 'right-1.5'
+                              } ${
                                 isOut
                                   ? 'bg-white/20 text-white hover:bg-white/30'
                                   : 'bg-bg3/80 text-muted hover:text-text hover:bg-bg3'
@@ -3283,6 +3287,33 @@ function isSameChat(chat: WaChatItem, targetChatId: string, resolvedNum?: string
                               ) : (
                                 <Copy size={11} />
                               )}
+                            </button>
+                          )}
+
+                          {/* Delete Button — received voice notes only (removes the LOCAL cached copy) */}
+                          {isVoiceNote && !isOut && (
+                            <button
+                              type="button"
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                if (!activeChat || deletingWaMsgId === m.id) return;
+                                setDeletingWaMsgId(m.id);
+                                try {
+                                  await api.deleteWhatsappMessage(activeChat.id, m.id);
+                                  setMessages(prev => prev.filter(x => x.id !== m.id));
+                                  toastEvent.trigger('Voice note removed from inbox (sender\'s copy is untouched)', 'success');
+                                } catch (err: unknown) {
+                                  const apiErr = err as LocalApiError;
+                                  toastEvent.trigger(apiErr?.response?.data?.error || apiErr?.message || 'Failed to delete voice note', 'error');
+                                } finally {
+                                  setDeletingWaMsgId(null);
+                                }
+                              }}
+                              disabled={deletingWaMsgId === m.id}
+                              className="absolute top-1.5 right-1.5 p-1 rounded-md transition-all bg-bg3/80 text-muted hover:text-red hover:bg-bg3"
+                              title="Delete this voice note from the local inbox cache"
+                            >
+                              {deletingWaMsgId === m.id ? <RefreshCw size={11} className="animate-spin" /> : <Trash2 size={11} />}
                             </button>
                           )}
 
@@ -3309,27 +3340,33 @@ function isSameChat(chat: WaChatItem, targetChatId: string, resolvedNum?: string
                           )}
                           {m.hasMedia && (
                             <div className="mt-2 pt-2 border-t border-border/40 flex items-center justify-between gap-2 text-[10px]">
-                              <span className="text-muted flex items-center gap-1">📁 Media Attachment</span>
-                              <button
-                                onClick={async () => {
-                                  setScanningOcrId(m.id);
-                                  try {
-                                    toastEvent.trigger('Queuing OCR prescription scan...', 'info');
-                                    await apiClient.post(
-                                      `/messaging/chats/${encodeURIComponent(activeChat!.id)}/messages/${encodeURIComponent(m.id)}/scan`
-                                    );
-                                    toastEvent.trigger('OCR scan queued – result will appear shortly', 'success', '/crm');
-                                  } catch {
-                                    toastEvent.trigger('Failed to queue prescription scan', 'error');
-                                  } finally {
-                                    setScanningOcrId(null);
-                                  }
-                                }}
-                                disabled={scanningOcrId === m.id}
-                                className="px-2 py-0.5 rounded-lg bg-primary/20 hover:bg-primary/30 text-primary border border-primary/30 font-bold transition-all flex items-center gap-1"
-                              >
-                                <span>{scanningOcrId === m.id ? 'Scanning OCR...' : '🔍 OCR Scan Prescription'}</span>
-                              </button>
+                              {isVoiceNote ? (
+                                <span className="text-muted flex items-center gap-1">🎤 Voice note (no transcription)</span>
+                              ) : (
+                                <>
+                                  <span className="text-muted flex items-center gap-1">📁 Media Attachment</span>
+                                  <button
+                                    onClick={async () => {
+                                      setScanningOcrId(m.id);
+                                      try {
+                                        toastEvent.trigger('Queuing OCR prescription scan...', 'info');
+                                        await apiClient.post(
+                                          `/messaging/chats/${encodeURIComponent(activeChat!.id)}/messages/${encodeURIComponent(m.id)}/scan`
+                                        );
+                                        toastEvent.trigger('OCR scan queued – result will appear shortly', 'success', '/crm');
+                                      } catch {
+                                        toastEvent.trigger('Failed to queue prescription scan', 'error');
+                                      } finally {
+                                        setScanningOcrId(null);
+                                      }
+                                    }}
+                                    disabled={scanningOcrId === m.id}
+                                    className="px-2 py-0.5 rounded-lg bg-primary/20 hover:bg-primary/30 text-primary border border-primary/30 font-bold transition-all flex items-center gap-1"
+                                  >
+                                    <span>{scanningOcrId === m.id ? 'Scanning OCR...' : '🔍 OCR Scan Prescription'}</span>
+                                  </button>
+                                </>
+                              )}
                             </div>
                           )}
                           <div
@@ -3860,8 +3897,15 @@ const SpecialOrdersSection: React.FC = () => {
     if (updatingId === id) return;
     setUpdatingId(id);
     try {
-      await api.updateOrder(id, { status: newStatus });
-      toastEvent.trigger(`Status updated to ${newStatus}`, 'success', '/crm');
+      const res = await api.updateOrder(id, { status: newStatus });
+      toastEvent.trigger(
+        res?.whatsapp_queued
+          ? `Status updated to ${newStatus} & arrival WhatsApp queued!`
+          : `Status updated to ${newStatus}`,
+        'success',
+        '/crm'
+      );
+      if (res?.whatsapp_queued) whatsappQueueEvent.triggerUpdated();
       await loadOrders();
     } catch {
       toastEvent.trigger('Failed to update order status', 'error', '/crm');
@@ -4123,7 +4167,7 @@ const SpecialOrdersSection: React.FC = () => {
 
     setEditFormSubmitting(true);
     try {
-      await api.updateOrder(editingOrder.id, {
+      const res = await api.updateOrder(editingOrder.id, {
         product: editProduct.trim(),
         requester: customerName,
         phone: customerPhone,
@@ -4138,11 +4182,24 @@ const SpecialOrdersSection: React.FC = () => {
         advance_payment: editAdvancePayment !== '' ? Number(editAdvancePayment) : 0
       });
 
-      toastEvent.trigger(`Special request for "${editProduct.trim()}" updated successfully!`, 'success', '/crm');
+      // Truthful toast contract: only claim the arrival WhatsApp was queued when the
+      // backend reports it (same rule as Quick Assist Mark Ready).
+      if (editStatus === 'Ready') {
+        toastEvent.trigger(
+          res?.whatsapp_queued
+            ? `Request updated & arrival WhatsApp queued for ${customerName}!`
+            : `Request updated — no arrival WhatsApp queued (no phone stored or already sent).`,
+          'success',
+          '/crm'
+        );
+      } else {
+        toastEvent.trigger(`Special request for "${editProduct.trim()}" updated successfully!`, 'success', '/crm');
+      }
       setShowEditModal(false);
       setEditingOrder(null);
       await loadOrders();
       specialOrdersEvent.triggerUpdated();
+      whatsappQueueEvent.triggerUpdated();
     } catch (err) {
       console.error('Failed to update special order request:', err);
       toastEvent.trigger((err as LocalApiError).response?.data?.error || 'Failed to update special order request', 'error', '/crm');

@@ -20,7 +20,11 @@ const execAsync = promisify(exec);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const UPLOADS_DIR = path.resolve(getAppDataDir(), 'uploads');
-const WWEBJS_AUTH_DIR = path.resolve(getAppDataDir(), '.wwebjs_auth');
+// Env override lets tests (and portable installs) point at an isolated auth dir so a
+// developer's REAL saved session can never be loaded or wiped by non-app processes.
+const WWEBJS_AUTH_DIR = process.env.WWEBJS_AUTH_DIR
+  ? path.resolve(process.env.WWEBJS_AUTH_DIR)
+  : path.resolve(getAppDataDir(), '.wwebjs_auth');
 
 /** Helper to check if an authenticated WhatsApp session folder exists on disk */
 export function hasSavedSession(): boolean {

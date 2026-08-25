@@ -3,7 +3,25 @@ import { jest } from '@jest/globals';
 jest.unstable_mockModule('../src/whatsappClient.js', () => ({
   __esModule: true,
   sendMessage: jest.fn(() => Promise.resolve(true)),
-  initClient: jest.fn(() => Promise.resolve(true))
+  initClient: jest.fn(() => Promise.resolve(true)),
+  hasSavedSession: jest.fn(() => true),
+  waitForWhatsAppReady: jest.fn(() => Promise.resolve(true)),
+  markWhatsAppActivity: jest.fn(),
+  getWhatsAppStatus: jest.fn(() => Promise.resolve({ isConnected: true, isReady: true, status: 'CONNECTED' })),
+  shouldRouteToBusiness: jest.fn(() => false),
+  isWhatsAppExplicitlyDisabled: jest.fn(() => Promise.resolve(false)),
+  isPuppeteerDetachedError: jest.fn(() => false),
+  hashMessageBody: jest.fn((b: any) => String(b ?? '').length),
+  normalizeWhatsAppPhone: jest.fn((p: string) => p ? String(p).replace(/\D/g, '') : ''),
+  setCurrentQr: jest.fn(),
+  setIsReady: jest.fn(),
+  destroyClient: jest.fn(() => Promise.resolve(undefined)),
+  forceReconnect: jest.fn(() => Promise.resolve(undefined)),
+  reconnectClient: jest.fn(() => Promise.resolve(undefined)),
+  getChats: jest.fn(() => Promise.resolve([])),
+  getChatMessages: jest.fn(() => Promise.resolve([])),
+  getMessageMedia: jest.fn(() => Promise.resolve({ mimetype: 'image/jpeg', data: '' })),
+  downloadMessageMediaById: jest.fn(() => Promise.resolve(undefined))
 }));
 
 jest.unstable_mockModule('../src/telegramBot.js', () => ({
@@ -57,6 +75,11 @@ describe('Email Purchase Date Integrity Tests', () => {
     await db.run(
       'INSERT INTO medicines (id, name, mrp, rate) VALUES (1, "Paracetamol 500mg", 20, 10)'
     );
+    // Strict purchase-resolution contract: every staged line name must exist in the
+    // master BEFORE approve — register the remaining staged-item medicines.
+    await db.run(`INSERT INTO medicines (name) VALUES ('Dolo 650')`);
+    await db.run(`INSERT INTO medicines (name) VALUES ('Amoxicillin 500')`);
+    await db.run(`INSERT INTO medicines (name) VALUES ('Azithromycin 500')`);
 
     // 1. Seed Email with explicit historical invoice date in body/subject
     await db.run(`

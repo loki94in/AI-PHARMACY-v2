@@ -403,7 +403,7 @@ export default function PhoneSales() {
                   const isSelected = selectedSale?.id === sale.id;
 
                   // Timeline node styles based on status
-                  let nodeColor = 'bg-zinc-600 border-zinc-500';
+                  let nodeColor = 'bg-bg3 border-border';
                   let statusBadge = '';
 
                   if (sale.status === 'pending') {

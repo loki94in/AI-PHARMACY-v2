@@ -746,7 +746,9 @@ async function searchAndBroadcast(opts: {
         medicine_name: medicineName,
         distributor_name: distName,
         quantity: quantity || 1,
-        customer_phone: customer?.phone || phone || '',
+        // Digits-only: chat-id style phones (@c.us/@lid suffixes) must never leak into
+        // shortage requests — they get copied raw into special_orders.phone downstream.
+        customer_phone: String(customer?.phone || phone || '').replace(/\D/g, ''),
         customer_name: customer?.name || '',
         source: 'whatsapp'
       }).catch(err => console.warn('[Intent Service] Shortage tracking failed:', err));

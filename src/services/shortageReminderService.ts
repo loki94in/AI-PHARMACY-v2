@@ -56,7 +56,7 @@ export async function trackMedicineRequest(req: {
     `INSERT INTO special_orders 
      (product, requester, phone, qty, priority, status, source)
      VALUES (?, ?, ?, ?, 'Normal', 'Pending', ?)`,
-    [name, req.customer_name || 'Walk-in Customer', req.customer_phone || '', qty, source]
+    [name, req.customer_name || 'Walk-in Customer', String(req.customer_phone || '').replace(/\D/g, ''), qty, source]
   );
 
   return result.lastID || 0;

@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url';
 import fs from 'fs';
 import { getPuppeteer } from '../utils/lazyPuppeteer.js';
 import { dbManager } from '../database/connection.js';
+import { eventService } from '../services/eventService.js';
 import { notificationService } from '../services/notificationService.js';
 import { searchCache } from '../services/searchCache.js';
 import { tokenRefreshScheduler, cleanProfileLockFiles, killOrphanChromeProcesses } from '../services/tokenRefreshScheduler.js';
@@ -1230,6 +1231,9 @@ router.post('/cart/add', async (req, res) => {
 
     if (cartSuccess) {
       invalidatePharmarackCartCache();
+      // P1 events-not-timers: every cart WRITE pushes one SSE frame so any open
+      // Pharmarack Cart page (this tab or another device) silently re-syncs.
+      eventService.broadcast('pharmarack_cart_changed', { action: 'add', at: Date.now() });
       return res.json({ success: true, message: 'Successfully added to Pharmarack cart!', mode: 'Live' });
     } else {
       return res.status(503).json({ error: 'Failed to add items to actual Pharmarack cart', details: lastError });
@@ -1455,6 +1459,7 @@ router.post('/delete-cart-item', async (req, res) => {
 
     if (deleteSuccess) {
       invalidatePharmarackCartCache();
+      eventService.broadcast('pharmarack_cart_changed', { action: 'remove', at: Date.now() });
       return res.json({ success: true, message: 'Successfully removed item from Pharmarack live cart!' });
     } else {
       return res.status(500).json({ error: 'Failed to delete item from Pharmarack live cart', details: lastError });

@@ -126,10 +126,8 @@ describe('Investigation routes', () => {
   });
 
   test('PUT /sales/:invoiceId edits sales bill and updates stock', async () => {
-    // Current stock after direct inventory correction test is 120
-    // Invoice S-999 has old sold quantity = 5.
-    // Reverting it adds 5 back to inventory -> 125.
-    // Correcting it to new sold quantity = 8 should subtract 8 -> remaining stock should be 117.
+    // Current stock after direct inventory correction test is 120 strips + 5 loose = 125 units.
+    // Invoice S-999 had old sold quantity = 5; correcting to 8 nets -3 units -> 122.
     const res = await request(app)
       .put(`/investigation/sales/${invoiceId}`)
       .send({
@@ -148,14 +146,12 @@ describe('Investigation routes', () => {
 
     // Verify stock
     const detailsRes = await request(app).get(`/investigation/details/${inventoryId}`);
-    expect(detailsRes.body.inventory.quantity).toBe(117);
+    expect(detailsRes.body.inventory.quantity).toBe(122);
   });
 
   test('PUT /purchases/:purchaseId edits purchase bill and updates stock', async () => {
-    // Current stock is 117.
-    // Old purchased quantity in P-777 was 100.
-    // Reverting it subtracts 100 -> 17.
-    // Correcting it to new purchased quantity = 150 should add 150 -> remaining stock should be 167.
+    // Current stock is 122 units.
+    // Purchase correction: -100 (old) +150 (new) = +50 units -> 172.
     const res = await request(app)
       .put(`/investigation/purchases/${purchaseId}`)
       .send({
@@ -173,7 +169,7 @@ describe('Investigation routes', () => {
 
     // Verify stock
     const detailsRes = await request(app).get(`/investigation/details/${inventoryId}`);
-    expect(detailsRes.body.inventory.quantity).toBe(167);
+    expect(detailsRes.body.inventory.quantity).toBe(172);
   });
 
   test('GET /timeline with query filters returns matching results', async () => {

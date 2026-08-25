@@ -1631,7 +1631,7 @@ const Dispatch = () => {
                       <div className="flex justify-between items-start">
                         <div className="flex items-center gap-3">
                           <div className={`w-9 h-9 rounded-full flex items-center justify-center font-bold text-xs shrink-0 ${
-                            boy.is_active ? 'bg-sky/20 text-sky border border-sky/30' : 'bg-zinc-800 text-muted'
+                            boy.is_active ? 'bg-sky/20 text-sky border border-sky/30' : 'bg-bg3 text-muted'
                           }`}>
                             {boy.name.charAt(0).toUpperCase()}
                           </div>
@@ -1648,7 +1648,7 @@ const Dispatch = () => {
                             onChange={() => handleToggleBoyActive(boy)}
                             className="sr-only peer"
                           />
-                          <div className="w-7 h-4 rounded-full bg-zinc-700 peer-checked:bg-emerald-500 transition-colors" />
+                          <div className="w-7 h-4 rounded-full bg-bg3 peer-checked:bg-emerald-500 transition-colors" />
                           <div className="absolute left-0.5 top-0.5 w-3 h-3 rounded-full bg-white transition-transform peer-checked:translate-x-3" />
                         </label>
                       </div>

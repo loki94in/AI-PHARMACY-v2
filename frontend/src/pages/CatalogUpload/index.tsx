@@ -1289,7 +1289,7 @@ const CatalogUpload = () => {
                       </h5>
                       <div className="flex-1 overflow-auto border border-glass-border/30 rounded-xl bg-black/20">
                         <table className="w-full text-left text-xs text-gray-300">
-                          <thead className="sticky top-0 bg-[#18181b]/95 border-b border-glass-border">
+                          <thead className="sticky top-0 bg-glass-bg border-b border-glass-border">
                             <tr>
                               {previewHeaders.map((header) => (
                                 <th key={header} className="p-3 font-bold uppercase tracking-wide text-gray-400">{header}</th>
@@ -1461,7 +1461,7 @@ const CatalogUpload = () => {
               ) : (
                 <div className="flex-1 overflow-auto border border-glass-border/30 rounded-xl bg-black/20">
                   <table className="w-full text-left text-xs text-gray-300">
-                    <thead className="sticky top-0 bg-[#18181b]/95 border-b border-glass-border">
+                    <thead className="sticky top-0 bg-glass-bg border-b border-glass-border">
                       <tr>
                         <th className="p-3">Job ID</th>
                         <th className="p-3">Catalogue File</th>
@@ -1616,7 +1616,7 @@ const CatalogUpload = () => {
 
           return (
             <div className="fixed inset-0 z-modal flex items-center justify-center bg-black/80 backdrop-blur-sm p-2 sm:p-3">
-              <div className="glass-panel w-full max-w-[99vw] h-[98vh] lg:max-w-[98vw] lg:h-[95vh] flex flex-col rounded-2xl border border-glass-border shadow-2xl overflow-hidden bg-zinc-950">
+              <div className="glass-panel w-full max-w-[99vw] h-[98vh] lg:max-w-[98vw] lg:h-[95vh] flex flex-col rounded-2xl border border-glass-border shadow-2xl overflow-hidden">
                 {/* Modal Header */}
                 <div className="p-4 md:px-6 md:py-4 border-b border-glass-border bg-white/5 flex justify-between items-center">
                   <div>
@@ -1740,9 +1740,9 @@ const CatalogUpload = () => {
                               >
                                 <option value="">-- Ignore --</option>
                                 {AVAILABLE_DB_SECTIONS.map((section) => (
-                                  <optgroup key={section.label} label={section.label} className="bg-[#18181b] text-primary font-semibold">
+                                  <optgroup key={section.label} label={section.label} className="bg-bg3 text-primary font-semibold">
                                     {section.fields.map((f) => (
-                                      <option key={f.value} value={f.value} className="bg-[#18181b] text-white font-normal">
+                                      <option key={f.value} value={f.value} className="bg-bg3 text-text font-normal">
                                         {f.label}
                                       </option>
                                     ))}
@@ -1751,16 +1751,16 @@ const CatalogUpload = () => {
                                 
                                 {/* Render Created Custom Columns */}
                                 {customColumns.length > 0 && (
-                                  <optgroup label="✨ Created Custom Columns" className="bg-[#18181b] text-blue-400 font-semibold">
+                                  <optgroup label="✨ Created Custom Columns" className="bg-bg3 text-sky font-semibold">
                                     {customColumns.map((c) => (
-                                      <option key={c} value={c} className="bg-[#18181b] text-white font-normal">
+                                      <option key={c} value={c} className="bg-bg3 text-text font-normal">
                                         Custom Field: {c.substring(11)}
                                       </option>
                                     ))}
                                   </optgroup>
                                 )}
                                 
-                                <option value="CREATE_CUSTOM" className="bg-[#18181b] text-yellow-500 font-semibold">
+                                <option value="CREATE_CUSTOM" className="bg-bg3 text-amber-400 font-semibold">
                                   + Add Custom Column...
                                 </option>
                               </select>
@@ -1798,7 +1798,7 @@ const CatalogUpload = () => {
                     
                     <div ref={scrollContainerRef} className="flex-1 overflow-auto border border-glass-border rounded-xl bg-black/40">
                       <table className="min-w-full divide-y divide-glass-border text-xs text-left">
-                        <thead className="bg-[#18181b]/90 sticky top-0 z-10">
+                        <thead className="bg-glass-bg sticky top-0 z-10">
                           <tr>
                             {visibleHeaders.map((header) => {
                               const isMapped = columnMappings[header];

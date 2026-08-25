@@ -66,8 +66,9 @@ describe('restoreBackup replaces the live database', () => {
     await db.run('INSERT INTO medicines (name) VALUES (?)', ['PRESENT_IN_BACKUP']);
     await db.close();
 
-    const { createBackup } = await import('../src/services/backupService.js');
-    const result = await createBackup('test');
+      const { createBackup } = await import('../src/services/backupService.js');
+      // 'Manual' bypasses the 60s boot-defer guard (cold-boot lock contention protection)
+      const result = await createBackup('Manual');
     backupFile = result.filename;
 
     expect(backupFile).toMatch(/\.db\.gz$/);
@@ -135,7 +136,7 @@ describe('restoreBackup replaces the live database', () => {
     await db.close();
 
     const { createBackup, restoreBackup } = await import('../src/services/backupService.js');
-    const broken = await createBackup('test-broken-index');
+      const broken = await createBackup('Manual');
 
     await expect(restoreBackup(broken.filename)).resolves.toBeUndefined();
 

@@ -2,6 +2,7 @@ import cron, { ScheduledTask } from 'node-cron';
 import { dbManager } from '../database/connection.js';
 import { activityTracker } from '../utils/activityTracker.js';
 import { getBackendFetchMode } from './dataFetchControl.js';
+import { runHeavyJob } from '../utils/backgroundJobLane.js';
 
 export interface TriggerConfig {
   id: string;
@@ -154,30 +155,32 @@ class TriggerSchedulerService {
       const timeStr = cfg.trigger_daily_check_time || '09:00';
       const cronExpr = this.timeToCron(timeStr);
       try {
-        const task = cron.schedule(cronExpr, async () => {
-          try {
-            const mode = await getBackendFetchMode('bg.dailyScans', 'off');
-            if (mode === 'off' || (mode === 'manual' && activityTracker.isIdle())) return;
-
-            console.log(`[Trigger: Daily Check] Running daily check scheduled at ${timeStr}...`);
-            const { checkAllRefills } = await import('./refillService.js');
-            const { checkOverdueCreditNotes } = await import('./creditNoteService.js');
-            await checkAllRefills(database);
-            await checkOverdueCreditNotes(database);
-
+        const task = cron.schedule(cronExpr, () => {
+          void runHeavyJob('daily_check', async () => {
             try {
-              const { bouncedAlertService } = await import('./bouncedAlertService.js');
-              await bouncedAlertService.checkAndSendBouncedProductsAlert();
-            } catch (bErr) {
-              console.error('[Trigger: Daily Check] Bounced alert error:', bErr);
-            }
+              const mode = await getBackendFetchMode('bg.dailyScans', 'off');
+              if (mode === 'off' || (mode === 'manual' && activityTracker.isIdle())) return;
 
-            const d = new Date();
-            const todayStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-            await database.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('last_daily_check_date', ?)", [todayStr]);
-          } catch (err) {
-            console.error('[Trigger: Daily Check] Execution failed:', err);
-          }
+              console.log(`[Trigger: Daily Check] Running daily check scheduled at ${timeStr}...`);
+              const { checkAllRefills } = await import('./refillService.js');
+              const { checkOverdueCreditNotes } = await import('./creditNoteService.js');
+              await checkAllRefills(database);
+              await checkOverdueCreditNotes(database);
+
+              try {
+                const { bouncedAlertService } = await import('./bouncedAlertService.js');
+                await bouncedAlertService.checkAndSendBouncedProductsAlert();
+              } catch (bErr) {
+                console.error('[Trigger: Daily Check] Bounced alert error:', bErr);
+              }
+
+              const d = new Date();
+              const todayStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+              await database.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('last_daily_check_date', ?)", [todayStr]);
+            } catch (err) {
+              console.error('[Trigger: Daily Check] Execution failed:', err);
+            }
+          });
         });
         this.scheduledTasks.set('daily_check', task);
         console.log(`[TriggerScheduler] Registered 'Daily Operational Check' -> Cron: ${cronExpr} (${timeStr})`);
@@ -197,17 +200,19 @@ class TriggerSchedulerService {
       const cronExpr = this.timeToCron(timeStr, cronDays);
 
       try {
-        const task = cron.schedule(cronExpr, async () => {
-          try {
-            const mode = await getBackendFetchMode('bg.dailyScans', 'off');
-            if (mode === 'off' || (mode === 'manual' && activityTracker.isIdle())) return;
+        const task = cron.schedule(cronExpr, () => {
+          void runHeavyJob('expiry_scan', async () => {
+            try {
+              const mode = await getBackendFetchMode('bg.dailyScans', 'off');
+              if (mode === 'off' || (mode === 'manual' && activityTracker.isIdle())) return;
 
-            console.log(`[Trigger: Expiry Scan] Running scan for ${lookahead} days lookahead...`);
-            const { runExpiryScanAndAlert } = await import('./expiryAlertService.js');
-            await runExpiryScanAndAlert(lookahead);
-          } catch (err) {
-            console.error('[Trigger: Expiry Scan] Execution failed:', err);
-          }
+              console.log(`[Trigger: Expiry Scan] Running scan for ${lookahead} days lookahead...`);
+              const { runExpiryScanAndAlert } = await import('./expiryAlertService.js');
+              await runExpiryScanAndAlert(lookahead);
+            } catch (err) {
+              console.error('[Trigger: Expiry Scan] Execution failed:', err);
+            }
+          });
         });
         this.scheduledTasks.set('expiry_scan', task);
         console.log(`[TriggerScheduler] Registered 'Near-Expiry Scan' -> Cron: ${cronExpr} (Days: ${daysStr}, Time: ${timeStr})`);
@@ -224,18 +229,20 @@ class TriggerSchedulerService {
       const cronExpr = this.timeToCron(timeStr);
 
       try {
-        const task = cron.schedule(cronExpr, async () => {
-          try {
-            const mode = await getBackendFetchMode('bg.nightlyBackup', 'off');
-            if (mode === 'off' || (mode === 'manual' && activityTracker.isIdle())) return;
+        const task = cron.schedule(cronExpr, () => {
+          void runHeavyJob('backup', async () => {
+            try {
+              const mode = await getBackendFetchMode('bg.nightlyBackup', 'off');
+              if (mode === 'off' || (mode === 'manual' && activityTracker.isIdle())) return;
 
-            console.log(`[Trigger: Backup] Creating scheduled nightly backup at ${timeStr}...`);
-            const { createBackup } = await import('./backupService.js');
-            const result = await createBackup(`Nightly Auto (${timeStr})`);
-            console.log(`[Trigger: Backup] Created backup file: ${result.filename}`);
-          } catch (err) {
-            console.error('[Trigger: Backup] Execution failed:', err);
-          }
+              console.log(`[Trigger: Backup] Creating scheduled nightly backup at ${timeStr}...`);
+              const { createBackup } = await import('./backupService.js');
+              const result = await createBackup(`Nightly Auto (${timeStr})`);
+              console.log(`[Trigger: Backup] Created backup file: ${result.filename}`);
+            } catch (err) {
+              console.error('[Trigger: Backup] Execution failed:', err);
+            }
+          });
         });
         this.scheduledTasks.set('backup', task);
         console.log(`[TriggerScheduler] Registered 'Nightly Database Backup' -> Cron: ${cronExpr} (${timeStr})`);
@@ -251,18 +258,22 @@ class TriggerSchedulerService {
     // ----------------------------------------------------
     if (cfg.trigger_expiry_return_enabled === 'true') {
       const intervalDays = Math.max(1, parseInt(cfg.trigger_expiry_return_interval_days || '15', 10) || 15);
-      const cronExpr = '0 9 * * *';
+      // 09:10 (staggered 2026-08): daily_check owns 09:00 by default; the lane
+      // serializes overlaps anyway, but a distinct minute avoids pointless queuing.
+      const cronExpr = '10 9 * * *';
 
       try {
-        const task = cron.schedule(cronExpr, async () => {
-          try {
-            const { shouldRunScheduledExpiryReturnScan, scanAndCreateExpiryReviews } = await import('./returnsService.js');
-            if (!(await shouldRunScheduledExpiryReturnScan(database, intervalDays))) return;
-            console.log(`[Trigger: Expiry Return Review] Running inventory-only expired-stock scan (every ${intervalDays} days)...`);
-            await scanAndCreateExpiryReviews(database);
-          } catch (err) {
-            console.error('[Trigger: Expiry Return Review] Execution failed:', err);
-          }
+        const task = cron.schedule(cronExpr, () => {
+          void runHeavyJob('expiry_returns', async () => {
+            try {
+              const { shouldRunScheduledExpiryReturnScan, scanAndCreateExpiryReviews } = await import('./returnsService.js');
+              if (!(await shouldRunScheduledExpiryReturnScan(database, intervalDays))) return;
+              console.log(`[Trigger: Expiry Return Review] Running inventory-only expired-stock scan (every ${intervalDays} days)...`);
+              await scanAndCreateExpiryReviews(database);
+            } catch (err) {
+              console.error('[Trigger: Expiry Return Review] Execution failed:', err);
+            }
+          });
         });
         this.scheduledTasks.set('expiry_returns', task);
         console.log(`[TriggerScheduler] Registered 'Auto Expiry Return Review Scanner' -> Daily tick, interval: every ${intervalDays} day(s)`);
@@ -330,14 +341,16 @@ class TriggerSchedulerService {
       const cronExpr = this.timeToCron(timeStr);
 
       try {
-        const task = cron.schedule(cronExpr, async () => {
-          try {
-            console.log(`[Trigger: Doctor Report] Sending daily doctor summaries scheduled at ${timeStr}...`);
-            const { sendDailyDoctorReports } = await import('./doctorReportingService.js');
-            await sendDailyDoctorReports();
-          } catch (err) {
-            console.error('[Trigger: Doctor Report] Execution failed:', err);
-          }
+        const task = cron.schedule(cronExpr, () => {
+          void runHeavyJob('doctor_report', async () => {
+            try {
+              console.log(`[Trigger: Doctor Report] Sending daily doctor summaries scheduled at ${timeStr}...`);
+              const { sendDailyDoctorReports } = await import('./doctorReportingService.js');
+              await sendDailyDoctorReports();
+            } catch (err) {
+              console.error('[Trigger: Doctor Report] Execution failed:', err);
+            }
+          });
         });
         this.scheduledTasks.set('doctor_report', task);
         console.log(`[TriggerScheduler] Registered 'Doctor Daily Summary Report' -> Cron: ${cronExpr} (${timeStr})`);

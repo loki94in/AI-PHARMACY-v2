@@ -334,6 +334,20 @@ interface ProcessedEmail {
   }>;
 }
 
+// Shared billing-amount pattern: grand total / net amount / bill amount / total amount /
+// bare "Total:" / currency-prefixed numbers. Single source reused for subject+body AND
+// text-based attachments so every surface extracts identically.
+const BILL_AMOUNT_PATTERN = /(?:(?:grand\s*total|net\s*amount|bill\s*amount|inv(?:oice)?\s*amount|total\s*amount)\s*[:\-\s]*\s*(?:rs\.?|inr|₹)?\s*([\d,]+(?:\.\d{1,2})?)|(?:total|amount|amt)\s*[:\-\s]*(?:rs\.?|inr|₹)\s*([\d,]+(?:\.\d{1,2})?)|(?:total|amount|amt)\s*[:\-\s]*\s*(?!items|qty|quantity|units|pcs|medicines|rows)([\d,]+(?:\.\d{1,2})?)|(?:rs\.?|inr|₹)\s*([\d,]+(?:\.\d{1,2})?))/i;
+
+function extractBillAmount(text: string): string {
+  const amtMatch = (text || '').match(BILL_AMOUNT_PATTERN);
+  if (!amtMatch) return '';
+  const rawNum = (amtMatch[1] || amtMatch[2] || amtMatch[3] || amtMatch[4] || '').replace(/,/g, '').trim();
+  const parsed = parseFloat(rawNum);
+  if (isNaN(parsed) || parsed <= 0) return '';
+  return `₹${parsed.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
 function formatExpiryDate(expStr: string): string {
   if (!expStr) return '';
   const clean = expStr.trim();
@@ -1333,15 +1347,34 @@ export class EmailService {
     // Detect distributor name (unresolved by default)
     let distributorName = '';
 
-    // 1. First priority: Check database (Distributors table & AI Learning Mappings) by clean email
     const cleanFromEmail = extractCleanEmail(email.from || '');
-    if (cleanFromEmail) {
+    const senderIsEmailAddress = cleanFromEmail.includes('@');
+
+    // 1. First priority: match the sender mail ID against saved distributor profiles (the
+    //    AI Learning page stores it on distributors.email). Both sides go through
+    //    extractCleanEmail so display-formatted ("Name <a@b.c>") or multi-address entries
+    //    still resolve instead of falling back to the raw mail ID.
+    if (senderIsEmailAddress) {
       try {
         const db = await dbManager.getConnection();
-        const dbDist = await db.get(
-          `SELECT name FROM distributors WHERE email IS NOT NULL AND email != '' AND LOWER(TRIM(email)) = ? AND name IS NOT NULL AND TRIM(name) != '' LIMIT 1`,
-          [cleanFromEmail.toLowerCase()]
+        let dbDist = await db.get(
+          `SELECT id, name, email FROM distributors
+           WHERE email IS NOT NULL AND TRIM(email) != ''
+             AND LOWER(TRIM(email)) = ?
+             AND name IS NOT NULL AND TRIM(name) != ''
+           LIMIT 1`,
+          [cleanFromEmail]
         );
+        if ((!dbDist || !(dbDist.name || '').trim())) {
+          // Dirty-format fallback: small table, once-per-mail scan; compare cleaned values.
+          const emailRows = await db.all(
+            `SELECT id, name, email FROM distributors
+             WHERE email IS NOT NULL AND TRIM(email) != ''
+               AND name IS NOT NULL AND TRIM(name) != ''`
+          );
+          const hit = emailRows.find(d => extractCleanEmail(d.email) === cleanFromEmail);
+          if (hit) dbDist = hit;
+        }
         if (dbDist?.name && dbDist.name.trim()) {
           distributorName = dbDist.name.trim();
         }
@@ -1350,53 +1383,39 @@ export class EmailService {
       }
     }
 
-    // 2. Second priority: If not resolved from DB, check email text body / subject for known manufacturer/distributor keywords
+    // 2. Second priority: match the sender's DISPLAY NAME against registered distributors.
+    //    On success, learn back the sender's mail ID onto that distributor profile so its
+    //    AI Learning layout links permanently and future mails resolve via priority 1.
+    //    Existing addresses are never overwritten — new ones are appended.
     if (!distributorName) {
-      const combinedText = subject + ' ' + body;
-      const mfgMatch = combinedText.match(/(Nitin Agency|Nitin Agencies|Cipla|Alkem|Abbott|Cadila|Zydus|Intas|Lupin)/i);
-      if (mfgMatch) {
-        distributorName = mfgMatch[1].toUpperCase();
-      }
+      const fromMatch = (email.from || '').match(/([^<]+)/);
+      if (fromMatch && fromMatch[1].trim()) {
+        const candidateName = fromMatch[1].trim().replace(/['"]/g, '');
+        if (candidateName && candidateName.length > 2 && !candidateName.includes('@')) {
+          try {
+            const db = await dbManager.getConnection();
+            const dbMatch = await db.get(
+              `SELECT id, name, email FROM distributors WHERE LOWER(TRIM(name)) = ? AND name IS NOT NULL AND TRIM(name) != '' LIMIT 1`,
+              [candidateName.toLowerCase()]
+            );
+            if (dbMatch?.name && dbMatch.name.trim()) {
+              distributorName = dbMatch.name.trim();
 
-      // Clean up distributorName based on typical distributors in the inbox
-      const lowerFrom = (email.from || '').toLowerCase();
-      const lowerSubject = subject.toLowerCase();
-      if (!distributorName) {
-        if (lowerFrom.includes('senior') || lowerSubject.includes('senior agency')) {
-          distributorName = 'Senior Agency';
-        } else if (lowerFrom.includes('mahalaxmi') || lowerSubject.includes('mahalaxmi')) {
-          distributorName = 'New Mahalaxmi Cosmetics';
-        } else if (lowerFrom.includes('bajaj') || lowerSubject.includes('bajaj pharma')) {
-          distributorName = 'Bajaj Pharma';
-        } else if (lowerFrom.includes('tapadiya') || lowerSubject.includes('tapadiya')) {
-          distributorName = 'Tapadiya Distributors';
-        } else if (lowerFrom.includes('nitin') || lowerSubject.includes('nitin agency')) {
-          distributorName = 'Nitin Agency';
-        } else if (lowerFrom.includes('prime') || lowerSubject.includes('prime distributors')) {
-          distributorName = 'Prime Distributors';
-        } else if (lowerFrom.includes('success') || lowerSubject.includes('pro success pharma')) {
-          distributorName = 'Pro Success Pharma';
-        }
-      }
-
-      // 3. Third priority: If still not resolved, check if sender display name matches an existing distributor in the DB
-      if (!distributorName) {
-        const fromMatch = (email.from || '').match(/([^<]+)/);
-        if (fromMatch && fromMatch[1].trim()) {
-          const candidateName = fromMatch[1].trim().replace(/['"]/g, '');
-          if (candidateName && candidateName.length > 2 && !candidateName.includes('@')) {
-            try {
-              const db = await dbManager.getConnection();
-              const dbMatch = await db.get(
-                `SELECT name FROM distributors WHERE LOWER(TRIM(name)) = ? LIMIT 1`,
-                [candidateName.toLowerCase()]
-              );
-              if (dbMatch?.name && dbMatch.name.trim()) {
-                distributorName = dbMatch.name.trim();
+              if (senderIsEmailAddress && dbMatch.id) {
+                const savedEmails = String(dbMatch.email || '')
+                  .split(/[,;]/)
+                  .map(e => extractCleanEmail(e))
+                  .filter(e => e.includes('@'));
+                if (!savedEmails.includes(cleanFromEmail)) {
+                  const merged = String(dbMatch.email || '').trim()
+                    ? `${String(dbMatch.email).trim()}, ${cleanFromEmail}`
+                    : cleanFromEmail;
+                  await db.run('UPDATE distributors SET email = ? WHERE id = ?', [merged, dbMatch.id]);
+                }
               }
-            } catch (dbErr) {
-              console.warn('[EmailService] Distributor lookup by sender name failed:', dbErr);
             }
+          } catch (dbErr) {
+            console.warn('[EmailService] Distributor lookup by sender name failed:', dbErr);
           }
         }
       }
@@ -1424,20 +1443,31 @@ export class EmailService {
       }
     }
 
-    // Format email arrival time
-    const emailDate = email.date ? new Date(email.date) : new Date();
-    const timeStr = !isNaN(emailDate.getTime())
-      ? emailDate.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })
-      : new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+    // Format email arrival time — uses the mail's REAL mailbox timestamp when available
+    // (IMAP INTERNALDATE / sender Date header); processing-time only as last resort for
+    // legacy callers that carry no date.
+    const emailDate = email.date ? new Date(email.date) : null;
+    const hasRealEmailDate = !!(emailDate && !isNaN(emailDate.getTime()));
+    const arrivalTimeOpts = { hour: '2-digit', minute: '2-digit', hour12: true } as const;
+    const timeStr = hasRealEmailDate
+      ? (emailDate as Date).toLocaleTimeString('en-IN', arrivalTimeOpts)
+      : new Date().toLocaleTimeString('en-IN', arrivalTimeOpts);
 
-    // Extract billing amount (total bill/invoice amount)
-    let billAmount = '';
-    const amtMatch = (subject + ' ' + body).match(/(?:(?:grand\s*total|net\s*amount|bill\s*amount|inv(?:oice)?\s*amount|total\s*amount)\s*[:\-\s]*\s*(?:rs\.?|inr|₹)?\s*([\d,]+(?:\.\d{1,2})?)|(?:total|amount|amt)\s*[:\-\s]*(?:rs\.?|inr|₹)\s*([\d,]+(?:\.\d{1,2})?)|(?:total|amount|amt)\s*[:\-\s]*\s*(?!items|qty|quantity|units|pcs|medicines|rows)([\d,]+(?:\.\d{1,2})?)|(?:rs\.?|inr|₹)\s*([\d,]+(?:\.\d{1,2})?))/i);
-    if (amtMatch) {
-      const rawNum = (amtMatch[1] || amtMatch[2] || amtMatch[3] || amtMatch[4] || '').replace(/,/g, '').trim();
-      const parsed = parseFloat(rawNum);
-      if (!isNaN(parsed) && parsed > 0) {
-        billAmount = `₹${parsed.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    // Extract billing amount (total bill/invoice amount): subject+body first, then
+    // text-based attachments (CSV/TXT). Binary attachments are skipped — an amount we
+    // cannot actually read stays empty and is reported honestly as N/A downstream.
+    let billAmount = extractBillAmount(subject + ' ' + body);
+    if (!billAmount && Array.isArray(email.attachments)) {
+      for (const att of email.attachments) {
+        const lowerName = (att.filename || '').toLowerCase();
+        if (!lowerName.endsWith('.csv') && !lowerName.endsWith('.txt')) continue;
+        try {
+          const textContent = att.content ? att.content.toString('utf8').slice(0, 100 * 1024) : '';
+          billAmount = extractBillAmount(textContent);
+          if (billAmount) break;
+        } catch (attErr) {
+          console.warn('[EmailService] Billing amount attachment scan failed:', attErr);
+        }
       }
     }
 
@@ -1507,6 +1537,8 @@ export class EmailService {
       invoiceNumber,
       billAmount: billAmount || undefined,
       timeStr,
+      emailDate: hasRealEmailDate ? (emailDate as Date).toISOString() : undefined,
+      senderEmail: senderIsEmailAddress ? cleanFromEmail : undefined,
       medicines: displayMeds,
       totalItems: resolvedMedicines.reduce((sum, m) => sum + parseInt(m.quantity || '0'), 0) || displayMeds.length,
       urgencyLevel: (body.toLowerCase().includes('urgent') || subject.toLowerCase().includes('urgent')) ? 'high' : 'normal'
@@ -1542,15 +1574,22 @@ export class EmailService {
         const billNo = (orderInfo?.invoiceNumber && orderInfo.invoiceNumber !== 'N/A')
           ? orderInfo.invoiceNumber.trim()
           : 'N/A';
-        const arrivalTime = orderInfo?.timeStr || (parsedDate ? new Date(parsedDate).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }) : new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }));
+        // Prefer the mail's REAL arrival timestamp; orderInfo.timeStr (which already
+        // carries it when known) and processing time are only fallbacks.
+        const arrivalSource = orderInfo?.emailDate || parsedDate;
+        const arrivalDate = arrivalSource ? new Date(arrivalSource) : null;
+        const arrivalTime = (arrivalDate && !isNaN(arrivalDate.getTime()))
+          ? arrivalDate.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })
+          : (orderInfo?.timeStr || new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }));
         const billAmount = orderInfo?.billAmount || '';
 
         let message = isOrder
           ? `Distributor: ${distName}\nInvoice No: ${billNo}`
           : `📧 *New Email Received*\nFrom: ${processedEmail.from || 'Unknown'}\nSubject: ${processedEmail.subject || 'No Subject'}`;
 
-        if (isOrder && billAmount) {
-          message += `\nBill Amount: ${billAmount}`;
+        if (isOrder) {
+          // Always print the line — N/A means genuinely undetectable, never a guess.
+          message += `\nBill Amount: ${billAmount || 'N/A'}`;
         }
         message += `\nArrival Time: ${arrivalTime}`;
 
@@ -1622,7 +1661,11 @@ export class EmailService {
 
       // 4. Real-Time In-App SSE Toast Notification
       try {
-        const timeStr = (parsedDate ? new Date(parsedDate) : new Date()).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+        const toastSource = orderInfo?.emailDate || parsedDate;
+        const toastDate = toastSource ? new Date(toastSource) : null;
+        const timeStr = (toastDate && !isNaN(toastDate.getTime()))
+          ? toastDate.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
+          : new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
         notificationManager.broadcast({
           type: 'new_email',
           title: isOrder ? 'New Distributor Email' : 'New Mail Received',
@@ -1670,14 +1713,15 @@ export class EmailService {
       const billNo = (orderInfo?.invoiceNumber && orderInfo.invoiceNumber !== 'N/A')
         ? orderInfo.invoiceNumber.trim()
         : 'N/A';
-      const arrivalTime = orderInfo?.timeStr || new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+      const alertDate = orderInfo?.emailDate ? new Date(orderInfo.emailDate) : null;
+      const arrivalTime = (alertDate && !isNaN(alertDate.getTime()))
+        ? alertDate.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })
+        : (orderInfo?.timeStr || new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }));
       const billAmount = orderInfo?.billAmount || '';
 
       const logRefId = customRefId || orderInfo.invoiceNumber || 'distributor_invoice';
       let message = `Distributor: ${distName}\nInvoice No: ${billNo}`;
-      if (billAmount) {
-        message += `\nBill Amount: ${billAmount}`;
-      }
+      message += `\nBill Amount: ${billAmount || 'N/A'}`;
       message += `\nArrival Time: ${arrivalTime}`;
 
       for (const phone of targetPhones) {
@@ -3260,6 +3304,9 @@ export class EmailService {
             from: parsed.from?.text || '',
             subject: parsed.subject || '',
             body: parsed.text || '',
+            // Real arrival time: IMAP INTERNALDATE (when it hit the mailbox) preferred,
+            // sender Date header as fallback — NEVER the sync moment.
+            date: (msg.attributes?.date ? new Date(msg.attributes.date) : undefined) ?? (parsed.date ? new Date(parsed.date) : undefined),
             attachments: (parsed.attachments || []).map((a: any) => ({
               filename: a.filename || 'unknown',
               content: a.content,
@@ -3372,6 +3419,7 @@ export class EmailService {
                 from: rawEmail.from_addr || '',
                 subject: rawEmail.subject || '',
                 body: rawEmail.body || '',
+                date: rawEmail.date ? new Date(rawEmail.date) : undefined,
                 attachments: []
               };
               const orderInfo = await this.extractOrderInfo(processedEmail);

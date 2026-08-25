@@ -263,67 +263,10 @@ select option {
 }
 
 /* ═══════════════════════════════════════════
-   LIGHT MODE — MODAL / POPUP CARD BACKGROUNDS
-   (bg-gray-800, bg-gray-900, etc.)
-   ═══════════════════════════════════════════ */
-.light .bg-gray-800,
-.light .bg-gray-800\/90,
-.light .bg-gray-800\/95 {
-  background-color: #ffffff !important;
-  border-color: rgba(34, 197, 94, 0.2) !important;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08) !important;
-  color: var(--text) !important;
-}
-.light .bg-gray-900,
-.light .bg-gray-900\/90,
-.light .bg-gray-900\/95 {
-  background-color: #f9fafb !important;
-  border-color: rgba(34, 197, 94, 0.2) !important;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08) !important;
-  color: var(--text) !important;
-}
-/* Cancel / neutral gray buttons inside modals */
-.light .bg-gray-600,
-.light .bg-gray-700 {
-  background-color: #e5e7eb !important;
-  color: #374151 !important;
-}
-.light .hover\:bg-gray-700:hover,
-.light .hover\:bg-gray-600:hover {
-  background-color: #d1d5db !important;
-  color: #111827 !important;
-}
-
-/* ═══════════════════════════════════════════
-   LIGHT MODE — AUTOCOMPLETE / DROPDOWN POPUPS
-   bg-[#18181b]/95  bg-[#18181b]/98  bg-zinc-950/95  bg-zinc-900/90
-   ═══════════════════════════════════════════ */
-.light .bg-\[\#18181b\]\/95,
-.light .bg-\[\#18181b\]\/98 {
-  background-color: rgba(255, 255, 255, 0.99) !important;
-  border-color: rgba(34, 197, 94, 0.25) !important;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1) !important;
-}
-/* Dropdown hover rows */
-.light .bg-\[\#18181b\]\/95 > *:hover,
-.light .bg-\[\#18181b\]\/98 > *:hover {
-  background-color: rgba(0, 0, 0, 0.04) !important;
-}
-/* zinc-950 dropdown */
-.light .bg-zinc-950\/95 {
-  background-color: rgba(255, 255, 255, 0.99) !important;
-  border-color: rgba(34, 197, 94, 0.25) !important;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1) !important;
-}
-/* zinc-900/90 — QuickOrderModal panel */
-.light .bg-zinc-900\/90 {
-  background-color: rgba(255, 255, 255, 0.99) !important;
-  border-color: rgba(34, 197, 94, 0.2) !important;
-}
-
-/* ═══════════════════════════════════════════
    LIGHT MODE — STICKY TABLE HEADERS
-   bg-[#18181b]/95  used in many pages
+   (2026-08 solid-background sweep: the raw-palette
+   shims for bg-gray/zinc/#18181b/#121214 surfaces were
+   removed — those sources now use semantic tokens.)
    ═══════════════════════════════════════════ */
 .light thead.sticky,
 .light thead .sticky,
@@ -331,28 +274,6 @@ select option {
   background-color: rgba(243, 244, 246, 0.98) !important;
   border-bottom-color: rgba(34, 197, 94, 0.2) !important;
   backdrop-filter: blur(12px) !important;
-}
-
-/* ═══════════════════════════════════════════
-   LIGHT MODE — INVENTORY SIDE PANEL
-   bg-[#121214]/95
-   ═══════════════════════════════════════════ */
-.light .bg-\[\#121214\]\/95 {
-  background-color: rgba(255, 255, 255, 0.99) !important;
-  border-color: rgba(34, 197, 94, 0.25) !important;
-  box-shadow: -8px 0 30px rgba(0, 0, 0, 0.08) !important;
-}
-
-/* ═══════════════════════════════════════════
-   LIGHT MODE — TOGGLE / SWITCH TRACK
-   bg-zinc-700  (unchecked state)
-   ═══════════════════════════════════════════ */
-.light .bg-zinc-700 {
-  background-color: #d1d5db !important;
-}
-.light .bg-zinc-700.peer-checked\:bg-green,
-.light .peer:checked ~ .bg-zinc-700 {
-  background-color: #16a34a !important;
 }
 
 /* ═══════════════════════════════════════════

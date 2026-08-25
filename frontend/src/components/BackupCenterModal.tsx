@@ -244,7 +244,7 @@ export const BackupCenterContent: React.FC<BackupCenterContentProps> = ({
                   <button
                     onClick={handleFreshInstall}
                     disabled={actionLoading}
-                    className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-text rounded text-[10px] font-black uppercase transition-all"
+                    className="px-3 py-1.5 bg-bg3 hover:bg-bg2 text-text rounded text-[10px] font-black uppercase transition-all"
                   >
                     Continue Fresh Installation
                   </button>
@@ -510,7 +510,7 @@ export const BackupCenterContent: React.FC<BackupCenterContentProps> = ({
           {onClose && (
             <button
               onClick={onClose}
-              className="px-5 py-2 bg-zinc-800 hover:bg-zinc-700 border border-glass-border text-text rounded-xl text-xs font-bold uppercase transition-all"
+              className="px-5 py-2 bg-bg3 hover:bg-bg2 border border-glass-border text-text rounded-xl text-xs font-bold uppercase transition-all"
             >
               Close
             </button>

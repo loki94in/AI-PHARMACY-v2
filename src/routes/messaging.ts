@@ -577,6 +577,46 @@ router.post('/chats/:chatId/messages/:messageId/scan', async (req, res) => {
   }
 });
 
+// DELETE /messaging/chats/:chatId/messages/:messageId — user-clicked removal of a
+// received message from the LOCAL inbox cache (whatsapp_messages row + its cached
+// media files). This NEVER touches the sender's own WhatsApp copy — it only cleans
+// this store's archived copy, same scope as the bulk toggle-ignore cleanup above.
+router.delete('/chats/:chatId/messages/:messageId', async (req, res) => {
+  const { messageId } = req.params;
+  try {
+    const { dbManager } = await import('../database/connection.js');
+    const db = await dbManager.getConnection();
+    const row = await db.get('SELECT id, chat_id, type FROM whatsapp_messages WHERE id = ?', [messageId]);
+    if (!row) {
+      return res.status(404).json({ error: 'Message not found in local cache' });
+    }
+
+    // Best-effort cached-media cleanup (same locations/conventions as the writers):
+    // data/inbound_media/<safeId>.jpg (saveInboundMedia) and <appData>/uploads/<messageId>*.
+    try {
+      const safeId = String(messageId || '').replace(/[^a-zA-Z0-9_-]/g, '_');
+      const inboundFile = path.resolve(process.cwd(), 'data', 'inbound_media', `${safeId}.jpg`);
+      if (safeId && fs.existsSync(inboundFile)) await fs.promises.unlink(inboundFile).catch(() => {});
+      const uploadsDir = path.resolve(getAppDataDir(), 'uploads');
+      if (fs.existsSync(uploadsDir)) {
+        for (const f of fs.readdirSync(uploadsDir)) {
+          if (f.startsWith(messageId)) await fs.promises.unlink(path.join(uploadsDir, f)).catch(() => {});
+        }
+      }
+    } catch (_) {}
+
+    const result = await db.run('DELETE FROM whatsapp_messages WHERE id = ?', [messageId]);
+    if (!result.changes) {
+      return res.status(404).json({ error: 'Message not found in local cache' });
+    }
+
+    res.json({ success: true, message: 'Message removed from local inbox' });
+  } catch (err: any) {
+    console.error('Failed to delete message:', err);
+    res.status(500).json({ error: err.message || 'Failed to delete message' });
+  }
+});
+
 // ── Message Templates Endpoints ───────────────────────────────────────────────
 
 // GET /messaging/templates — List all message templates

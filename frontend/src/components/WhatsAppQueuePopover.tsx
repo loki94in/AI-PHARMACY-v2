@@ -226,7 +226,10 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
     if (resendingId === id) return;
     setResendingId(id);
     try {
-      const res = await api.resendWhatsAppQueueItem(id);
+      // Mapped rows (failure log id>=900000 / direct messages id>=800000) have no backing
+      // whatsapp_send_queue row — pass the visible payload so the backend can still re-enqueue.
+      const item = cachedQueueState?.recentItems?.find(i => i.id === id);
+      const res = await api.resendWhatsAppQueueItem(id, item ? { number: item.number, message: item.message, targetName: item.target_name } : undefined);
       toastEvent.trigger(res.message || 'Message resent for immediate delivery', 'success');
       await fetchStatus();
     } catch (err) {

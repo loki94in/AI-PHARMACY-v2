@@ -39,7 +39,7 @@ export const StagedQueueFloatingWidget: React.FC<Props> = ({ onLoadIntoPOS }) =>
 
   return createPortal(
     <div className="fixed bottom-14 right-6 z-global-modal slide-up select-none">
-      <div className="bg-[#18181b]/95 border border-primary/40 rounded-2xl p-3.5 shadow-2xl backdrop-blur-md w-80 text-white space-y-2.5">
+      <div className="bg-glass-bg border border-primary/40 rounded-2xl p-3.5 shadow-2xl backdrop-blur-md w-80 text-text space-y-2.5">
         {/* Header bar */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-1.5 text-xs font-bold text-primary">
@@ -49,7 +49,7 @@ export const StagedQueueFloatingWidget: React.FC<Props> = ({ onLoadIntoPOS }) =>
 
           <button
             onClick={() => stagedQueueService.clearQueue()}
-            className="p-1 rounded-md text-muted hover:text-white hover:bg-white/10 transition-colors"
+            className="p-1 rounded-md text-muted hover:text-text hover:bg-bg3 transition-colors"
             title="Exit queue"
           >
             <X size={14} />
@@ -57,9 +57,9 @@ export const StagedQueueFloatingWidget: React.FC<Props> = ({ onLoadIntoPOS }) =>
         </div>
 
         {/* Customer & Info Details */}
-        <div className="bg-white/5 border border-white/10 rounded-xl p-2.5 space-y-1">
+        <div className="bg-bg3/60 border border-border rounded-xl p-2.5 space-y-1">
           <div className="flex items-center justify-between">
-            <span className="font-bold text-sm text-white truncate max-w-[170px]">
+            <span className="font-bold text-sm text-text truncate max-w-[170px]">
               {currentItem.patient_name || 'Walk-in Customer'}
             </span>
             {getPaymentBadge(currentItem.payment_medium)}
@@ -85,7 +85,7 @@ export const StagedQueueFloatingWidget: React.FC<Props> = ({ onLoadIntoPOS }) =>
             <button
               onClick={() => stagedQueueService.prevItem()}
               disabled={currentIndex === 0}
-              className="p-1.5 rounded-lg border border-glass-border hover:bg-white/10 text-muted hover:text-white disabled:opacity-30 disabled:pointer-events-none transition-all"
+              className="p-1.5 rounded-lg border border-glass-border hover:bg-bg3 text-muted hover:text-text disabled:opacity-30 disabled:pointer-events-none transition-all"
               title="Previous order"
             >
               <ChevronLeft size={14} />
@@ -93,7 +93,7 @@ export const StagedQueueFloatingWidget: React.FC<Props> = ({ onLoadIntoPOS }) =>
             <button
               onClick={() => stagedQueueService.nextItem()}
               disabled={currentIndex === total - 1}
-              className="p-1.5 rounded-lg border border-glass-border hover:bg-white/10 text-muted hover:text-white disabled:opacity-30 disabled:pointer-events-none transition-all"
+              className="p-1.5 rounded-lg border border-glass-border hover:bg-bg3 text-muted hover:text-text disabled:opacity-30 disabled:pointer-events-none transition-all"
               title="Next order"
             >
               <ChevronRight size={14} />

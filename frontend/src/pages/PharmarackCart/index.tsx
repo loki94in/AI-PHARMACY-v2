@@ -2503,6 +2503,20 @@ const [showAddedItems] = useState<boolean>(false);
     fetchLatestSentMap();
   }, []);
 
+  // Auto-refresh on every RETURN to this page: KeepAlive keeps us mounted forever,
+  // so switching away and back used to show the stale list until a manual refresh.
+  // One silent sync per activation (cached paint stays up, data updates underneath)
+  // keeps the cart current with zero spinners. Changes made WHILE the page is
+  // visible arrive via the global SSE bridge ('refresh-pharmarack-cart' below).
+  const pageActiveRef = useRef(pageActive);
+  useEffect(() => {
+    const wasActive = pageActiveRef.current;
+    pageActiveRef.current = pageActive;
+    if (!pageActive || wasActive) return;
+    fetchCartSilent();
+    fetchLatestSentMap();
+  }, [pageActive]);
+
   useEffect(() => {
     const timer = setTimeout(() => setShowPendingTier(true), 300);
     return () => clearTimeout(timer);
@@ -2654,6 +2668,9 @@ const [showAddedItems] = useState<boolean>(false);
   // 'refresh-special-orders'     → re-fetch pending orders so the left sidebar count is up-to-date
   useEffect(() => {
     const handleCartRefresh = () => {
+      // Hidden kept-alive page must not background-fetch (P3 gating) — the
+      // activation effect silently syncs the moment the user returns.
+      if (!pageActiveRef.current) return;
       scheduleCartSync(300);
       fetchLatestSentMap();
     };

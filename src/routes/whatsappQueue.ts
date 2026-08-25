@@ -371,6 +371,9 @@ router.post('/retry-failed', async (_req, res) => {
 });
 
 // POST resend a previously queued/sent/failed message immediately (creates a NEW queue item)
+// Resolves the source from: (1) whatsapp_send_queue row, (2) automation_notifications failure
+// rows surfaced in the UI as id >= 900000, or (3) an explicit {number,message} payload for
+// mapped/direct rows that have no backing table row.
 router.post('/items/:id/resend', async (req, res) => {
   const id = Number(req.params.id);
   if (!id || isNaN(id)) {
@@ -378,25 +381,65 @@ router.post('/items/:id/resend', async (req, res) => {
   }
   try {
     const db = await dbManager.getConnection();
-    const source = await db.get('SELECT * FROM whatsapp_send_queue WHERE id = ?', [id]);
-    if (!source) {
-      return res.status(404).json({ error: 'Queue item not found' });
+    const bodyNumber = typeof req.body?.number === 'string' ? req.body.number : '';
+    const bodyMessage = typeof req.body?.message === 'string' ? req.body.message : '';
+    const bodyTargetName = typeof req.body?.targetName === 'string' ? req.body.targetName : undefined;
+
+    let number = '';
+    let message = '';
+    let type = 'crm_notification';
+    let targetName: string | undefined = bodyTargetName;
+    let mediaUrl: string | undefined;
+    let fileObj: any;
+
+    if (id < 900000) {
+      const source = await db.get('SELECT * FROM whatsapp_send_queue WHERE id = ?', [id]);
+      if (!source) {
+        return res.status(404).json({ error: 'Queue item not found' });
+      }
+      number = source.number;
+      message = source.message;
+      type = source.type;
+      targetName = source.target_name || targetName;
+      mediaUrl = source.media_url || undefined;
+      if (source.file_json) {
+        try { fileObj = JSON.parse(source.file_json); } catch (_) {}
+      }
+    } else {
+      const notifRow = await db.get(
+        'SELECT recipient_phone, message, type, recipient_name FROM automation_notifications WHERE id = ?',
+        [id - 900000]
+      );
+      if (notifRow) {
+        number = notifRow.recipient_phone || '';
+        message = notifRow.message || '';
+        type = notifRow.type || type;
+        targetName = notifRow.recipient_name || targetName;
+      } else if (bodyNumber && bodyMessage) {
+        number = bodyNumber;
+        message = bodyMessage;
+      } else {
+        return res.status(404).json({ error: 'Queue item not found' });
+      }
     }
 
-    let fileObj: any = null;
-    if (source.file_json) {
-      try { fileObj = JSON.parse(source.file_json); } catch (_) {}
+    const cleanPhone = normalizeWhatsAppPhone(number);
+    if (!cleanPhone || cleanPhone.length < 10) {
+      return res.status(400).json({ error: `Stored recipient number "${number || 'N/A'}" is not a valid phone — use Edit to correct it before resending` });
+    }
+    if (!message) {
+      return res.status(400).json({ error: 'This item has no stored message text to resend' });
     }
 
     // skipDedupe: an identical same-day message must still be allowed to go out again
     const newQueueId = await whatsappQueueWorker.enqueue(
-      source.number,
-      source.message,
-      source.type,
-      source.target_name || undefined,
+      cleanPhone,
+      message,
+      type,
+      targetName,
       undefined,
-      source.media_url || undefined,
-      fileObj || undefined,
+      mediaUrl,
+      fileObj,
       { skipDedupe: true }
     );
 
@@ -405,7 +448,7 @@ router.post('/items/:id/resend', async (req, res) => {
     res.json({
       success: true,
       queueId: newQueueId,
-      message: `Resend dispatched for ${source.target_name || source.number}`
+      message: `Resend dispatched for ${targetName || cleanPhone}`
     });
   } catch (err: any) {
     console.error('Failed to resend queue item:', err);

@@ -1088,6 +1088,23 @@ export async function ensureSchema(dbPath: string) {
     ['refill_fulfillments', 'next_due_date', 'ALTER TABLE refill_fulfillments ADD COLUMN next_due_date TEXT'],
     ['refill_fulfillments', 'fulfilled_via', 'ALTER TABLE refill_fulfillments ADD COLUMN fulfilled_via TEXT'],
     ['refill_fulfillments', 'notes', 'ALTER TABLE refill_fulfillments ADD COLUMN notes TEXT'],
+    // catalog_jobs: the base CREATE (id/file_path/status/created_at) predates the whole
+    // OCR pipeline — worker + routes read/write these 11 columns on EVERY upload/review,
+    // so fresh installs AND long-lived DBs crashed with "no such column" (bug found via
+    // catalogPipeline/duplicateCatalog suites, 2026-08-25). Mirrors the stock_ledger case.
+    ['catalog_jobs', 'original_filename', 'ALTER TABLE catalog_jobs ADD COLUMN original_filename TEXT'],
+    ['catalog_jobs', 'extracted_data', 'ALTER TABLE catalog_jobs ADD COLUMN extracted_data TEXT'],
+    ['catalog_jobs', 'mapping_config', 'ALTER TABLE catalog_jobs ADD COLUMN mapping_config TEXT'],
+    ['catalog_jobs', 'data_filters', 'ALTER TABLE catalog_jobs ADD COLUMN data_filters TEXT'],
+    ['catalog_jobs', 'error_log', 'ALTER TABLE catalog_jobs ADD COLUMN error_log TEXT'],
+    ['catalog_jobs', 'progress', 'ALTER TABLE catalog_jobs ADD COLUMN progress INTEGER DEFAULT 0'],
+    ['catalog_jobs', 'total_count', 'ALTER TABLE catalog_jobs ADD COLUMN total_count INTEGER DEFAULT 0'],
+    ['catalog_jobs', 'processed_count', 'ALTER TABLE catalog_jobs ADD COLUMN processed_count INTEGER DEFAULT 0'],
+    ['catalog_jobs', 'new_count', 'ALTER TABLE catalog_jobs ADD COLUMN new_count INTEGER DEFAULT 0'],
+    ['catalog_jobs', 'existing_count', 'ALTER TABLE catalog_jobs ADD COLUMN existing_count INTEGER DEFAULT 0'],
+    ['catalog_jobs', 'duplicate_count', 'ALTER TABLE catalog_jobs ADD COLUMN duplicate_count INTEGER DEFAULT 0'],
+    ['catalog_jobs', 'matched_previous_job_id', 'ALTER TABLE catalog_jobs ADD COLUMN matched_previous_job_id INTEGER DEFAULT NULL'],
+    ['catalog_jobs', 'newly_detected_columns', 'ALTER TABLE catalog_jobs ADD COLUMN newly_detected_columns TEXT'],
   ];
 
   // Pre-check PRAGMA table_info before ALTER TABLE ADD COLUMN to prevent SQLite error outputs

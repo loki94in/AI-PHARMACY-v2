@@ -1139,6 +1139,7 @@ export const api = {
   getIgnoredPhones: () => apiClient.get('/messaging/ignored-phones').then(res => res.data),
   toggleIgnore: (phone: string, ignore: boolean, reason?: string) => apiClient.post('/messaging/toggle-ignore', { phone, ignore, reason }).then(res => res.data),
   triggerManualScan: (chatId: string, messageId: string) => apiClient.post(`/messaging/chats/${encodeURIComponent(chatId)}/messages/${encodeURIComponent(messageId)}/scan`).then(res => res.data),
+  deleteWhatsappMessage: (chatId: string, messageId: string) => apiClient.delete<{ success: boolean; message: string }>(`/messaging/chats/${encodeURIComponent(chatId)}/messages/${encodeURIComponent(messageId)}`).then(res => res.data),
   getSettings: () => apiClient.get('/settings').then(res => res.data),
   saveSettings: (settings: AppSettings) => apiClient.post('/settings/save', settings).then(res => res.data),
   
@@ -1202,7 +1203,7 @@ export const api = {
   createOrder: (data: Partial<SpecialOrder>) => apiClient.post('/orders', data).then(res => res.data),
   createBatchOrders: (data: { items: readonly unknown[]; requester: string; phone: string; priority?: string; advance_payment?: number; customer_id?: number; language?: string; sendWhatsApp?: boolean }) =>
     apiClient.post('/orders/batch', data).then(res => res.data),
-  updateOrder: (id: number, data: Partial<SpecialOrder>) => apiClient.put(`/orders/${id}`, data).then(res => res.data),
+  updateOrder: (id: number, data: Partial<SpecialOrder>) => apiClient.put<{ success: boolean; message: string; whatsapp_queued?: boolean }>(`/orders/${id}`, data).then(res => res.data),
   updateOrderStatus: (id: number, status: string) => apiClient.post(`/orders/${id}/status`, { status }).then(res => res.data),
   deleteOrder: (id: number) => apiClient.delete(`/orders/${id}`).then(res => res.data),
   getUncollectedAlerts: () => apiClient.get<SpecialOrder[]>('/orders/uncollected-alerts').then(res => res.data),
@@ -1400,7 +1401,7 @@ export const api = {
   flushWhatsAppQueue: () => apiClient.post<{ success: boolean; message: string }>('/whatsapp/queue/flush').then(res => res.data),
   flushNextWhatsAppQueueItem: () => apiClient.post<{ success: boolean; forced: boolean; message: string; state: WhatsAppQueueStatus | null }>('/whatsapp/queue/flush-next').then(res => res.data),
   retryFailedWhatsAppQueue: () => apiClient.post<{ success: boolean; retriedCount: number; message: string }>('/whatsapp/queue/retry-failed').then(res => res.data),
-  resendWhatsAppQueueItem: (id: number) => apiClient.post<{ success: boolean; queueId: number; message: string }>(`/whatsapp/queue/items/${id}/resend`).then(res => res.data),
+  resendWhatsAppQueueItem: (id: number, payload?: { number?: string; message?: string; targetName?: string }) => apiClient.post<{ success: boolean; queueId: number; message: string }>(`/whatsapp/queue/items/${id}/resend`, payload).then(res => res.data),
   updateWhatsAppPacingConfig: (minSec: number, maxSec: number) => apiClient.post<{ success: boolean; minSec?: number; maxSec?: number; preset?: string; message: string }>('/whatsapp/queue/pacing', { minSec, maxSec }).then(res => res.data),
   setWhatsAppQueuePacingPreset: (preset: 'turbo' | 'fast' | 'safe') => apiClient.post<{ success: boolean; preset: string; minMs: number; maxMs: number; message: string; state: WhatsAppQueueStatus | null }>('/whatsapp/queue/pacing', { preset }).then(res => res.data),
   updateWhatsAppQueueItem: (data: { id: number; number: string; message?: string }) => apiClient.put<{ success: boolean; message: string }>('/whatsapp/queue/update-item', data).then(res => res.data),
