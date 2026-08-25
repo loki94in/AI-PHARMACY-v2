@@ -228,6 +228,15 @@ export async function waitForWhatsAppReady(timeoutMs: number = 90_000): Promise<
   return !!(isReady && clientInstance);
 }
 
+/**
+ * Ensures WhatsApp is warmed up and ready before scheduled batch triggers execute.
+ * If WhatsApp is sleeping, triggers silent session restore and awaits ready state.
+ */
+export async function ensureWhatsAppReady(timeoutMs: number = 30_000): Promise<boolean> {
+  markWhatsAppActivity();
+  return waitForWhatsAppReady(timeoutMs);
+}
+
 /** Helper to check whether we should route messages to WhatsApp Business Cloud API */
 export async function shouldRouteToBusiness(): Promise<boolean> {
   const db = await dbManager.getConnection();

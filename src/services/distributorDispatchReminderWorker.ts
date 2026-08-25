@@ -529,6 +529,19 @@ export async function checkAndSendAutoReminders() {
     if (withPhone.length > 0) {
       console.log(`[DistributorReminderWorker] Found ${withPhone.length} active distributor reminders to send for ${startTimeStr}-${endTimeStr} window.`);
 
+      // Ensure WhatsApp client is ready (wake from idle sleep if needed) before dispatching
+      try {
+        const { ensureWhatsAppReady } = await import('../whatsappClient.js');
+        const isReady = await ensureWhatsAppReady(30000);
+        if (!isReady) {
+          console.warn('[DistributorReminderWorker] WhatsApp not ready for reminders window. Standing down to avoid queue stalling.');
+          isWorkerRunning = false;
+          return;
+        }
+      } catch (waReadyErr: any) {
+        console.warn('[DistributorReminderWorker] WhatsApp readiness check warning:', waReadyErr?.message || waReadyErr);
+      }
+
       for (const item of withPhone) {
         // Anti-ban safe delay: 5 to 10 seconds between messages (strictly non-bulk)
         const delay = Math.floor(Math.random() * 5000) + 5000;
@@ -607,6 +620,11 @@ export async function checkAndSendAfternoonDeliveryBoyReminder() {
     }
 
     console.log(`[DistributorReminderWorker] Triggering scheduled afternoon Delivery Boy consolidated dispatch at ${targetTime}...`);
+    try {
+      const { ensureWhatsAppReady } = await import('../whatsappClient.js');
+      await ensureWhatsAppReady(30000);
+    } catch (_) {}
+
     const todayReminders = await syncTodayActiveDistributors();
     const result = await notificationService.sendConsolidatedDeliveryBoyDispatch(todayReminders);
     console.log('[DistributorReminderWorker] Afternoon Delivery Boy dispatch result:', result);

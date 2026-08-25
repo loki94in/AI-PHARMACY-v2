@@ -55,6 +55,8 @@ interface LocalQueueState extends Omit<WhatsAppQueueStatus, 'counts'> {
   nextItem?: QueueItem | null;
   isCompleted?: boolean;
   progressPercent?: number;
+  stalePendingCount?: number;
+  oldestPendingWaitSeconds?: number;
 }
 
 // Module-level persistent cache for zero-latency instant rendering (<1ms)
@@ -772,6 +774,11 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
               {((queueState?.counts?.failed || 0) > 0 || todayFailedCount > 0) && (
                 <span className="px-2 py-0.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-400 font-bold flex items-center gap-1">
                   <AlertTriangle size={11} /> Failed: {queueState?.counts?.failed || todayFailedCount}
+                </span>
+              )}
+              {(queueState?.stalePendingCount || 0) > 0 && (
+                <span className="px-2 py-0.5 rounded-lg bg-amber-500/20 border border-amber-500/30 text-amber-300 font-bold flex items-center gap-1 animate-pulse" title="Items waiting in queue for over 5 minutes">
+                  <AlertTriangle size={11} /> Stalled (&gt;5m): {queueState?.stalePendingCount}
                 </span>
               )}
             </div>

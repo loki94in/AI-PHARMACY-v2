@@ -325,6 +325,11 @@ async function resolveDeliveryBoyPhones(db: any, orders: any[]): Promise<{ name:
 async function sendBatchToDeliveryBoys(db: any, orders: any[], isLate = false): Promise<void> {
   if (orders.length === 0) return;
 
+  try {
+    const { ensureWhatsAppReady } = await import('../whatsappClient.js');
+    await ensureWhatsAppReady(30000);
+  } catch (_) {}
+
   const { summaryMessage } = await buildSeparateDispatchMessages(db, orders, isLate);
   const boys = await resolveDeliveryBoyPhones(db, orders);
 
@@ -340,14 +345,14 @@ async function sendBatchToDeliveryBoys(db: any, orders: any[], isLate = false): 
     try {
       // Enqueue ONLY the summary message (Delivery Boy strictly receives the distributor summary list, no raw medicine spam)
       const notifType = isLate ? 'pharmarack_additional_batch_summary' : 'pharmarack_daily_batch_summary';
-      const refId = isLate ? `batch_additional_${todayIST()}_${now}` : `batch_summary_${todayIST()}`;
+      const queueId = await whatsappQueueWorker.enqueue(boy.phone, summaryMessage, notifType, boy.name);
+      const refId = queueId ? `queue_${queueId}` : (isLate ? `batch_additional_${todayIST()}_${now}` : `batch_summary_${todayIST()}`);
 
-      await whatsappQueueWorker.enqueue(boy.phone, summaryMessage, notifType, boy.name);
       await db.run(
         `INSERT INTO automation_notifications
            (type, recipient_name, recipient_phone, message, status, reference_id)
          VALUES (?, ?, ?, ?, ?, ?)`,
-        [notifType, boy.name, boy.phone, summaryMessage, 'sent', refId]
+        [notifType, boy.name, boy.phone, summaryMessage, 'pending', refId]
       );
 
       // Record in action_logs for Activity Alerts

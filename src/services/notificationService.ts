@@ -847,10 +847,12 @@ export class NotificationService {
         [reminderId]
       );
 
+      const refId = queueId ? `queue_${queueId}` : `reminder_${reminderId}_${Date.now()}`;
+      const notifStatus = queueId ? 'pending' : 'failed';
       await db.run(
         `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
          VALUES (?, ?, ?, ?, ?, ?)`,
-        ['distributor_dispatch_reminder', reminder.distributor_name, recipientPhone, message, 'sent', `reminder_${reminderId}_${Date.now()}`]
+        ['distributor_dispatch_reminder', reminder.distributor_name, recipientPhone, message, notifStatus, refId]
       );
 
       return Boolean(queueId);
@@ -940,10 +942,12 @@ export class NotificationService {
       );
 
       const todayIso = new Date().toISOString().split('T')[0];
+      const refId = queueId ? `queue_${queueId}` : `afternoon_dispatch_${todayIso}_${Date.now()}`;
+      const notifStatus = queueId ? 'pending' : 'failed';
       await db.run(
         `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
          VALUES (?, ?, ?, ?, ?, ?)`,
-        ['afternoon_delivery_boy_dispatch', boyName, boyPhone, msg, 'sent', `afternoon_dispatch_${todayIso}_${Date.now()}`]
+        ['afternoon_delivery_boy_dispatch', boyName, boyPhone, msg, notifStatus, refId]
       );
 
       return { ok: Boolean(queueId), message: 'Afternoon dispatch summary enqueued for Delivery Boy!' };
@@ -985,10 +989,12 @@ export class NotificationService {
       );
 
       const todayIso = new Date().toISOString().split('T')[0];
+      const refId = queueId ? `queue_${queueId}` : `missing_dist_phones_${todayIso}_${Date.now()}`;
+      const notifStatus = queueId ? 'pending' : 'failed';
       await db.run(
         `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
          VALUES (?, ?, ?, ?, ?, ?)`,
-        ['admin_missing_distributor_phones', 'Admin / Store Owner', adminPhone, msg, 'sent', `missing_dist_phones_${todayIso}_${Date.now()}`]
+        ['admin_missing_distributor_phones', 'Admin / Store Owner', adminPhone, msg, notifStatus, refId]
       );
 
       return Boolean(queueId);

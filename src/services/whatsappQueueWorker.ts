@@ -563,8 +563,12 @@ class WhatsAppQueueWorker {
           break;
         }
 
-        // Set status to sending
+        // Set status to sending in both queue and automation_notifications
         await db.run("UPDATE whatsapp_send_queue SET status = 'sending' WHERE id = ?", [item.id]);
+        await db.run(
+          "UPDATE automation_notifications SET status = 'sending' WHERE reference_id = ? OR reference_id = ?",
+          [`queue_${item.id}`, String(item.id)]
+        ).catch(() => {});
         if (item.type === 'refill_reminder') {
           await db.run("UPDATE patient_refills SET reminder_status = 'SENDING' WHERE reminder_job_id = ?", [item.id]).catch(() => {});
         }
@@ -600,12 +604,16 @@ class WhatsAppQueueWorker {
             console.warn(`[WhatsAppQueueWorker] Outbox verification note for #${item.id} (${item.number}): message sent via sendMessage, recorded in outbound history.`);
           }
 
-          // Mark sent
+          // Mark sent in queue and update linked notification records
           const sentAt = Date.now();
           await db.run(
             "UPDATE whatsapp_send_queue SET status = 'sent', sent_at = ?, error_message = NULL WHERE id = ?",
             [sentAt, item.id]
           );
+          await db.run(
+            "UPDATE automation_notifications SET status = 'sent', error_message = NULL WHERE reference_id = ? OR reference_id = ?",
+            [`queue_${item.id}`, String(item.id)]
+          ).catch(() => {});
 
           if (item.type === 'pharmarack_distributor_order') {
             await this.markPharmarackOrderSent(db, item.target_name);
@@ -635,6 +643,11 @@ class WhatsAppQueueWorker {
               "UPDATE whatsapp_send_queue SET status = 'sent', sent_at = ?, error_message = NULL WHERE id = ?",
               [sentAt, item.id]
             );
+            await db.run(
+              "UPDATE automation_notifications SET status = 'sent', error_message = NULL WHERE reference_id = ? OR reference_id = ?",
+              [`queue_${item.id}`, String(item.id)]
+            ).catch(() => {});
+
             if (item.type === 'pharmarack_distributor_order') {
               await this.markPharmarackOrderSent(db, item.target_name);
             }
@@ -658,6 +671,10 @@ class WhatsAppQueueWorker {
               "UPDATE whatsapp_send_queue SET status = ?, retry_count = ?, error_message = ? WHERE id = ?",
               [newStatus, newRetryCount, errMsg, item.id]
             );
+            await db.run(
+              "UPDATE automation_notifications SET status = 'failed', error_message = ? WHERE reference_id = ? OR reference_id = ?",
+              [errMsg, `queue_${item.id}`, String(item.id)]
+            ).catch(() => {});
 
             if (item.type === 'refill_reminder') {
               await db.run(
@@ -947,6 +964,16 @@ class WhatsAppQueueWorker {
     const delayDistRow = await db.get("SELECT value FROM app_settings WHERE key = 'whatsapp_delay_distributor'");
     const delayDelivRow = await db.get("SELECT value FROM app_settings WHERE key = 'whatsapp_delay_delivery_boy'");
 
+    // Stale watchdog: count pending items waiting for > 5 minutes
+    const staleFiveMinsAgo = now - 300000;
+    const staleRow = await db.get(
+      `SELECT COUNT(*) as cnt, MIN(created_at) as oldest_created FROM whatsapp_send_queue
+       WHERE status = 'pending' AND (scheduled_at IS NULL OR scheduled_at <= ?) AND created_at <= ?`,
+      [now, staleFiveMinsAgo]
+    );
+    const stalePendingCount = Number(staleRow?.cnt || 0);
+    const oldestPendingWaitSeconds = staleRow?.oldest_created ? Math.max(0, Math.floor((now - Number(staleRow.oldest_created)) / 1000)) : 0;
+
     let preset: 'turbo' | 'fast' | 'safe' | 'custom' = 'custom';
     if (this.pacingMinMs === 100 && this.pacingMaxMs === 300) {
       preset = 'turbo';
@@ -965,6 +992,8 @@ class WhatsAppQueueWorker {
       // saved session as "Offline / Reconnecting".
       sleeping: waStatus.sleeping === true,
       initializing: waStatus.initializing === true,
+      stalePendingCount,
+      oldestPendingWaitSeconds,
       nextDispatchCountdownMs: countdownSec * 1000,
       nextDispatchCountdownSeconds: countdownSec,
       nextDispatchTimestamp: this.nextDispatchTimestamp,
