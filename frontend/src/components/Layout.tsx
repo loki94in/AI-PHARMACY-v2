@@ -1866,6 +1866,7 @@ const Topbar = memo(({
           {/* Quick Order Shortcut Button */}
           <button
             onClick={() => quickOrderEvent.triggerOpen()}
+            onMouseEnter={() => api.warmupPharmarackSession()}
             className="p-2 text-muted hover:text-white transition-colors flex items-center justify-center relative hover:bg-white/5 rounded-xl cursor-pointer"
             title="Quick Special Request (Alt+O)"
             aria-label="Quick special request"
@@ -1876,6 +1877,7 @@ const Topbar = memo(({
           {/* Live Cart Shortcut Button */}
           <button
             onClick={() => liveCartAddEvent.triggerOpen()}
+            onMouseEnter={() => api.warmupPharmarackSession()}
             className="p-2 text-muted hover:text-white transition-colors flex items-center justify-center relative hover:bg-white/5 rounded-xl cursor-pointer"
             title="Live Cart Add (Alt+L)"
             aria-label="Live cart"

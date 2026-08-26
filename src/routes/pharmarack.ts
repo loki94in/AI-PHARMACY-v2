@@ -75,6 +75,13 @@ async function fetchPharmarack(url: string, options: any = {}): Promise<Response
   let response = await executeFetch(token);
 
   if ((response.status === 401 || response.status === 403) && token) {
+    if (options.nonBlockingOn401) {
+      console.log(`[Pharmarack Fetch] Search API returned ${response.status}. Triggering async background token refresh and returning immediately...`);
+      tokenRefreshScheduler.executeRefresh().catch(err => {
+        console.warn('[Pharmarack Fetch] Async token refresh error:', err?.message || err);
+      });
+      return response;
+    }
     console.log(`[Pharmarack Fetch] API ${url} returned ${response.status}. Attempting silent background token refresh...`);
     const freshToken = await tokenRefreshScheduler.executeRefresh();
     if (freshToken) {
@@ -197,7 +204,8 @@ async function performPharmarackSearch(qRaw: string, storeId: number | null, isM
     let response = await fetchPharmarack('https://pharmretail-elasticsearch.pharmarack.com/open-search/api/v2/search', {
       method: 'POST',
       body: JSON.stringify(buildPayload(qRaw)),
-      signal: AbortSignal.timeout(3500)
+      signal: AbortSignal.timeout(3500),
+      nonBlockingOn401: true
     });
 
     let data: any = response.ok ? await response.json().catch(() => null) : null;
@@ -208,7 +216,8 @@ async function performPharmarackSearch(qRaw: string, storeId: number | null, isM
       response = await fetchPharmarack('https://pharmretail-elasticsearch.pharmarack.com/open-search/api/v2/search', {
         method: 'POST',
         body: JSON.stringify(buildPayload(cleanedTerm)),
-        signal: AbortSignal.timeout(3000)
+        signal: AbortSignal.timeout(3000),
+        nonBlockingOn401: true
       });
       if (response.ok) {
         data = await response.json().catch(() => null);
@@ -422,6 +431,12 @@ router.post('/catalog/sync', async (_req, res) => {
   } catch (err: any) {
     res.status(500).json({ error: 'Failed to start catalog sync: ' + err.message });
   }
+});
+
+// Trigger silent background keep-alive check (e.g. on window focus or Live Cart modal hover)
+router.post('/session/warmup', async (_req, res) => {
+  res.json({ success: true, message: 'Session warm-up probe triggered' });
+  tokenRefreshScheduler.runSessionHeartbeat('heartbeat').catch(() => {});
 });
 
 // Launch non-headless login window

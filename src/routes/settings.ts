@@ -674,6 +674,16 @@ router.post('/google/disconnect', async (_req, res) => {
 router.get('/registered-devices', async (_req, res) => {
   try {
     const db = await dbManager.getConnection();
+    try {
+      const cols = await db.all('PRAGMA table_info(push_tokens)');
+      const names = new Set(cols.map((c: any) => c.name));
+      if (cols.length > 0 && !names.has('device_uuid')) {
+        await db.run('ALTER TABLE push_tokens ADD COLUMN device_uuid TEXT');
+      }
+      if (cols.length > 0 && !names.has('is_blocked')) {
+        await db.run('ALTER TABLE push_tokens ADD COLUMN is_blocked INTEGER DEFAULT 0');
+      }
+    } catch (_) {}
     // Dedupe by stable identity (uuid, falling back to token for legacy rows)
     const rows = await db.all(`
       SELECT

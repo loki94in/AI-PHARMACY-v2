@@ -226,13 +226,13 @@ export class TokenRefreshScheduler {
       this.timeoutId = null;
     }
 
-    let targetInterval = 20;
+    let targetInterval = 8;
     try {
       const db = await dbManager.getConnection();
       const intervalRow = await db.get("SELECT value FROM app_settings WHERE key = 'trigger_pharmarack_refresh_interval_min'");
       if (intervalRow?.value) {
         const parsed = parseInt(intervalRow.value, 10);
-        if (!isNaN(parsed) && parsed >= 5 && parsed <= 120) {
+        if (!isNaN(parsed) && parsed >= 3 && parsed <= 120) {
           targetInterval = parsed;
         }
       }

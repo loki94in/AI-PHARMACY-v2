@@ -223,6 +223,46 @@ export async function ensureSchema(dbPath: string) {
       // Schedule Drugs hub: filter-by-schedule + name-ordered pages over the
       // 291k master catalog (composite covers equality lookups on schedule_type)
       await db.run('CREATE INDEX IF NOT EXISTS idx_medicines_schedule_type_name ON medicines(schedule_type, name)');
+
+      // Ensure multi-device & velocity metrics tables exist on fast-boot
+      try {
+        const pushCols = await db.all('PRAGMA table_info(push_tokens)');
+        const pushNames = new Set(pushCols.map((c: any) => c.name));
+        if (pushCols.length > 0 && !pushNames.has('device_uuid')) {
+          await db.run('ALTER TABLE push_tokens ADD COLUMN device_uuid TEXT');
+        }
+        if (pushCols.length > 0 && !pushNames.has('is_blocked')) {
+          await db.run('ALTER TABLE push_tokens ADD COLUMN is_blocked INTEGER DEFAULT 0');
+        }
+      } catch (_) {}
+
+      try {
+        const stagedCols = await db.all('PRAGMA table_info(staged_sales)');
+        const stagedNames = new Set(stagedCols.map((c: any) => c.name));
+        if (stagedCols.length > 0 && !stagedNames.has('device_uuid')) {
+          await db.run('ALTER TABLE staged_sales ADD COLUMN device_uuid TEXT');
+        }
+        if (stagedCols.length > 0 && !stagedNames.has('sold_from_device')) {
+          await db.run('ALTER TABLE staged_sales ADD COLUMN sold_from_device TEXT');
+        }
+      } catch (_) {}
+
+      await db.run(`
+        CREATE TABLE IF NOT EXISTS medicine_sales_metrics (
+          medicine_id INTEGER PRIMARY KEY,
+          sales_2d_qty REAL DEFAULT 0,
+          sales_window_qty REAL DEFAULT 0,
+          purchases_window_qty REAL DEFAULT 0,
+          last_sold_date TEXT,
+          last_purchased_date TEXT,
+          last_purchase_ptr REAL DEFAULT 0,
+          last_distributor_id INTEGER,
+          last_distributor_name TEXT,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+      await db.run('CREATE INDEX IF NOT EXISTS idx_msm_velocity ON medicine_sales_metrics(sales_window_qty, purchases_window_qty, sales_2d_qty)');
+
       await ensureMedicinesFts(db);
       return;
     }
@@ -816,6 +856,8 @@ export async function ensureSchema(dbPath: string) {
       token TEXT PRIMARY KEY,
       device_name TEXT,
       os TEXT,
+      device_uuid TEXT,
+      is_blocked INTEGER DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       last_seen DATETIME DEFAULT CURRENT_TIMESTAMP
     );
@@ -1359,8 +1401,24 @@ export async function ensureSchema(dbPath: string) {
       discount REAL DEFAULT 0,
       sale_date DATETIME DEFAULT CURRENT_TIMESTAMP,
       items_json TEXT,
+      sold_from_device TEXT,
+      device_uuid TEXT,
       status TEXT CHECK(status IN ('pending', 'approved', 'rejected')) DEFAULT 'pending'
     );
+
+    CREATE TABLE IF NOT EXISTS medicine_sales_metrics (
+      medicine_id INTEGER PRIMARY KEY,
+      sales_2d_qty REAL DEFAULT 0,
+      sales_window_qty REAL DEFAULT 0,
+      purchases_window_qty REAL DEFAULT 0,
+      last_sold_date TEXT,
+      last_purchased_date TEXT,
+      last_purchase_ptr REAL DEFAULT 0,
+      last_distributor_id INTEGER,
+      last_distributor_name TEXT,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_msm_velocity ON medicine_sales_metrics(sales_window_qty, purchases_window_qty, sales_2d_qty);
 
     CREATE TABLE IF NOT EXISTS staged_purchases (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1784,6 +1842,8 @@ export async function ensureSchema(dbPath: string) {
       token TEXT PRIMARY KEY,
       device_name TEXT,
       os TEXT,
+      device_uuid TEXT,
+      is_blocked INTEGER DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       last_seen DATETIME DEFAULT CURRENT_TIMESTAMP
     );

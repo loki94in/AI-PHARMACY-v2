@@ -2690,6 +2690,8 @@ router.get('/credit-dues', async (req, res) => {
 router.get('/reorder-suggestions', async (_req, res) => {
   try {
     const db = await dbManager.getConnection();
+    const { ensureMedicineSalesMetricsSchema } = await import('../services/medicineSalesMetricsService.js');
+    await ensureMedicineSalesMetricsSchema(db);
     
     // Fetch active snoozed medicine IDs
     const snoozedRows = await db.all(`

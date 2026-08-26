@@ -451,6 +451,11 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
     }
   }, [selectedMedicineName, product, qty]);
 
+  // Proactively warm up Pharmarack session in background on modal open
+  useEffect(() => {
+    api.warmupPharmarackSession();
+  }, []);
+
   // Suggestions Search
   const [suggestions, setSuggestions] = useState<SuggestionMedicine[]>([]);
   const [, setCandidateOptions] = useState<SuggestionMedicine[]>([]);

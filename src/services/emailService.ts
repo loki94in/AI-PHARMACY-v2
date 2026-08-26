@@ -6,7 +6,8 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { ensureSchema } from '../database.js';
-import { sendMessage, waitForWhatsAppReady } from '../whatsappClient.js';
+import { waitForWhatsAppReady } from '../whatsappClient.js';
+import { whatsappQueueWorker } from './whatsappQueueWorker.js';
 import { telegramBotService } from '../telegramBot.js';
 import { notificationManager } from '../utils/notifications.js';
 import { extractDateFromText } from '../utils/dateExtractor.js';
@@ -1611,24 +1612,21 @@ export class EmailService {
           }
 
           try {
-            // Boot-window resilience: background alerts can fire while the WhatsApp
-            // session is still restoring — wait (bounded) instead of failing instantly.
-            await waitForWhatsAppReady();
-            await sendMessage(phone, undefined, message);
-            console.log(`[MailArrival] WhatsApp alert sent to ${phone} for ${refId}`);
-            await db.run(
-              `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
-               VALUES (?, ?, ?, ?, ?, ?)`,
-              [isOrder ? 'distributor_invoice' : 'email_arrival', distName || 'Admin / Store Owner', phone, message, 'sent', phoneRefId]
+            await whatsappQueueWorker.enqueue(
+              phone,
+              message,
+              isOrder ? 'distributor_invoice' : 'email_arrival',
+              distName || 'Admin / Store Owner'
             );
+            console.log(`[MailArrival] WhatsApp alert enqueued for ${phone} (${refId})`);
             whatsappSentToOwner = true;
           } catch (wsErr: any) {
-            console.error(`[MailArrival] Failed to send WhatsApp mail alert to ${phone}:`, wsErr);
+            console.error(`[MailArrival] Failed to enqueue WhatsApp mail alert to ${phone}:`, wsErr);
             await db.run(
               `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, error_message, reference_id)
                VALUES (?, ?, ?, ?, ?, ?, ?)`,
               [isOrder ? 'distributor_invoice' : 'email_arrival', distName || 'Admin / Store Owner', phone, message, 'failed', wsErr?.message || 'Unknown error', phoneRefId]
-            );
+            ).catch(() => {});
           }
         }
       }
@@ -1727,23 +1725,20 @@ export class EmailService {
       for (const phone of targetPhones) {
         const phoneRefId = `${logRefId}_${phone}`;
         try {
-          // Boot-window resilience: same bounded wait as the mail-arrival alert above.
-          await waitForWhatsAppReady();
-          await sendMessage(phone, undefined, message);
-          console.log(`Distributor WhatsApp alert sent to: ${phone}`);
-          
-          await db.run(
-            `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
-             VALUES (?, ?, ?, ?, ?, ?)`,
-            ['distributor_invoice', distName, phone, message, 'sent', phoneRefId]
+          await whatsappQueueWorker.enqueue(
+            phone,
+            message,
+            'distributor_invoice',
+            distName
           );
+          console.log(`Distributor WhatsApp alert enqueued for: ${phone}`);
         } catch (wsError: any) {
-          console.error(`Failed to send distributor alert to ${phone}:`, wsError);
+          console.error(`Failed to enqueue distributor alert to ${phone}:`, wsError);
           await db.run(
             `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, error_message, reference_id)
              VALUES (?, ?, ?, ?, ?, ?, ?)`,
             ['distributor_invoice', distName, phone, message, 'failed', wsError.message || 'Unknown error', phoneRefId]
-          );
+          ).catch(() => {});
         }
       }
     } catch (err) {

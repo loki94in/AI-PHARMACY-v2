@@ -104,13 +104,24 @@ let deviceUuidColumnReady = false;
 async function ensureDeviceUuidColumn(db: any): Promise<void> {
   if (deviceUuidColumnReady) return;
   try {
+    await db.run(`
+      CREATE TABLE IF NOT EXISTS push_tokens (
+        token TEXT PRIMARY KEY,
+        device_name TEXT,
+        os TEXT,
+        device_uuid TEXT,
+        is_blocked INTEGER DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        last_seen DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
     const cols = await db.all('PRAGMA table_info(push_tokens)');
     const names = new Set(cols.map((c: any) => c.name));
-    if (!names.has('device_uuid')) {
-      await db.run('ALTER TABLE push_tokens ADD COLUMN device_uuid TEXT');
+    if (cols.length > 0 && !names.has('device_uuid')) {
+      await db.run('ALTER TABLE push_tokens ADD COLUMN device_uuid TEXT').catch(() => {});
     }
-    if (!names.has('is_blocked')) {
-      await db.run('ALTER TABLE push_tokens ADD COLUMN is_blocked INTEGER DEFAULT 0');
+    if (cols.length > 0 && !names.has('is_blocked')) {
+      await db.run('ALTER TABLE push_tokens ADD COLUMN is_blocked INTEGER DEFAULT 0').catch(() => {});
     }
     deviceUuidColumnReady = true;
   } catch (err) {

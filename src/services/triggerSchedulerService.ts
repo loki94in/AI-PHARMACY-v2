@@ -97,7 +97,7 @@ class TriggerSchedulerService {
 
       // 6. Pharmarack Token Refresher
       trigger_pharmarack_refresh_enabled: 'true',
-      trigger_pharmarack_refresh_interval_min: '20',
+      trigger_pharmarack_refresh_interval_min: '8',
 
       // 7. WhatsApp Queue Worker
       trigger_whatsapp_queue_enabled: 'true',

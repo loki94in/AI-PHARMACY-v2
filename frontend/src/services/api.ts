@@ -1048,6 +1048,7 @@ export const api = {
       },
       ...(signal ? { signal } : {})
     }).then(res => res.data),
+  warmupPharmarackSession: () => apiClient.post('/pharmarack/session/warmup').then(res => res.data).catch(() => {}),
   addPharmarackCart: (items: Array<{ 
     productId: string | number; 
     storeId: string | number; 

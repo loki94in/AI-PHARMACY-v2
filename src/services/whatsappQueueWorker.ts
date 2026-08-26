@@ -68,7 +68,7 @@ class WhatsAppQueueWorker {
   private nextDispatchTimestamp: number | null = null;
   private currentSendingItemId: number | null = null;
   private pacingMinMs = 10000;
-  private pacingMaxMs = 12000;
+  private pacingMaxMs = 15000;
 
   public isWorkerPaused(): boolean {
     return this.isPaused;
