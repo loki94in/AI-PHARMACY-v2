@@ -22,6 +22,16 @@ let ordersTableInitialized = false;
 
 async function initOrdersTable(db: any) {
   if (ordersTableInitialized) return;
+  try {
+    const cols = await db.all('PRAGMA table_info(special_orders)');
+    const colNames = new Set(cols.map((c: any) => c.name));
+    if (!colNames.has('notification_count')) {
+      await db.run('ALTER TABLE special_orders ADD COLUMN notification_count INTEGER DEFAULT 0');
+    }
+    if (!colNames.has('cart_add_error')) {
+      await db.run('ALTER TABLE special_orders ADD COLUMN cart_add_error TEXT DEFAULT NULL');
+    }
+  } catch (_) {}
   ordersTableInitialized = true;
 }
 

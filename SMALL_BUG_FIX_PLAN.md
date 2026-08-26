@@ -7,6 +7,17 @@
 
 ## Fixed
 
+### [Fixed] P1-10 — Batch create special orders failed: `table special_orders has no column named notification_count`
+
+| Field | Content |
+|-------|---------|
+| **What the user saw** | Order creation errored: `Batch create special orders error: [Error: SQLITE_ERROR: table special_orders has no column named notification_count]` on `POST /api/orders/batch` and `POST /api/orders`. |
+| **Root cause** | `CURRENT_SCHEMA_VERSION` was at `43`, and fast boot skipped DDL when version matched. In `src/database.ts`, `columnMigrations` array lacked entries for `notification_count` and `cart_add_error`, so databases upgraded to schema v43 never had those columns added to `special_orders`. Also `initOrdersTable` in `src/routes/orders.ts` was a no-op that didn't heal missing columns. |
+| **How it was fixed** | 1. Bumped `CURRENT_SCHEMA_VERSION` to `44` in `src/database.ts`.<br>2. Added `notification_count` and `cart_add_error` to `columnMigrations`, `CREATE TABLE special_orders_new`, and `CREATE TABLE IF NOT EXISTS special_orders`.<br>3. Made `initOrdersTable(db)` in `src/routes/orders.ts` check and dynamically add missing columns (`notification_count`, `cart_add_error`) on demand.<br>4. Updated `tests/ordersNotifiedFlag.test.ts` to assert `notification_count: 0` and verify booking notification flow. |
+| **Priority** | P1 |
+| **What not to touch** | `notified` flag starts at `0` on order booking because it tracks customer arrival notification (on Mark Ready); booking notification is recorded in `automation_notifications`. |
+| **Verified by** | `tests/ordersNotifiedFlag.test.ts` + `tests/specialOrderArrival.test.ts` (13/13 PASS); `npm run build` clean; `npm run guardrails` PASS. |
+
 ### [Fixed] S-01 — Single-key settings endpoints stored `admin_password` as plaintext (hashing only existed on the bulk `/save` path)
 
 | Field | Content |

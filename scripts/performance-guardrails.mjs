@@ -265,7 +265,7 @@ const RULES = [
 // Target collection
 // ---------------------------------------------------------------------------
 function git(args) {
-  try { return execSync('git ' + args, { cwd: ROOT, encoding: 'utf8' }); }
+  try { return execSync('git ' + args, { cwd: ROOT, encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'], maxBuffer: 50 * 1024 * 1024 }); }
   catch { return null; }
 }
 
