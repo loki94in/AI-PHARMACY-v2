@@ -32,7 +32,7 @@ export interface QueueWorkerState {
   nextDispatchTimestamp: number | null;
   currentPacingMinMs: number;
   currentPacingMaxMs: number;
-  pacingPreset: 'turbo' | 'fast' | 'safe' | 'custom';
+  pacingPreset: 'safe' | 'custom';
   currentSendingItemId: number | null;
   activeTargetName?: string | null;
   currentItem?: QueueItem | null;
@@ -128,28 +128,24 @@ class WhatsAppQueueWorker {
       await this.ensureSchema(db);
       const minRow = await db.get("SELECT value FROM app_settings WHERE key = 'whatsapp_queue_pacing_min'");
       const maxRow = await db.get("SELECT value FROM app_settings WHERE key = 'whatsapp_queue_pacing_max'");
-      
-      let min = minRow ? parseInt(minRow.value, 10) : 10000;
-      let max = maxRow ? parseInt(maxRow.value, 10) : 12000;
 
-      // Upgrade legacy default (5000 / 8000) to standard 10-12s
-      if (min === 5000 || min === 8000) {
-        min = 10000;
-        max = 12000;
-      }
+      const rawMin = minRow ? parseInt(minRow.value, 10) : 10000;
+      const rawMax = maxRow ? parseInt(maxRow.value, 10) : 15000;
 
-      this.pacingMinMs = isNaN(min) ? 10000 : Math.max(100, min);
-      this.pacingMaxMs = isNaN(max) ? 12000 : Math.max(this.pacingMinMs, max);
+      // Hard floor: no send path may pace faster than 10s, even if app_settings
+      // holds a stale or directly-edited value from before this floor existed.
+      this.pacingMinMs = Math.max(10000, isNaN(rawMin) ? 10000 : rawMin);
+      this.pacingMaxMs = Math.max(this.pacingMinMs + 1000, isNaN(rawMax) ? 15000 : rawMax);
     } catch (err) {
       // Use defaults
     }
     return { minMs: this.pacingMinMs, maxMs: this.pacingMaxMs };
   }
 
-  /** Update pacing config in database */
+  /** Update pacing config in database. minSec is floored to 10s; maxSec is floored to minSec + 1s. */
   public async setPacingConfig(minSec: number, maxSec: number): Promise<void> {
-    const minMs = Math.max(100, Math.round(minSec * 1000));
-    const maxMs = Math.max(minMs, Math.round(maxSec * 1000));
+    const minMs = Math.max(10000, Math.round(minSec * 1000));
+    const maxMs = Math.max(minMs + 1000, Math.round(maxSec * 1000));
 
     const db = await dbManager.getConnection();
     await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('whatsapp_queue_pacing_min', ?)", [String(minMs)]);
@@ -159,15 +155,9 @@ class WhatsAppQueueWorker {
     this.pacingMaxMs = maxMs;
   }
 
-  /** Set pacing preset: 'turbo' (100ms), 'fast' (1-3s) vs 'safe' (10-12s, default 11s) */
-  public async setPacingPreset(preset: 'turbo' | 'fast' | 'safe'): Promise<{ minMs: number; maxMs: number; preset: string }> {
-    if (preset === 'turbo') {
-      await this.setPacingConfig(0.1, 0.3);
-    } else if (preset === 'fast') {
-      await this.setPacingConfig(1, 3);
-    } else {
-      await this.setPacingConfig(10, 12);
-    }
+  /** Set pacing preset: 'safe' (10-15s, anti-ban) — the only preset; 'turbo'/'fast' were removed as unsafe. */
+  public async setPacingPreset(preset: 'safe'): Promise<{ minMs: number; maxMs: number; preset: string }> {
+    await this.setPacingConfig(10, 15);
     return { minMs: this.pacingMinMs, maxMs: this.pacingMaxMs, preset };
   }
 
@@ -976,12 +966,8 @@ class WhatsAppQueueWorker {
     const stalePendingCount = Number(staleRow?.cnt || 0);
     const oldestPendingWaitSeconds = staleRow?.oldest_created ? Math.max(0, Math.floor((now - Number(staleRow.oldest_created)) / 1000)) : 0;
 
-    let preset: 'turbo' | 'fast' | 'safe' | 'custom' = 'custom';
-    if (this.pacingMinMs === 100 && this.pacingMaxMs === 300) {
-      preset = 'turbo';
-    } else if (this.pacingMinMs === 1000 && this.pacingMaxMs === 3000) {
-      preset = 'fast';
-    } else if (this.pacingMinMs === 10000 && this.pacingMaxMs === 12000) {
+    let preset: 'safe' | 'custom' = 'custom';
+    if (this.pacingMinMs === 10000 && this.pacingMaxMs === 15000) {
       preset = 'safe';
     }
 

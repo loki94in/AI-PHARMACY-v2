@@ -471,7 +471,10 @@ router.post('/flush-next', async (_req, res) => {
 router.all('/pacing', async (req, res) => {
   const { minSec, maxSec, preset } = req.body || {};
   try {
-    if (preset === 'turbo' || preset === 'fast' || preset === 'safe') {
+    if (preset === 'turbo' || preset === 'fast') {
+      return res.status(400).json({ error: 'The "turbo" and "fast" pacing presets have been removed. WhatsApp sends must never go faster than 10-15s apart. Use "safe" or a custom range of at least 10s.' });
+    }
+    if (preset === 'safe') {
       const result = await whatsappQueueWorker.setPacingPreset(preset);
       const state = await whatsappQueueWorker.getWorkerState();
       return res.json({ success: true, ...result, message: `Pacing set to ${preset} mode (${result.minMs/1000}s-${result.maxMs/1000}s)`, state });
@@ -479,9 +482,9 @@ router.all('/pacing', async (req, res) => {
     if (typeof minSec === 'number' && typeof maxSec === 'number') {
       await whatsappQueueWorker.setPacingConfig(minSec, maxSec);
       const state = await whatsappQueueWorker.getWorkerState();
-      return res.json({ success: true, minSec, maxSec, message: `Pacing updated to ${minSec}s - ${maxSec}s`, state });
+      return res.json({ success: true, minSec, maxSec, message: `Pacing updated to ${state.currentPacingMinMs/1000}s - ${state.currentPacingMaxMs/1000}s`, state });
     }
-    return res.status(400).json({ error: 'Either preset ("turbo"|"fast"|"safe") or minSec & maxSec required' });
+    return res.status(400).json({ error: 'Either preset ("safe") or minSec & maxSec required' });
   } catch (err: any) {
     res.status(500).json({ error: err?.message || 'Failed to update pacing' });
   }
