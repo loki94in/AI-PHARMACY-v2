@@ -38,21 +38,21 @@ function getJaccardSimilarity(arr1: string[], arr2: string[]): number {
 function normalizeMapping(map: Record<string, string> | null | undefined): Record<string, string> {
   if (!map) return {};
   const normalized: Record<string, string> = {};
-  
+
   const canonicalSet = new Set([
     'distributor_name', 'invoice_no', 'invoice_date', 'global_cd_per', 'total_amount',
     'name', 'quantity', 'rate', 'mrp', 'batch_no', 'expiry_date', 'cgst', 'sgst',
     'free_qty', 'cd_per', 'cd_rs'
   ]);
-  
+
   let keysAreCanonical = 0;
   let valuesAreCanonical = 0;
-  
+
   for (const [k, v] of Object.entries(map)) {
     if (k && canonicalSet.has(k)) keysAreCanonical++;
     if (v && canonicalSet.has(v)) valuesAreCanonical++;
   }
-  
+
   if (valuesAreCanonical > keysAreCanonical) {
     // Format is { rawHeader: canonicalName }, so invert it to { canonicalName: rawHeader }
     for (const [k, v] of Object.entries(map)) {
@@ -68,7 +68,7 @@ function normalizeMapping(map: Record<string, string> | null | undefined): Recor
       }
     }
   }
-  
+
   return normalized;
 }
 
@@ -93,132 +93,132 @@ async function getSuggestedMappingFromHeaders(headers: string[], db: any): Promi
     priority1: RegExp;
     priority2?: RegExp;
   }> = [
-    {
-      field: 'distributor_name',
-      priority1: /^(distributor|supplier|vendor|party|partyname)$/i,
-      priority2: /distributor|supplier|vendor|party/i
-    },
-    {
-      field: 'invoice_date',
-      priority1: /^(invoicedate|billdate|date|invdate|trdate)$/i,
-      priority2: /date|dt/i
-    },
-    {
-      field: 'invoice_no',
-      priority1: /^(invoiceno|billno|invno|vouno)$/i,
-      priority2: /invno|invoiceno|billno|vou/i
-    },
-    {
-      field: 'total_amount',
-      priority1: /^(totalamount|invamt|netamt|grandtotal|total|inetamt)$/i,
-      priority2: /total|amt|amount/i
-    },
-    {
-      field: 'name',
-      priority1: /^(itemname|productname|medicinename|prodname|pitemname|productdesc|itemdesc|description|name)$/i,
-      priority2: /name|brand|product|item|desc/i
-    },
-    {
-      field: 'api_reference',
-      priority1: /^(api|composition|generic|salt|formula|active|molecule)$/i,
-      priority2: /api|composition|generic|salt/i
-    },
-    {
-      field: 'strength',
-      priority1: /^(strength|dosage|potency)$/i,
-      priority2: /strength|dosage|potency|mg|ml/i
-    },
-    {
-      field: 'packaging',
-      priority1: /^(pack|packaging|dosageform|type|unit)$/i,
-      priority2: /pack|pkg|packaging/i
-    },
-    {
-      field: 'manufacturer',
-      priority1: /^(mfg|manufacturer|applicant|company|maker)$/i,
-      priority2: /mfg|manufactur|company/i
-    },
-    {
-      field: 'marketed_by',
-      priority1: /^(mkt|marketedby|market)$/i,
-      priority2: /mkt|market/i
-    },
-    {
-      field: 'hsn_code',
-      priority1: /^(hsn|hsncode)$/i,
-      priority2: /hsn/i
-    },
-    {
-      field: 'schedule_type',
-      priority1: /^(schedule|scheduletype)$/i,
-      priority2: /schedule/i
-    },
-    {
-      field: 'mrp',
-      priority1: /^(mrp)$/i,
-      priority2: /mrp/i
-    },
-    {
-      field: 'rate',
-      priority1: /^(rate|ptr|cost|price|unitrate|purrate|ftrate|srate)$/i,
-      priority2: /rate|price|ptr/i
-    },
-    {
-      field: 'cgst',
-      priority1: /^(cgstper|cgstrate|cgst)$/i,
-      priority2: /cgst/i
-    },
-    {
-      field: 'sgst',
-      priority1: /^(sgstper|sgstrate|sgst)$/i,
-      priority2: /sgst/i
-    },
-    {
-      field: 'rack',
-      priority1: /^(rack|shelf|location)$/i,
-      priority2: /rack|shelf|location/i
-    },
-    {
-      field: 'quantity',
-      priority1: /^(qty|quantity|quantitybld|bldqty)$/i,
-      priority2: /qty|quantity/i
-    },
-    {
-      field: 'batch_no',
-      priority1: /^(batch|batchno|lot|lotno)$/i,
-      priority2: /batch|lot/i
-    },
-    {
-      field: 'expiry_date',
-      priority1: /^(expiry|expdate|expirydate)$/i,
-      priority2: /exp|expiry/i
-    },
-    {
-      field: 'free_qty',
-      priority1: /^(free|freeqty|fqty)$/i,
-      priority2: /free/i
-    },
-    {
-      field: 'cd_per',
-      priority1: /^(cdper|discper|discountper|discount)$/i,
-      priority2: /disc|discount/i
-    },
-    {
-      field: 'cd_rs',
-      priority1: /^(cdamt|cdval|discamt|cdrs)$/i,
-      priority2: /disc.*amt|cd.*amt|disc.*val|cd.*val/i
-    },
-    {
-      field: 'cn_amount',
-      priority1: /^(cnamount|cnamt|creditnoteamount|creditnoteamt|creditnoteval|extra_credit)$/i,
-      priority2: /cn.*amt|cn.*amount|credit.*note.*amount|credit.*note.*amt/i
-    },
-    {
-      field: 'cn_number',
-      priority1: /^(cnno|cnnumber|creditnoteno|creditnotenumber)$/i,
-      priority2: /cn.*no|cn.*num|credit.*note.*no|credit.*note.*num/i
-    }
-  ];
+      {
+        field: 'distributor_name',
+        priority1: /^(distributor|supplier|vendor|party|partyname)$/i,
+        priority2: /distributor|supplier|vendor|party/i
+      },
+      {
+        field: 'invoice_date',
+        priority1: /^(invoicedate|billdate|date|invdate|trdate)$/i,
+        priority2: /date|dt/i
+      },
+      {
+        field: 'invoice_no',
+        priority1: /^(invoiceno|billno|invno|vouno)$/i,
+        priority2: /invno|invoiceno|billno|vou/i
+      },
+      {
+        field: 'total_amount',
+        priority1: /^(totalamount|invamt|netamt|grandtotal|total|inetamt)$/i,
+        priority2: /total|amt|amount/i
+      },
+      {
+        field: 'name',
+        priority1: /^(itemname|productname|medicinename|prodname|pitemname|productdesc|itemdesc|description|name)$/i,
+        priority2: /name|brand|product|item|desc/i
+      },
+      {
+        field: 'api_reference',
+        priority1: /^(api|composition|generic|salt|formula|active|molecule)$/i,
+        priority2: /api|composition|generic|salt/i
+      },
+      {
+        field: 'strength',
+        priority1: /^(strength|dosage|potency)$/i,
+        priority2: /strength|dosage|potency|mg|ml/i
+      },
+      {
+        field: 'packaging',
+        priority1: /^(pack|packaging|dosageform|type|unit)$/i,
+        priority2: /pack|pkg|packaging/i
+      },
+      {
+        field: 'manufacturer',
+        priority1: /^(mfg|manufacturer|applicant|company|maker)$/i,
+        priority2: /mfg|manufactur|company/i
+      },
+      {
+        field: 'marketed_by',
+        priority1: /^(mkt|marketedby|market)$/i,
+        priority2: /mkt|market/i
+      },
+      {
+        field: 'hsn_code',
+        priority1: /^(hsn|hsncode)$/i,
+        priority2: /hsn/i
+      },
+      {
+        field: 'schedule_type',
+        priority1: /^(schedule|scheduletype)$/i,
+        priority2: /schedule/i
+      },
+      {
+        field: 'mrp',
+        priority1: /^(mrp)$/i,
+        priority2: /mrp/i
+      },
+      {
+        field: 'rate',
+        priority1: /^(rate|ptr|cost|price|unitrate|purrate|ftrate|srate)$/i,
+        priority2: /rate|price|ptr/i
+      },
+      {
+        field: 'cgst',
+        priority1: /^(cgstper|cgstrate|cgst)$/i,
+        priority2: /cgst/i
+      },
+      {
+        field: 'sgst',
+        priority1: /^(sgstper|sgstrate|sgst)$/i,
+        priority2: /sgst/i
+      },
+      {
+        field: 'rack',
+        priority1: /^(rack|shelf|location)$/i,
+        priority2: /rack|shelf|location/i
+      },
+      {
+        field: 'quantity',
+        priority1: /^(qty|quantity|quantitybld|bldqty)$/i,
+        priority2: /qty|quantity/i
+      },
+      {
+        field: 'batch_no',
+        priority1: /^(batch|batchno|lot|lotno)$/i,
+        priority2: /batch|lot/i
+      },
+      {
+        field: 'expiry_date',
+        priority1: /^(expiry|expdate|expirydate)$/i,
+        priority2: /exp|expiry/i
+      },
+      {
+        field: 'free_qty',
+        priority1: /^(free|freeqty|fqty)$/i,
+        priority2: /free/i
+      },
+      {
+        field: 'cd_per',
+        priority1: /^(cdper|discper|discountper|discount)$/i,
+        priority2: /disc|discount/i
+      },
+      {
+        field: 'cd_rs',
+        priority1: /^(cdamt|cdval|discamt|cdrs)$/i,
+        priority2: /disc.*amt|cd.*amt|disc.*val|cd.*val/i
+      },
+      {
+        field: 'cn_amount',
+        priority1: /^(cnamount|cnamt|creditnoteamount|creditnoteamt|creditnoteval|extra_credit)$/i,
+        priority2: /cn.*amt|cn.*amount|credit.*note.*amount|credit.*note.*amt/i
+      },
+      {
+        field: 'cn_number',
+        priority1: /^(cnno|cnnumber|creditnoteno|creditnotenumber)$/i,
+        priority2: /cn.*no|cn.*num|credit.*note.*no|credit.*note.*num/i
+      }
+    ];
 
   // Keep track of which headers are already mapped to prevent double mapping of same header to multiple fields
   const mappedHeaders = new Set<string>();
@@ -264,7 +264,7 @@ async function getSuggestedMappingFromHeaders(headers: string[], db: any): Promi
       if (mappedHeaders.has(h)) continue;
       const norm = normalize(h);
       if (isExcluded(rule.field, norm)) continue;
-      
+
       if (rule.priority1.test(norm)) {
         suggested[h] = rule.field;
         mappedHeaders.add(h);
@@ -353,7 +353,7 @@ function formatExpiryDate(expStr: string): string {
   if (!expStr) return '';
   const clean = expStr.trim();
   if (clean === '00000000' || clean === '*' || clean === '***' || clean === '') return '';
-  
+
   // Format DD/MM/YYYY or MM/YYYY or DD-MM-YYYY
   const match = clean.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
   if (match) {
@@ -369,7 +369,7 @@ function formatExpiryDate(expStr: string): string {
     if (!year || !month) return '';
     return `${month.padStart(2, '0')}/${year}`;
   }
-  
+
   // If it's MM/YY or MM-YY
   const matchShort = clean.match(/^(\d{1,2})[\/\-](\d{2})/);
   if (matchShort) {
@@ -434,7 +434,7 @@ function parseRecordTypeInvoice(csvRecords: string[][], filename: string): {
   let invoice_date = '';
   let total_amount = 0;
   const items: any[] = [];
-  
+
   const headerRow = csvRecords.find(row => row[0]?.trim() === 'H');
   if (headerRow) {
     if (headerRow[5] && isNaN(Number(headerRow[5])) && headerRow[5].trim().length > 3 && !headerRow[5].includes('/') && !headerRow[5].includes('-')) {
@@ -450,20 +450,20 @@ function parseRecordTypeInvoice(csvRecords: string[][], filename: string): {
       total_amount = parseFloat(headerRow[16]) || 0;
     }
   }
-  
+
   for (const row of csvRecords) {
     if (row.length < 5) continue;
     if (row[0]?.trim() !== 'T') continue;
-    
+
     const isLayoutB = row[11] && (row[11].includes('/') || row[11].includes('-')) && !isNaN(parseFloat(row[6]));
-    
+
     if (isLayoutB) {
       let name = row[2] ? row[2].trim() : '';
       const pack = row[4] ? row[4].trim() : '';
       if (pack && name) {
         name = name + ' ' + pack;
       }
-      
+
       const qty = parseFloat(row[6]) || 0;
       const free_qty = parseFloat(row[7]) || 0;
       const mrp = parseFloat(row[8]) || 0;
@@ -473,7 +473,7 @@ function parseRecordTypeInvoice(csvRecords: string[][], filename: string): {
       const gst = parseFloat(row[16]) || 0;
       const mfgB = (row[1] && isNaN(Number(row[1])) && row[1].trim().length >= 2) ? row[1].trim() : '';
       const hsnB = (row[26] || row[25] || '').trim();
-      
+
       if (name) {
         items.push({
           name,
@@ -513,7 +513,7 @@ function parseRecordTypeInvoice(csvRecords: string[][], filename: string): {
       if (pack && name) {
         name = name + ' ' + pack;
       }
-      
+
       const qty = parseFloat(row[19 + offset]) || parseFloat(row[10]) || 0;
       const free_qty = parseFloat(row[14 + offset]) || parseFloat(row[18]) || parseFloat(row[11]) || 0;
       const rate = parseFloat(row[13 + offset]) || parseFloat(row[14]) || 0;
@@ -524,7 +524,7 @@ function parseRecordTypeInvoice(csvRecords: string[][], filename: string): {
       const cd_rs = parseFloat(row[25]) || 0;
       const hsn = (row[26] || row[25 + offset] || row[37] || '').trim();
       const mfg = (row[2] && isNaN(Number(row[2])) && row[2].trim().length >= 2) ? row[2].trim() : (row[1] ? row[1].trim() : '');
-      
+
       if (name) {
         items.push({
           name,
@@ -559,14 +559,14 @@ function parseRecordTypeInvoice(csvRecords: string[][], filename: string): {
       }
     }
   }
-  
+
   if (!distributor_name && filename) {
     const base = path.basename(filename).toLowerCase();
     if (base.includes('prakash_pharmaceuticals') || base.includes('prakashpharmaceuticals')) {
       distributor_name = 'PRAKASH PHARMACEUTICALS';
     }
   }
-  
+
   return {
     distributor_name,
     invoice_no,
@@ -598,10 +598,10 @@ function parseItemsFromTextLines(content: string, global_cd_per: number): any[] 
   for (const line of lines) {
     const trimmed = line.trim();
     if (!trimmed) continue;
-    
+
     const tokens = trimmed.split(/\s+/);
     if (tokens.length < 5) continue;
-    
+
     const expIdx = tokens.findIndex(t => /^\d{1,2}[\/\-]\d{2,4}$/.test(t) || /^\d{2}[\/\-]\d{2}[\/\-]\d{2,4}$/.test(t));
     if (expIdx !== -1 && expIdx > 1 && expIdx < tokens.length - 3) {
       const batch = tokens[expIdx - 1];
@@ -609,13 +609,13 @@ function parseItemsFromTextLines(content: string, global_cd_per: number): any[] 
       const qty = parseFloat(tokens[expIdx + 1]);
       const mrp = parseFloat(tokens[expIdx + 2]);
       const rate = parseFloat(tokens[expIdx + 3]);
-      
+
       if (!isNaN(qty) && qty > 0 && !isNaN(mrp) && mrp > 0 && !isNaN(rate) && rate > 0) {
         const hasHsn = /^\d{4,8}$/.test(tokens[0]);
         const nameTokens = tokens.slice(hasHsn ? 1 : 0, expIdx - 1);
-        
+
         const name = nameTokens.join(' ').trim();
-        
+
         let cgst_per = 0;
         let sgst_per = 0;
         if (tokens[expIdx + 7] && !isNaN(parseFloat(tokens[expIdx + 7]))) {
@@ -624,10 +624,10 @@ function parseItemsFromTextLines(content: string, global_cd_per: number): any[] 
         if (tokens[expIdx + 9] && !isNaN(parseFloat(tokens[expIdx + 9]))) {
           sgst_per = parseFloat(tokens[expIdx + 9]);
         }
-        
+
         if (cgst_per > 30) cgst_per = 0;
         if (sgst_per > 30) sgst_per = 0;
-        
+
         items.push({
           name,
           quantity: qty,
@@ -703,7 +703,7 @@ function parseShriyashInvoice(content: string, globalCdPer: number): { items: an
       const parsed = decomposeShriyashConcatenatedLine(expLine);
 
       if (parsed.expiry) expiry_date = formatExpiryDate(parsed.expiry);
-      
+
       if (parsed.batch) {
         batch_no = parsed.batch;
       } else if (expLineIdx > 5) {
@@ -728,7 +728,7 @@ function parseShriyashInvoice(content: string, globalCdPer: number): { items: an
 
     let brandName = rawProductDesc;
     let packSize = '';
-    
+
     const packMatch = rawProductDesc.match(/(10|15|20|30|60|100|120|150)(?:\s*(?:TA|TAB|Ta|ML|Dry SYP|CAP|Syp|Cap|G|Mg)s?)?$/i);
     if (packMatch) {
       packSize = packMatch[0];
@@ -913,7 +913,7 @@ function splitConcatenatedDecimals(str: string): { decimals: string[]; remaining
       const decPart = match[1];
       const intPart = match[2];
       const lastDecPart = match[3];
-      
+
       decimals.unshift(intPart + '.' + lastDecPart);
       remaining = remaining.substring(0, remaining.length - intPart.length - lastDecPart.length - 1);
     } else {
@@ -964,7 +964,7 @@ function extractTotalsFromText(text: string) {
     if (cgstMatch && !cgst) {
       cgst = parseFloat(cgstMatch[1]) || 0;
     }
-    
+
     // SGST
     const sgstMatch = line.match(/(?:sgst|state gst)\s*(?:amt|amount)?\s*[:\-]?\s*(\d+(?:\.\d{2})?)/i);
     if (sgstMatch && !sgst) {
@@ -1052,7 +1052,7 @@ function extractTotalsFromText(text: string) {
       }
     }
   }
-  
+
   if (!total_amount) {
     for (let i = cleanLines.length - 1; i >= Math.max(0, cleanLines.length - 15); i--) {
       const line = cleanLines[i];
@@ -1112,7 +1112,7 @@ export class EmailService {
       const authMethodRow = await db.get("SELECT value FROM app_settings WHERE key = 'gmail_auth_method'");
       // Missing row defaults to oauth2, matching buildImapConfig(); only bail if explicitly set to another method.
       if (authMethodRow && authMethodRow.value !== 'oauth2') {
-                return null;
+        return null;
       }
 
       const accessTokenRow = await db.get("SELECT value FROM app_settings WHERE key = 'gmail_oauth_access_token'");
@@ -1120,7 +1120,7 @@ export class EmailService {
       const expiryRow = await db.get("SELECT value FROM app_settings WHERE key = 'gmail_oauth_token_expiry'");
       const clientIdRow = await db.get("SELECT value FROM app_settings WHERE key = 'google_client_id'");
       const clientSecretRow = await db.get("SELECT value FROM app_settings WHERE key = 'google_client_secret'");
-      
+
       const clientId = process.env.GOOGLE_CLIENT_ID || clientIdRow?.value;
       const clientSecret = process.env.GOOGLE_CLIENT_SECRET || clientSecretRow?.value;
 
@@ -1150,13 +1150,13 @@ export class EmailService {
           const newExpiry = Date.now() + (data.expires_in * 1000);
           await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('gmail_oauth_access_token', ?)", [data.access_token]);
           await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('gmail_oauth_token_expiry', ?)", [newExpiry.toString()]);
-                    return data.access_token;
+          return data.access_token;
         } else {
           console.warn('Failed to refresh Gmail OAuth token:', data);
         }
       }
 
-            return accessTokenRow.value;
+      return accessTokenRow.value;
     } catch (err) {
       console.error('Error getting Gmail access token:', err);
       return null;
@@ -1300,7 +1300,7 @@ export class EmailService {
         'INSERT INTO action_logs (action_type, description) VALUES (?, ?)',
         ['EMAIL_RECEIVED', `From: ${email.from}, Subject: ${email.subject}`]
       );
-          } catch (error) {
+    } catch (error) {
       console.error('Failed to log email receipt:', error);
     }
   }
@@ -1314,16 +1314,16 @@ export class EmailService {
   private isOrderRelatedEmail(email: ProcessedEmail): boolean {
     const orderKeywords = ['order', 'purchase', 'invoice', 'delivery', 'consignment', 'bill', 'receipt', 'tax invoice', 'dispatch', 'sale bill', 'cash memo'];
     const distributorKeywords = ['distributor', 'supplier', 'wholesale', 'pharma', 'agency', 'medical', 'agencies', 'traders', 'chemists', 'enterprises', 'marketing'];
-    
+
     const content = (email.subject + ' ' + (email.body || '')).toLowerCase();
-    
+
     const hasOrderKeyword = orderKeywords.some(k => content.includes(k));
     const hasDistributorKeyword = distributorKeywords.some(k => content.includes(k));
-    
+
     if (hasOrderKeyword && hasDistributorKeyword) return true;
-    
+
     if (/(?:tax\s*invoice|invoice|inv[_\-\s]?\d+|bill[_\-\s]?\d+|order\s*ack|purchase\s*order|stock\s*order|order\s*confirm|supply\s*order|stock\s*alert|po[_\-\s]?\d+)/i.test(email.subject)) return true;
-    
+
     if (email.attachments && email.attachments.length > 0) {
       const invoiceExts = ['.pdf', '.csv', '.xlsx', '.xls', '.dbf', '.xml', '.txt'];
       const hasInvoiceAttachment = email.attachments.some(att => {
@@ -1334,7 +1334,7 @@ export class EmailService {
         return true;
       }
     }
-    
+
     return false;
   }
 
@@ -1472,66 +1472,66 @@ export class EmailService {
       }
     }
 
-  // Try to extract medicine candidates. A line doesn't need an explicit "qty:" label to be
-  // considered — many distributors just list items one per line — so every non-noise line is
-  // treated as a candidate name, and quantity defaults to 1 when no explicit marker is found.
-  // Whether a candidate is actually a medicine gets decided later, against the real catalog.
-  const medicines: Array<{ name: string; quantity: string }> = [];
-  const lines = body.split('\n');
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
+    // Try to extract medicine candidates. A line doesn't need an explicit "qty:" label to be
+    // considered — many distributors just list items one per line — so every non-noise line is
+    // treated as a candidate name, and quantity defaults to 1 when no explicit marker is found.
+    // Whether a candidate is actually a medicine gets decided later, against the real catalog.
+    const medicines: Array<{ name: string; quantity: string }> = [];
+    const lines = body.split('\n');
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
 
-    const qtyMatch = trimmed.match(/(?:(?:qty|quantity|x|count)\s*[:\-\s]*\s*(\d+))|(\d+)\s*(?:x|units|pcs)/i);
-    let qty = '1';
-    let name = trimmed;
-    if (qtyMatch) {
-      qty = qtyMatch[1] || qtyMatch[2];
-      name = trimmed.replace(qtyMatch[0], '');
+      const qtyMatch = trimmed.match(/(?:(?:qty|quantity|x|count)\s*[:\-\s]*\s*(\d+))|(\d+)\s*(?:x|units|pcs)/i);
+      let qty = '1';
+      let name = trimmed;
+      if (qtyMatch) {
+        qty = qtyMatch[1] || qtyMatch[2];
+        name = trimmed.replace(qtyMatch[0], '');
+      }
+      name = cleanMedicineName(name.replace(/[:\-\t\r\n]/g, ' ').trim());
+
+      if (name && name.length > 2 && isNaN(Number(name)) && !isNonMedicineNoise(name)) {
+        medicines.push({ name, quantity: qty });
+      }
     }
-    name = cleanMedicineName(name.replace(/[:\-\t\r\n]/g, ' ').trim());
 
-    if (name && name.length > 2 && isNaN(Number(name)) && !isNonMedicineNoise(name)) {
-      medicines.push({ name, quantity: qty });
-    }
-  }
-
-  // Only keep names that actually resolve to a real catalog entry — snap the
-  // extracted text to the canonical medicines.name value instead of trusting
-  // whatever free text sat on the email line. Resolution is scoped to this
-  // distributor's own history first (far more precise than the whole catalog),
-  // falling back to global/fuzzy matching only when nothing distributor-specific fits.
-  const resolvedMedicines: Array<{ name: string; quantity: string }> = [];
-  if (medicines.length > 0) {
-    try {
-      const db = await dbManager.getConnection();
-
-      let distributorId: number | null = null;
+    // Only keep names that actually resolve to a real catalog entry — snap the
+    // extracted text to the canonical medicines.name value instead of trusting
+    // whatever free text sat on the email line. Resolution is scoped to this
+    // distributor's own history first (far more precise than the whole catalog),
+    // falling back to global/fuzzy matching only when nothing distributor-specific fits.
+    const resolvedMedicines: Array<{ name: string; quantity: string }> = [];
+    if (medicines.length > 0) {
       try {
-        const senderEmail = extractCleanEmail(email.from || '');
-        const distRow = await db.get(
-          `SELECT id FROM distributors WHERE (email IS NOT NULL AND email != '' AND LOWER(email) = ?) OR LOWER(name) = ?`,
-          [(senderEmail || '').toLowerCase(), distributorName.toLowerCase()]
-        );
-        distributorId = distRow?.id ?? null;
-      } catch (distErr) {
-        console.warn('[EmailService] Distributor lookup for medicine resolution failed:', distErr);
-      }
+        const db = await dbManager.getConnection();
 
-      for (const m of medicines) {
-        const resolution = await medicineService.resolveMedicineNameMultiTier(db, m.name, distributorId);
-        if (!resolution.medicineId) continue;
-        const catalogRow = await db.get('SELECT name FROM medicines WHERE id = ?', [resolution.medicineId]);
-        if (catalogRow?.name) {
-          resolvedMedicines.push({ name: catalogRow.name, quantity: m.quantity });
+        let distributorId: number | null = null;
+        try {
+          const senderEmail = extractCleanEmail(email.from || '');
+          const distRow = await db.get(
+            `SELECT id FROM distributors WHERE (email IS NOT NULL AND email != '' AND LOWER(email) = ?) OR LOWER(name) = ?`,
+            [(senderEmail || '').toLowerCase(), distributorName.toLowerCase()]
+          );
+          distributorId = distRow?.id ?? null;
+        } catch (distErr) {
+          console.warn('[EmailService] Distributor lookup for medicine resolution failed:', distErr);
         }
-      }
-    } catch (err) {
-      console.error('[EmailService] Failed to resolve extracted medicine names against catalog:', err);
-    }
-  }
 
-  const displayMeds = resolvedMedicines.slice(0, 15);
+        for (const m of medicines) {
+          const resolution = await medicineService.resolveMedicineNameMultiTier(db, m.name, distributorId);
+          if (!resolution.medicineId) continue;
+          const catalogRow = await db.get('SELECT name FROM medicines WHERE id = ?', [resolution.medicineId]);
+          if (catalogRow?.name) {
+            resolvedMedicines.push({ name: catalogRow.name, quantity: m.quantity });
+          }
+        }
+      } catch (err) {
+        console.error('[EmailService] Failed to resolve extracted medicine names against catalog:', err);
+      }
+    }
+
+    const displayMeds = resolvedMedicines.slice(0, 15);
 
     return {
       distributorName: (distributorName && isValidDistributorName(distributorName)) ? distributorName.trim() : '',
@@ -1626,7 +1626,7 @@ export class EmailService {
               `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, error_message, reference_id)
                VALUES (?, ?, ?, ?, ?, ?, ?)`,
               [isOrder ? 'distributor_invoice' : 'email_arrival', distName || 'Admin / Store Owner', phone, message, 'failed', wsErr?.message || 'Unknown error', phoneRefId]
-            ).catch(() => {});
+            ).catch(() => { });
           }
         }
       }
@@ -1738,7 +1738,7 @@ export class EmailService {
             `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, error_message, reference_id)
              VALUES (?, ?, ?, ?, ?, ?, ?)`,
             ['distributor_invoice', distName, phone, message, 'failed', wsError.message || 'Unknown error', phoneRefId]
-          ).catch(() => {});
+          ).catch(() => { });
         }
       }
     } catch (err) {
@@ -1818,7 +1818,7 @@ export class EmailService {
           'INSERT INTO action_logs (action_type, description) VALUES (?, ?)',
           ['EMAIL_INQUIRY_DETECTED', `Potential inquiry detected: ${email.subject}`]
         );
-        
+
         // Implement auto-response or routing logic
         await this.sendAutoResponse(email);
         console.log('Potential inquiry detected and auto-response sent:', email.subject);
@@ -1846,7 +1846,7 @@ export class EmailService {
             'INSERT INTO action_logs (action_type, description) VALUES (?, ?)',
             ['EMAIL_ATTACHMENT_MEDICINE_LIST', `Medicine list attachment: ${attachment.filename}`]
           );
-          
+
           // Implement actual attachment processing (parse CSV/XLS for medicine orders)
           await this.processMedicineListAttachment(attachment);
           console.log('Medicine list attachment processed:', attachment.filename);
@@ -1874,7 +1874,7 @@ export class EmailService {
     try {
       const orderInfo = await this.extractOrderInfo(email);
       const db = await dbManager.getConnection();
-      
+
       // Log order processing start
       await db.run(
         'INSERT INTO action_logs (action_type, description) VALUES (?, ?)',
@@ -1889,7 +1889,7 @@ export class EmailService {
       if (validDistName) {
         await db.run('INSERT OR IGNORE INTO distributors (name) VALUES (?)', [validDistName]);
       }
-      
+
       const extractedDate = extractDateFromText(email.subject + ' ' + email.body);
       const billDate = extractedDate || null;
 
@@ -1914,11 +1914,11 @@ export class EmailService {
         'INSERT INTO action_logs (action_type, description) VALUES (?, ?)',
         ['EMAIL_ORDER_STAGED', `Staged ${stagedItems.length} products${validDistName ? ` from ${validDistName}` : ''} for review.`]
       );
-      
+
       try {
         const { eventService } = await import('./eventService.js');
         eventService.broadcast('purchases_sync', { success: true, count: 1 });
-      } catch (_) {}
+      } catch (_) { }
 
       console.log('Medicine order staged for verification:', orderInfo.invoiceNumber);
     } catch (error) {
@@ -1929,7 +1929,7 @@ export class EmailService {
           'INSERT INTO action_logs (action_type, description) VALUES (?, ?)',
           ['EMAIL_ORDER_ERROR', `Error processing medicine order: ${email.subject} - ${(error as any).message}`]
         );
-              } catch (logError) {
+      } catch (logError) {
         console.error('Failed to log order processing error:', logError);
       }
     }
@@ -1951,7 +1951,7 @@ export class EmailService {
         'INSERT INTO action_logs (action_type, description) VALUES (?, ?)',
         ['EMAIL_AUTO_RESPONSE_SENDING', `Sending auto-response to: ${email.from}`]
       );
-      
+
       // Send the auto-response
       const responseSent = await this.sendEmail({
         to: email.from,
@@ -1966,7 +1966,7 @@ export class EmailService {
           'INSERT INTO action_logs (action_type, description) VALUES (?, ?)',
           ['EMAIL_AUTO_RESPONSE_SENT', `Auto-response sent to: ${email.from}`]
         );
-                console.log('Auto-response sent successfully to:', email.from);
+        console.log('Auto-response sent successfully to:', email.from);
       } else {
         // Log failed auto-response
         const db2 = await dbManager.getConnection();
@@ -1974,7 +1974,7 @@ export class EmailService {
           'INSERT INTO action_logs (action_type, description) VALUES (?, ?)',
           ['EMAIL_AUTO_RESPONSE_FAILED', `Failed to send auto-response to: ${email.from}`]
         );
-                console.error('Failed to send auto-response to:', email.from);
+        console.error('Failed to send auto-response to:', email.from);
       }
     } catch (error) {
       console.error('Error sending auto-response:', error);
@@ -1986,7 +1986,7 @@ export class EmailService {
           'INSERT INTO action_logs (action_type, description) VALUES (?, ?)',
           ['EMAIL_AUTO_RESPONSE_ERROR', `Error sending auto-response to: ${email.from} - ${(error as any).message}`]
         );
-              } catch (logError) {
+      } catch (logError) {
         console.error('Failed to log auto-response error:', logError);
       }
     }
@@ -2013,7 +2013,7 @@ export class EmailService {
         'INSERT INTO action_logs (action_type, description) VALUES (?, ?)',
         ['EMAIL_ATTACHMENT_PROCESSING', `Processing medicine list attachment: ${attachment.filename}`]
       );
-      
+
       // For now, we'll just log that we processed it
       // In a real implementation, this would parse the CSV/XLS and update inventory or create orders
       const db2 = await dbManager.getConnection();
@@ -2021,7 +2021,7 @@ export class EmailService {
         'INSERT INTO action_logs (action_type, description) VALUES (?, ?)',
         ['EMAIL_ATTACHMENT_PROCESSED', `Medicine list attachment processed: ${attachment.filename}`]
       );
-      
+
       console.log('Medicine list attachment logged (no auto-parsing implemented):', attachment.filename);
     } catch (error) {
       console.error('Error processing medicine list attachment:', error);
@@ -2033,7 +2033,7 @@ export class EmailService {
           'INSERT INTO action_logs (action_type, description) VALUES (?, ?)',
           ['EMAIL_ATTACHMENT_ERROR', `Error processing medicine list attachment: ${attachment.filename} - ${(error as any).message}`]
         );
-              } catch (logError) {
+      } catch (logError) {
         console.error('Failed to log attachment processing error:', logError);
       }
     }
@@ -2079,23 +2079,23 @@ export class EmailService {
   }> {
     try {
       const nameLower = filePath.toLowerCase();
-      
+
       // ZIP files support
       if (nameLower.endsWith('.zip')) {
         const { default: AdmZip } = await import('adm-zip');
         const zip = new AdmZip(filePath);
         const zipEntries = zip.getEntries();
-        
+
         const validEntry = zipEntries.find(entry => {
           if (entry.isDirectory) return false;
           const entryName = entry.entryName.toLowerCase();
           return entryName.endsWith('.csv') ||
-                 entryName.endsWith('.xlsx') ||
-                 entryName.endsWith('.xls') ||
-                 entryName.endsWith('.pdf') ||
-                 entryName.endsWith('.dav') ||
-                 entryName.endsWith('.dac') ||
-                 /\.(png|jpe?g|webp|bmp|tiff?)$/i.test(entryName);
+            entryName.endsWith('.xlsx') ||
+            entryName.endsWith('.xls') ||
+            entryName.endsWith('.pdf') ||
+            entryName.endsWith('.dav') ||
+            entryName.endsWith('.dac') ||
+            /\.(png|jpe?g|webp|bmp|tiff?)$/i.test(entryName);
         });
 
         if (validEntry) {
@@ -2103,20 +2103,20 @@ export class EmailService {
           const tempExt = path.extname(validEntry.entryName);
           const tempChildPath = path.join(uploadsDir, `zip-extracted-${Date.now()}${tempExt}`);
           fs.writeFileSync(tempChildPath, validEntry.getData());
-          
+
           try {
             const result = await this.parseAndImportAttachment(tempChildPath, importData);
-            try { fs.unlinkSync(tempChildPath); } catch {}
+            try { fs.unlinkSync(tempChildPath); } catch { }
             return result;
           } catch (err) {
-            try { fs.unlinkSync(tempChildPath); } catch {}
+            try { fs.unlinkSync(tempChildPath); } catch { }
             throw err;
           }
         } else {
           return { success: false, count: 0, items: [] };
         }
       }
-      
+
       let distributor_name = '';
       let distributorId: number | undefined;
       let invoice_no = '';
@@ -2137,7 +2137,7 @@ export class EmailService {
       // 1. Database connection & Distributor/Profile Lookup
       const safeBasename = path.basename(filePath);
       const db = await dbManager.getConnection();
-      
+
       let distributor: any = null;
       let emailAttachment = await db.get(
         'SELECT ea.uid, e.from_addr, e.subject, e.distributor_name FROM email_attachments ea JOIN emails e ON ea.uid = e.uid WHERE ea.local_path = ? OR ea.filename = ?',
@@ -2176,7 +2176,7 @@ export class EmailService {
           const textContent = fileBuffer.toString('utf8');
           const firstLine = textContent.split('\n')[0]?.trim() || '';
           const firstField = firstLine.split(',')[0]?.trim();
-          
+
           if (firstField === 'H') {
             isRecordType = true;
             const csvRecords = parse(fileBuffer, { columns: false, skip_empty_lines: true, relax_column_count: true, relax_quotes: true, bom: true, trim: true });
@@ -2227,7 +2227,7 @@ export class EmailService {
                 highestSim = sim;
                 bestMatchFile = hf;
               }
-            } catch (e) {}
+            } catch (e) { }
           }
 
           if (highestSim >= 0.8 && bestMatchFile) {
@@ -2326,7 +2326,7 @@ export class EmailService {
       } else if (nameLower.endsWith('.dav') || nameLower.endsWith('.dac')) {
         const text = fs.readFileSync(filePath, 'utf8');
         const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
-        
+
         const headerLine = lines.find(l => l.startsWith('H,'));
         if (headerLine) {
           const parts = headerLine.split(',');
@@ -2337,7 +2337,7 @@ export class EmailService {
             invoice_no = parts[2].trim();
           }
           if (parts[16]) total_amount = parseFloat(parts[16]) || 0;
-          
+
           const rawDate = parts[3];
           if (rawDate && rawDate.length === 8) {
             const d = rawDate.substring(0, 2);
@@ -2346,19 +2346,19 @@ export class EmailService {
             invoice_date = `${y}-${m}-${d}`;
           }
         }
-        
+
         for (const line of lines) {
           const parts = line.split(',');
           if (parts.length < 10) continue;
           if (parts[0] !== 'I' && parts[0] !== 'T') continue;
-          
+
           const offset = parts[0] === 'T' ? 1 : 0;
           let name = parts[4 + offset] || '';
           const pack = parts[5 + offset] || '';
           if (pack.trim() && name.trim()) {
             name = name.trim() + ' ' + pack.trim();
           }
-          
+
           if (name && name.trim()) {
             const qty = parseInt(parts[19 + offset] || parts[20], 10) || 0;
             const free_qty = parseInt(parts[14 + offset] || parts[15], 10) || 0;
@@ -2367,12 +2367,12 @@ export class EmailService {
             const batch = (parts[7 + offset] || parts[8] || '').trim();
             const rawExp = (parts[8 + offset] || parts[9] || '').trim();
             let expiry = formatExpiryDate(rawExp);
-            
+
             const mfg = (parts[2] && isNaN(Number(parts[2])) && parts[2].trim().length >= 2) ? parts[2].trim() : (parts[1] ? parts[1].trim() : '');
             const hsn = (parts[26] || parts[25 + offset] || parts[25] || '').trim();
             const gst = parseFloat(parts[11 + offset] || parts[12]) || 0;
             const cd_rs = parseFloat(parts[25]) || 0;
-            
+
             items.push({
               name: name.trim(),
               quantity: qty,
@@ -2410,7 +2410,7 @@ export class EmailService {
         // PDF, Image, or Plain text parsing line by line
         const isPdf = nameLower.endsWith('.pdf');
         const isImage = /\.(png|jpe?g|webp|bmp|tiff?)$/i.test(nameLower);
-        
+
         if (isPdf) {
           const { default: pdfParse } = await import('pdf-parse');
           const fileBuffer = fs.readFileSync(filePath);
@@ -2433,7 +2433,7 @@ export class EmailService {
             const { createCanvas, Canvas, Image } = canvasPkg;
             (globalThis as any).Canvas = Canvas;
             (globalThis as any).Image = Image;
-            
+
             class NodeCanvasFactory {
               create(width: number, height: number) {
                 const canvas = createCanvas(width, height);
@@ -2462,15 +2462,15 @@ export class EmailService {
             } as any).promise;
             const numPages = pdfDoc.numPages;
             let ocrText = '';
-            
+
             const { Jimp } = await import('jimp');
-            
+
             for (let pageNum = 1; pageNum <= numPages; pageNum++) {
               const page = await pdfDoc.getPage(pageNum);
               const viewport = page.getViewport({ scale: 2.0 });
               const width = Math.floor(viewport.width);
               const height = Math.floor(viewport.height);
-              
+
               let pageBuffer: Buffer;
               try {
                 const canvas = createCanvas(width, height);
@@ -2482,7 +2482,7 @@ export class EmailService {
                 const image = new Jimp({ width, height, color: 0xFFFFFFFF });
                 pageBuffer = await image.getBuffer('image/png');
               }
-              
+
               const pageOcr = await aiCameraService.extractTextFromImage(pageBuffer);
               if (pageOcr?.text) {
                 ocrText += pageOcr.text + '\n';
@@ -2512,7 +2512,7 @@ export class EmailService {
 
         const parseItemsFromText = () => {
           items = [];
-          
+
           // Apply learned regex layout patterns if profile exists
           if (distributor && lpProfile && lpProfile.file_mapping_rules) {
             try {
@@ -2641,19 +2641,19 @@ export class EmailService {
                 const batchExpHsnLine = cleanLines[i - 3];
                 const gstPerLine = cleanLines[i - 5];
                 const productNameLine = cleanLines[i - 7];
-                
+
                 if (!isNaN(qty) && qty > 0 && pricesTokens.length >= 3 && productNameLine && productNameLine.length > 2) {
                   const rate = parseFloat(pricesTokens[0]);
                   const mrp = parseFloat(pricesTokens[2]);
-                  
+
                   let batch_no = '';
                   let expiry_date = '';
-                  
+
                   if (batchExpHsnLine && batchExpHsnLine.length > 9) {
                     expiry_date = formatExpiryDate(batchExpHsnLine.substring(batchExpHsnLine.length - 5));
                     batch_no = batchExpHsnLine.substring(4, batchExpHsnLine.length - 5);
                   }
-                  
+
                   let cgst_per = 0;
                   let sgst_per = 0;
                   if (gstPerLine) {
@@ -2663,7 +2663,7 @@ export class EmailService {
                       sgst_per = totalGst / 2;
                     }
                   }
-                  
+
                   if (!isNaN(rate)) {
                     items.push({
                       name: productNameLine,
@@ -2688,7 +2688,7 @@ export class EmailService {
               for (const line of lines) {
                 const trimmed = line.trim();
                 if (!trimmed) continue;
-                
+
                 const match = trimmed.match(/^([a-zA-Z0-9\s().&/\-]+)\s+(\d+)\s+(\d+(?:\.\d+)?)$/);
                 if (match) {
                   items.push({
@@ -2707,7 +2707,7 @@ export class EmailService {
                 }
               }
             }
-            
+
             if (items.length === 0) {
               const lines = content.split('\n');
               for (const line of lines) {
@@ -2717,7 +2717,7 @@ export class EmailService {
                   if (tokens.length >= 3) {
                     const priceVal = parseFloat(tokens[tokens.length - 1]);
                     const qtyVal = parseInt(tokens[tokens.length - 2], 10);
-                    
+
                     if (!isNaN(priceVal) && !isNaN(qtyVal) && priceVal > 0 && qtyVal > 0) {
                       const namePart = tokens.slice(0, tokens.length - 2).join(' ');
                       if (namePart.length > 2) {
@@ -2755,7 +2755,7 @@ export class EmailService {
       // 3. Match Distributor from DB using the parsed distributor name (if not already found via email metadata)
       if (!distributorId && distributor_name && isValidDistributorName(distributor_name)) {
         const cleanedName = distributor_name.trim().toLowerCase();
-        
+
         let matchedDist = await db.get('SELECT * FROM distributors WHERE LOWER(name) = ?', [cleanedName]);
         if (!matchedDist) {
           matchedDist = await db.get(
@@ -2763,7 +2763,7 @@ export class EmailService {
             [cleanedName, `%${cleanedName}%`]
           );
         }
-        
+
         if (matchedDist) {
           distributorId = matchedDist.id;
           distributor_name = matchedDist.name;
@@ -2788,7 +2788,7 @@ export class EmailService {
                last_success_at = CURRENT_TIMESTAMP,
                last_updated = CURRENT_TIMESTAMP`,
             [distributorId, layout]
-          ).catch(() => {});
+          ).catch(() => { });
         } catch (profErr) {
           console.warn('[Email Learning] Profile update failed:', profErr);
         }
@@ -2943,7 +2943,7 @@ export class EmailService {
       console.error('Failed to save learning profile:', err);
       throw err;
     } finally {
-          }
+    }
   }
 
   /**
@@ -3056,7 +3056,7 @@ export class EmailService {
     try {
       await ensureSchema(getDbPath());
       const db = await dbManager.getConnection();
-      
+
       let rows: any[] = [];
       if (since && since !== 'all') {
         rows = await db.all(
@@ -3083,7 +3083,7 @@ export class EmailService {
           [limit]
         );
       }
-      
+
       return rows.map((row: any) => ({
         id: row.uid,
         uid: row.uid,
@@ -3147,7 +3147,7 @@ export class EmailService {
       // spaces, which IMAP rejects. Strip whitespace when that leaves a 16-letter key.
       const compact = password.replace(/\s+/g, '');
       if (/^[a-zA-Z]{16}$/.test(compact)) password = compact;
-    } catch (_) {}
+    } catch (_) { }
 
     if (authMethod === 'password') {
       if (!user || !password) {
@@ -3193,7 +3193,7 @@ export class EmailService {
       if (hostRow && hostRow.value) host = hostRow.value.trim();
       if (portRow && portRow.value) port = Number(portRow.value) || 993;
       if (tlsRow && tlsRow.value) tls = tlsRow.value === 'true';
-    } catch (_) {}
+    } catch (_) { }
 
     const imapConfig: any = {
       ...this.imapConfig,
@@ -3271,7 +3271,7 @@ export class EmailService {
 
       // Sort descending (newest first)
       newResults.sort((a: number, b: number) => b - a);
-      
+
       // Limit to max 50 per sync to avoid timeouts and connection drops
       const limitedResults = newResults.slice(0, 50);
 
@@ -3444,7 +3444,7 @@ export class EmailService {
       if (syncedCount > 0) {
         try {
           eventService.broadcast('email_new', { count: syncedCount, at: Date.now() });
-        } catch (_) {}
+        } catch (_) { }
       }
       try {
         const dbConn = await dbManager.getConnection();
@@ -3480,7 +3480,7 @@ export class EmailService {
     } finally {
       this.isSyncing = false;
       if (connection) {
-        try { await connection.end(); } catch (e) {}
+        try { await connection.end(); } catch (e) { }
       }
     }
 
@@ -3496,7 +3496,7 @@ export class EmailService {
       await ensureSchema(getDbPath());
       const db = await dbManager.getConnection();
       await db.run('UPDATE emails SET is_saved = 1, is_seen = 1 WHERE uid = ?', [uid]);
-            return true;
+      return true;
     } catch (err) {
       console.error('[Mail] markEmailSaved error:', err);
       return false;
@@ -3553,7 +3553,7 @@ export class EmailService {
         const finalFilename = `att-${uid}-${sanitizedFilename}`;
         const filePath = path.join(uploadsDir, finalFilename);
         fs.writeFileSync(filePath, att.content);
-        
+
         const ext = path.extname(sanitizedFilename).toLowerCase();
         const contentTypes: Record<string, string> = {
           '.pdf': 'application/pdf',
@@ -3563,7 +3563,7 @@ export class EmailService {
           '.xls': 'application/vnd.ms-excel',
           '.ods': 'application/vnd.oasis.opendocument.spreadsheet',
         };
-        
+
         savedList.push({
           filename: finalFilename,
           size: att.size,
@@ -3579,7 +3579,7 @@ export class EmailService {
       if (connection) {
         try {
           await connection.end();
-        } catch (e) {}
+        } catch (e) { }
       }
     }
   }
@@ -3630,7 +3630,7 @@ export class EmailService {
       await ensureSchema(getDbPath());
       const db = await dbManager.getConnection();
       await db.run('UPDATE emails SET is_seen = 1 WHERE uid = ?', [uid]);
-          } catch (err) {
+    } catch (err) {
       console.error('[Mail] markEmailSeen error:', err);
     }
   }
@@ -3666,7 +3666,7 @@ export class EmailService {
       if (connection) {
         try {
           await connection.end();
-        } catch (e) {}
+        } catch (e) { }
       }
     }
   }
