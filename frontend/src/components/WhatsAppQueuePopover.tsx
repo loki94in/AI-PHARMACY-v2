@@ -7,31 +7,9 @@ import {
 } from 'lucide-react';
 import { api, apiClient, peekWhatsAppQueueStatusCache, type WhatsAppQueueItem, type WhatsAppQueueStatus } from '../services/api';
 import { toastEvent, whatsappQueueEvent, messageSendEvent } from '../services/events';
+import { getFormattedFailureReason } from '../utils/whatsappFailureReason';
 
 type QueueItem = WhatsAppQueueItem;
-
-function getFormattedFailureReason(errorMsg?: string, status?: string): string {
-  if (!errorMsg && status === 'failed_offline') {
-    return 'PC / Internet is offline or connection lost';
-  }
-  if (!errorMsg) {
-    return 'Message delivery failed during queue dispatch attempt';
-  }
-  const msg = errorMsg.toLowerCase();
-  if (msg.includes('invalid') || msg.includes('phone') || msg.includes('number')) {
-    return 'Invalid recipient phone number format';
-  }
-  if (msg.includes('session') || msg.includes('auth') || msg.includes('token') || msg.includes('login')) {
-    return 'WhatsApp Web session disconnected / login required';
-  }
-  if (msg.includes('timeout') || msg.includes('net::err') || msg.includes('econnrefused')) {
-    return 'Network connection timeout';
-  }
-  if (msg.includes('not registered') || msg.includes('not on whatsapp')) {
-    return 'Recipient phone number is not registered on WhatsApp';
-  }
-  return errorMsg;
-}
 
 interface WhatsAppQueuePopoverProps {
   onClose: () => void;
