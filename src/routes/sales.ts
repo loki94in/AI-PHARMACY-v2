@@ -658,20 +658,18 @@ router.post('/', async (req, res) => {
             if (isCredit) {
               // Calculate accurate ledger balance
               let finalOutstanding = 0;
-              if (patient_name) {
-                const oldInvoices = customerId
-                  ? await db.all(
-                      `SELECT total_amount FROM sales WHERE customer_id = ? AND (payment_status = 'UNPAID' OR payment_medium = 'CREDIT') AND id != ?`,
-                      [customerId, invoiceId]
-                    )
-                  : patient_name
-                  ? await db.all(
-                      `SELECT total_amount FROM sales WHERE LOWER(patient_name) = LOWER(?) AND (payment_status = 'UNPAID' OR payment_medium = 'CREDIT') AND id != ?`,
-                      [patient_name.trim(), invoiceId]
-                    )
-                  : [];
-                const oldDuesSum = oldInvoices.reduce((sum: number, inv: any) => sum + Number(inv.total_amount || 0), 0);
-                finalOutstanding = oldDuesSum + Number(total);
+              if (customerId) {
+                const custRow = await db.get('SELECT credit_balance FROM customers WHERE id = ?', [customerId]);
+                finalOutstanding = custRow?.credit_balance !== undefined && custRow?.credit_balance !== null
+                  ? Number(custRow.credit_balance)
+                  : Number(total);
+              } else if (patient_name) {
+                const custRow = await db.get('SELECT credit_balance FROM customers WHERE LOWER(TRIM(name)) = LOWER(?) LIMIT 1', [patient_name.trim()]);
+                finalOutstanding = custRow?.credit_balance !== undefined && custRow?.credit_balance !== null
+                  ? Number(custRow.credit_balance)
+                  : Number(total);
+              } else {
+                finalOutstanding = Number(total);
               }
 
               const todayStr = formatDate(invoiceDateValue);
@@ -679,6 +677,10 @@ router.post('/', async (req, res) => {
               waMsg += `📌 *Credit Purchase Bill & Account Summary*\n\n`;
               waMsg += `🧾 *Current Bill (#${invoice_no})*\n`;
               waMsg += `• Date: *${todayStr}*\n`;
+              if (itemLines) {
+                waMsg += `\n${itemLines}`;
+              }
+              waMsg += `• Bill Amount: *₹${Number(total).toFixed(2)}*\n`;
               waMsg += `💰 *Total Outstanding Balance: ₹${finalOutstanding.toFixed(2)}*\n\n`;
               waMsg += `This bill has been posted to your credit ledger account.\n`;
             } else {
@@ -701,7 +703,7 @@ router.post('/', async (req, res) => {
             await db.run(
               `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
                VALUES (?, ?, ?, ?, ?, ?)`,
-              ['pos_credit_invoice', nameForWA, phoneForWA, waMsg, 'sent', `invoice_${invoiceId}`]
+              [isCredit ? 'pos_credit_invoice' : 'pos_sale_invoice', nameForWA, phoneForWA, waMsg, 'sent', `invoice_${invoiceId}`]
             );
           } catch (waErr: any) {
             console.error(`[POS WhatsApp] Failed to enqueue notification for ${invoice_no}:`, waErr);

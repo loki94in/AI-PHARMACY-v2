@@ -25,6 +25,8 @@ export interface QueueWorkerState {
   // send) and the boot restore window are NOT disconnections.
   sleeping: boolean;
   initializing: boolean;
+  stalePendingCount?: number;
+  oldestPendingWaitSeconds?: number;
   nextDispatchCountdownMs: number;
   nextDispatchCountdownSeconds: number;
   nextDispatchTimestamp: number | null;

@@ -3702,6 +3702,7 @@ interface SpecialOrderItem {
   pharmarack_mapped?: number | null;
   advance_payment?: number | null;
   language?: string;
+  notification_count?: number;
 }
 
 let cachedSpecialOrders: SpecialOrderItem[] = [];
@@ -4424,7 +4425,7 @@ const SpecialOrdersSection: React.FC = () => {
                       {/* Notified Badge */}
                       {order.notified === 1 && (
                         <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-bold flex items-center gap-1">
-                          <CheckCircle2 size={11} /> WA Sent
+                          <CheckCircle2 size={11} /> {order.notification_count && order.notification_count > 1 ? `Sent ${order.notification_count}x` : 'WA Sent'}
                         </span>
                       )}
                     </div>
@@ -4469,27 +4470,27 @@ const SpecialOrdersSection: React.FC = () => {
                       <div className="flex items-center gap-1">
                         <span className="px-2.5 py-1 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-bold flex items-center gap-1">
                           <Check size={12} />
-                          <span>WA Sent</span>
+                          <span>{order.notification_count && order.notification_count > 1 ? `Sent ${order.notification_count}x` : 'WA Sent'}</span>
                         </span>
                         <button
                           onClick={() => handleNotifyArrival(order)}
                           disabled={notifyingId === order.id}
-                          className="flex items-center gap-1 px-2 py-1 rounded-xl bg-bg3 hover:bg-bg border border-border text-muted hover:text-emerald-400 text-xs font-semibold transition-all cursor-pointer"
-                          title="Resend arrival WhatsApp notification to customer"
+                          className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold shadow-md shadow-sky-500/20 transition-all hover:scale-105 active:scale-95 cursor-pointer disabled:opacity-50"
+                          title="Re-send arrival reminder WhatsApp notification to customer"
                         >
                           <MessageCircle size={12} className={notifyingId === order.id ? 'animate-spin' : ''} />
-                          <span>{notifyingId === order.id ? '...' : 'Resend'}</span>
+                          <span>{notifyingId === order.id ? '...' : `Resend Ready • ${order.notification_count || 1}`}</span>
                         </button>
                       </div>
                     ) : (
                       <button
                         onClick={() => handleNotifyArrival(order)}
                         disabled={notifyingId === order.id}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold shadow-md shadow-emerald-500/20 transition-all hover:scale-105 active:scale-95 cursor-pointer disabled:opacity-50"
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold shadow-md shadow-sky-500/20 transition-all hover:scale-105 active:scale-95 cursor-pointer disabled:opacity-50"
                         title="Manually send WhatsApp arrival notification to customer"
                       >
                         <MessageCircle size={13} className={notifyingId === order.id ? 'animate-spin' : ''} />
-                        <span>{notifyingId === order.id ? 'Sending...' : '📱 Send Arrival WA'}</span>
+                        <span>{notifyingId === order.id ? 'Sending...' : '📱 Mark Ready'}</span>
                       </button>
                     )}
 

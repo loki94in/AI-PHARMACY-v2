@@ -721,7 +721,8 @@ export async function ensureSchema(dbPath: string) {
       source_refill_id INTEGER DEFAULT NULL,
       source TEXT,
       converted_to_refill_id INTEGER DEFAULT NULL,
-      customer_id INTEGER DEFAULT NULL
+      customer_id INTEGER DEFAULT NULL,
+      notification_count INTEGER DEFAULT 0
     );
 
     CREATE TABLE IF NOT EXISTS distributor_learning_profiles (

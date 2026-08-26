@@ -42,6 +42,7 @@ import {
   Loader2,
   ChevronDown,
   BrainCircuit,
+  MessageCircle,
 } from 'lucide-react';
 import { shortcutEvent, SHORTCUT_DIRECTORY } from '../services/keyboardShortcuts';
 import {
@@ -2040,9 +2041,9 @@ const QuickAssistSidebar = memo(({
 
 
   const handleUpdateGroupStatus = async (
-    group: { requester: string; phone?: string; items: Array<{ id: number; product: string; qty: number }> },
+    group: { requester: string; phone?: string; items: Array<{ id: number; product: string; qty: number; notification_count?: number }> },
     newStatus: string,
-    opts?: { navigateToPos?: boolean }
+    opts?: { navigateToPos?: boolean; resend?: boolean }
   ) => {
     const itemIds = group.items.map(i => i.id);
 
@@ -2061,7 +2062,7 @@ const QuickAssistSidebar = memo(({
     }
 
     try {
-      const results = await Promise.all(group.items.map(i => apiClient.post(`/orders/${i.id}/status`, { status: newStatus })));
+      const results = await Promise.all(group.items.map(i => apiClient.post(`/orders/${i.id}/status`, { status: newStatus, resend: opts?.resend })));
       const queuedCount = results.filter(r => r?.data?.whatsapp_queued).length;
       if (newStatus === 'Completed' || newStatus === 'Fulfilled') {
         toastEvent.trigger(`Marked ${group.items.length} request(s) for "${group.requester}" as Completed!`, 'success');
@@ -2083,7 +2084,9 @@ const QuickAssistSidebar = memo(({
         }
       } else if (newStatus === 'Ready') {
         toastEvent.trigger(queuedCount > 0
-          ? `Marked ready & arrival WhatsApp queued for ${queuedCount} customer(s)!`
+          ? (opts?.resend
+              ? `Arrival reminder WhatsApp re-queued for "${group.requester}"!`
+              : `Marked ready & arrival WhatsApp queued for ${queuedCount} customer(s)!`)
           : `Marked all requests for "${group.requester}" as Ready!`, 'success');
       } else if (newStatus === 'Cancelled') {
         toastEvent.trigger(`Marked all requests for "${group.requester}" as Cancelled!`, 'success');
@@ -2398,6 +2401,7 @@ const QuickAssistSidebar = memo(({
         qty: number;
         status: string;
         priority: string;
+        notification_count?: number;
       }>;
     }> = [];
 
@@ -2423,6 +2427,7 @@ const QuickAssistSidebar = memo(({
         qty: Number(order.qty || 1),
         status: order.status || 'Pending',
         priority: order.priority || 'Normal',
+        notification_count: Number((order as any).notification_count || 0),
       });
     }
 
@@ -2814,17 +2819,24 @@ const QuickAssistSidebar = memo(({
                         </div>
                       </div>
                       <div className="flex items-center gap-1.5 shrink-0">
-                        <span
-                          className={`px-1.5 py-0.5 rounded text-[9px] font-mono font-bold uppercase ${
-                            group.overallStatus === 'Ready'
-                              ? 'bg-sky-500/20 text-sky-300 border border-sky-500/30'
-                              : group.overallStatus === 'Ordered'
-                              ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                              : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
-                          }`}
-                        >
-                          {group.overallStatus}
-                        </span>
+                        {(() => {
+                          const maxCount = Math.max(0, ...group.items.map(i => Number(i.notification_count || 0)));
+                          return (
+                            <span
+                              className={`px-1.5 py-0.5 rounded text-[9px] font-mono font-bold uppercase ${
+                                group.overallStatus === 'Ready'
+                                  ? 'bg-sky-500/20 text-sky-300 border border-sky-500/30'
+                                  : group.overallStatus === 'Ordered'
+                                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                                  : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                              }`}
+                            >
+                              {group.overallStatus === 'Ready' && maxCount > 0
+                                ? `Ready (Sent ${maxCount}x)`
+                                : group.overallStatus}
+                            </span>
+                          );
+                        })()}
                         <ChevronDown size={14} className={`text-muted transition-transform duration-200 ${isExpanded ? 'rotate-180 text-amber-400' : ''}`} />
                       </div>
                     </div>
@@ -2852,15 +2864,31 @@ const QuickAssistSidebar = memo(({
                     {/* Action Buttons Footer */}
                     <div className="flex items-center flex-wrap gap-1.5 pt-1 border-t border-border/30 min-w-0">
                       {group.overallStatus === 'Ready' ? (
-                        <button
-                          disabled={isProcessing}
-                          onClick={() => handleUpdateGroupStatus(group, 'Completed', { navigateToPos: true })}
-                          className="flex-1 py-1 px-2 rounded bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-[10px] font-bold tracking-wide uppercase transition-colors flex items-center justify-center gap-1 shadow-sm cursor-pointer whitespace-nowrap min-w-0"
-                          title="Mark all requests as Completed, remove from Quick Assist and open POS pre-filled for this customer"
-                        >
-                          {isProcessing ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
-                          Complete All
-                        </button>
+                        <>
+                          {(() => {
+                            const maxCount = Math.max(0, ...group.items.map(i => Number(i.notification_count || 0)));
+                            return (
+                              <button
+                                disabled={isProcessing}
+                                onClick={() => handleUpdateGroupStatus(group, 'Ready', { resend: true })}
+                                className="flex-1 py-1 px-2 rounded bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white text-[10px] font-bold tracking-wide uppercase transition-colors flex items-center justify-center gap-1 shadow-sm cursor-pointer whitespace-nowrap min-w-0"
+                                title="Re-send arrival reminder WhatsApp notification to customer"
+                              >
+                                {isProcessing ? <Loader2 size={11} className="animate-spin" /> : <MessageCircle size={11} />}
+                                Resend Ready {maxCount > 0 ? `• ${maxCount}` : ''}
+                              </button>
+                            );
+                          })()}
+                          <button
+                            disabled={isProcessing}
+                            onClick={() => handleUpdateGroupStatus(group, 'Completed', { navigateToPos: true })}
+                            className="flex-1 py-1 px-2 rounded bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-[10px] font-bold tracking-wide uppercase transition-colors flex items-center justify-center gap-1 shadow-sm cursor-pointer whitespace-nowrap min-w-0"
+                            title="Mark all requests as Completed, remove from Quick Assist and open POS pre-filled for this customer"
+                          >
+                            {isProcessing ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
+                            Complete
+                          </button>
+                        </>
                       ) : group.overallStatus === 'Ordered' ? (
                         <>
                           <button
