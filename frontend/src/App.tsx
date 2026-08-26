@@ -201,6 +201,76 @@ function App() {
     };
   }, []);
 
+  // Global browser autofill & accessibility observer: guarantees strictly unique id, name, and label association across all form fields
+  useEffect(() => {
+    let fieldCount = 0;
+    const seenIds = new Set<string>();
+
+    const processElement = (el: Element) => {
+      if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT') {
+        const field = el as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
+        
+        // 1. Ensure name attribute
+        if (!field.name) {
+          const rawName = field.getAttribute('placeholder')?.toLowerCase().replace(/[^a-z0-9]/g, '_') ||
+                          field.getAttribute('aria-label')?.toLowerCase().replace(/[^a-z0-9]/g, '_') ||
+                          `field_${++fieldCount}`;
+          const cleanName = rawName.replace(/^_+|_+$/g, '') || `field_${++fieldCount}`;
+          field.name = cleanName;
+        }
+
+        // 2. Ensure id is strictly unique across the DOM
+        if (!field.id || seenIds.has(field.id)) {
+          const baseId = (field.id || field.name || 'field').replace(/^_+|_+$/g, '');
+          let uniqueId = `${baseId}_${++fieldCount}`;
+          while (seenIds.has(uniqueId) || (typeof document !== 'undefined' && document.getElementById(uniqueId))) {
+            uniqueId = `${baseId}_${++fieldCount}`;
+          }
+          field.id = uniqueId;
+        }
+        seenIds.add(field.id);
+
+        // 3. Ensure autocomplete attribute
+        if (!field.getAttribute('autocomplete')) {
+          field.setAttribute('autocomplete', 'off');
+        }
+      }
+
+      // 4. Ensure labels are associated with their target inputs
+      if (el.tagName === 'LABEL') {
+        const lbl = el as HTMLLabelElement;
+        if (!lbl.htmlFor) {
+          const nestedInput = lbl.querySelector('input, textarea, select') as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | null;
+          if (nestedInput?.id) {
+            lbl.htmlFor = nestedInput.id;
+          } else {
+            const nextInput = lbl.parentElement?.querySelector('input, textarea, select') as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | null;
+            if (nextInput?.id) {
+              lbl.htmlFor = nextInput.id;
+            }
+          }
+        }
+      }
+    };
+
+    document.querySelectorAll('input, textarea, select, label').forEach(processElement);
+
+    const observer = new MutationObserver((mutations) => {
+      for (const m of mutations) {
+        m.addedNodes.forEach(node => {
+          if (node.nodeType === Node.ELEMENT_NODE) {
+            const el = node as Element;
+            processElement(el);
+            el.querySelectorAll?.('input, textarea, select, label').forEach(processElement);
+          }
+        });
+      }
+    });
+
+    observer.observe(document.body, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, []);
+
   return (
     <ErrorBoundary>
       <BrowserRouter>

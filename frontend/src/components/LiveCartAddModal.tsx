@@ -1154,7 +1154,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
     try {
       await api.addPharmarackCart([record.payload]);
       setPendingAddStatus(record.id, 'added');
-      toastEvent.trigger(`Added "${record.name}" directly to live Pharmarack cart!`, 'success');
+      // ponytail: chip already shows 'added' — no toast needed
       window.dispatchEvent(new CustomEvent('refresh-pharmarack-cart'));
 
       // Automatically update source order status if opened from pending requests or refills

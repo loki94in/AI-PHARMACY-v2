@@ -92,11 +92,13 @@ export const PhoneInputWithBadge: React.FC<PhoneInputWithBadgeProps> = ({
     ? 'border-emerald-500/70 focus:border-emerald-400'
     : 'border-border focus:border-primary';
 
+  const inputId = id || 'phone-input-badge';
+
   return (
     <div className={`space-y-1.5 ${className}`}>
       {label && (
         <div className="flex items-center justify-between text-xs font-bold text-text">
-          <label htmlFor={id} className="flex items-center gap-1.5">
+          <label htmlFor={inputId} className="flex items-center gap-1.5">
             <Phone size={13} className="text-muted" />
             {label} {required && <span className="text-rose-400">*</span>}
           </label>
@@ -108,8 +110,10 @@ export const PhoneInputWithBadge: React.FC<PhoneInputWithBadgeProps> = ({
 
       <div className="relative flex items-center">
         <input
-          id={id}
+          id={inputId}
+          name={inputId}
           type="tel"
+          autoComplete="off"
           value={value}
           onChange={handleChange}
           onBlur={handleBlur}

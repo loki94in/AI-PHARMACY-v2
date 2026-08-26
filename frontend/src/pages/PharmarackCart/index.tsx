@@ -1393,6 +1393,7 @@ const [showAddedItems] = useState<boolean>(false);
   const handleSendDeliveryBoyNotification = async (dist: Distributor) => {
     setSendingDeliveryBoyNotifId(dist.storeId);
     try {
+      messageSendEvent.triggerSendProgress(dist.storeName, `Dispatching Delivery Boy notification for ${dist.storeName}...`, 10);
       const checkedItems = dist.items.filter(item => item.isChecked !== false);
       const itemsToSend = checkedItems.length > 0 ? checkedItems : dist.items;
       const res = await api.sendManualCartNotification({
@@ -1420,6 +1421,7 @@ const [showAddedItems] = useState<boolean>(false);
   const handleSendManualNotification = async (dist: Distributor) => {
     setSendingNotifId(dist.storeId);
     try {
+      messageSendEvent.triggerSendProgress(dist.storeName, `Sending WhatsApp notification to ${dist.storeName}...`, 10);
       const checkedItems = dist.items.filter(item => item.isChecked !== false);
       const itemsToSend = checkedItems.length > 0 ? checkedItems : dist.items;
       const res = await api.sendManualCartNotification({
@@ -1783,7 +1785,6 @@ const [showAddedItems] = useState<boolean>(false);
 
         setHasUnreadSentHistory(true);
         specialOrdersEvent.triggerUpdated();
-        whatsappQueueEvent.triggerOpen();
         whatsappQueueEvent.triggerUpdated();
         window.dispatchEvent(new CustomEvent('refresh-special-orders'));
         await fetchPendingOrders();
@@ -1956,6 +1957,7 @@ const [showAddedItems] = useState<boolean>(false);
         try {
           const itemsToSend = editingDistributor.items.filter(item => isItemIncludedInDispatch(item, editingDistributor));
           if (itemsToSend.length > 0) {
+            messageSendEvent.triggerSendProgress(distName, `Dispatching order to ${distName}...`, 10);
             const msg = buildDistributorOrderMessage({ ...editingDistributor, storeName: distName });
             await apiClient.post('/messaging/enqueue-single-distributor-order', {
               storeId: editingDistributor.storeId,

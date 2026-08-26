@@ -148,7 +148,10 @@ export const ConnectedDevicesFooterBar = memo(function ConnectedDevicesFooterBar
                 {isEditing ? (
                   <div className="flex items-center gap-1">
                     <input
+                      id={`device-rename-${dev.token}`}
+                      name={`device_rename_${dev.token}`}
                       type="text"
+                      autoComplete="off"
                       value={editName}
                       onChange={e => setEditName(e.target.value)}
                       className="bg-bg border border-primary px-1.5 py-0.5 rounded text-[11px] text-white outline-none w-24"

@@ -1361,9 +1361,11 @@ const UniversalMedicineEditModalInner: React.FC<UniversalMedicineEditModalProps>
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-muted mb-1.5">Additional Storage & Clinical Notes</label>
+                    <label htmlFor="medicine-edit-notes" className="block text-xs font-semibold text-muted mb-1.5">Additional Storage & Clinical Notes</label>
                     <textarea 
+                      id="medicine-edit-notes"
                       name="api_reference" 
+                      autoComplete="off"
                       value={form.api_reference || ''} 
                       onChange={handleChange}
                       rows={3}

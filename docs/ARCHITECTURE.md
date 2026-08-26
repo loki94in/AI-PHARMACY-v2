@@ -1,4 +1,4 @@
-﻿# 🏗️ AI Pharmacy v2 — Master Architecture Document
+# 🏗️ AI Pharmacy v2 — Master Architecture Document
 
 > **For AI Agents**: Read this file FIRST before editing any page. It tells you exactly which pages share data, which query keys are shared, and what breaks when you touch something.
 
@@ -24,6 +24,7 @@ AI PHARMACY v2/
 │       └── cacheInvalidation.ts    # Shared React Query invalidation
 └── docs/                           # You are here
     ├── ARCHITECTURE.md
+    ├── LOGICAL_WORKFLOWS_AND_BATCH_PATIENT_SPEC.md # Multi-batch spillover, Purchases & Patient Refills
     ├── pages/                      # Per-page docs
     └── shared/                     # Cross-cutting concerns
 ```

@@ -1400,34 +1400,9 @@ const Topbar = memo(({
       });
     }
 
-    // 5. 5-Minute Prior Upcoming Automations
-    upcomingTriggers.forEach(trig => {
-      const mins = Math.floor(trig.secondsUntilRun / 60);
-      const secs = trig.secondsUntilRun % 60;
-      items.push({
-        id: `upcoming-${trig.id}`,
-        type: 'notification',
-        title: `⏰ Upcoming Automation (in ${mins}m ${secs}s): ${trig.name}`,
-        subtitle: `${trig.description} • Click Run Now or Snooze`,
-        badge: `Upcoming (${mins}m)`,
-        color: 'amber',
-        action: async () => {
-          try {
-            toastEvent.trigger(`▶ Starting ${trig.name}...`, 'info');
-            await api.runTriggerNow(trig.id);
-            toastEvent.trigger(`✓ ${trig.name} completed successfully`, 'success');
-            fetchUpcomingTriggers();
-          } catch (err: unknown) {
-            toastEvent.trigger(`❌ Trigger failed: ${(err as LocalApiErrorShape)?.message || 'Error'}`, 'error');
-          }
-        },
-        actionLabel: '▶ Run Now',
-        icon: <ClockIcon size={12} className="text-amber-400 animate-pulse shrink-0" />
-      });
-    });
 
     return items;
-  }, [activeMsgProgress, waQueueDetail, isWaActive, isWaRecentlyDone, backupStatus, catalogJob, ocrStatus, onOpenWaQueue, upcomingTriggers, fetchUpcomingTriggers, navigate]);
+  }, [activeMsgProgress, waQueueDetail, isWaActive, isWaRecentlyDone, backupStatus, catalogJob, ocrStatus, onOpenWaQueue, navigate]);
 
 
   const [carouselIndex, setCarouselIndex] = useState(0);
@@ -1535,11 +1510,12 @@ const Topbar = memo(({
     };
   }, [showShortcutHelp]);
 
-  // Listen for toast events — show flash AND add to panel
+  // Flash toast only for errors — success/info/mail/automation log silently to Activity panel only
   useEffect(() => {
     return toastEvent.subscribe((detail) => {
       onNewNotification(detail);
-      // Show flash
+      // ponytail: only errors surface as flash popups; everything else is panel-only
+      if (detail.type !== 'error') return;
       const id = Date.now();
       setFlashToast({ ...detail, id });
       clearTimeout(flashTimerRef.current);
@@ -1582,8 +1558,6 @@ const Topbar = memo(({
         {/* CENTER SECTION: Auto-Hides in Idle state */}
         <div
           className="flex-1 flex justify-center items-center px-2 sm:px-4 max-w-[460px] mx-auto min-w-0 h-full relative"
-          onMouseEnter={activeHeaderItems.length > 0 ? handleHubMouseEnter : undefined}
-          onMouseLeave={activeHeaderItems.length > 0 ? handleHubMouseLeave : undefined}
         >
           {activeHeaderItems.length > 0 && currentHeaderItem && (
             <div className="w-full flex flex-col justify-center gap-0.5 h-full relative cursor-pointer group/progress origin-center transition-all duration-300 animate-in fade-in zoom-in-95">
@@ -1624,121 +1598,6 @@ const Topbar = memo(({
                     style={{ width: `${Math.min(100, Math.max(0, currentHeaderItem.progress))}%` }}
                   >
                     <div className="absolute right-0 top-0 bottom-0 w-2 bg-white/80 rounded-full shadow-[0_0_8px_rgba(255,255,255,0.9)]" />
-                  </div>
-                </div>
-              )}
-
-              {/* Day/Night Theme-Adapted Operations Command Center Popover (Solid Opaque Background) */}
-              {activeHeaderItems.length > 0 && isHoverExpanded && (
-                <div
-                  onClick={(e) => e.stopPropagation()}
-                  onMouseEnter={handleHubMouseEnter}
-                  onMouseLeave={handleHubMouseLeave}
-                  className="absolute top-full mt-2 left-1/2 -translate-x-1/2 w-[460px] max-h-[480px] overflow-y-auto bg-bg2 border border-border shadow-2xl rounded-3xl p-4 z-dropdown flex flex-col gap-3 animate-in fade-in slide-in-from-top-2 duration-200"
-                >
-                  {/* Header Title & Controls */}
-                  <div className="flex items-center justify-between border-b border-border pb-2.5">
-                    <div className="flex items-center gap-2">
-                      <div className="p-1 rounded-lg bg-primary/10 text-primary">
-                        <Activity size={14} className="animate-pulse" />
-                      </div>
-                      <div className="flex flex-col">
-                        <span className="text-xs font-black uppercase tracking-wider text-text">Automation & Operations Hub</span>
-                        <span className="text-[10px] text-muted font-medium">{activeHeaderItems.length} active trigger{activeHeaderItems.length > 1 ? 's' : ''} next in line</span>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setIsManualCarouselPaused(prev => !prev);
-                        }}
-                        className={`px-2 py-0.5 rounded-lg border text-[10px] font-mono font-bold transition-all cursor-pointer ${isManualCarouselPaused
-                            ? 'bg-amber-500/20 border-amber-500/30 text-amber-300'
-                            : 'bg-bg3 border-border text-muted hover:text-text'
-                          }`}
-                      >
-                        {isManualCarouselPaused ? '⏸ Paused' : '▶ Auto-Ticker'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (hubHoverTimerRef.current) {
-                            clearTimeout(hubHoverTimerRef.current);
-                            hubHoverTimerRef.current = null;
-                          }
-                          setIsCarouselHovered(false);
-                          setIsHoverExpanded(false);
-                        }}
-                        className="p-1 rounded-lg text-muted hover:text-text hover:bg-bg3 transition-colors cursor-pointer text-xs font-bold"
-                        title="Close Hub Popover"
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* All Active Automation Triggers & Next-in-Line Queue */}
-                  <div className="flex flex-col gap-2.5">
-                    {activeHeaderItems.map((item, index) => (
-                      <div
-                        key={item.id}
-                        className={`p-3 rounded-2xl border transition-all ${index === activeIndex
-                            ? 'bg-primary/10 border-primary/40 shadow-md'
-                            : 'bg-bg border border-border hover:bg-bg3'
-                          }`}
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="flex items-start gap-2 min-w-0 flex-1">
-                            <div className="mt-0.5">{item.icon}</div>
-                            <div className="flex flex-col min-w-0">
-                              <span className="text-xs font-bold text-text truncate leading-tight">
-                                {item.title}
-                              </span>
-                              {item.subtitle && (
-                                <span className="text-[10px] text-muted truncate mt-0.5">
-                                  {item.subtitle}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            {item.action && (
-                              <button
-                                type="button"
-                                onClick={item.action}
-                                className="px-2.5 py-1 rounded-lg bg-sky-500/20 border border-sky-500/30 text-sky-300 hover:bg-sky-500/30 text-[10px] font-black uppercase tracking-wider cursor-pointer"
-                              >
-                                {item.actionLabel || 'View'}
-                              </button>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Individual Progress Fill Track for each active trigger */}
-                        {item.progress !== undefined && (
-                          <div className="w-full h-1.5 bg-bg border border-glass-border rounded-full overflow-hidden relative mt-2.5">
-                            <div
-                              className={`h-full rounded-full transition-all duration-500 relative bg-gradient-to-r ${item.color === 'purple'
-                                  ? 'from-purple-500 via-indigo-500 to-sky-400'
-                                  : item.color === 'sky'
-                                    ? 'from-sky-500 via-blue-500 to-cyan-400'
-                                    : item.color === 'amber'
-                                      ? 'from-amber-500 to-orange-400'
-                                      : 'from-emerald-500 via-teal-400 to-emerald-400'
-                                }`}
-                              style={{ width: `${Math.min(100, Math.max(0, item.progress))}%` }}
-                            >
-                              <div className="absolute right-0 top-0 bottom-0 w-2 bg-white/90 rounded-full shadow-[0_0_8px_rgba(255,255,255,0.9)]" />
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    ))}
                   </div>
                 </div>
               )}
@@ -2019,6 +1878,7 @@ const QuickAssistSidebar = memo(({
 
   const handleSendRefillGroup = async (group: { patient_name: string; patient_phone: string; medicines: Array<{ id: number; medicine_name: string; quantity_needed: number }> }) => {
     try {
+      messageSendEvent.triggerSendProgress(group.patient_name || 'Patient', 'Dispatching WhatsApp refill reminder...', 10);
       if (group.patient_phone) {
         await api.sendGroupedRefill({
           patient_name: group.patient_name,
@@ -2085,6 +1945,9 @@ const QuickAssistSidebar = memo(({
           });
         }
       } else if (newStatus === 'Ready') {
+        if (queuedCount > 0) {
+          messageSendEvent.triggerSendProgress(group.requester || group.phone || 'Customer', `Arrival alert for ${group.items[0]?.product || 'Order'}`, 10);
+        }
         toastEvent.trigger(queuedCount > 0
           ? (opts?.resend
               ? `Arrival reminder WhatsApp re-queued for "${group.requester}"!`

@@ -605,6 +605,7 @@ const RefillsSection: React.FC = () => {
   const handleRemindNow = async (phone: string) => {
     setSending(phone);
     try {
+      messageSendEvent.triggerSendProgress(phone, 'Dispatching WhatsApp refill reminder...', 10);
       await apiClient.post('/refills/send-reminder-now', { patient_phone: phone });
       toastEvent.trigger(`WhatsApp reminder queued for ${phone}`, 'success', '/crm');
       whatsappQueueEvent.triggerUpdated();
@@ -3948,6 +3949,7 @@ const SpecialOrdersSection: React.FC = () => {
         // Send booking confirmation WhatsApp message to the customer
         if (order.phone) {
           try {
+            messageSendEvent.triggerSendProgress(order.requester || order.phone || 'Customer', `Booking confirmation for ${order.product}`, 10);
             await api.resendSpecialOrderBooking(order.id);
             toastEvent.trigger(`Booking WhatsApp sent to ${order.requester || 'Customer'}!`, 'success', '/crm');
             whatsappQueueEvent.triggerUpdated();
@@ -4056,6 +4058,9 @@ const SpecialOrdersSection: React.FC = () => {
 
     setFormSubmitting(true);
     try {
+      if (Boolean(sendWhatsApp) && customerPhone) {
+        messageSendEvent.triggerSendProgress(customerName || 'Customer', `Booking confirmation for ${product.trim()}`, 10);
+      }
       await api.createOrder({
         product: product.trim(),
         requester: customerName,
@@ -4186,6 +4191,9 @@ const SpecialOrdersSection: React.FC = () => {
       // Truthful toast contract: only claim the arrival WhatsApp was queued when the
       // backend reports it (same rule as Quick Assist Mark Ready).
       if (editStatus === 'Ready') {
+        if (res?.whatsapp_queued) {
+          messageSendEvent.triggerSendProgress(customerName || customerPhone || 'Customer', `Arrival alert for ${editProduct.trim()}`, 10);
+        }
         toastEvent.trigger(
           res?.whatsapp_queued
             ? `Request updated & arrival WhatsApp queued for ${customerName}!`
@@ -5116,6 +5124,7 @@ const CustomerCreditSection: React.FC = () => {
   const handleSendManualReminder = async (cust: CreditCustomerItem) => {
     setSendingId(cust.id);
     try {
+      messageSendEvent.triggerSendProgress(cust.name || 'Customer', 'Dispatching WhatsApp credit reminder...', 10);
       await apiClient.post(`/crm/credit-customers/${cust.id}/send-reminder`, {});
       toastEvent.trigger(`Manual credit reminder sent to ${cust.name}`, 'success', '/crm');
       whatsappQueueEvent.triggerUpdated();

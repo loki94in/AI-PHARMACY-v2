@@ -3356,6 +3356,7 @@ const POS = () => {
                 <div className="flex gap-1 items-center relative">
                   <input
                     id="patient-name-input"
+                    name="patient_name"
                     type="text"
                     autoComplete="off"
                     className="premium-input text-xs font-semibold h-8.5 px-3 flex-1 w-full bg-bg2/60 border-border/70 rounded-xl placeholder:text-muted/40"
@@ -3481,7 +3482,9 @@ const POS = () => {
                 <div className="flex gap-1 items-center">
                   <input
                     id="patient-phone-input"
+                    name="patient_phone"
                     type="text"
+                    autoComplete="off"
                     className="premium-input text-xs font-mono font-semibold h-8.5 px-3 w-full text-text bg-bg2/60 border-border/70 rounded-xl placeholder:text-muted/40"
                     placeholder="Mobile / WhatsApp..."
                     value={patientPhone}
@@ -3520,6 +3523,7 @@ const POS = () => {
                 <div className="flex gap-1 relative items-center">
                   <input
                     id="doctor-name-input"
+                    name="doctor_name"
                     type="text"
                     autoComplete="off"
                     aria-label="Prescribing Doctor"
@@ -3646,7 +3650,10 @@ const POS = () => {
               {/* Billing Date (Span 2) */}
               <div className="md:col-span-2">
                 <input
+                  id="pos-billing-date"
+                  name="billing_date"
                   type="date"
+                  autoComplete="off"
                   className="premium-input text-xs font-semibold h-8.5 px-2.5 text-text w-full font-mono bg-bg2/60 border-border/70 rounded-xl"
                   value={toDateInputValue(date)}
                   onChange={e => setDate(e.target.value)}
@@ -3688,6 +3695,7 @@ const POS = () => {
                   </span>
                   <input
                     id="medicine-search-input"
+                    name="medicine_search"
                     type="text"
                     autoComplete="off"
                     aria-label="Search medicine by name, composition, batch, or price"
@@ -4257,6 +4265,7 @@ const POS = () => {
                             <div ref={activeRowSearchIndex === cart.indexOf(item) ? activeRowRef : null} className="flex-1 relative">
                               <input 
                                 id={`row-med-input-${cart.indexOf(item)}`}
+                                name={`row_med_name_${cart.indexOf(item)}`}
                                 type="text" 
                                 autoComplete="off"
                                 className="w-full bg-transparent border-0 border-b border-transparent hover:border-border/60 focus:border-primary/60 focus:ring-0 text-sm font-semibold text-text py-0.5 px-1 rounded"
@@ -4382,7 +4391,10 @@ const POS = () => {
                         <td className="py-1 px-2.5 relative">
                           <div className="relative">
                             <input
+                              id={`row-batch-input-${cart.indexOf(item)}`}
+                              name={`row_batch_${cart.indexOf(item)}`}
                               type="text"
+                              autoComplete="off"
                               className={`w-24 text-center bg-bg/40 border border-border/40 hover:border-border/80 focus:border-primary/50 focus:ring-1 focus:ring-primary/20 text-xs font-mono font-semibold py-0.5 px-1.5 h-7 rounded-lg ${item.isEmptyRow ? 'cursor-not-allowed opacity-40' : 'cursor-pointer'}`}
                               value={item.batch || ''}
                               placeholder="Batch"
@@ -4490,9 +4502,11 @@ const POS = () => {
                                 <div className="flex items-center gap-1 bg-bg/40 border border-border/40 hover:border-border/80 focus-within:border-primary/50 focus-within:ring-1 focus-within:ring-primary/20 rounded-lg px-2 py-0.5 h-7">
                                   <input 
                                     id={`row-qty-input-${cart.indexOf(item)}`}
+                                    name={`row_qty_${cart.indexOf(item)}`}
                                     data-pos-row-index={cart.indexOf(item)}
                                     data-pos-field="qty"
-                                    type="number" 
+                                    type="number"
+                                    autoComplete="off" 
                                     className="w-10 text-center bg-transparent border-0 focus:ring-0 p-0 text-sm font-mono font-bold text-text focus:outline-none"
                                     value={item.qty !== undefined && item.qty !== null ? item.qty : ''}
                                     onChange={e => updateCartItem(item.id, 'qty', e.target.value === '' ? 0 : Math.max(0, Number(e.target.value)))}
@@ -4566,9 +4580,11 @@ const POS = () => {
                                 }`}>
                                   <input 
                                     id={`row-loose-input-${cart.indexOf(item)}`}
+                                    name={`row_loose_qty_${cart.indexOf(item)}`}
                                     data-pos-row-index={cart.indexOf(item)}
                                     data-pos-field="looseQty"
-                                    type="number" 
+                                    type="number"
+                                    autoComplete="off" 
                                     className={`w-9 text-center bg-transparent border-0 focus:ring-0 p-0 text-sm font-mono font-bold focus:outline-none ${
                                       isLooseAllowed ? 'text-amber-500' : 'text-muted cursor-not-allowed'
                                     }`}
@@ -4714,10 +4730,12 @@ const POS = () => {
                             }`}>
                               <input 
                                 id={`row-disc-input-${cart.indexOf(item)}`}
+                                name={`row_disc_${cart.indexOf(item)}`}
                                 data-pos-row-index={cart.indexOf(item)}
                                 data-pos-field="discount"
                                 type="number" 
                                 step="0.5"
+                                autoComplete="off"
                                 className={`w-12 text-center bg-transparent border-0 focus:ring-0 p-0 text-xs font-mono font-bold focus:outline-none ${
                                   (item.discount && Number(item.discount) > 0) ? 'text-sky-400' : 'text-text'
                                 } ${item.isEmptyRow ? 'cursor-not-allowed' : ''}`}
@@ -4770,9 +4788,11 @@ const POS = () => {
                         <td className="py-1 px-2.5 text-right">
                           <input 
                             id={`row-rate-input-${cart.indexOf(item)}`}
+                            name={`row_rate_${cart.indexOf(item)}`}
                             data-pos-row-index={cart.indexOf(item)}
                             data-pos-field="unitPrice"
-                            type="number" 
+                            type="number"
+                            autoComplete="off" 
                             className={`w-16 text-right font-mono bg-bg/40 border border-border/40 hover:border-border/80 focus:border-primary/50 focus:ring-1 focus:ring-primary/20 text-xs py-0.5 px-1 h-7 rounded-lg font-bold text-emerald-400 ${item.isEmptyRow ? 'opacity-40 cursor-not-allowed' : ''}`} 
                             value={item.isEmptyRow ? '' : (item.unitPrice !== undefined && item.unitPrice !== null ? item.unitPrice : (item.sell_price !== undefined && item.sell_price !== null ? item.sell_price : (item.mrp || '')))}
                             placeholder="0.00"
@@ -4817,9 +4837,11 @@ const POS = () => {
                         <td className="py-1 px-2.5 text-right">
                           <input 
                             id={`row-mrp-input-${cart.indexOf(item)}`}
+                            name={`row_mrp_${cart.indexOf(item)}`}
                             data-pos-row-index={cart.indexOf(item)}
                             data-pos-field="mrp"
-                            type="number" 
+                            type="number"
+                            autoComplete="off" 
                             className={`w-16 text-right font-mono bg-bg/40 border border-border/40 hover:border-border/80 focus:border-primary/50 focus:ring-1 focus:ring-primary/20 text-xs py-0.5 px-1 h-7 rounded-lg ${item.isEmptyRow ? 'opacity-40 cursor-not-allowed' : ''}`} 
                             value={item.isEmptyRow ? '' : (item.mrp || '')}
                             placeholder="0.00"
@@ -4912,7 +4934,10 @@ const POS = () => {
             <span className="font-mono font-bold text-text text-[10px]">₹{Math.round(subtotal)}</span>
             <span className="text-[9px] text-muted ml-1">Disc%</span>
             <input
+              id="pos-bill-discount-input"
+              name="pos_bill_discount"
               type="number"
+              autoComplete="off"
               value={discount === 0 || discount === undefined || discount === null ? '' : discount}
               onChange={e => setDiscount(e.target.value === '' ? 0 : Math.min(100, Math.max(0, Number(e.target.value))))}
               placeholder="0"
@@ -5091,7 +5116,10 @@ const POS = () => {
               <div className="space-y-1.5">
                 <span className="text-xs font-bold text-muted uppercase tracking-wider">Patient Card ID</span>
                 <input 
+                  id="modal-patient-id"
+                  name="modal_patient_card_id"
                   type="text" 
+                  autoComplete="off"
                   className="premium-input w-full text-xs font-mono py-2 px-3 bg-bg3/40 cursor-not-allowed rounded-xl" 
                   value={patientId}
                   disabled
@@ -5103,7 +5131,10 @@ const POS = () => {
               <div className="space-y-1.5">
                 <span className="text-xs font-bold text-muted uppercase tracking-wider">Full Name</span>
                 <input 
+                  id="modal-patient-name"
+                  name="modal_patient_name"
                   type="text" 
+                  autoComplete="off"
                   className="premium-input w-full text-sm py-2 px-3 bg-bg2/50 border-border/80 rounded-xl" 
                   placeholder="Enter full name" 
                   value={patientName}
@@ -5117,7 +5148,10 @@ const POS = () => {
                   <Phone size={12} className="text-green" /> WhatsApp / Contact Number
                 </span>
                 <input 
+                  id="modal-patient-phone"
+                  name="modal_patient_phone"
                   type="text" 
+                  autoComplete="off"
                   className="premium-input w-full text-sm font-mono py-2 px-3 bg-bg2/50 border-border/80 rounded-xl" 
                   placeholder="e.g. 9130558910" 
                   value={patientPhone}
@@ -5135,8 +5169,10 @@ const POS = () => {
                     </span>
                     <p className="text-[10px] text-muted">Generate recurring WhatsApp stock notifications</p>
                   </div>
-                  <label className="relative inline-flex items-center cursor-pointer" aria-label="Toggle Refill">
+                  <label htmlFor="modal-refill-enabled" className="relative inline-flex items-center cursor-pointer" aria-label="Toggle Refill">
                     <input 
+                      id="modal-refill-enabled"
+                      name="modal_refill_enabled"
                       type="checkbox" 
                       className="sr-only peer"
                       checked={refillEnabled}
@@ -5154,7 +5190,10 @@ const POS = () => {
                       </span>
                       <div className="flex gap-2">
                         <input 
+                          id="modal-refill-days"
+                          name="modal_refill_days"
                           type="number" 
+                          autoComplete="off"
                           className="premium-input text-sm font-mono py-1.5 px-3 w-20 text-center bg-bg border-border rounded-xl" 
                           value={refillDays}
                           onChange={e => setRefillDays(Math.min(100, Math.max(1, Number(e.target.value))))}
@@ -5183,6 +5222,8 @@ const POS = () => {
                           <span>100 days</span>
                         </div>
                         <input
+                          id="modal-refill-days-range"
+                          name="modal_refill_days_range"
                           type="range"
                           min="1"
                           max="100"
@@ -5233,11 +5274,14 @@ const POS = () => {
             
             <div className="p-5 space-y-4">
               <div className="space-y-1.5">
-                <label className="text-xs font-bold text-muted uppercase tracking-wider">Doctor Name *</label>
+                <label htmlFor="modal-doctor-name" className="text-xs font-bold text-muted uppercase tracking-wider">Doctor Name *</label>
                 <div className="relative">
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted text-sm font-semibold">Dr.</span>
                   <input
+                    id="modal-doctor-name"
+                    name="modal_doctor_name"
                     type="text"
+                    autoComplete="off"
                     className="premium-input w-full pl-9 rounded-xl bg-bg2/40 border-border"
                     placeholder="John Doe"
                     value={newDoctorName}
@@ -5247,9 +5291,12 @@ const POS = () => {
               </div>
               
               <div className="space-y-1.5">
-                <label className="text-xs font-bold text-muted uppercase tracking-wider">Specialization</label>
+                <label htmlFor="modal-doctor-specialty" className="text-xs font-bold text-muted uppercase tracking-wider">Specialization</label>
                 <input
+                  id="modal-doctor-specialty"
+                  name="modal_doctor_specialty"
                   type="text"
+                  autoComplete="off"
                   className="premium-input w-full rounded-xl bg-bg2/40 border-border"
                   placeholder="e.g. Cardiologist"
                   value={newDoctorSpecialty}
@@ -5258,9 +5305,12 @@ const POS = () => {
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-xs font-bold text-muted uppercase tracking-wider">Phone</label>
+                <label htmlFor="modal-doctor-phone" className="text-xs font-bold text-muted uppercase tracking-wider">Phone</label>
                 <input
+                  id="modal-doctor-phone"
+                  name="modal_doctor_phone"
                   type="text"
+                  autoComplete="off"
                   className="premium-input w-full rounded-xl bg-bg2/40 border-border font-mono"
                   placeholder="10-digit Phone Number"
                   value={newDoctorPhone}
@@ -5270,9 +5320,12 @@ const POS = () => {
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-xs font-bold text-muted uppercase tracking-wider">Clinic Name</label>
+                <label htmlFor="modal-doctor-clinic" className="text-xs font-bold text-muted uppercase tracking-wider">Clinic Name</label>
                 <input
+                  id="modal-doctor-clinic"
+                  name="modal_doctor_clinic"
                   type="text"
+                  autoComplete="off"
                   className="premium-input w-full rounded-xl bg-bg2/40 border-border"
                   placeholder="Clinic / Hospital Name"
                   value={newDoctorClinic}
@@ -5281,9 +5334,12 @@ const POS = () => {
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-xs font-bold text-muted uppercase tracking-wider">Registration No.</label>
+                <label htmlFor="modal-doctor-reg-no" className="text-xs font-bold text-muted uppercase tracking-wider">Registration No.</label>
                 <input
+                  id="modal-doctor-reg-no"
+                  name="modal_doctor_reg_no"
                   type="text"
+                  autoComplete="off"
                   className="premium-input w-full rounded-xl bg-bg2/40 border-border"
                   placeholder="e.g. MMC-12345"
                   value={newDoctorRegNo}

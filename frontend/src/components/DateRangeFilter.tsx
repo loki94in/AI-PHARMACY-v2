@@ -85,7 +85,7 @@ export function DateRangeFilter({
   return (
     <div className={`flex flex-col gap-2 ${className}`}>
       {label && (
-        <label className="text-[10px] font-bold text-muted uppercase tracking-wider">{label}</label>
+        <span className="text-[10px] font-bold text-muted uppercase tracking-wider block">{label}</span>
       )}
       
       {showPresets && (

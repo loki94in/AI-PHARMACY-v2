@@ -957,7 +957,10 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
         <div className="p-3 bg-bg2/60 border-b border-glass-border/30 flex flex-col gap-2 shrink-0">
           <div className="relative flex items-center w-full">
             <input
+              id="wa-queue-search-input"
+              name="wa_queue_search"
               type="text"
+              autoComplete="off"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search saved WhatsApp notifications by phone, recipient, or text..."
@@ -1199,9 +1202,12 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
             <form onSubmit={handleSaveEditItem} className="bg-bg border border-glass-border/40 p-4 rounded-2xl max-w-md w-full space-y-3 shadow-2xl">
               <h4 className="text-xs font-bold text-text">Edit Phone & Resend Item #{editingItem.id}</h4>
               <div>
-                <label className="text-[10px] font-bold text-muted uppercase">Phone Number</label>
+                <label htmlFor="wa-queue-edit-phone-input" className="text-[10px] font-bold text-muted uppercase">Phone Number</label>
                 <input
+                  id="wa-queue-edit-phone-input"
+                  name="wa_queue_edit_phone"
                   type="text"
+                  autoComplete="off"
                   value={editPhone}
                   onChange={(e) => setEditPhone(e.target.value)}
                   placeholder="e.g. 919876543210"
@@ -1210,8 +1216,11 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
                 />
               </div>
               <div>
-                <label className="text-[10px] font-bold text-muted uppercase">Message Preview</label>
+                <label htmlFor="wa-queue-edit-message" className="text-[10px] font-bold text-muted uppercase">Message Preview</label>
                 <textarea
+                  id="wa-queue-edit-message"
+                  name="wa_queue_edit_message"
+                  autoComplete="off"
                   value={editMessage}
                   onChange={(e) => setEditMessage(e.target.value)}
                   rows={4}

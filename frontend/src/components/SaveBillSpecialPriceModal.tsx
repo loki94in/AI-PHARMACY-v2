@@ -239,7 +239,10 @@ export const SaveBillSpecialPriceModal: React.FC<SaveBillSpecialPriceModalProps>
             </span>
             <div className="relative flex items-center">
               <input
+                id="batch-discount-input"
+                name="batch_discount"
                 type="number"
+                autoComplete="off"
                 min="0"
                 max="100"
                 step="0.5"
@@ -294,7 +297,10 @@ export const SaveBillSpecialPriceModal: React.FC<SaveBillSpecialPriceModalProps>
                   <td className="py-3 px-3 text-center">
                     <div className="relative inline-flex items-center w-28">
                       <input
+                        id={`special-discount-${idx}`}
+                        name={`special_discount_${idx}`}
                         type="number"
+                        autoComplete="off"
                         min="0"
                         max="100"
                         step="0.1"
@@ -310,7 +316,10 @@ export const SaveBillSpecialPriceModal: React.FC<SaveBillSpecialPriceModalProps>
                     <div className="relative inline-flex items-center w-32">
                       <span className="absolute left-2.5 text-xs font-semibold text-emerald-500">₹</span>
                       <input
+                        id={`special-price-${idx}`}
+                        name={`special_price_${idx}`}
                         type="number"
+                        autoComplete="off"
                         min="0"
                         max={row.mrp}
                         step="0.5"

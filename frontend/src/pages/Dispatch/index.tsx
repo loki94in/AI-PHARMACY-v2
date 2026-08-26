@@ -324,7 +324,6 @@ const Dispatch = () => {
     setIsSendingAfternoonDispatch(true);
     try {
       messageSendEvent.triggerSendProgress('Delivery Staff Dispatch', 'Compiling afternoon collection summary...', 10);
-      whatsappQueueEvent.triggerOpen();
       whatsappQueueEvent.triggerUpdated();
       const res = await api.sendAfternoonDeliveryBoyDispatch();
       if (res && res.success) {
@@ -379,7 +378,6 @@ const Dispatch = () => {
       }
 
       messageSendEvent.triggerSendProgress(distName, `Sending WhatsApp reminder to ${distName}...`, 10);
-      whatsappQueueEvent.triggerOpen();
       whatsappQueueEvent.triggerUpdated();
 
       await api.sendDistributorReminderNow(targetId, msgToSend);
