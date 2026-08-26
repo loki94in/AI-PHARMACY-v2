@@ -2,7 +2,7 @@ import { dbManager } from './database/connection.js';
 
 // Bump this number whenever you add new CREATE TABLE, ALTER TABLE, or INSERT OR IGNORE statements below.
 // On normal boots where this version matches the stored version, all DDL is skipped entirely (~3-5s saved).
-const CURRENT_SCHEMA_VERSION = 43;
+const CURRENT_SCHEMA_VERSION = 44;
 
 // FTS5 creates exactly these four shadow tables for an external-content index.
 // While the `medicines_fts` declaration exists in sqlite_master these names are
@@ -348,6 +348,7 @@ export async function ensureSchema(dbPath: string) {
           source_refill_id INTEGER DEFAULT NULL,
           converted_to_refill_id INTEGER DEFAULT NULL,
           cart_add_error TEXT DEFAULT NULL,
+          notification_count INTEGER DEFAULT 0,
           lifecycle_status TEXT DEFAULT 'CREATED',
           last_checked_at DATETIME
         );
@@ -762,6 +763,7 @@ export async function ensureSchema(dbPath: string) {
       source TEXT,
       converted_to_refill_id INTEGER DEFAULT NULL,
       customer_id INTEGER DEFAULT NULL,
+      cart_add_error TEXT DEFAULT NULL,
       notification_count INTEGER DEFAULT 0
     );
 
@@ -1094,6 +1096,8 @@ export async function ensureSchema(dbPath: string) {
     ['special_orders', 'converted_to_refill_id', 'ALTER TABLE special_orders ADD COLUMN converted_to_refill_id INTEGER DEFAULT NULL'],
     ['special_orders', 'source_refill_id', 'ALTER TABLE special_orders ADD COLUMN source_refill_id INTEGER DEFAULT NULL'],
     ['special_orders', 'source', 'ALTER TABLE special_orders ADD COLUMN source TEXT'],
+    ['special_orders', 'cart_add_error', 'ALTER TABLE special_orders ADD COLUMN cart_add_error TEXT DEFAULT NULL'],
+    ['special_orders', 'notification_count', 'ALTER TABLE special_orders ADD COLUMN notification_count INTEGER DEFAULT 0'],
     ['held_bills', 'invoice_no', 'ALTER TABLE held_bills ADD COLUMN invoice_no TEXT'],
     ['held_bills', 'temp_label', 'ALTER TABLE held_bills ADD COLUMN temp_label TEXT'],
     ['held_bills', 'patient_name', 'ALTER TABLE held_bills ADD COLUMN patient_name TEXT'],

@@ -30,7 +30,7 @@ describe('Special Order Booking notified flag & status', () => {
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
   });
 
-  test('POST /api/orders with sendWhatsApp = true sets notified = 1 and status = Pending', async () => {
+  test('POST /api/orders with sendWhatsApp = true queues notification and sets notified = 0 and status = Pending', async () => {
     const res = await request(app)
       .post('/api/orders')
       .send({
@@ -48,11 +48,17 @@ describe('Special Order Booking notified flag & status', () => {
     const db = await dbManager.getConnection();
     const order = await db.get('SELECT * FROM special_orders WHERE product = ?', ['Paracetamol 500mg']);
     expect(order).toBeDefined();
-    expect(order.notified).toBe(1);
+    // notified flag tracks arrival notification (on Mark Ready), so starts at 0
+    expect(order.notified).toBe(0);
+    expect(order.notification_count).toBe(0);
     expect(order.status).toBe('Pending');
+
+    const notif = await db.get('SELECT * FROM automation_notifications WHERE reference_id = ?', [String(order.id)]);
+    expect(notif).toBeDefined();
+    expect(notif.status).toBe('queued');
   });
 
-  test('POST /api/orders with sendWhatsApp = false or omitted sets notified = 0 and status = Pending', async () => {
+  test('POST /api/orders with sendWhatsApp = false or omitted sets notified = 0 and status = Pending without queuing notification', async () => {
     const res = await request(app)
       .post('/api/orders')
       .send({
@@ -71,10 +77,14 @@ describe('Special Order Booking notified flag & status', () => {
     const order = await db.get('SELECT * FROM special_orders WHERE product = ?', ['Amoxicillin 250mg']);
     expect(order).toBeDefined();
     expect(order.notified).toBe(0);
+    expect(order.notification_count).toBe(0);
     expect(order.status).toBe('Pending');
+
+    const notif = await db.get('SELECT * FROM automation_notifications WHERE reference_id = ?', [String(order.id)]);
+    expect(notif).toBeUndefined();
   });
 
-  test('POST /api/orders/batch with sendWhatsApp = true sets notified = 1 for all items and status = Pending', async () => {
+  test('POST /api/orders/batch with sendWhatsApp = true queues notifications and sets notified = 0 for all items', async () => {
     const res = await request(app)
       .post('/api/orders/batch')
       .send({
@@ -94,10 +104,16 @@ describe('Special Order Booking notified flag & status', () => {
     const db = await dbManager.getConnection();
     const order1 = await db.get('SELECT * FROM special_orders WHERE product = ?', ['Metformin 500mg']);
     const order2 = await db.get('SELECT * FROM special_orders WHERE product = ?', ['Atorvastatin 10mg']);
-    expect(order1.notified).toBe(1);
+    expect(order1.notified).toBe(0);
+    expect(order1.notification_count).toBe(0);
     expect(order1.status).toBe('Pending');
-    expect(order2.notified).toBe(1);
+    expect(order2.notified).toBe(0);
+    expect(order2.notification_count).toBe(0);
     expect(order2.status).toBe('Pending');
+
+    const notif1 = await db.get('SELECT * FROM automation_notifications WHERE reference_id = ?', [String(order1.id)]);
+    expect(notif1).toBeDefined();
+    expect(notif1.status).toBe('queued');
   });
 
   test('POST /api/orders/batch with sendWhatsApp = false sets notified = 0 for all items and status = Pending', async () => {
@@ -118,7 +134,9 @@ describe('Special Order Booking notified flag & status', () => {
     const { dbManager } = await import('../src/database/connection.js');
     const db = await dbManager.getConnection();
     const order = await db.get('SELECT * FROM special_orders WHERE product = ?', ['Cetirizine 10mg']);
+    expect(order).toBeDefined();
     expect(order.notified).toBe(0);
+    expect(order.notification_count).toBe(0);
     expect(order.status).toBe('Pending');
   });
 });
