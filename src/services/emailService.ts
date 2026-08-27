@@ -1198,17 +1198,25 @@ export class EmailService {
       console.error('Failed to import fetch control in pollInbox:', importErr);
     }
 
+    try {
+      const { checkConnectivity } = await import('../utils/networkDetector.js');
+      const isOnline = await checkConnectivity();
+      if (!isOnline) {
+        return; // Skip silently if no internet connection
+      }
+    } catch (_) {}
+
     if (this.isPolling) {
-      console.log('Email polling already in progress, skipping...');
       return;
     }
 
     this.isPolling = true;
     try {
-      console.log('[Mail] Running background email poller sync...');
       await this.syncNewEmailsFromIMAP();
-    } catch (err) {
-      console.error('[Mail] Background email poller sync failed:', err);
+    } catch (err: any) {
+      if (err?.code !== 'ENOTFOUND' && err?.code !== 'ETIMEDOUT') {
+        console.error('[Mail] Background email poller sync failed:', err?.message || err);
+      }
     } finally {
       this.isPolling = false;
     }
@@ -1620,6 +1628,11 @@ export class EmailService {
             );
             console.log(`[MailArrival] WhatsApp alert enqueued for ${phone} (${refId})`);
             whatsappSentToOwner = true;
+            await db.run(
+              `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
+               VALUES (?, ?, ?, ?, 'sent', ?)`,
+              [isOrder ? 'distributor_invoice' : 'email_arrival', distName || 'Admin / Store Owner', phone, message, phoneRefId]
+            ).catch(() => { });
           } catch (wsErr: any) {
             console.error(`[MailArrival] Failed to enqueue WhatsApp mail alert to ${phone}:`, wsErr);
             await db.run(
@@ -3400,7 +3413,7 @@ export class EmailService {
             `SELECT e.* FROM emails e
              LEFT JOIN automation_notifications n 
                ON n.recipient_phone = ? 
-              AND n.status = 'sent'
+              AND n.status IN ('sent', 'sending', 'pending')
               AND (n.reference_id = 'email_uid_' || e.uid OR n.reference_id LIKE 'email_uid_' || e.uid || '%')
              WHERE n.id IS NULL
              ORDER BY e.uid DESC

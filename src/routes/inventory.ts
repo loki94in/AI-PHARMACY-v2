@@ -557,24 +557,17 @@ router.get('/catalog-search', async (req, res) => {
     }
 
     const prefixQ = `${q}%`;
-    const likeQ = `%${q}%`;
-    
-    // Pass 1: Prefix match on name & aliases (utilizes idx_medicines_name index range scan)
+    const rows: any[] = [];
+    const seenIds = new Set<number>();
+
+    // Pass 1: Direct Index Range Scan on medicines name (uses idx_medicines_name_nocase in <5ms)
     const prefixRows = await db.all(
       `SELECT id, name, item_code, manufacturer, strength, packaging, pack_unit, mrp, rate, cgst_per, sgst_per, hsn_code, generic_name
        FROM medicines
-       WHERE name LIKE ?
-       UNION ALL
-       SELECT m.id, m.name, m.item_code, m.manufacturer, m.strength, m.packaging, m.pack_unit, m.mrp, m.rate, m.cgst_per, m.sgst_per, m.hsn_code, m.generic_name
-       FROM medicine_aliases a
-       JOIN medicines m ON a.medicine_id = m.id
-       WHERE a.alias_name LIKE ?
+       WHERE name LIKE ? COLLATE NOCASE
        ORDER BY name ASC LIMIT 40`,
-      [prefixQ, prefixQ]
+      [prefixQ]
     );
-
-    const rows: any[] = [];
-    const seenIds = new Set<number>();
 
     for (const r of prefixRows) {
       if (!seenIds.has(r.id)) {
@@ -583,31 +576,59 @@ router.get('/catalog-search', async (req, res) => {
       }
     }
 
-    // Pass 2: Containment match on name & aliases — ONLY when the prefix pass
-    // came back sparse (<15). Common brand prefixes skip the %term% scan
-    // entirely, keeping the whole request inside the owner-approved 100-300 ms
-    // budget. (The former Pass 3 — %term% ORs over api_reference/item_code/
-    // manufacturer/generic_name — was REMOVED 2026-08: it full-scanned all 291k
-    // rows and took a measured ~2.7 s whenever the term had few name hits,
-    // blowing the dropdown budget with confusing noise results.)
-    if (rows.length < 15) {
-      const containmentRows = await db.all(
-        `SELECT id, name, item_code, manufacturer, strength, packaging, pack_unit, mrp, rate, cgst_per, sgst_per, hsn_code, generic_name
-         FROM medicines
-         WHERE name LIKE ?
-         UNION ALL
-         SELECT m.id, m.name, m.item_code, m.manufacturer, m.strength, m.packaging, m.pack_unit, m.mrp, m.rate, m.cgst_per, m.sgst_per, m.hsn_code, m.generic_name
+    // Pass 1b: Prefix match on aliases
+    if (rows.length < 30) {
+      const aliasRows = await db.all(
+        `SELECT m.id, m.name, m.item_code, m.manufacturer, m.strength, m.packaging, m.pack_unit, m.mrp, m.rate, m.cgst_per, m.sgst_per, m.hsn_code, m.generic_name
          FROM medicine_aliases a
          JOIN medicines m ON a.medicine_id = m.id
-         WHERE a.alias_name LIKE ?
-         ORDER BY name ASC LIMIT 50`,
-        [likeQ, likeQ]
-      );
-      for (const r of containmentRows) {
+         WHERE a.alias_name LIKE ? COLLATE NOCASE
+         ORDER BY m.name ASC LIMIT 20`,
+        [prefixQ]
+      ).catch(() => []);
+      for (const r of aliasRows) {
         if (!seenIds.has(r.id)) {
           seenIds.add(r.id);
           rows.push(r);
-          if (rows.length >= 50) break;
+        }
+      }
+    }
+
+    // Pass 2: Infix / Trigram search ONLY when Pass 1 returned 0 prefix hits
+    // (e.g. user typed middle keyword). Uses FTS5 trigram index for <10ms response.
+    if (rows.length === 0 && q.length >= 3) {
+      try {
+        const cleanToken = q.replace(/[^a-zA-Z0-9 ]/g, ' ').trim();
+        if (cleanToken.length >= 3) {
+          const ftsRows = await db.all(
+            `SELECT m.id, m.name, m.item_code, m.manufacturer, m.strength, m.packaging, m.pack_unit, m.mrp, m.rate, m.cgst_per, m.sgst_per, m.hsn_code, m.generic_name
+             FROM medicines_fts f
+             JOIN medicines m ON f.rowid = m.id
+             WHERE medicines_fts MATCH ?
+             LIMIT 30`,
+            [`"${cleanToken}"`]
+          );
+          for (const r of ftsRows) {
+            if (!seenIds.has(r.id)) {
+              seenIds.add(r.id);
+              rows.push(r);
+            }
+          }
+        }
+      } catch (_) {
+        // Fallback to indexed prefix or limited like if FTS5 is not ready
+        const fallbackRows = await db.all(
+          `SELECT id, name, item_code, manufacturer, strength, packaging, pack_unit, mrp, rate, cgst_per, sgst_per, hsn_code, generic_name
+           FROM medicines
+           WHERE name LIKE ?
+           ORDER BY name ASC LIMIT 30`,
+          [`%${q}%`]
+        ).catch(() => []);
+        for (const r of fallbackRows) {
+          if (!seenIds.has(r.id)) {
+            seenIds.add(r.id);
+            rows.push(r);
+          }
         }
       }
     }
@@ -615,6 +636,8 @@ router.get('/catalog-search', async (req, res) => {
     if (rows.length > 0) {
       const idsArr = Array.from(seenIds);
       const placeholders = idsArr.map(() => '?').join(',');
+
+      // 1. Live stock quantities
       const stockRows = await db.all(
         `SELECT medicine_id, COALESCE(SUM(quantity), 0) as stock_qty, COALESCE(SUM(loose_quantity), 0) as loose_qty
          FROM inventory_master
@@ -626,10 +649,33 @@ router.get('/catalog-search', async (req, res) => {
       for (const s of stockRows) {
         stockMap.set(s.medicine_id, { stock_qty: s.stock_qty, loose_qty: s.loose_qty });
       }
+
+      // 2. Pre-bundled purchase metrics (instant rate & distributor hydration)
+      const metricsRows = await db.all(
+        `SELECT medicine_id, last_purchase_ptr, last_distributor_id, last_distributor_name, last_purchase_date
+         FROM medicine_sales_metrics
+         WHERE medicine_id IN (${placeholders})`,
+        idsArr
+      ).catch(() => []);
+      const metricsMap = new Map<number, any>();
+      for (const m of metricsRows) {
+        metricsMap.set(m.medicine_id, m);
+      }
+
       for (const r of rows) {
         const s = stockMap.get(r.id);
         r.stock_qty = s ? s.stock_qty : 0;
         r.loose_qty = s ? s.loose_qty : 0;
+
+        const m = metricsMap.get(r.id);
+        if (m) {
+          if ((!r.rate || Number(r.rate) <= 0) && Number(m.last_purchase_ptr) > 0) {
+            r.rate = m.last_purchase_ptr;
+          }
+          r.pharmarack_distributor = m.last_distributor_name || r.pharmarack_distributor;
+          r.last_distributor_name = m.last_distributor_name;
+          r.last_purchase_date = m.last_purchase_date;
+        }
       }
 
       // Purchases-dropdown contract (owner request): ONE row per medicine NAME.

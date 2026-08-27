@@ -19,6 +19,37 @@ export async function analyzeMedicineImage(imageUri: string, base64?: string | n
   });
 }
 
+export async function scanPurchaseBillWithVision(imageUri: string, base64?: string | null): Promise<any> {
+  let imageB64 = base64 || null;
+  if (!imageB64) {
+    imageB64 = await FileSystem.readAsStringAsync(imageUri, { encoding: FileSystem.EncodingType.Base64 });
+  }
+  return request<any>('/purchases/scan-bill', {
+    method: 'POST',
+    body: JSON.stringify({ image: imageB64, mimeType: 'image/jpeg', fileName: `bill_${Date.now()}.jpg` }),
+  });
+}
+
+export async function uploadPrescriptionPhoto(imageUri: string, base64?: string | null, invoiceNo?: string): Promise<any> {
+  let imageB64 = base64 || null;
+  if (!imageB64) {
+    imageB64 = await FileSystem.readAsStringAsync(imageUri, { encoding: FileSystem.EncodingType.Base64 });
+  }
+  const uploadRes = await request<any>('/sales/prescription/upload', {
+    method: 'POST',
+    body: JSON.stringify({ image: imageB64, fileName: `Rx_${Date.now()}.jpg` }),
+  });
+  if (invoiceNo && uploadRes?.image_path) {
+    try {
+      await request<any>(`/sales/${invoiceNo}/prescription`, {
+        method: 'POST',
+        body: JSON.stringify({ prescription_image: uploadRes.image_path }),
+      });
+    } catch (_) {}
+  }
+  return uploadRes;
+}
+
 // ─── Scan Purchase Bill (photo → OCR → review) ─────────────────────────────
 
 /**

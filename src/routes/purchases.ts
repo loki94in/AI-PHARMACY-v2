@@ -3767,6 +3767,36 @@ router.post('/staged/:id/reject', async (req, res) => {
   }
 });
 
+// Scan & extract purchase bill from image / base64 / PDF
+router.post('/scan-bill', upload.single('file'), async (req, res) => {
+  try {
+    const { invoiceVisionService } = await import('../services/invoiceVisionService.js');
+    let buffer: Buffer | null = null;
+    let mimeType = 'image/jpeg';
+    let originalName = 'purchase_bill.jpg';
 
+    if (req.file) {
+      buffer = req.file.buffer;
+      mimeType = req.file.mimetype || 'image/jpeg';
+      originalName = req.file.originalname || 'purchase_bill.jpg';
+    } else if (req.body.image) {
+      // Base64 string from mobile app or web camera
+      const base64Str = req.body.image.replace(/^data:image\/\w+;base64,/, '');
+      buffer = Buffer.from(base64Str, 'base64');
+      mimeType = req.body.mimeType || 'image/jpeg';
+      originalName = req.body.fileName || 'camera_bill.jpg';
+    }
+
+    if (!buffer || buffer.length === 0) {
+      return res.status(400).json({ error: 'No image or file provided for scan' });
+    }
+
+    const parsed = await invoiceVisionService.parseInvoiceImage(buffer, mimeType, originalName);
+    res.json(parsed);
+  } catch (error: any) {
+    console.error('[Purchases] scan-bill error:', error);
+    res.status(500).json({ error: error.message || 'Failed to process purchase bill image' });
+  }
+});
 
 export default router;

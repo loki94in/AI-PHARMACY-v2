@@ -19,6 +19,13 @@ export async function ensureMedicineSalesMetricsSchema(db: any): Promise<void> {
       FOREIGN KEY (medicine_id) REFERENCES medicines(id)
     )
   `);
+  try {
+    const cols = await db.all('PRAGMA table_info(medicine_sales_metrics)');
+    const colNames = new Set(cols.map((c: any) => c.name));
+    if (cols.length > 0 && !colNames.has('last_purchase_date')) {
+      await db.run('ALTER TABLE medicine_sales_metrics ADD COLUMN last_purchase_date TEXT');
+    }
+  } catch (_) {}
   await db.run(`
     CREATE INDEX IF NOT EXISTS idx_msm_activity
     ON medicine_sales_metrics(sales_window_qty, purchases_window_qty, sales_2d_qty)

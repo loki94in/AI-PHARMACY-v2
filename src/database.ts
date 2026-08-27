@@ -2,7 +2,7 @@ import { dbManager } from './database/connection.js';
 
 // Bump this number whenever you add new CREATE TABLE, ALTER TABLE, or INSERT OR IGNORE statements below.
 // On normal boots where this version matches the stored version, all DDL is skipped entirely (~3-5s saved).
-const CURRENT_SCHEMA_VERSION = 45;
+const CURRENT_SCHEMA_VERSION = 46;
 
 // FTS5 creates exactly these four shadow tables for an external-content index.
 // While the `medicines_fts` declaration exists in sqlite_master these names are
@@ -215,6 +215,11 @@ export async function ensureSchema(dbPath: string) {
       await db.run('CREATE INDEX IF NOT EXISTS idx_return_items_return_id ON return_items(return_id)');
       await db.run('CREATE INDEX IF NOT EXISTS idx_return_items_medicine_id ON return_items(medicine_id)');
       await db.run('CREATE INDEX IF NOT EXISTS idx_purchase_items_med_batch ON purchase_items(medicine_id, batch_no)');
+      await db.run('CREATE INDEX IF NOT EXISTS idx_purchase_items_history_lookup ON purchase_items(medicine_id, purchase_id, cost_price, mrp, batch_no)');
+      await db.run('CREATE INDEX IF NOT EXISTS idx_purchases_id_date_dist ON purchases(id, distributor_id, date DESC)');
+      await db.run('CREATE INDEX IF NOT EXISTS idx_medicine_aliases_lookup ON medicine_aliases(alias_name, medicine_id)');
+      await db.run('CREATE INDEX IF NOT EXISTS idx_medicines_name_nocase ON medicines(name COLLATE NOCASE)');
+      await db.run('CREATE INDEX IF NOT EXISTS idx_medicine_aliases_nocase ON medicine_aliases(alias_name COLLATE NOCASE)');
       // Reports route date predicates wrap columns in COALESCE(date(...)) which
       // defeats plain date indexes; these EXPRESSION indexes match that exact
       // expression so SQLite can range-scan instead of full-scanning per request.
@@ -254,13 +259,20 @@ export async function ensureSchema(dbPath: string) {
           sales_window_qty REAL DEFAULT 0,
           purchases_window_qty REAL DEFAULT 0,
           last_sold_date TEXT,
-          last_purchased_date TEXT,
+          last_purchase_date TEXT,
           last_purchase_ptr REAL DEFAULT 0,
           last_distributor_id INTEGER,
           last_distributor_name TEXT,
           updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
       `);
+      try {
+        const msmCols = await db.all('PRAGMA table_info(medicine_sales_metrics)');
+        const msmNames = new Set(msmCols.map((c: any) => c.name));
+        if (msmCols.length > 0 && !msmNames.has('last_purchase_date')) {
+          await db.run('ALTER TABLE medicine_sales_metrics ADD COLUMN last_purchase_date TEXT');
+        }
+      } catch (_) {}
       await db.run('CREATE INDEX IF NOT EXISTS idx_msm_velocity ON medicine_sales_metrics(sales_window_qty, purchases_window_qty, sales_2d_qty)');
 
       await ensureMedicinesFts(db);
@@ -428,6 +440,8 @@ export async function ensureSchema(dbPath: string) {
       PRIMARY KEY (locale, key)
     );
     CREATE INDEX IF NOT EXISTS idx_medicines_name ON medicines (name);
+    CREATE INDEX IF NOT EXISTS idx_medicines_name_nocase ON medicines (name COLLATE NOCASE);
+    CREATE INDEX IF NOT EXISTS idx_medicine_aliases_nocase ON medicine_aliases (alias_name COLLATE NOCASE);
     CREATE INDEX IF NOT EXISTS idx_medicines_api_ref ON medicines (api_reference);
     CREATE INDEX IF NOT EXISTS idx_medicines_therapeutic ON medicines (therapeutic);
     CREATE INDEX IF NOT EXISTS idx_catalog_jobs_status ON catalog_jobs (status);
@@ -719,6 +733,9 @@ export async function ensureSchema(dbPath: string) {
     CREATE INDEX IF NOT EXISTS idx_purchase_items_medicine_id ON purchase_items (medicine_id);
     CREATE INDEX IF NOT EXISTS idx_purchase_items_purchase_id ON purchase_items (purchase_id);
     CREATE INDEX IF NOT EXISTS idx_purchase_items_med_batch ON purchase_items (medicine_id, batch_no);
+    CREATE INDEX IF NOT EXISTS idx_purchase_items_history_lookup ON purchase_items (medicine_id, purchase_id, cost_price, mrp, batch_no);
+    CREATE INDEX IF NOT EXISTS idx_purchases_id_date_dist ON purchases (id, distributor_id, date DESC);
+    CREATE INDEX IF NOT EXISTS idx_medicine_aliases_lookup ON medicine_aliases (alias_name, medicine_id);
 
     CREATE TABLE IF NOT EXISTS return_items (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1418,7 +1435,7 @@ export async function ensureSchema(dbPath: string) {
       sales_window_qty REAL DEFAULT 0,
       purchases_window_qty REAL DEFAULT 0,
       last_sold_date TEXT,
-      last_purchased_date TEXT,
+      last_purchase_date TEXT,
       last_purchase_ptr REAL DEFAULT 0,
       last_distributor_id INTEGER,
       last_distributor_name TEXT,

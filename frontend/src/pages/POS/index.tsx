@@ -1303,7 +1303,7 @@ const POS = () => {
   );
 
   const [rowBatchesList, setRowBatchesList] = useState<PosBatchItem[]>([]);
-  const [activeBatchRowId, setActiveBatchRowId] = useState<number | null>(null);
+  const [activeBatchRowId, setActiveBatchRowId] = useState<string | number | null>(null);
 
   // Multi-cart tab states
   const [tabs, setTabs] = useState<POSTab[]>(initialTabs);
@@ -4389,30 +4389,47 @@ const POS = () => {
 
                         {/* Batch Selection */}
                         <td className="py-1 px-2.5 relative">
-                          <div className="relative">
-                            <input
+                          <div className="relative inline-block">
+                            <button
                               id={`row-batch-input-${cart.indexOf(item)}`}
-                              name={`row_batch_${cart.indexOf(item)}`}
-                              type="text"
-                              autoComplete="off"
-                              className={`w-24 text-center bg-bg/40 border border-border/40 hover:border-border/80 focus:border-primary/50 focus:ring-1 focus:ring-primary/20 text-xs font-mono font-semibold py-0.5 px-1.5 h-7 rounded-lg ${item.isEmptyRow ? 'cursor-not-allowed opacity-40' : 'cursor-pointer'}`}
-                              value={item.batch || ''}
-                              placeholder="Batch"
-                              readOnly
+                              type="button"
                               disabled={item.isEmptyRow}
-                              onKeyDown={e => {
-                                const allowedKeys = ['Tab', 'Enter', 'Escape', 'ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Backspace', 'Delete'];
-                                if (!allowedKeys.includes(e.key)) {
-                                  e.preventDefault();
-                                }
-                              }}
-                              onPaste={e => e.preventDefault()}
-                              onFocus={() => {
+                              className={`w-28 text-center flex items-center justify-between gap-1 bg-bg/60 border border-border/60 hover:border-primary/50 focus:border-primary/80 focus:ring-1 focus:ring-primary/20 text-xs font-mono font-semibold py-1 px-2 h-7 rounded-lg transition-all ${item.isEmptyRow ? 'cursor-not-allowed opacity-40' : 'cursor-pointer hover:bg-bg3/50'}`}
+                              onClick={() => {
                                 if (item.isEmptyRow) return;
-                                setActiveBatchRowId(Number(item.id));
+                                const rowKey = String(item.id);
+                                if (activeBatchRowId === rowKey) {
+                                  setActiveBatchRowId(null);
+                                  return;
+                                }
+                                setActiveBatchRowId(rowKey);
+                                
+                                // First check compact cache for instant population
+                                const compact = getCompactInventoryCache();
+                                if (compact && compact.length > 0) {
+                                  const localMatches = compact.filter(med => 
+                                    (item.medicine_id && med.medicine_id === item.medicine_id) ||
+                                    (med.name || '').toLowerCase().trim() === (item.name || '').toLowerCase().trim()
+                                  );
+                                  if (localMatches.length > 0) {
+                                    setRowBatchesList(localMatches.map(m => ({
+                                      inventory_id: m.inventory_id,
+                                      medicine_id: m.medicine_id,
+                                      medicine_name: m.name,
+                                      batch_no: m.batch_no,
+                                      expiry_date: m.expiry_date,
+                                      mrp: m.mrp,
+                                      cost_price: m.cost_price,
+                                      quantity: m.quantity,
+                                      loose_quantity: m.loose_quantity,
+                                      pack_size: m.pack_size
+                                    })));
+                                  }
+                                }
+                                
                                 api.searchMedicine(item.name || '')
                                   .then(data => {
-                                    if (Array.isArray(data)) {
+                                    if (Array.isArray(data) && data.length > 0) {
                                       const matches = data.filter(med => (med.medicine_name || '').toLowerCase().trim() === (item.name || '').toLowerCase().trim());
                                       setRowBatchesList(matches.length > 0 ? matches : data);
                                     }
@@ -4421,17 +4438,27 @@ const POS = () => {
                               }}
                               onBlur={() => {
                                 setTimeout(() => {
-                                  if (activeBatchRowId === item.id) {
+                                  if (activeBatchRowId === String(item.id)) {
                                     setActiveBatchRowId(null);
                                   }
                                 }, 250);
                               }}
-                            />
+                            >
+                              <span className="truncate flex-1 text-center font-bold text-text">
+                                {item.batch || (item.isEmptyRow ? '—' : 'Select')}
+                              </span>
+                              {!item.isEmptyRow && (
+                                <svg className="w-3 h-3 text-muted shrink-0 opacity-60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+                                </svg>
+                              )}
+                            </button>
                             
-                            {activeBatchRowId === item.id && rowBatchesList.length > 1 && (
-                              <div className="absolute left-1 z-[100] mt-1 bg-bg2 border border-border rounded-xl overflow-hidden max-h-48 overflow-y-auto w-64 text-left shadow-2xl">
-                                <div className="p-2 border-b border-border/30 bg-bg3/60 text-[11px] font-bold text-muted uppercase tracking-wider">
-                                  Switch Batch:
+                            {activeBatchRowId === String(item.id) && rowBatchesList.length > 0 && (
+                              <div className="absolute left-0 z-[100] mt-1 bg-bg2 border border-border rounded-xl overflow-hidden max-h-48 overflow-y-auto w-64 text-left shadow-2xl animate-in fade-in zoom-in-95 duration-100">
+                                <div className="p-2 border-b border-border/30 bg-bg3/60 text-[11px] font-bold text-muted uppercase tracking-wider flex items-center justify-between">
+                                  <span>Switch Batch</span>
+                                  <span className="text-[10px] font-normal text-muted/70">{rowBatchesList.length} available</span>
                                 </div>
                                 {rowBatchesList.map(b => {
                                   const otherCartQty = cart.reduce((sum, c) => {
@@ -4442,9 +4469,10 @@ const POS = () => {
                                     return sum;
                                   }, 0);
                                   const liveStock = Math.max(0, (b.quantity !== undefined ? b.quantity : 0) - otherCartQty);
+                                  const isCurrent = b.batch_no === item.batch;
                                   return (
                                     <button
-                                      key={b.inventory_id}
+                                      key={b.inventory_id || `${b.batch_no}-${b.expiry_date}`}
                                       type="button"
                                       onMouseDown={() => {
                                         updateCart(prev => prev.map((cItem): CartRow => {
@@ -4457,7 +4485,7 @@ const POS = () => {
                                             : cItem.discount;
                                           return {
                                             ...cItem,
-                                            id: b.inventory_id!,
+                                            id: b.inventory_id ? String(b.inventory_id) : cItem.id,
                                             batch: b.batch_no,
                                             expiry: b.expiry_date,
                                             mrp: b.mrp,
@@ -4471,10 +4499,13 @@ const POS = () => {
                                         }));
                                         setActiveBatchRowId(null);
                                       }}
-                                      className={`w-full text-left px-2.5 py-1.5 hover:bg-sky/15 border-b border-border/10 text-xs font-mono transition-all block ${b.batch_no === item.batch ? 'bg-sky/10 text-sky' : 'text-text'}`}
+                                      className={`w-full text-left px-2.5 py-1.5 hover:bg-sky/15 border-b border-border/10 text-xs font-mono transition-all block ${isCurrent ? 'bg-sky/10 text-sky font-semibold' : 'text-text'}`}
                                     >
-                                      <span className="font-bold block">{b.batch_no}</span>
-                                      <span className="text-muted block text-[11px]">Exp: {b.expiry_date} | Stock: {liveStock} Str {b.loose_quantity !== undefined && b.loose_quantity > 0 && `/ ${b.loose_quantity} Tab`} | MRP: ₹{b.mrp}</span>
+                                      <div className="flex items-center justify-between">
+                                        <span className="font-bold">{b.batch_no}</span>
+                                        {isCurrent && <span className="text-[10px] text-sky font-sans">Active</span>}
+                                      </div>
+                                      <span className="text-muted block text-[11px] mt-0.5">Exp: {b.expiry_date || 'N/A'} | Stock: {liveStock} Str {b.loose_quantity !== undefined && b.loose_quantity > 0 ? `/ ${b.loose_quantity} Tab` : ''} | MRP: ₹{b.mrp}</span>
                                     </button>
                                   );
                                 })}

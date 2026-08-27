@@ -216,7 +216,7 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: verification.message, layer: verification.layer });
     }
 
-    const { items = [], patient_id, doctor_id, doctor_name, discount = 0, patient_name, patient_phone, patient_address, paymentMedium = 'CASH', paymentStatus = 'PAID', sendWhatsApp = false, sale_date, refillEnabled = false, refillDays = 30, refillId } = req.body;
+    const { items = [], patient_id, doctor_id, doctor_name, discount = 0, patient_name, patient_phone, patient_address, paymentMedium = 'CASH', paymentStatus = 'PAID', sendWhatsApp = false, sale_date, refillEnabled = false, refillDays = 30, refillId, prescription_image } = req.body;
 
     // Strict validation: check items parameters to prevent null values
     if (!Array.isArray(items) || items.length === 0) {
@@ -323,6 +323,17 @@ router.post('/', async (req, res) => {
     const invoiceId = result.lastID;
     if (!invoiceId) {
       throw new Error('Failed to retrieve inserted invoice ID.');
+    }
+
+    if (prescription_image && typeof prescription_image === 'string') {
+      try {
+        await db.run('ALTER TABLE sales_invoices ADD COLUMN prescription_image TEXT');
+      } catch (_) {}
+      try {
+        await db.run('UPDATE sales_invoices SET prescription_image = ? WHERE id = ?', [prescription_image, invoiceId]);
+      } catch (pErr) {
+        console.warn('Failed to attach prescription_image to invoice:', pErr);
+      }
     }
 
     // Update customer credit balance automatically if payment medium is CREDIT or status is PENDING/UNPAID
@@ -3194,6 +3205,74 @@ router.get('/patient-refill-medicines', async (req, res) => {
   } catch (err: any) {
     console.error('Failed to get patient refill medicines:', err);
     res.status(500).json({ error: err.message || 'Failed to get patient refill medicines' });
+  }
+});
+
+// Upload Prescription Image (from mobile Wi-Fi capture or web)
+router.post('/prescription/upload', async (req, res) => {
+  try {
+    const { image, fileName } = req.body;
+    if (!image) {
+      return res.status(400).json({ error: 'Image data (base64) is required' });
+    }
+    const uploadsDir = path.resolve(getAppDataDir(), 'uploads', 'prescriptions');
+    if (!fs.existsSync(uploadsDir)) {
+      fs.mkdirSync(uploadsDir, { recursive: true });
+    }
+    const base64Str = image.replace(/^data:image\/\w+;base64,/, '');
+    const buffer = Buffer.from(base64Str, 'base64');
+    const safeName = `Rx_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.jpg`;
+    const fullPath = path.join(uploadsDir, safeName);
+    fs.writeFileSync(fullPath, buffer);
+
+    const relativeUrl = `/uploads/prescriptions/${safeName}`;
+    res.json({ success: true, image_path: relativeUrl });
+  } catch (err: any) {
+    console.error('Prescription upload error:', err);
+    res.status(500).json({ error: err.message || 'Failed to upload prescription' });
+  }
+});
+
+// Attach prescription to an existing sales invoice
+router.post('/:id/prescription', async (req, res) => {
+  const { id } = req.params;
+  const { prescription_image } = req.body;
+  if (!prescription_image) {
+    return res.status(400).json({ error: 'prescription_image is required' });
+  }
+  try {
+    const db = await dbManager.getConnection();
+    try {
+      await db.run('ALTER TABLE sales_invoices ADD COLUMN prescription_image TEXT');
+    } catch (_) {}
+    await db.run('UPDATE sales_invoices SET prescription_image = ? WHERE id = ? OR invoice_no = ?', [prescription_image, id, id]);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to attach prescription' });
+  }
+});
+
+// Get attached prescription for invoice
+router.get('/:id/prescription', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const db = await dbManager.getConnection();
+    try {
+      await db.run('ALTER TABLE sales_invoices ADD COLUMN prescription_image TEXT');
+    } catch (_) {}
+    const row = await db.get('SELECT id, invoice_no, prescription_image, date FROM sales_invoices WHERE id = ? OR invoice_no = ?', [id, id]);
+    if (!row) {
+      return res.status(404).json({ error: 'Invoice not found' });
+    }
+    res.json({
+      success: true,
+      invoice_id: row.id,
+      invoice_no: row.invoice_no,
+      prescription_image: row.prescription_image || null,
+      date: row.date
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to fetch prescription' });
   }
 });
 

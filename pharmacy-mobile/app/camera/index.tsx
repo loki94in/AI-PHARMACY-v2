@@ -1,18 +1,22 @@
 import React, { useState, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, ScrollView, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Image, ScrollView, Alert, ActivityIndicator, TextInput } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { colors, spacing, typography, radius, shadows } from '../../lib/theme';
-import { analyzeMedicineImage } from '../../lib/api';
+import { analyzeMedicineImage, scanPurchaseBillWithVision, uploadPrescriptionPhoto } from '../../lib/api';
+
+type ScanMode = 'medicine' | 'purchase_bill' | 'prescription';
 
 export default function CameraScreen() {
   const [permission, requestPermission] = useCameraPermissions();
+  const [scanMode, setScanMode] = useState<ScanMode>('purchase_bill');
   const [photo, setPhoto] = useState<string | null>(null);
   const [photoBase64, setPhotoBase64] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
   const [result, setResult] = useState<any>(null);
+  const [invoiceNoInput, setInvoiceNoInput] = useState('');
   const cameraRef = useRef<CameraView>(null);
 
   const handleCapture = async () => {
@@ -45,11 +49,20 @@ export default function CameraScreen() {
     setProcessing(true);
     setResult(null);
     try {
-      // Real server-side OCR via POST /api/aicamera/analyze
-      const analysis = await analyzeMedicineImage(photo, photoBase64);
-      setResult(analysis);
+      if (scanMode === 'purchase_bill') {
+        const res = await scanPurchaseBillWithVision(photo, photoBase64);
+        setResult(res);
+        Alert.alert('Bill Processed!', `Extracted ${(res?.items || []).length} items. Check Desktop Purchases page.`);
+      } else if (scanMode === 'prescription') {
+        const res = await uploadPrescriptionPhoto(photo, photoBase64, invoiceNoInput.trim() || undefined);
+        setResult(res);
+        Alert.alert('Prescription Attached!', `Rx photo saved to ${res?.image_path || 'server archive'}`);
+      } else {
+        const analysis = await analyzeMedicineImage(photo, photoBase64);
+        setResult(analysis);
+      }
     } catch (err: any) {
-      Alert.alert('OCR Failed', err.message || 'Could not reach the PC scanner. Connect to the pharmacy WiFi and retry.');
+      Alert.alert('Scan Failed', err.message || 'Could not reach the PC server. Connect to the pharmacy WiFi and retry.');
     } finally {
       setProcessing(false);
     }
@@ -153,12 +166,54 @@ export default function CameraScreen() {
   // Camera view
   return (
     <View style={styles.container}>
+      {/* Top Mode Switcher */}
+      <View style={styles.modeBar}>
+        <TouchableOpacity
+          style={[styles.modeTab, scanMode === 'purchase_bill' && styles.modeTabActive]}
+          onPress={() => setScanMode('purchase_bill')}
+        >
+          <Text style={[styles.modeText, scanMode === 'purchase_bill' && styles.modeTextActive]}>📦 Purchase Bill</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.modeTab, scanMode === 'prescription' && styles.modeTabActive]}
+          onPress={() => setScanMode('prescription')}
+        >
+          <Text style={[styles.modeText, scanMode === 'prescription' && styles.modeTextActive]}>📋 Rx Prescription</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.modeTab, scanMode === 'medicine' && styles.modeTabActive]}
+          onPress={() => setScanMode('medicine')}
+        >
+          <Text style={[styles.modeText, scanMode === 'medicine' && styles.modeTextActive]}>💊 Pack OCR</Text>
+        </TouchableOpacity>
+      </View>
+
       <CameraView ref={cameraRef} style={styles.camera} facing="back">
         <View style={styles.cameraOverlay}>
-          <View style={styles.scanFrame} />
-          <Text style={styles.scanHint}>Point camera at medicine label</Text>
+          <View style={[styles.scanFrame, scanMode === 'purchase_bill' && { height: 280, width: 300 }]} />
+          <Text style={styles.scanHint}>
+            {scanMode === 'purchase_bill'
+              ? 'Fit distributor bill / invoice inside frame'
+              : scanMode === 'prescription'
+              ? 'Fit doctor prescription inside frame'
+              : 'Point camera at medicine label'}
+          </Text>
         </View>
       </CameraView>
+
+      {scanMode === 'prescription' && (
+        <View style={styles.invoiceInputContainer}>
+          <Text style={styles.invoiceInputLabel}>Attach to Invoice # (Optional):</Text>
+          <TextInput
+            style={styles.invoiceInput}
+            placeholder="e.g. S-2026-0001 or leave empty for active bill"
+            placeholderTextColor="#888"
+            value={invoiceNoInput}
+            onChangeText={setInvoiceNoInput}
+          />
+        </View>
+      )}
+
       <View style={styles.cameraControls}>
         <TouchableOpacity style={styles.controlBtn} onPress={handlePick}>
           <Ionicons name="images-outline" size={28} color={colors.textPrimary} />
@@ -227,4 +282,53 @@ const styles = StyleSheet.create({
   processBtnText: { fontSize: 15, fontWeight: '700', color: '#fff' },
   permBtn: { paddingVertical: 12, paddingHorizontal: spacing.xl, borderRadius: radius.md },
   permBtnText: { fontSize: 15, fontWeight: '700', color: '#fff' },
+  modeBar: {
+    flexDirection: 'row',
+    backgroundColor: colors.surface,
+    padding: spacing.xs,
+    gap: spacing.xs,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.cardBorder,
+  },
+  modeTab: {
+    flex: 1,
+    paddingVertical: 8,
+    alignItems: 'center',
+    borderRadius: radius.sm,
+    backgroundColor: 'transparent',
+  },
+  modeTabActive: {
+    backgroundColor: colors.primary,
+  },
+  modeText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: colors.textMuted,
+  },
+  modeTextActive: {
+    color: '#fff',
+    fontWeight: '700',
+  },
+  invoiceInputContainer: {
+    backgroundColor: colors.surface,
+    padding: spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: colors.cardBorder,
+  },
+  invoiceInputLabel: {
+    fontSize: 11,
+    color: colors.textMuted,
+    marginBottom: 4,
+    fontWeight: '600',
+  },
+  invoiceInput: {
+    backgroundColor: colors.bg,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+    borderRadius: radius.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 6,
+    color: colors.textPrimary,
+    fontSize: 13,
+  },
 });

@@ -587,22 +587,24 @@ class TelegramBotService {
 
   // Method to send notification to default chat (if configured)
   public async sendDefaultNotification(message: string): Promise<boolean> {
+    if (!this.enabled || !this.bot) return false;
     const defaultChatId = this.chatId || process.env.TELEGRAM_CHAT_ID;
     if (defaultChatId) {
       return this.sendNotification(defaultChatId, message);
     }
-    console.warn('Telegram Chat ID not configured for default notifications');
     return false;
   }
 
   // Email Notification Bridge
   public async sendEmailAlertToTelegram(emailSubject: string, emailSender: string, emailPreview: string): Promise<boolean> {
+    if (!this.enabled || !this.bot) return false;
     const message = `📧 *New Important Email*\n\n*From:* ${emailSender}\n*Subject:* ${emailSubject}\n\n*Preview:* ${emailPreview}\n\nPlease check your email dashboard for details.`;
     return this.sendDefaultNotification(message);
   }
 
   // Method to send a photo to the default chat
   public async sendPhotoToDefaultChat(photoBuffer: Buffer, caption: string): Promise<boolean> {
+    if (!this.enabled || !this.bot) return false;
     const defaultChatId = this.chatId || process.env.TELEGRAM_CHAT_ID;
     if (defaultChatId && this.bot) {
       try {
@@ -611,8 +613,6 @@ class TelegramBotService {
       } catch (error) {
         console.error('Failed to send Telegram photo:', error);
       }
-    } else {
-      console.warn('Telegram Chat ID not configured or bot not initialized for photo notifications');
     }
     return false;
   }

@@ -156,21 +156,6 @@ export type {
   AutomationHubSummary
 };
 
-export interface AutomationHubActivityItem {
-  automationType: string;
-  targetName: string | null;
-  status: string;
-  errorMessage: string | null;
-  sentAt: number | null;
-  createdAt: string;
-}
-
-export interface AutomationHubSummary {
-  headline: 'sending' | 'failed' | 'idle';
-  activity: AutomationHubActivityItem[];
-}
-
-
 const COMPACT_INVENTORY_SESSION_KEY = 'pharmacy_compact_inventory_v1';
 
 let compactInventoryCache: CompactInventoryItem[] | null = null;
@@ -927,9 +912,22 @@ export const api = {
   getLearnedMapping: (name: string) => apiClient.get('/learning/mapping', { params: { name } }).then(res => res.data),
   getManufacturers: (q: string) => apiClient.get('/manufacturers', { params: { q } }).then(res => res.data),
   getMarketedBy: (q: string) => apiClient.get('/marketed-by', { params: { q } }).then(res => res.data),
+  scanPurchaseBill: (formDataOrPayload: FormData | { image: string; mimeType?: string; fileName?: string }) => {
+    if (formDataOrPayload instanceof FormData) {
+      return apiClient.post('/purchases/scan-bill', formDataOrPayload, {
+        headers: { 'Content-Type': undefined },
+        timeout: 60000
+      }).then(res => res.data);
+    }
+    return apiClient.post('/purchases/scan-bill', formDataOrPayload, { timeout: 60000 }).then(res => res.data);
+  },
+  uploadPrescription: (payload: { image: string; fileName?: string }) =>
+    apiClient.post('/sales/prescription/upload', payload, { timeout: 30000 }).then(res => res.data),
+  attachPrescription: (saleId: number | string, prescription_image: string) =>
+    apiClient.post(`/sales/${saleId}/prescription`, { prescription_image }).then(res => res.data),
+  getPrescription: (saleId: number | string) =>
+    apiClient.get(`/sales/${saleId}/prescription`).then(res => res.data),
 
-
-  
   getPatients: (params?: { q?: string; limit?: number }) => apiClient.get('/crm/patients', { params }).then(r => r.data),
   
   // Migration Endpoints
