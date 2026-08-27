@@ -449,6 +449,7 @@ export interface DistributorDispatchReminder {
   order_source?: string;
   has_pharmarack_order_today?: number;
   has_order_today?: number;
+  scheduled_send_time?: string | null;
   created_at?: string;
 }
 

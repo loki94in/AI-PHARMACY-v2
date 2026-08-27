@@ -1247,6 +1247,13 @@ const Dispatch = () => {
                                 <span className="px-2 py-0.5 rounded-full text-[9px] font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 flex items-center gap-1 shrink-0">
                                   <CheckCircle size={10} /> Message Sent
                                 </span>
+                              ) : item.scheduled_send_time && item.has_order_today === 1 && item.status !== 'Dispatched' && item.status !== 'Collected' ? (
+                                <span
+                                  className="px-2 py-0.5 rounded-full text-[9px] font-semibold bg-sky/15 text-sky border border-sky/30 flex items-center gap-1 shrink-0"
+                                  title={`Dynamic reminder scheduled for ${item.scheduled_send_time} (30-day anti-pattern staggered)`}
+                                >
+                                  <Clock size={10} /> Auto-Send: {item.scheduled_send_time}
+                                </span>
                               ) : null}
                             </div>
                           </td>

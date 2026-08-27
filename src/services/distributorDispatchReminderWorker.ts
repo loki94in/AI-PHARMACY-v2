@@ -4,6 +4,19 @@ import { resolveDistributorContact } from '../utils/distributorSyncHelper.js';
 
 let isWorkerRunning = false;
 let checkIntervalTimer: NodeJS.Timeout | null = null;
+let reminderSchemaEnsured = false;
+
+async function ensureReminderSchema(db: any): Promise<void> {
+  if (reminderSchemaEnsured) return;
+  try {
+    const cols = await db.all("PRAGMA table_info(distributor_dispatch_reminders)");
+    const colNames = new Set(cols.map((c: any) => c.name.toLowerCase()));
+    if (!colNames.has('scheduled_send_time')) {
+      await db.run("ALTER TABLE distributor_dispatch_reminders ADD COLUMN scheduled_send_time TEXT DEFAULT NULL");
+    }
+    reminderSchemaEnsured = true;
+  } catch (_e) {}
+}
 
 /**
  * Get current date string YYYY-MM-DD in local time
@@ -25,6 +38,7 @@ export async function syncTodayActiveDistributors(): Promise<any[]> {
   const todayStr = getTodayDateString();
 
   try {
+    await ensureReminderSchema(db);
     // 0. Auto-deduplicate distributor_dispatch_reminders for today to keep single canonical row per distributor
     await db.run(
       `DELETE FROM distributor_dispatch_reminders 
@@ -245,12 +259,15 @@ export async function syncTodayActiveDistributors(): Promise<any[]> {
       }
     }
 
+    // Dynamically allocate staggered reminder times avoiding 30-day past slots
+    await allocateDynamicReminderTimes(db, todayStr);
+
     // Fetch and return full list of today's reminders with delivery boy name joined.
     const todayReminders = await db.all(
       `SELECT r.id, r.distributor_id,
               COALESCE(NULLIF(d.name, ''), r.distributor_name) as distributor_name,
               COALESCE(NULLIF(d.phone, ''), r.distributor_phone) as distributor_phone,
-              r.date, r.status, r.auto_remind, r.delivery_boy_id, r.last_reminded_at, r.created_at,
+              r.date, r.status, r.auto_remind, r.delivery_boy_id, r.last_reminded_at, r.scheduled_send_time, r.created_at,
               db.name as delivery_boy_name, db.whatsapp_number as delivery_boy_phone,
               1 as has_pharmarack_order_today,
               1 as has_order_today,
@@ -322,6 +339,7 @@ export async function syncTodayActiveDistributors(): Promise<any[]> {
             auto_remind: 0,
             delivery_boy_id: null,
             last_reminded_at: null,
+            scheduled_send_time: null,
             created_at: new Date().toISOString(),
             delivery_boy_name: null,
             delivery_boy_phone: null,
@@ -352,6 +370,7 @@ export async function syncTodayActiveDistributors(): Promise<any[]> {
             auto_remind: 0,
             delivery_boy_id: null,
             last_reminded_at: null,
+            scheduled_send_time: null,
             created_at: new Date().toISOString(),
             delivery_boy_name: null,
             delivery_boy_phone: null,
@@ -456,7 +475,153 @@ export async function syncTodayActiveDistributors(): Promise<any[]> {
 }
 
 /**
- * Check and run auto-sending during the 12:30 PM - 1:00 PM time window
+ * Allocate dynamic, non-uniform reminder dispatch times across the configured window
+ * avoiding time slots used by the same distributor over the past 30 days.
+ */
+export async function allocateDynamicReminderTimes(db: any, todayStr: string): Promise<void> {
+  try {
+    await ensureReminderSchema(db);
+    // 1. Fetch configured window start & end times
+    const [startSetting, endSetting] = await Promise.all([
+      db.get("SELECT value FROM app_settings WHERE key = 'trigger_dispatch_reminder_time_start'"),
+      db.get("SELECT value FROM app_settings WHERE key = 'trigger_dispatch_reminder_time_end'")
+    ]);
+
+    const startTimeStr = startSetting?.value || '12:30';
+    const endTimeStr = endSetting?.value || '13:00';
+
+    const [startH, startM] = startTimeStr.split(':').map(Number);
+    const [endH, endM] = endTimeStr.split(':').map(Number);
+
+    const startMinutesTotal = (isNaN(startH) ? 12 : startH) * 60 + (isNaN(startM) ? 30 : startM);
+    const endMinutesTotal = (isNaN(endH) ? 13 : endH) * 60 + (isNaN(endM) ? 0 : endM);
+
+    const windowDuration = Math.max(10, endMinutesTotal - startMinutesTotal);
+
+    // 2. Fetch today's active reminders that need scheduling
+    const reminders = await db.all(
+      `SELECT id, distributor_name, scheduled_send_time, last_reminded_at, status
+       FROM distributor_dispatch_reminders
+       WHERE date = ? AND status != 'No Order Today'
+       ORDER BY id ASC`,
+      [todayStr]
+    );
+
+    if (reminders.length === 0) return;
+
+    // 3. For each distributor, fetch past 30-day reminder timestamps
+    const pastThirtyDaysDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+    const pastReminders = await db.all(
+      `SELECT LOWER(TRIM(distributor_name)) as dist_name, last_reminded_at, scheduled_send_time, date
+       FROM distributor_dispatch_reminders
+       WHERE date >= ? AND date < ? AND (last_reminded_at IS NOT NULL OR scheduled_send_time IS NOT NULL)`,
+      [pastThirtyDaysDate, todayStr]
+    );
+
+    // Build map of past send minutes (minute of day) per distributor
+    const pastMinutesMap = new Map<string, number[]>();
+    for (const pr of pastReminders) {
+      const name = pr.dist_name;
+      if (!name) continue;
+      let minuteOfDay: number | null = null;
+      if (pr.last_reminded_at) {
+        const d = new Date(pr.last_reminded_at);
+        if (!isNaN(d.getTime())) {
+          minuteOfDay = d.getHours() * 60 + d.getMinutes();
+        }
+      }
+      if (minuteOfDay === null && pr.scheduled_send_time && pr.scheduled_send_time.includes(':')) {
+        const [ph, pm] = pr.scheduled_send_time.split(':').map(Number);
+        if (!isNaN(ph) && !isNaN(pm)) {
+          minuteOfDay = ph * 60 + pm;
+        }
+      }
+      if (minuteOfDay !== null) {
+        if (!pastMinutesMap.has(name)) pastMinutesMap.set(name, []);
+        pastMinutesMap.get(name)!.push(minuteOfDay);
+      }
+    }
+
+    // 4. Track slots already assigned today
+    const assignedSlotsToday = new Set<number>();
+    for (const r of reminders) {
+      if (r.scheduled_send_time && r.scheduled_send_time.includes(':')) {
+        const [h, m] = r.scheduled_send_time.split(':').map(Number);
+        if (!isNaN(h) && !isNaN(m)) {
+          assignedSlotsToday.add(h * 60 + m);
+        }
+      }
+    }
+
+    // Unassigned reminders that need a new slot
+    const unassigned = reminders.filter((r: any) => !r.scheduled_send_time);
+    if (unassigned.length === 0) return;
+
+    const totalSlotsNeeded = unassigned.length;
+    const step = windowDuration / (totalSlotsNeeded + 1);
+
+    for (let i = 0; i < unassigned.length; i++) {
+      const rem = unassigned[i];
+      const normName = (rem.distributor_name || '').toLowerCase().trim();
+      const pastMinutes = pastMinutesMap.get(normName) || [];
+
+      // Base target minute with pseudo-random non-uniform jitter
+      const jitter = Math.floor(Math.random() * 9) - 4;
+      let targetMin = Math.round(startMinutesTotal + (i + 1) * step + jitter);
+      targetMin = Math.max(startMinutesTotal, Math.min(endMinutesTotal - 1, targetMin));
+
+      // Find best minute around targetMin avoiding past 30-day slots & today collisions
+      let bestMin = targetMin;
+      let bestScore = -Infinity;
+
+      for (let offset = -15; offset <= 15; offset++) {
+        const candidate = targetMin + offset;
+        if (candidate < startMinutesTotal || candidate >= endMinutesTotal) continue;
+
+        // Check collision with today's assigned slots
+        let collisionToday = false;
+        for (const assigned of assignedSlotsToday) {
+          if (Math.abs(assigned - candidate) < 2) {
+            collisionToday = true;
+            break;
+          }
+        }
+        if (collisionToday) continue;
+
+        // Score based on distance to past 30-day send times for this specific distributor
+        let minPastDist = 999;
+        for (const pm of pastMinutes) {
+          const diff = Math.abs(pm - candidate);
+          if (diff < minPastDist) minPastDist = diff;
+        }
+
+        const score = minPastDist * 2 - Math.abs(offset);
+        if (score > bestScore) {
+          bestScore = score;
+          bestMin = candidate;
+        }
+      }
+
+      assignedSlotsToday.add(bestMin);
+
+      const resH = Math.floor(bestMin / 60);
+      const resM = bestMin % 60;
+      const formattedTime = `${String(resH).padStart(2, '0')}:${String(resM).padStart(2, '0')}`;
+
+      await db.run(
+        `UPDATE distributor_dispatch_reminders SET scheduled_send_time = ? WHERE id = ?`,
+        [formattedTime, rem.id]
+      );
+      rem.scheduled_send_time = formattedTime;
+    }
+  } catch (err: any) {
+    console.error('[DistributorReminderWorker] Error allocating dynamic reminder times:', err.message);
+  }
+}
+
+/**
+ * Check and run auto-sending during the configured time window with dynamic unequal schedule
  */
 export async function checkAndSendAutoReminders() {
   if (isWorkerRunning) return;
@@ -494,7 +659,8 @@ export async function checkAndSendAutoReminders() {
     const startMinutesTotal = (isNaN(startH) ? 12 : startH) * 60 + (isNaN(startM) ? 30 : startM);
     const endMinutesTotal = (isNaN(endH) ? 13 : endH) * 60 + (isNaN(endM) ? 0 : endM);
 
-    const isWithinWindow = currentMinutesTotal >= startMinutesTotal && currentMinutesTotal <= endMinutesTotal;
+    // Active window check (with 15 min buffer to catch late slots)
+    const isWithinWindow = currentMinutesTotal >= startMinutesTotal && currentMinutesTotal <= (endMinutesTotal + 15);
 
     if (!isWithinWindow) {
       isWorkerRunning = false;
@@ -503,10 +669,11 @@ export async function checkAndSendAutoReminders() {
 
     const todayStr = getTodayDateString();
     await syncTodayActiveDistributors();
+    await allocateDynamicReminderTimes(db, todayStr);
 
-    // 1. Fetch all active reminders for today (Pending or Dispatched) that have not been reminded today
+    // 1. Fetch all active reminders for today that have not been reminded today
     const activeReminders = await db.all(
-      `SELECT r.id, r.distributor_name, r.distributor_phone, d.phone as master_phone
+      `SELECT r.id, r.distributor_name, r.distributor_phone, r.scheduled_send_time, d.phone as master_phone
        FROM distributor_dispatch_reminders r
        LEFT JOIN distributors d ON r.distributor_id = d.id
        WHERE r.date = ? AND r.status != 'No Order Today'
@@ -514,20 +681,35 @@ export async function checkAndSendAutoReminders() {
       [todayStr, todayStr]
     );
 
-    const withPhone: Array<{ id: number; distributor_name: string }> = [];
+    const dueReminders: Array<{ id: number; distributor_name: string }> = [];
     const missingPhone: Array<{ id: number; distributor_name: string }> = [];
 
     for (const item of activeReminders) {
       const p = (item.distributor_phone || item.master_phone || '').replace(/\D/g, '').slice(-10);
-      if (p && p.length === 10) {
-        withPhone.push({ id: item.id, distributor_name: item.distributor_name });
-      } else {
+      if (!p || p.length !== 10) {
         missingPhone.push({ id: item.id, distributor_name: item.distributor_name });
+        continue;
+      }
+
+      // Check if scheduled time has arrived
+      let isDue = true;
+      if (item.scheduled_send_time && item.scheduled_send_time.includes(':')) {
+        const [schH, schM] = item.scheduled_send_time.split(':').map(Number);
+        if (!isNaN(schH) && !isNaN(schM)) {
+          const schMinutes = schH * 60 + schM;
+          if (currentMinutesTotal < schMinutes) {
+            isDue = false;
+          }
+        }
+      }
+
+      if (isDue) {
+        dueReminders.push({ id: item.id, distributor_name: item.distributor_name });
       }
     }
 
-    if (withPhone.length > 0) {
-      console.log(`[DistributorReminderWorker] Found ${withPhone.length} active distributor reminders to send for ${startTimeStr}-${endTimeStr} window.`);
+    if (dueReminders.length > 0) {
+      console.log(`[DistributorReminderWorker] Found ${dueReminders.length} due distributor reminder(s) to send (Window ${startTimeStr}-${endTimeStr}).`);
 
       // Ensure WhatsApp client is ready (wake from idle sleep if needed) before dispatching
       try {
@@ -542,12 +724,11 @@ export async function checkAndSendAutoReminders() {
         console.warn('[DistributorReminderWorker] WhatsApp readiness check warning:', waReadyErr?.message || waReadyErr);
       }
 
-      for (const item of withPhone) {
-        // Anti-ban safe delay: 5 to 10 seconds between messages (strictly non-bulk)
-        const delay = Math.floor(Math.random() * 5000) + 5000;
-        await new Promise(res => setTimeout(res, delay));
-
+      for (const item of dueReminders) {
+        // Enqueue reminder to notificationService -> whatsappQueueWorker (where 10-15s non-bulk pacing is enforced)
         await notificationService.sendDistributorDispatchReminder(item.id);
+        // Micro-yield between queue additions
+        await new Promise(res => setTimeout(res, 1000));
       }
     }
 
@@ -678,7 +859,7 @@ export async function purgeStaleOfflineReminders(): Promise<number> {
 }
 
 /**
- * Start the periodic background checker (runs every 5 minutes)
+ * Start the periodic background checker (runs every 60 seconds)
  */
 export function startDistributorDispatchReminderWorker() {
   if (checkIntervalTimer) return;
@@ -689,7 +870,7 @@ export function startDistributorDispatchReminderWorker() {
   checkAndSendAutoReminders().catch(() => {});
   checkAndSendAfternoonDeliveryBoyReminder().catch(() => {});
 
-  // Check every 5 minutes (300,000 ms). P3 gated worker: skip ticks while the
+  // Check every 60 seconds (1 minute). P3 gated worker: skip ticks while the
   // user is idle >30 min; checks resume automatically on the next tick after wake.
   checkIntervalTimer = setInterval(async () => {
     try {
@@ -699,9 +880,9 @@ export function startDistributorDispatchReminderWorker() {
     purgeStaleOfflineReminders().catch(() => {});
     checkAndSendAutoReminders().catch(() => {});
     checkAndSendAfternoonDeliveryBoyReminder().catch(() => {});
-  }, 5 * 60 * 1000);
+  }, 60 * 1000);
 
-  console.log('[DistributorReminderWorker] Distributor dispatch reminder background worker initialized with PC offline protection & afternoon Delivery Boy dispatch.');
+  console.log('[DistributorReminderWorker] Distributor dispatch reminder background worker initialized with dynamic 30-day staggered scheduler & PC offline protection.');
 }
 
 /**
@@ -714,3 +895,4 @@ export function stopDistributorDispatchReminderWorker() {
     console.log('[DistributorReminderWorker] Distributor dispatch reminder background worker stopped.');
   }
 }
+

@@ -2,7 +2,7 @@ import { dbManager } from './database/connection.js';
 
 // Bump this number whenever you add new CREATE TABLE, ALTER TABLE, or INSERT OR IGNORE statements below.
 // On normal boots where this version matches the stored version, all DDL is skipped entirely (~3-5s saved).
-const CURRENT_SCHEMA_VERSION = 44;
+const CURRENT_SCHEMA_VERSION = 45;
 
 // FTS5 creates exactly these four shadow tables for an external-content index.
 // While the `medicines_fts` declaration exists in sqlite_master these names are
@@ -301,6 +301,7 @@ export async function ensureSchema(dbPath: string) {
           date TEXT NOT NULL,
           order_source TEXT DEFAULT 'pharmarack',
           email_received_at DATETIME,
+          scheduled_send_time TEXT DEFAULT NULL,
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
         INSERT INTO distributor_dispatch_reminders_new (id, distributor_id, distributor_name, distributor_phone, delivery_boy_id, status, auto_remind, last_reminded_at, date, created_at)
@@ -1057,6 +1058,7 @@ export async function ensureSchema(dbPath: string) {
     ['distributors', 'state_code', 'ALTER TABLE distributors ADD COLUMN state_code TEXT'],
     ['distributors', 'preferred_file_format', 'ALTER TABLE distributors ADD COLUMN preferred_file_format TEXT DEFAULT NULL'],
     ['distributors', 'mapping_config', 'ALTER TABLE distributors ADD COLUMN mapping_config TEXT DEFAULT NULL'],
+    ['distributor_dispatch_reminders', 'scheduled_send_time', 'ALTER TABLE distributor_dispatch_reminders ADD COLUMN scheduled_send_time TEXT DEFAULT NULL'],
     ['doctors', 'send_daily_summary', 'ALTER TABLE doctors ADD COLUMN send_daily_summary INTEGER DEFAULT 0'],
     ['customers', 'legacy_id', 'ALTER TABLE customers ADD COLUMN legacy_id TEXT'],
     ['customers', 'age', 'ALTER TABLE customers ADD COLUMN age TEXT'],
