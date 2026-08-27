@@ -41,6 +41,12 @@ export async function runExpiryScanAndAlert(days = 90): Promise<boolean> {
       return true; // Scan completed successfully, optional notification skipped
     }
 
+    const expiryReportEnabledRow = await db.get("SELECT value FROM app_settings WHERE key = 'trigger_wa_expiry_report_enabled'");
+    if (expiryReportEnabledRow?.value === 'false') {
+      console.log('[ExpiryScan] Expiry report automation disabled. Skipping WhatsApp notification.');
+      return true; // Scan completed successfully, notification skipped by user toggle
+    }
+
     // Load WhatsApp queue worker and enqueue message
     const { whatsappQueueWorker } = await import('./whatsappQueueWorker.js');
     const cleanPhone = targetPhone.replace(/\D/g, '');

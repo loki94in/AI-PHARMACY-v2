@@ -69,7 +69,7 @@ export async function trackMedicineRequest(req: {
  */
 export async function checkShortageRequestsAndNotifyAdmin(db?: Database): Promise<{ scanned: number; notified: number }> {
   const connection = db || await dbManager.getConnection();
-  
+
   // Fetch pending requests created > 23 hours ago
   const pendingRequests = await connection.all(
     `SELECT * FROM special_orders
@@ -80,6 +80,9 @@ export async function checkShortageRequestsAndNotifyAdmin(db?: Database): Promis
   if (!pendingRequests || pendingRequests.length === 0) {
     return { scanned: 0, notified: 0 };
   }
+
+  const shortageEnabledRow = await connection.get("SELECT value FROM app_settings WHERE key = 'trigger_wa_shortage_notice_enabled'");
+  const shortageNoticeEnabled = shortageEnabledRow?.value !== 'false';
 
   let notifiedCount = 0;
 
@@ -176,7 +179,7 @@ export async function checkShortageRequestsAndNotifyAdmin(db?: Database): Promis
     const recipientName = 'Admin / Store Owner';
     const adminPhone = storeOwnerPhone ? storeOwnerPhone.replace(/\D/g, '') : '';
 
-    if (adminPhone && adminPhone.length >= 10) {
+    if (adminPhone && adminPhone.length >= 10 && shortageNoticeEnabled) {
       const formattedPhone = adminPhone.length === 10 ? `91${adminPhone}` : adminPhone;
       try {
         await notificationService.sendWhatsApp(formattedPhone, adminMessage);

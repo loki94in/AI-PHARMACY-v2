@@ -445,6 +445,11 @@ router.post('/distributor-reminders/:id/send-now', async (req, res) => {
   const { id } = req.params;
   const { custom_message } = req.body || {};
   try {
+    const db = await dbManager.getConnection();
+    const enabledRow = await db.get("SELECT value FROM app_settings WHERE key = 'trigger_dispatch_reminder_enabled'");
+    if (enabledRow?.value === 'false') {
+      return res.status(409).json({ error: 'Distributor dispatch reminder automation is disabled. Enable it in the Automation Hub to send reminders.' });
+    }
     const ok = await notificationService.sendDistributorDispatchReminder(Number(id), custom_message);
     if (ok) {
       res.json({ success: true, message: 'WhatsApp reminder sent successfully' });

@@ -17,7 +17,13 @@ export class WhatsappInvoiceService {
     let db;
     try {
       db = await dbManager.getConnection();
-      
+
+      const enabledRow = await db.get("SELECT value FROM app_settings WHERE key = 'trigger_wa_invoice_pdf_enabled'");
+      if (enabledRow?.value === 'false') {
+        console.log(`Invoice WhatsApp delivery automation disabled — skipping send for invoice ID ${invoiceId}`);
+        return false;
+      }
+
       const invoice = await db.get(
         `SELECT si.invoice_no, si.date, si.total_amount, si.payment_medium, si.payment_status, si.customer_id,
                 c.name as customer_name, c.phone as customer_phone, c.credit_balance

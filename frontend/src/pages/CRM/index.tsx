@@ -7,7 +7,7 @@ import {
   CheckCircle2, AlertCircle, Clock, Search, Repeat2, Bell,
   MessageCircle, Check, Package, Mail, ExternalLink, LogOut, Zap, Copy, FileText, X, Plus, Trash2, Sliders, ChevronDown, ClipboardList, ShoppingCart, AlertTriangle, Pencil, Edit2, RotateCcw, Globe, Pill
 } from 'lucide-react';
-import { toastEvent, specialOrdersEvent, refillEvent, messageSendEvent, whatsappQueueEvent } from '../../services/events';
+import { toastEvent, specialOrdersEvent, refillEvent, messageSendEvent, whatsappQueueEvent, automationHubEvent } from '../../services/events';
 import { usePageActive } from '../../lib/keepAlive/PageActiveContext';
 import { useOnClickOutside } from '../../hooks/useOnClickOutside';
 import { getTodayString, getNDaysAgoString, toDateInputValue } from '../../utils/date';
@@ -609,6 +609,7 @@ const RefillsSection: React.FC = () => {
       await apiClient.post('/refills/send-reminder-now', { patient_phone: phone });
       toastEvent.trigger(`WhatsApp reminder queued for ${phone}`, 'success', '/crm');
       whatsappQueueEvent.triggerUpdated();
+      automationHubEvent.triggerUpdated();
       await load(true);
     } catch (err) {
       toastEvent.trigger((err as LocalApiError).response?.data?.error || 'Failed to send reminder', 'error', '/crm');

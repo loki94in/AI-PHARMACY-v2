@@ -21,6 +21,13 @@ export class BouncedAlertService {
         return false;
       }
 
+      // 1b. Check the bounced products alert automation toggle (default-on)
+      const bouncedEnabledRow = await db.get("SELECT value FROM app_settings WHERE key = 'trigger_wa_bounced_products_alert_enabled'");
+      if (bouncedEnabledRow?.value === 'false') {
+        console.log('[BouncedAlert] Bounced products alert automation disabled. Skipping alert check.');
+        return false;
+      }
+
       // 2. Fetch recipient phone (Admin / Store Owner numbers ONLY)
       const { getPharmacyOwnerPhone } = await import('./storeSettingsService.js');
       recipientPhone = await getPharmacyOwnerPhone(db);

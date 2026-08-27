@@ -130,6 +130,20 @@ export interface AutomationNotification {
   reference_id?: string;
 }
 
+export interface AutomationHubActivityItem {
+  automationType: string;
+  targetName: string | null;
+  status: string;
+  errorMessage: string | null;
+  sentAt: number | null;
+  createdAt: string;
+}
+
+export interface AutomationHubSummary {
+  headline: 'sending' | 'failed' | 'idle';
+  activity: AutomationHubActivityItem[];
+}
+
 export interface Patient {
   id: number;
   name: string;

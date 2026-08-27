@@ -565,6 +565,12 @@ router.post('/credit-customers/:id/send-reminder', async (req, res) => {
   const { custom_message } = req.body || {};
   try {
     const db = await dbManager.getConnection();
+
+    const enabledRow = await db.get("SELECT value FROM app_settings WHERE key = 'trigger_wa_credit_reminder_enabled'");
+    if (enabledRow?.value === 'false') {
+      return res.status(409).json({ error: 'Credit reminder automation is disabled. Enable it in the Automation Hub to send reminders.' });
+    }
+
     const customer = await db.get('SELECT * FROM customers WHERE id = ?', [id]);
     if (!customer || !customer.phone) {
       return res.status(400).json({ error: 'Customer phone number not found' });
@@ -689,7 +695,14 @@ router.post('/ledger/pay', async (req, res) => {
     let whatsappSent = false;
     let whatsappError = '';
 
-    if (Boolean(req.body.sendWhatsApp) && customer && customer.phone) {
+    const paymentReceiptRequested = Boolean(req.body.sendWhatsApp) && customer && customer.phone;
+    const paymentReceiptEnabledRow = paymentReceiptRequested
+      ? await db.get("SELECT value FROM app_settings WHERE key = 'trigger_wa_payment_receipt_enabled'")
+      : null;
+
+    if (paymentReceiptRequested && paymentReceiptEnabledRow?.value === 'false') {
+      whatsappError = 'Payment receipt automation is disabled in the Automation Hub';
+    } else if (paymentReceiptRequested) {
       try {
         const cleanPhone = normalizeWhatsAppPhone(customer.phone);
         if (cleanPhone && cleanPhone.length >= 10) {

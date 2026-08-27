@@ -140,7 +140,9 @@ import type {
   InventoryItem,
   SpecialOrder,
   Refill,
-  AutomationNotification
+  AutomationNotification,
+  AutomationHubActivityItem,
+  AutomationHubSummary
 } from '../types/api';
 
 export type {
@@ -149,7 +151,9 @@ export type {
   InventoryItem,
   SpecialOrder,
   Refill,
-  AutomationNotification
+  AutomationNotification,
+  AutomationHubActivityItem,
+  AutomationHubSummary
 };
 
 export interface AutomationHubActivityItem {
