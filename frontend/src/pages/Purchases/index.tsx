@@ -1217,6 +1217,7 @@ const Purchases: React.FC = () => {
   const [, setLastSavedInvoiceNo] = useState('');
   const [, setLastSavedItems] = useState<{ name?: string; batch?: string }[]>([]);
   const searchResultsRef = useRef<HTMLDivElement>(null);
+  const [purchaseSearchDropUp, setPurchaseSearchDropUp] = useState<boolean>(false);
 
   useEffect(() => {
     if (searchHighlightIndex >= 0 && searchResultsRef.current) {
@@ -3386,16 +3387,27 @@ const Purchases: React.FC = () => {
                               data-row-index={index}
                               data-field="medicine_name"
                               value={item.medicine_name}
-                              onFocus={() => {
+                              onFocus={e => {
                                 setActiveSearchIndex(index);
                                 setActiveMedicineIndex(index);
-                                // Row switch must NEVER inherit another row's
-                                // result list (gating rule: no dropdown from
-                                // focus alone). List rebuilds once ≥3 chars.
-                                setSearchResults([]);
-                                setSearchHighlightIndex(-1);
+                                const rect = e.currentTarget.getBoundingClientRect();
+                                if (window.innerHeight - rect.bottom < 260 && rect.top > 260) {
+                                  setPurchaseSearchDropUp(true);
+                                } else {
+                                  setPurchaseSearchDropUp(false);
+                                }
+                                (e.target as HTMLInputElement).select?.();
+                                if (item.medicine_name.trim().length >= 2) {
+                                  searchMedicines(item.medicine_name, index);
+                                }
                               }}
                               onChange={(e) => {
+                                const rect = e.currentTarget.getBoundingClientRect();
+                                if (window.innerHeight - rect.bottom < 260 && rect.top > 260) {
+                                  setPurchaseSearchDropUp(true);
+                                } else {
+                                  setPurchaseSearchDropUp(false);
+                                }
                                 updateItem(index, 'medicine_name', e.target.value);
                                 searchMedicines(e.target.value, index);
                               }}
@@ -3523,7 +3535,11 @@ const Purchases: React.FC = () => {
                             )}
                           </div>
                           {activeSearchIndex === index && searchSearching && searchResults.length === 0 && item.medicine_name.trim().length >= 3 && (
-                            <div ref={searchResultsRef} className="absolute z-[9999] w-[440px] max-w-[90vw] mt-1 bg-bg2 border border-glass-border rounded-xl shadow-2xl p-3 left-0 backdrop-blur-xl">
+                            <div ref={searchResultsRef} className={`absolute z-[9999] w-[440px] max-w-[90vw] bg-bg2 border border-glass-border rounded-xl shadow-2xl p-3 left-0 backdrop-blur-xl ${
+                              purchaseSearchDropUp
+                                ? 'bottom-full mb-1'
+                                : 'top-full mt-1'
+                            }`}>
                               <div className="flex items-center gap-2 text-xs text-muted font-semibold">
                                 <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" />
                                 Searching Master Database for &ldquo;{item.medicine_name.trim()}&rdquo;&hellip;
@@ -3531,7 +3547,11 @@ const Purchases: React.FC = () => {
                             </div>
                           )}
                           {activeSearchIndex === index && !searchSearching && searchResults.length === 0 && item.medicine_name.trim().length >= 3 && (
-                            <div ref={searchResultsRef} className="absolute z-[9999] w-[440px] max-w-[90vw] mt-1 bg-bg2 border border-glass-border rounded-xl shadow-2xl p-2 left-0 backdrop-blur-xl">
+                            <div ref={searchResultsRef} className={`absolute z-[9999] w-[440px] max-w-[90vw] bg-bg2 border border-glass-border rounded-xl shadow-2xl p-2 left-0 backdrop-blur-xl ${
+                              purchaseSearchDropUp
+                                ? 'bottom-full mb-1'
+                                : 'top-full mt-1'
+                            }`}>
                               <div className="px-3 py-1.5 text-xs text-muted font-medium border-b border-glass-border/30 flex items-center justify-between">
                                 <span>No match in Master Database</span>
                                 <span className="text-[10px] text-amber-400 font-mono font-semibold">New Item</span>
@@ -3559,7 +3579,11 @@ const Purchases: React.FC = () => {
                             </div>
                           )}
                           {activeSearchIndex === index && searchResults.length > 0 && (
-                            <div ref={searchResultsRef} className="absolute z-[9999] w-[440px] max-w-[90vw] mt-1 bg-bg2 border border-glass-border rounded-xl shadow-2xl max-h-64 overflow-y-auto left-0">
+                            <div ref={searchResultsRef} className={`absolute z-[9999] w-[440px] max-w-[90vw] bg-bg2 border border-glass-border rounded-xl shadow-2xl max-h-64 overflow-y-auto left-0 backdrop-blur-xl ${
+                              purchaseSearchDropUp
+                                ? 'bottom-full mb-1'
+                                : 'top-full mt-1'
+                            }`}>
                               {item.original_name && (
                                 <div className="px-4 py-2 bg-blue-500/10 border-b border-glass-border/30 text-xs text-blue-300 font-bold select-none flex items-center gap-1.5 font-mono">
                                   📄 Original Bill Name: {item.original_name}
@@ -3570,8 +3594,9 @@ const Purchases: React.FC = () => {
                                   key={medicine.id}
                                   type="button"
                                   data-highlighted={idx === searchHighlightIndex ? "true" : "false"}
+                                  onMouseEnter={() => setSearchHighlightIndex(idx)}
                                   onClick={() => selectMedicine(medicine, index)}
-                                  className={`w-full text-left px-4 py-2 hover:bg-white/10 text-text border-b border-glass-border/10 last:border-0 ${idx === searchHighlightIndex ? 'bg-primary/15 border-l-2 border-primary' : ''}`}
+                                  className={`w-full text-left px-4 py-2 hover:bg-bg3 text-text border-b border-glass-border/10 last:border-0 ${idx === searchHighlightIndex ? 'bg-primary/20 border-l-2 border-primary' : ''}`}
                                 >
                                   <div className="flex items-start justify-between gap-2">
                                     <div className="min-w-0 flex-1">
@@ -3601,6 +3626,11 @@ const Purchases: React.FC = () => {
                                             </span>
                                           );
                                         })()}
+                                        {((medicine as any).location || (medicine as any).rack || (medicine as any).shelf) && (
+                                          <span className="text-[10px] px-1.5 py-0.5 rounded font-mono font-semibold bg-blue-500/15 text-blue-400 border border-blue-500/30">
+                                            📍 {(medicine as any).location || (medicine as any).rack || (medicine as any).shelf}
+                                          </span>
+                                        )}
                                         {(medicine.pharmarack_rate) && (medicine.pharmarack_rate < (medicine.mrp || 99999)) && (
                                            <span className="text-[10px] px-1.5 py-0.5 rounded font-mono font-semibold bg-amber-500/15 text-amber-400 border border-amber-500/30">
                                              ⚡ Pharmarack Rate: ₹{(medicine.pharmarack_rate)} ({medicine.pharmarack_distributor || 'Mapped Distributor'})
@@ -3622,6 +3652,7 @@ const Purchases: React.FC = () => {
                               <button
                                 type="button"
                                 data-highlighted={searchHighlightIndex === searchResults.length ? "true" : "false"}
+                                onMouseEnter={() => setSearchHighlightIndex(searchResults.length)}
                                 onClick={() => openAddMedicineModal(index)}
                                 className={`w-full text-left px-4 py-2.5 hover:bg-emerald-500/15 text-emerald-400 font-semibold border-t border-glass-border/30 flex items-center justify-between transition-all ${
                                   searchHighlightIndex === searchResults.length ? 'bg-emerald-500/20 border-l-2 border-emerald-400' : ''

@@ -59,6 +59,8 @@ class TriggerSchedulerService {
 
     import('./distributorDispatchReminderWorker.js').then(m => m.stopDistributorDispatchReminderWorker()).catch(() => {});
     import('./tokenRefreshScheduler.js').then(m => m.tokenRefreshScheduler.stop()).catch(() => {});
+    import('./orderFulfillmentService.js').then(m => m.orderFulfillmentService.stop()).catch(() => {});
+    import('../worker/emailPoller.js').then(m => m.stopEmailPoller()).catch(() => {});
   }
 
   /**
@@ -357,6 +359,38 @@ class TriggerSchedulerService {
       } catch (err) {
         console.error('[TriggerScheduler] Failed to schedule Doctor Report:', err);
       }
+    // ----------------------------------------------------
+    // Trigger 9: Email PDF Invoice Poller
+    // ----------------------------------------------------
+    if (cfg.trigger_email_poller_enabled === 'true') {
+      try {
+        const { startEmailPoller } = await import('../worker/emailPoller.js');
+        await startEmailPoller();
+      } catch (err) {
+        console.error('[TriggerScheduler] Failed to start Email Poller:', err);
+      }
+    } else {
+      try {
+        const { stopEmailPoller } = await import('../worker/emailPoller.js');
+        stopEmailPoller();
+      } catch (_) {}
+    }
+
+    // ----------------------------------------------------
+    // Trigger 10: Patient Chronic Refill Evaluator
+    // ----------------------------------------------------
+    if (cfg.trigger_refills_enabled === 'true') {
+      try {
+        const { orderFulfillmentService } = await import('./orderFulfillmentService.js');
+        await orderFulfillmentService.start();
+      } catch (err) {
+        console.error('[TriggerScheduler] Failed to start Refill Evaluator:', err);
+      }
+    } else {
+      try {
+        const { orderFulfillmentService } = await import('./orderFulfillmentService.js');
+        orderFulfillmentService.stop();
+      } catch (_) {}
     }
 
     this.isInitialized = true;

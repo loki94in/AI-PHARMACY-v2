@@ -1587,6 +1587,7 @@ const POS = () => {
   const [rowSearchResults, setRowSearchResults] = useState<PosBatchItem[]>([]);
   const [searchHighlightIndex, setSearchHighlightIndex] = useState(-1);
   const [rowSearchHighlightIndex, setRowSearchHighlightIndex] = useState(-1);
+  const [rowSearchDropUp, setRowSearchDropUp] = useState<boolean>(false);
 
   const justSelectedDoctorRef = useRef<boolean>(false);
 
@@ -1760,23 +1761,22 @@ const POS = () => {
   // subsequent patientName keystrokes, instead of re-hitting the API per keystroke.
   const refillsPanelCacheRef = useRef<RefillPanelGroup[] | null>(null);
 
-  // Search for pending refills / previous prescriptions matching the patient
+  // Search for pending refills / previous prescriptions matching the patient (CRM registered customers only)
   useEffect(() => {
-    const cleanPName = patientName.trim();
-  
-    const cleanPPhone = patientPhone.trim();
-    // Pick-person-first guard: a bare typed name can match several DIFFERENT people.
-    // Refill suggestions require a pinned customer (picked from list) or a real phone number.
-    const refillDigits = cleanPPhone.replace(/\D/g, '');
-    if (selectedCustomerIdRef.current === null && refillDigits.length < 5) {
+    // Strictly require a registered CRM customer to be selected
+    if (!selectedCustomerId || selectedCustomerIdRef.current === null) {
       setMatchedRefill(null);
       return;
     }
+
+    const cleanPName = patientName.trim();
+    const cleanPPhone = patientPhone.trim();
     if (cleanPName.length < 2 && cleanPPhone.length < 5) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- refill banner guard reset
       setMatchedRefill(null);
       return;
     }
+    const refillDigits = cleanPPhone.replace(/\D/g, '');
     const delayCheck = setTimeout(async () => {
       try {
         // 1. Check patient previous sales & refills
@@ -1800,8 +1800,7 @@ const POS = () => {
           }
         }
 
-        // 2. Fallback to panel cache — prefer phone identity; name match only after the
-        // person was explicitly picked from the patient list (id pinned).
+        // 2. Fallback to panel cache for registered customer
         let panelData = refillsPanelCacheRef.current;
         if (!panelData) {
           const response = await apiClient.get('/refills/panel');
@@ -1812,7 +1811,7 @@ const POS = () => {
           (refillDigits.length >= 5
             ? panelData.find(group => group.patient_phone?.replace(/\D/g, '').includes(refillDigits))
             : undefined) ||
-          (selectedCustomerIdRef.current !== null && cleanPName.length >= 2
+          (cleanPName.length >= 2
             ? panelData.find(group => group.patient_name?.toLowerCase().trim() === cleanPName.toLowerCase())
             : undefined);
         if (match && match.medicines && match.medicines.length > 0) {
@@ -3311,7 +3310,7 @@ const POS = () => {
 
           {/* Top Control Ribbon: Patient, WhatsApp, Doctor, Date, Tabs */}
           <div className="glass-panel p-2.5 bg-glass-bg border-glass-border shrink-0 relative z-40 shadow-sm rounded-2xl w-full min-w-0 flex flex-col gap-2">
-            {matchedRefill && (
+            {selectedCustomerId && matchedRefill && (
               <div className="p-2.5 rounded-xl bg-violet-500/10 border border-violet-500/20 text-violet-300 text-xs font-semibold flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 shadow-sm animate-fade-in">
                 <div className="flex items-center gap-2 min-w-0">
                   <span className="h-2 w-2 rounded-full bg-violet-400 animate-pulse shrink-0" />
@@ -4273,11 +4272,23 @@ const POS = () => {
                                 onChange={e => {
                                   const val = e.target.value;
                                   const idx = cart.indexOf(item);
+                                  const rect = e.currentTarget.getBoundingClientRect();
+                                  if (window.innerHeight - rect.bottom < 240 && rect.top > 240) {
+                                    setRowSearchDropUp(true);
+                                  } else {
+                                    setRowSearchDropUp(false);
+                                  }
                                   setActiveRowSearchIndex(idx);
                                   setRowSearchTerm(val);
                                 }}
                                 onFocus={e => {
                                   const idx = cart.indexOf(item);
+                                  const rect = e.currentTarget.getBoundingClientRect();
+                                  if (window.innerHeight - rect.bottom < 240 && rect.top > 240) {
+                                    setRowSearchDropUp(true);
+                                  } else {
+                                    setRowSearchDropUp(false);
+                                  }
                                   setActiveRowSearchIndex(idx);
                                   const currentName = item.isEmptyRow ? '' : (item.name || '');
                                   setRowSearchTerm(currentName);
@@ -4333,24 +4344,33 @@ const POS = () => {
                               />
                               
                               {activeRowSearchIndex === cart.indexOf(item) && rowSearchTerm.trim().length >= 2 && rowSearchResults.length > 0 && (
-                                <div ref={rowSearchResultsRef} className="absolute left-0 right-0 z-[9999] mt-1 bg-bg2 border-2 border-primary/40 rounded-xl overflow-hidden max-h-56 overflow-y-auto w-[320px] shadow-[0_20px_50px_rgba(0,0,0,0.8)]">
-                                  {rowSearchResults.map((med) => {
+                                <div 
+                                  ref={rowSearchResultsRef} 
+                                  className={`absolute left-0 right-0 z-[9999] bg-bg2 border-2 border-primary/40 rounded-xl overflow-hidden max-h-56 overflow-y-auto w-[340px] shadow-[0_20px_50px_rgba(0,0,0,0.8)] backdrop-blur-xl ${
+                                    rowSearchDropUp
+                                      ? 'bottom-full mb-1'
+                                      : 'top-full mt-1'
+                                  }`}
+                                >
+                                  {rowSearchResults.map((med, mIdx) => {
                                     const rowPendingMatches = specialOrders.filter(
                                       o => o.product.toLowerCase().trim() === (med.medicine_name || '').toLowerCase().trim() ||
                                            (med.medicine_name || '').toLowerCase().includes(o.product.toLowerCase().trim())
                                     );
                                     const rowHasPending = rowPendingMatches.length > 0;
-                                    const isRowHighlighted = rowSearchHighlightIndex === rowSearchResults.indexOf(med);
+                                    const isRowHighlighted = rowSearchHighlightIndex === mIdx;
+                                    const locTag = med.location || med.rack || (med as any).shelf || '';
                                     return (
                                       <button
                                         key={med.inventory_id}
                                         type="button"
                                         data-highlighted={isRowHighlighted ? "true" : "false"}
+                                        onMouseEnter={() => setRowSearchHighlightIndex(mIdx)}
                                         onClick={() => {
                                           const idx = cart.indexOf(item);
                                           fetchDetailsAndChangeRowMedicine(idx, med);
                                         }}
-                                        className={`flex flex-col p-2.5 hover:bg-bg3 border-b border-border/10 text-left transition-all text-xs w-full ${isRowHighlighted ? 'bg-primary/10 border-l-2 border-primary' : ''}`}
+                                        className={`flex flex-col p-2.5 hover:bg-bg3 border-b border-border/10 text-left transition-all text-xs w-full cursor-pointer ${isRowHighlighted ? 'bg-primary/20 border-l-2 border-primary text-text' : ''}`}
                                       >
                                         <div className="flex items-center justify-between gap-1">
                                           <div className="flex items-center gap-1.5 flex-wrap min-w-0">
@@ -4361,19 +4381,26 @@ const POS = () => {
                                               </span>
                                             )}
                                           </div>
-                                          {med.medicine_id && (
-                                            <button
-                                              type="button"
-                                              title="Quick Edit in Universal Medicine Editor"
-                                              onMouseDown={(e) => {
-                                                e.stopPropagation();
-                                                setEditMedicineId(Number(med.medicine_id));
-                                              }}
-                                              className="p-1 rounded bg-bg3/60 hover:bg-bg3 border border-border/40 text-muted hover:text-text transition-all shrink-0 cursor-pointer"
-                                            >
-                                              <Edit size={11} />
-                                            </button>
-                                          )}
+                                          <div className="flex items-center gap-1 shrink-0">
+                                            {locTag && (
+                                              <span className="text-[10px] bg-bg3/80 border border-border/40 text-muted px-1.5 py-0.5 rounded font-mono font-bold" title="Store Location / Rack">
+                                                📍 {locTag}
+                                              </span>
+                                            )}
+                                            {med.medicine_id && (
+                                              <button
+                                                type="button"
+                                                title="Quick Edit in Universal Medicine Editor"
+                                                onMouseDown={(e) => {
+                                                  e.stopPropagation();
+                                                  setEditMedicineId(Number(med.medicine_id));
+                                                }}
+                                                className="p-1 rounded bg-bg3/60 hover:bg-bg3 border border-border/40 text-muted hover:text-text transition-all shrink-0 cursor-pointer"
+                                              >
+                                                <Edit size={11} />
+                                              </button>
+                                            )}
+                                          </div>
                                         </div>
                                         <span className="text-[11px] text-muted font-mono mt-0.5">Batch: {med.batch_no} | Exp: {med.expiry_date}</span>
                                         <span className="text-[11px] text-green font-bold font-mono mt-0.5">

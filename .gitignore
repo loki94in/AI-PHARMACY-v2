@@ -21,6 +21,9 @@ data/*.db.bak*-wal
 data/*.corrupt
 data/*backup*
 data/app.test.db*
+data/*.test.db*
+data/*restore*
+data/*restoring*
 backup/
 data/temp_migration/
 data/migration_reports/

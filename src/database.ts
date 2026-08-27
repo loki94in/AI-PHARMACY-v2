@@ -439,6 +439,22 @@ export async function ensureSchema(dbPath: string) {
       value  TEXT NOT NULL,
       PRIMARY KEY (locale, key)
     );
+    CREATE TABLE IF NOT EXISTS medicine_aliases (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      alias_name TEXT NOT NULL UNIQUE,
+      medicine_id INTEGER NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(medicine_id) REFERENCES medicines(id)
+    );
+    CREATE TABLE IF NOT EXISTS distributor_medicine_aliases (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      distributor_id INTEGER,
+      alias_name TEXT NOT NULL,
+      medicine_id INTEGER NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(medicine_id) REFERENCES medicines(id),
+      UNIQUE(distributor_id, alias_name)
+    );
     CREATE INDEX IF NOT EXISTS idx_medicines_name ON medicines (name);
     CREATE INDEX IF NOT EXISTS idx_medicines_name_nocase ON medicines (name COLLATE NOCASE);
     CREATE INDEX IF NOT EXISTS idx_medicine_aliases_nocase ON medicine_aliases (alias_name COLLATE NOCASE);
@@ -1452,24 +1468,6 @@ export async function ensureSchema(dbPath: string) {
       items_json TEXT,
       status TEXT CHECK(status IN ('pending', 'approved', 'rejected')) DEFAULT 'pending',
       source_type TEXT DEFAULT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS medicine_aliases (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      alias_name TEXT NOT NULL UNIQUE,
-      medicine_id INTEGER NOT NULL,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY(medicine_id) REFERENCES medicines(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS distributor_medicine_aliases (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      distributor_id INTEGER,
-      alias_name TEXT NOT NULL,
-      medicine_id INTEGER NOT NULL,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY(medicine_id) REFERENCES medicines(id),
-      UNIQUE(distributor_id, alias_name)
     );
 
     CREATE TABLE IF NOT EXISTS legacy_id_map (

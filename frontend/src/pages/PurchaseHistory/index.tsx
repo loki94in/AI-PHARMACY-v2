@@ -157,12 +157,13 @@ const PurchaseHistory = () => {
     },
     clientFilterFn,
     fetchPage: async (pageParam, filters) => {
+      const isSearching = !!(filters.search && filters.search.trim().length >= 2);
       const response = await api.getPurchases({
-        page: isDateFiltered ? undefined : pageParam,
-        limit: isDateFiltered ? 10000 : 50,
+        page: isDateFiltered && !isSearching ? undefined : pageParam,
+        limit: isDateFiltered && !isSearching ? 10000 : 50,
         search: filters.search || undefined,
-        start: filters.start || undefined,
-        end: filters.end || undefined,
+        start: isSearching ? undefined : (filters.start || undefined),
+        end: isSearching ? undefined : (filters.end || undefined),
       });
       if (response && response.data) {
         return {

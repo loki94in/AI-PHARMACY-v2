@@ -398,6 +398,8 @@ async function sendBatchToDeliveryBoys(db: any, orders: any[], isLate = false): 
 export async function tryDailySend(): Promise<void> {
   try {
     const db = await dbManager.getConnection();
+    const autoRow = await db.get("SELECT value FROM app_settings WHERE key = 'automation_enabled'");
+    if (autoRow?.value === 'false') return;
     if (await hasSentTodaysBatch(db)) return;
     if (!(await isNowInSendWindow(db))) return;
 

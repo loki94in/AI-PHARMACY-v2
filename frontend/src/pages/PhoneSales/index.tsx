@@ -325,7 +325,7 @@ export default function PhoneSales() {
             <Smartphone size={20} />
           </div>
           <div>
-            <h2 className="text-base font-bold text-white">Phone & Mobile Sales</h2>
+            <h2 className="text-base font-bold text-text">Phone & Mobile Sales</h2>
             <p className="text-xs text-muted">Manage, edit, and approve orders logged from remote app sessions</p>
           </div>
         </div>
@@ -357,7 +357,7 @@ export default function PhoneSales() {
 
           <button
             onClick={fetchStagedSales}
-            className="p-2 rounded-xl bg-bg border border-border hover:bg-bg3 hover:border-glass-border text-muted hover:text-white transition-all shrink-0"
+            className="p-2 rounded-xl bg-bg border border-border hover:bg-bg3 hover:border-glass-border text-muted hover:text-text transition-all shrink-0"
             title="Refresh List"
           >
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
@@ -383,7 +383,7 @@ export default function PhoneSales() {
             ) : filteredSales.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-24 text-center text-muted">
                 <Clock className="text-muted/20 mb-3" size={36} />
-                <p className="font-bold text-xs text-white">No staged sales found</p>
+                <p className="font-bold text-xs text-text">No staged sales found</p>
                 <p className="text-[10px] text-muted max-w-[200px] mt-1">Waiting for remote users to record and sync offline orders.</p>
               </div>
             ) : (
@@ -500,7 +500,7 @@ export default function PhoneSales() {
                   )}
                   <button
                     onClick={() => setSelectedSale(null)}
-                    className="p-1.5 text-xs font-semibold rounded-lg bg-bg border border-border text-muted hover:text-white"
+                    className="p-1.5 text-xs font-semibold rounded-lg bg-bg border border-border text-muted hover:text-text"
                   >
                     Close
                   </button>
@@ -571,7 +571,7 @@ export default function PhoneSales() {
                               value={item.quantity}
                               onChange={(e) => handleUpdateItemField(idx, 'quantity', e.target.value)}
                               disabled={selectedSale.status !== 'pending'}
-                              className="w-full text-center px-1 py-0.5 text-xs font-bold bg-bg border border-border rounded focus:outline-none disabled:opacity-60 text-white"
+                              className="w-full text-center px-1 py-0.5 text-xs font-bold bg-bg border border-border rounded focus:outline-none disabled:opacity-60 text-text"
                             />
                           </div>
 
@@ -584,7 +584,7 @@ export default function PhoneSales() {
                               value={item.unit_price}
                               onChange={(e) => handleUpdateItemField(idx, 'unit_price', e.target.value)}
                               disabled={selectedSale.status !== 'pending'}
-                              className="w-full text-center px-1 py-0.5 text-xs bg-bg border border-border rounded focus:outline-none disabled:opacity-60 text-white"
+                              className="w-full text-center px-1 py-0.5 text-xs bg-bg border border-border rounded focus:outline-none disabled:opacity-60 text-text"
                             />
                           </div>
 
@@ -659,7 +659,7 @@ export default function PhoneSales() {
                         min={0}
                         value={discount}
                         onChange={(e) => setDiscount(parseFloat(e.target.value) || 0)}
-                        className="w-16 text-center text-xs py-0.5 bg-bg border border-border rounded text-white"
+                        className="w-16 text-center text-xs py-0.5 bg-bg border border-border rounded text-text"
                       />
                     ) : (
                       <span className="text-xs font-semibold text-text">₹{discount}</span>

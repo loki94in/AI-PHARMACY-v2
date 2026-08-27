@@ -36,6 +36,11 @@ export class AutoMatchWorker {
     this.isRunning = true;
     try {
       const db = await dbManager.getConnection();
+      const autoRow = await db.get("SELECT value FROM app_settings WHERE key = 'automation_enabled'");
+      if (autoRow?.value === 'false') {
+        this.isRunning = false;
+        return;
+      }
 
       // One reconcile per case: orders that already have an overlap record are
       // never re-processed by this safety-net scan (once calculated, no

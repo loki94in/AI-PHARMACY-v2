@@ -285,11 +285,12 @@ const Sells = () => {
     },
     clientFilterFn,
     fetchPage: async (pageParam, filters) => {
+      const isSearching = !!(filters.search && filters.search.trim().length >= 2);
       const res = await api.listSales({
         page: pageParam - 1,
         limit: 100,
-        date_from: filters.date_from,
-        date_to: filters.date_to,
+        date_from: isSearching ? undefined : filters.date_from,
+        date_to: isSearching ? undefined : filters.date_to,
         search: filters.search,
         min_amount: filters.min_amount ? Number(filters.min_amount) : undefined,
         max_amount: filters.max_amount ? Number(filters.max_amount) : undefined,

@@ -567,56 +567,65 @@ server.on('error', (err: any) => {
 
           // Startup refill evaluation
           try {
-            const { checkAllRefills } = await import('./services/refillService.js');
-            await checkAllRefills(db);
+            const refillRow = await db.get("SELECT value FROM app_settings WHERE key = 'trigger_refills_enabled'");
+            if (refillRow?.value !== 'false') {
+              const { checkAllRefills } = await import('./services/refillService.js');
+              await checkAllRefills(db);
+            }
           } catch (refillErr) {
             bootWorkerFailures++;
             console.error('[Boot:Phase3] Refill startup evaluation error:', refillErr);
           }
 
           // Daily catch-up check (overdue credit notes & monthly expiry returns review)
-          const d = new Date();
-          const todayStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-          const lastCheckRow = await db.get("SELECT value FROM app_settings WHERE key = 'last_daily_check_date'");
-          
-          if (!lastCheckRow || lastCheckRow.value !== todayStr) {
-            console.log(`[Boot:Phase3] Daily check missed today (${todayStr}). Running catch-up daily check...`);
-            try {
-              const { checkOverdueCreditNotes } = await import('./services/creditNoteService.js');
-              await checkOverdueCreditNotes(db);
+          const dailyCheckRow = await db.get("SELECT value FROM app_settings WHERE key = 'trigger_daily_check_enabled'");
+          if (dailyCheckRow?.value !== 'false') {
+            const d = new Date();
+            const todayStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+            const lastCheckRow = await db.get("SELECT value FROM app_settings WHERE key = 'last_daily_check_date'");
+            
+            if (!lastCheckRow || lastCheckRow.value !== todayStr) {
+              console.log(`[Boot:Phase3] Daily check missed today (${todayStr}). Running catch-up daily check...`);
+              try {
+                const { checkOverdueCreditNotes } = await import('./services/creditNoteService.js');
+                await checkOverdueCreditNotes(db);
 
-              // Expiry return review catch-up — same every-N-days gate as the
-              // scheduler (default 15), so a missed tick is recovered on boot.
-              const { shouldRunScheduledExpiryReturnScan, scanAndCreateExpiryReviews } = await import('./services/returnsService.js');
-              if (await shouldRunScheduledExpiryReturnScan(db)) {
-                console.log('[Boot:Phase3] Expiry return review scan due. Running inventory-only expired-stock scan...');
-                await scanAndCreateExpiryReviews(db);
+                // Expiry return review catch-up — same every-N-days gate as the
+                // scheduler (default 15), so a missed tick is recovered on boot.
+                const { shouldRunScheduledExpiryReturnScan, scanAndCreateExpiryReviews } = await import('./services/returnsService.js');
+                if (await shouldRunScheduledExpiryReturnScan(db)) {
+                  console.log('[Boot:Phase3] Expiry return review scan due. Running inventory-only expired-stock scan...');
+                  await scanAndCreateExpiryReviews(db);
+                }
+
+                await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('last_daily_check_date', ?)", [todayStr]);
+              } catch (err) {
+                bootWorkerFailures++;
+                console.error('[Boot:Phase3] Startup catch-up daily check failed:', err);
               }
-
-              await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('last_daily_check_date', ?)", [todayStr]);
-            } catch (err) {
-              bootWorkerFailures++;
-              console.error('[Boot:Phase3] Startup catch-up daily check failed:', err);
             }
           }
 
           // Expiry alerts & shortage reminder scans
-          const { checkAndRunScheduledExpiryScan } = await import('./services/expiryAlertService.js');
-          await checkAndRunScheduledExpiryScan(90).catch(err => { bootWorkerFailures++; console.error('[Boot:Phase3] Expiry scan check failed:', err); });
+          const expiryRow = await db.get("SELECT value FROM app_settings WHERE key = 'trigger_expiry_scan_enabled'");
+          if (expiryRow?.value !== 'false') {
+            const { checkAndRunScheduledExpiryScan } = await import('./services/expiryAlertService.js');
+            await checkAndRunScheduledExpiryScan(90).catch(err => { bootWorkerFailures++; console.error('[Boot:Phase3] Expiry scan check failed:', err); });
+          }
 
           const { checkShortageRequestsAndNotifyAdmin } = await import('./services/shortageReminderService.js');
           checkShortageRequestsAndNotifyAdmin(db).catch(err => { bootWorkerFailures++; console.error('[Boot:Phase3] Shortage check failed:', err); });
+
+          // Monthly reports check
+          const { monthlyReportService } = await import('./services/monthlyReportService.js');
+          monthlyReportService.checkAndRunScheduledReports().catch(err => { bootWorkerFailures++; console.error('[Boot:Phase3] Monthly report check failed:', err); });
+
+          // Backup scheduler
+          const { initBackupScheduler } = await import('./services/backupService.js');
+          await initBackupScheduler().catch(err => { bootWorkerFailures++; console.error('[Boot:Phase3] Failed to init backup scheduler:', err); });
         } else {
           console.log('[Boot:Phase3] Background automation is disabled in Settings — skipping automatic startup workers.');
         }
-
-        // Monthly reports check
-        const { monthlyReportService } = await import('./services/monthlyReportService.js');
-        monthlyReportService.checkAndRunScheduledReports().catch(err => { bootWorkerFailures++; console.error('[Boot:Phase3] Monthly report check failed:', err); });
-
-        // Backup scheduler
-        const { initBackupScheduler } = await import('./services/backupService.js');
-        await initBackupScheduler().catch(err => { bootWorkerFailures++; console.error('[Boot:Phase3] Failed to init backup scheduler:', err); });
 
         // Doctor reporting service — registered ONLY when its trigger is enabled
         // (owner rule 2026-08: no feature configured → no timer at all).

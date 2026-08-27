@@ -5,7 +5,7 @@ import { apiClient, api } from '../../services/api';
 import {
   RefreshCw, Send, Users, MessageSquare, Phone, Calendar,
   CheckCircle2, AlertCircle, Clock, Search, Repeat2, Bell,
-  MessageCircle, Check, Package, Mail, ExternalLink, LogOut, Zap, Copy, FileText, X, Plus, Trash2, Sliders, ChevronDown, ClipboardList, ShoppingCart, AlertTriangle, Pencil, Edit2, RotateCcw, Globe, Pill
+  MessageCircle, Check, Package, Mail, ExternalLink, LogOut, Zap, Copy, FileText, X, Plus, Trash2, Sliders, ChevronDown, ChevronUp, ClipboardList, ShoppingCart, AlertTriangle, Pencil, Edit2, RotateCcw, Globe, Pill
 } from 'lucide-react';
 import { toastEvent, specialOrdersEvent, refillEvent, messageSendEvent, whatsappQueueEvent, automationHubEvent } from '../../services/events';
 import { usePageActive } from '../../lib/keepAlive/PageActiveContext';
@@ -201,6 +201,7 @@ interface MedicineSuggestion {
   manufacturer?: string;
   mrp?: number;
   in_stock_qty?: number;
+  location?: string;
 }
 
 interface MedicineRow {
@@ -260,6 +261,7 @@ const RefillsSection: React.FC = () => {
   const [customUnit] = useState<'days' | 'weeks' | 'months'>('days');
 
   const [medicineRows, setMedicineRows] = useState<MedicineRow[]>([emptyRow()]);
+  const [dropUpIndex, setDropUpIndex] = useState<number | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   // Frequency slider modal
@@ -725,7 +727,8 @@ const RefillsSection: React.FC = () => {
           name: m.name,
           manufacturer: m.manufacturer,
           mrp: m.mrp || m.sell_price || m.last_purchase_mrp,
-          in_stock_qty: stockMap.get(m.id) || 0
+          in_stock_qty: stockMap.get(m.id) || 0,
+          location: (m as any).location || (m as any).rack || (m as any).shelf || ''
         }));
       } else {
         const lower = clean.toLowerCase();
@@ -739,7 +742,8 @@ const RefillsSection: React.FC = () => {
               name: m.name || m.medicine_name,
               manufacturer: m.manufacturer,
               mrp: m.mrp,
-              in_stock_qty: stockMap.get(medId) || 0
+              in_stock_qty: stockMap.get(medId) || 0,
+              location: (m as any).location || (m as any).rack || (m as any).shelf || ''
             });
           }
         }
@@ -1906,16 +1910,35 @@ const RefillsSection: React.FC = () => {
                             <input
                               type="text"
                               value={row.searchTerm}
-                              onFocus={() => {
-                                if (row.searchTerm.trim().length >= 2 && row.suggestions.length > 0) {
-                                  setMedicineRows(prev => {
-                                    const updated = [...prev];
-                                    updated[idx] = { ...updated[idx], isOpen: true };
-                                    return updated;
-                                  });
+                              onFocus={e => {
+                                (e.target as HTMLInputElement).select?.();
+                                const rect = e.currentTarget.getBoundingClientRect();
+                                if (window.innerHeight - rect.bottom < 230 && rect.top > 230) {
+                                  setDropUpIndex(idx);
+                                } else {
+                                  setDropUpIndex(null);
+                                }
+                                if (row.searchTerm.trim().length >= 2) {
+                                  if (row.suggestions.length === 0) {
+                                    fetchSuggestions(idx, row.searchTerm);
+                                  } else {
+                                    setMedicineRows(prev => {
+                                      const updated = [...prev];
+                                      updated[idx] = { ...updated[idx], isOpen: true };
+                                      return updated;
+                                    });
+                                  }
                                 }
                               }}
-                              onChange={e => handleMedicineSearch(idx, e.target.value)}
+                              onChange={e => {
+                                const rect = e.currentTarget.getBoundingClientRect();
+                                if (window.innerHeight - rect.bottom < 230 && rect.top > 230) {
+                                  setDropUpIndex(idx);
+                                } else {
+                                  setDropUpIndex(null);
+                                }
+                                handleMedicineSearch(idx, e.target.value);
+                              }}
                               placeholder="Type to search inventory stock…"
                               className="w-full pl-9 pr-8 py-2.5 bg-bg2 border border-border rounded-xl text-xs text-text focus:outline-none focus:border-primary"
                             />
@@ -1927,7 +1950,11 @@ const RefillsSection: React.FC = () => {
 
                           {/* Dropdown Suggestions List */}
                           {row.isOpen && row.searchTerm.trim().length >= 2 && (
-                            <div className="absolute top-full left-0 right-0 z-30 mt-1 bg-bg2 border border-border rounded-xl shadow-2xl overflow-hidden max-h-56 overflow-y-auto">
+                            <div className={`absolute left-0 right-0 z-30 bg-bg2 border border-border rounded-xl shadow-2xl overflow-hidden max-h-56 overflow-y-auto backdrop-blur-xl ${
+                              dropUpIndex === idx
+                                ? 'bottom-full mb-1'
+                                : 'top-full mt-1'
+                            }`}>
                               {row.loadingSuggestions && (
                                 <div className="p-3 text-center text-xs text-muted flex items-center justify-center gap-2">
                                   <RefreshCw size={12} className="animate-spin" /> Fetching inventory…
@@ -1944,7 +1971,7 @@ const RefillsSection: React.FC = () => {
                                   <div
                                     key={s.id}
                                     onClick={() => selectMedicine(idx, s)}
-                                    className="px-3.5 py-2.5 hover:bg-bg3 cursor-pointer border-b border-border/40 last:border-none flex items-center justify-between gap-3 transition-colors"
+                                    className="px-3.5 py-2.5 hover:bg-primary/10 hover:border-l-2 hover:border-primary cursor-pointer border-b border-border/40 last:border-none flex items-center justify-between gap-3 transition-colors"
                                   >
                                     <div className="min-w-0 flex-1">
                                       <p className="text-xs font-semibold text-text truncate">{s.name}</p>
@@ -1953,6 +1980,11 @@ const RefillsSection: React.FC = () => {
                                       )}
                                     </div>
                                     <div className="flex items-center gap-2 shrink-0">
+                                      {s.location && (
+                                        <span className="text-[10px] px-1.5 py-0.5 rounded font-mono font-semibold bg-blue-500/15 text-blue-400 border border-blue-500/30">
+                                          📍 {s.location}
+                                        </span>
+                                      )}
                                       {s.mrp ? (
                                         <span className="text-[11px] font-medium text-text">₹{s.mrp}</span>
                                       ) : null}
@@ -4218,6 +4250,18 @@ const SpecialOrdersSection: React.FC = () => {
     }
   };
 
+  const [expandedCustomers, setExpandedCustomers] = useState<Record<string, boolean>>({});
+  const [expandAll, setExpandAll] = useState(false);
+
+  const toggleCustomer = (key: string) => {
+    setExpandedCustomers(prev => ({
+      ...prev,
+      [key]: prev[key] === undefined ? false : !prev[key]
+    }));
+  };
+
+  const isSearching = searchQuery.trim().length >= 2;
+
   const filteredOrders = orders.filter(o => {
     const q = searchQuery.toLowerCase().trim();
     const matchesSearch = !q || 
@@ -4238,7 +4282,8 @@ const SpecialOrdersSection: React.FC = () => {
     if (!matchesStatus) return false;
 
     let matchesDate = true;
-    if (dateFrom || dateTo) {
+    // Smart range expansion: search term auto-expands across all database history unless manual date is pinned
+    if (!isSearching && (dateFrom || dateTo)) {
       if (!o.date) {
         matchesDate = false;
       } else {
@@ -4251,6 +4296,242 @@ const SpecialOrdersSection: React.FC = () => {
     return matchesDate;
   });
 
+  // Group filtered orders by customer phone / requester
+  const customerGroups = React.useMemo(() => {
+    const groupsMap = new Map<string, {
+      key: string;
+      requester: string;
+      phone: string;
+      orders: SpecialOrderItem[];
+      activeOrders: SpecialOrderItem[];
+      pastOrders: SpecialOrderItem[];
+      activeCount: number;
+      arrivedCount: number;
+      totalAdvance: number;
+    }>();
+
+    filteredOrders.forEach(order => {
+      const cleanPhone = (order.phone || '').trim();
+      const cleanName = (order.requester || 'Walk-in Customer').trim();
+      const groupKey = cleanPhone || cleanName;
+
+      if (!groupsMap.has(groupKey)) {
+        groupsMap.set(groupKey, {
+          key: groupKey,
+          requester: cleanName,
+          phone: cleanPhone,
+          orders: [],
+          activeOrders: [],
+          pastOrders: [],
+          activeCount: 0,
+          arrivedCount: 0,
+          totalAdvance: 0
+        });
+      }
+
+      const group = groupsMap.get(groupKey)!;
+      group.orders.push(order);
+      if (order.advance_payment && Number(order.advance_payment) > 0) {
+        group.totalAdvance += Number(order.advance_payment);
+      }
+
+      if (order.status === 'Fulfilled' || order.status === 'Cancelled') {
+        group.pastOrders.push(order);
+      } else {
+        group.activeOrders.push(order);
+        group.activeCount++;
+        if (order.status === 'Ready' || order.status === 'Arrived') {
+          group.arrivedCount++;
+        }
+      }
+    });
+
+    return Array.from(groupsMap.values());
+  }, [filteredOrders]);
+
+  const renderOrderCard = (order: SpecialOrderItem) => {
+    const isArrived = order.status === 'Ready' || order.status === 'Arrived';
+    const isOrdered = order.status === 'Ordered';
+    const isPast = order.status === 'Fulfilled' || order.status === 'Cancelled';
+    const hasAdvance = order.advance_payment && Number(order.advance_payment) > 0;
+
+    return (
+      <div
+        key={order.id}
+        className={`p-3.5 rounded-xl border transition-all ${
+          isArrived
+            ? 'bg-emerald-500/5 border-emerald-500/30'
+            : order.status === 'Waiting'
+            ? 'bg-amber-500/5 border-amber-500/30'
+            : isOrdered
+            ? 'bg-indigo-500/5 border-indigo-500/30'
+            : isPast
+            ? 'bg-bg/40 border-border/40 opacity-75'
+            : 'bg-bg2 border-border hover:border-primary/40'
+        }`}
+      >
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          {/* Left Column: Product & Details */}
+          <div className="space-y-1 flex-1 min-w-[240px]">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h3 className="font-bold text-sm text-text">{order.product}</h3>
+              <span className="px-2 py-0.5 rounded-md bg-bg3 border border-border text-[11px] font-bold text-primary">
+                Qty: {order.qty}
+              </span>
+              {hasAdvance && (
+                <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-[10px] font-extrabold flex items-center gap-1">
+                  ✨ Advance: ₹{Number(order.advance_payment).toFixed(2)}
+                </span>
+              )}
+              {order.priority && (
+                <span className={`px-1.5 py-0.5 rounded-md text-[9px] font-bold ${
+                  order.priority === 'High' ? 'bg-red-500/15 text-red-400 border border-red-500/30' : 'bg-bg3 text-muted border border-border'
+                }`}>
+                  {order.priority}
+                </span>
+              )}
+              <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider ${
+                isArrived
+                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
+                  : order.status === 'Waiting'
+                  ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
+                  : isOrdered
+                  ? 'bg-indigo-500/20 text-indigo-400 border border-indigo-500/40'
+                  : isPast
+                  ? 'bg-zinc-500/20 text-muted border border-border'
+                  : 'bg-blue-500/15 text-blue-400 border border-blue-500/30'
+              }`}>
+                {order.status}
+              </span>
+
+              {order.notified === 1 && (
+                <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-bold flex items-center gap-1">
+                  <CheckCircle2 size={11} /> {order.notification_count && order.notification_count > 1 ? `Sent ${order.notification_count}x` : 'WA Sent'}
+                </span>
+              )}
+            </div>
+
+            <div className="flex items-center gap-3 text-xs text-muted flex-wrap">
+              {order.pharmarack_distributor && (
+                <span className="px-2 py-0.5 rounded-md bg-bg3/80 text-[10px] text-muted border border-border font-medium">
+                  Distributor: <strong className="text-text">{order.pharmarack_distributor}</strong>
+                </span>
+              )}
+              <span className="text-[10px]">
+                Logged: {formatDate(order.date)}
+              </span>
+            </div>
+          </div>
+
+          {/* Right Column: Status Action Bar */}
+          <div className="flex items-center gap-1.5 flex-wrap shrink-0">
+            {/* Sell Now Button */}
+            <button
+              onClick={() => handleSellSpecialOrder(order)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black shadow-sm shadow-emerald-500/20 transition-all hover:scale-105 active:scale-95 cursor-pointer"
+              title="Sell now: Transfers patient, medicine, quantity & advance credit directly to POS"
+            >
+              <ShoppingCart size={13} />
+              <span>⚡ Sell</span>
+            </button>
+
+            {/* WA Notification Button */}
+            {order.notified === 1 ? (
+              <button
+                onClick={() => handleNotifyArrival(order)}
+                disabled={notifyingId === order.id}
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold shadow-sm shadow-sky-500/20 transition-all hover:scale-105 active:scale-95 cursor-pointer disabled:opacity-50"
+                title="Re-send arrival reminder WhatsApp notification to customer"
+              >
+                <MessageCircle size={12} className={notifyingId === order.id ? 'animate-spin' : ''} />
+                <span>{notifyingId === order.id ? '...' : `Resend WA`}</span>
+              </button>
+            ) : (
+              <button
+                onClick={() => handleNotifyArrival(order)}
+                disabled={notifyingId === order.id}
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold shadow-sm shadow-sky-500/20 transition-all hover:scale-105 active:scale-95 cursor-pointer disabled:opacity-50"
+                title="Manually send WhatsApp arrival notification to customer"
+              >
+                <MessageCircle size={12} className={notifyingId === order.id ? 'animate-spin' : ''} />
+                <span>{notifyingId === order.id ? 'Sending...' : '📱 Ready'}</span>
+              </button>
+            )}
+
+            {/* Pending Button */}
+            {order.status !== 'Pending' && (
+              <button
+                onClick={() => handleUpdateStatus(order.id, 'Pending')}
+                disabled={updatingId === order.id}
+                className="flex items-center gap-1 px-2 py-1.5 rounded-xl bg-blue-500/10 border border-blue-500/30 text-blue-400 hover:bg-blue-500/20 text-xs font-semibold transition-all"
+                title="Set status to Pending"
+              >
+                <Clock size={11} />
+                <span>Pending</span>
+              </button>
+            )}
+
+            {/* Waiting Button */}
+            {order.status !== 'Waiting' && (
+              <button
+                onClick={() => handleUpdateStatus(order.id, 'Waiting')}
+                disabled={updatingId === order.id}
+                className="flex items-center gap-1 px-2 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 hover:bg-amber-500/20 text-xs font-semibold transition-all"
+                title="Set status to Waiting"
+              >
+                <Clock size={11} />
+                <span>Waiting</span>
+              </button>
+            )}
+
+            {/* Add to Pharmarack Cart */}
+            <button
+              onClick={() => handleAddToCart(order)}
+              disabled={addingCartId === order.id}
+              className="flex items-center gap-1 px-2 py-1.5 rounded-xl bg-primary/15 hover:bg-primary/25 border border-primary/40 text-primary text-xs font-bold transition-all disabled:opacity-50"
+              title="Push special request item directly to Pharmarack Cart"
+            >
+              <ShoppingCart size={12} className={addingCartId === order.id ? 'animate-spin' : ''} />
+              <span>Cart</span>
+            </button>
+
+            {/* Convert Refill */}
+            <button
+              onClick={() => handleConvertToRefill(order)}
+              disabled={convertingId === order.id}
+              className="flex items-center gap-1 px-2 py-1.5 rounded-xl bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-purple-400 text-xs font-semibold transition-all disabled:opacity-50"
+              title="Convert special order into recurring patient refill schedule"
+            >
+              <Repeat2 size={11} />
+              <span>Refill</span>
+            </button>
+
+            {/* Edit Button */}
+            <button
+              onClick={() => handleOpenEditModal(order)}
+              className="flex items-center gap-1 px-2 py-1.5 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 text-blue-400 text-xs font-bold transition-all cursor-pointer"
+              title="Edit Special Order Request details"
+            >
+              <Pencil size={11} />
+              <span>Edit</span>
+            </button>
+
+            {/* Cancel Button */}
+            <button
+              onClick={() => handleDeleteOrder(order.id, order.product)}
+              disabled={deletingId === order.id}
+              className="flex items-center gap-1 px-2 py-1.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 hover:text-red-300 text-xs font-bold transition-all disabled:opacity-50"
+              title="Cancel Special Order Request"
+            >
+              <Trash2 size={11} />
+              <span>{deletingId === order.id ? '...' : 'Cancel'}</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="flex flex-col h-full gap-3 overflow-hidden">
       {/* Top Controls & Action Bar */}
@@ -4261,7 +4542,7 @@ const SpecialOrdersSection: React.FC = () => {
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
             <input
               type="text"
-              placeholder="Search medicine, customer, phone, invoice, distributor..."
+              placeholder="Search medicine, customer, phone, distributor (auto-searches all history)..."
               value={searchQuery}
               onChange={e => {
                 const val = e.target.value;
@@ -4285,7 +4566,7 @@ const SpecialOrdersSection: React.FC = () => {
           </div>
         </div>
 
-        {/* Right: Date Range, Remind Uncollected, Refresh, New Request */}
+        {/* Right: Date Range, Fold Toggle, Remind Uncollected, Refresh, New Request */}
         <div className="flex items-center gap-2 flex-wrap">
           {/* Date Picker Controls */}
           <div className="flex items-center gap-1.5 bg-bg border border-border px-2.5 py-1 rounded-xl text-xs">
@@ -4330,6 +4611,22 @@ const SpecialOrdersSection: React.FC = () => {
             </button>
           </div>
 
+          {/* Fold / Unfold All Button */}
+          <button
+            onClick={() => {
+              const next = !expandAll;
+              setExpandAll(next);
+              const map: Record<string, boolean> = {};
+              customerGroups.forEach(g => { map[g.key] = next; });
+              setExpandedCustomers(map);
+            }}
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-bg3 hover:bg-bg border border-border text-muted hover:text-text text-xs font-semibold transition-all cursor-pointer"
+            title="Toggle folding for all customer groups"
+          >
+            {expandAll ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+            <span>{expandAll ? 'Fold All' : 'Unfold All'}</span>
+          </button>
+
           {/* Check Uncollected Orders Button */}
           <button
             onClick={handleScanUncollected}
@@ -4359,11 +4656,11 @@ const SpecialOrdersSection: React.FC = () => {
         </div>
       </div>
 
-      {/* Orders List Container */}
-      <div className="flex-1 overflow-y-auto pr-1 space-y-2.5">
+      {/* Orders List Container - Grouped by Customer with Collapsible Fold/Unfold */}
+      <div className="flex-1 overflow-y-auto pr-1 space-y-3">
         {loading && orders.length === 0 ? (
           <div className="p-12 text-center text-xs text-muted">Loading special requests...</div>
-        ) : filteredOrders.length === 0 ? (
+        ) : customerGroups.length === 0 ? (
           <div className="p-12 text-center flex flex-col items-center gap-2 text-xs text-muted bg-bg2/40 rounded-2xl border border-border/50">
             <span className="font-semibold text-text text-sm">No special requests found matching your filter.</span>
             {searchQuery.trim().length >= 2 && (
@@ -4382,208 +4679,82 @@ const SpecialOrdersSection: React.FC = () => {
             )}
           </div>
         ) : (
-          filteredOrders.map(order => {
-            const isArrived = order.status === 'Ready' || order.status === 'Arrived';
-            const isOrdered = order.status === 'Ordered';
-            const hasAdvance = order.advance_payment && Number(order.advance_payment) > 0;
+          customerGroups.map(group => {
+            const isExpanded = isSearching || (expandedCustomers[group.key] ?? true);
+
             return (
               <div
-                key={order.id}
-                className={`p-4 rounded-2xl border transition-all ${
-                  isArrived
-                    ? 'bg-emerald-500/5 border-emerald-500/30'
-                    : order.status === 'Waiting'
-                    ? 'bg-amber-500/5 border-amber-500/30'
-                    : isOrdered
-                    ? 'bg-indigo-500/5 border-indigo-500/30'
-                    : 'bg-bg2 border-border hover:border-primary/40'
-                }`}
+                key={group.key}
+                className="bg-bg2/80 rounded-2xl border border-border shadow-sm overflow-hidden transition-all"
               >
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  {/* Left Column: Product & Customer Info */}
-                  <div className="space-y-1.5 flex-1 min-w-[260px]">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <h3 className="font-bold text-sm text-text">{order.product}</h3>
-                      <span className="px-2 py-0.5 rounded-md bg-bg3 border border-border text-[11px] font-bold text-primary">
-                        Qty: {order.qty}
-                      </span>
-                      {hasAdvance && (
-                        <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-[11px] font-extrabold flex items-center gap-1">
-                          ✨ Advance Paid: ₹{Number(order.advance_payment).toFixed(2)}
-                        </span>
-                      )}
-                      {order.priority && (
-                        <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
-                          order.priority === 'High' ? 'bg-red-500/15 text-red-400 border border-red-500/30' : 'bg-bg3 text-muted border border-border'
-                        }`}>
-                          {order.priority}
-                        </span>
-                      )}
-                      <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider ${
-                        isArrived
-                          ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
-                          : order.status === 'Waiting'
-                          ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
-                          : isOrdered
-                          ? 'bg-indigo-500/20 text-indigo-400 border border-indigo-500/40'
-                          : 'bg-blue-500/15 text-blue-400 border border-blue-500/30'
-                      }`}>
-                        {order.status}
-                      </span>
-
-                      {/* Notified Badge */}
-                      {order.notified === 1 && (
-                        <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-bold flex items-center gap-1">
-                          <CheckCircle2 size={11} /> {order.notification_count && order.notification_count > 1 ? `Sent ${order.notification_count}x` : 'WA Sent'}
-                        </span>
-                      )}
+                {/* Customer Group Header (Fold/Unfold Bar) */}
+                <div
+                  onClick={() => toggleCustomer(group.key)}
+                  className="p-3 bg-bg3/40 hover:bg-bg3/70 border-b border-border/60 flex items-center justify-between gap-3 cursor-pointer transition-colors select-none"
+                >
+                  <div className="flex items-center gap-2.5 flex-wrap">
+                    <div className="w-7 h-7 rounded-lg bg-primary/15 text-primary flex items-center justify-center font-bold text-xs">
+                      <Users size={14} />
                     </div>
-
-                    <div className="flex items-center gap-3 text-xs text-muted flex-wrap">
-                      <span className="font-semibold text-text flex items-center gap-1">
-                        <Users size={12} className="text-primary" />
-                        {order.requester}
-                        <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-bg3 text-text border border-border ml-1">
-                          {order.language === 'hi' ? '🇮🇳 HI' : order.language === 'mr' ? '🇮🇳 MR' : '🇬🇧 EN'}
-                        </span>
+                    <span className="font-bold text-sm text-text">{group.requester}</span>
+                    {group.phone && (
+                      <span className="flex items-center gap-1 font-mono text-xs text-muted bg-bg px-2 py-0.5 rounded-md border border-border">
+                        <Phone size={11} className="text-muted" />
+                        {group.phone}
                       </span>
-                      <span className="flex items-center gap-1 font-mono">
-                        <Phone size={12} className="text-muted" />
-                        {order.phone}
+                    )}
+                    {group.activeCount > 0 && (
+                      <span className="px-2 py-0.5 rounded-full bg-blue-500/15 border border-blue-500/30 text-blue-400 text-[10px] font-bold">
+                        {group.activeCount} Active {group.activeCount === 1 ? 'Request' : 'Requests'}
                       </span>
-                      {order.pharmarack_distributor && (
-                        <span className="px-2 py-0.5 rounded-md bg-bg3/80 text-[11px] text-muted border border-border font-medium">
-                          Distributor: <strong className="text-text">{order.pharmarack_distributor}</strong>
-                        </span>
-                      )}
-                      <span className="text-[11px]">
-                        Logged: {formatDate(order.date)}
+                    )}
+                    {group.arrivedCount > 0 && (
+                      <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-[10px] font-bold flex items-center gap-1">
+                        <CheckCircle2 size={10} /> {group.arrivedCount} Ready
                       </span>
-                    </div>
+                    )}
+                    {group.pastOrders.length > 0 && (
+                      <span className="px-2 py-0.5 rounded-full bg-bg border border-border text-muted text-[10px] font-medium">
+                        {group.pastOrders.length} Past
+                      </span>
+                    )}
+                    {group.totalAdvance > 0 && (
+                      <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-[10px] font-bold">
+                        ✨ Advance: ₹{group.totalAdvance.toFixed(2)}
+                      </span>
+                    )}
                   </div>
 
-                  {/* Right Column: Complete Status Action Bar */}
-                  <div className="flex items-center gap-1.5 flex-wrap shrink-0">
-                    {/* Sell Now Button - Quick Handoff to POS */}
-                    <button
-                      onClick={() => handleSellSpecialOrder(order)}
-                      className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-black shadow-md shadow-emerald-500/20 transition-all hover:scale-105 active:scale-95 cursor-pointer"
-                      title="Sell now: Transfers patient, medicine, quantity & advance credit directly to POS"
-                    >
-                      <ShoppingCart size={14} />
-                      <span>⚡ Sell Now</span>
-                    </button>
-
-                    {/* Customer Notified Status / Manual Send WhatsApp Arrival Button */}
-                    {order.notified === 1 ? (
-                      <div className="flex items-center gap-1">
-                        <span className="px-2.5 py-1 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-bold flex items-center gap-1">
-                          <Check size={12} />
-                          <span>{order.notification_count && order.notification_count > 1 ? `Sent ${order.notification_count}x` : 'WA Sent'}</span>
-                        </span>
-                        <button
-                          onClick={() => handleNotifyArrival(order)}
-                          disabled={notifyingId === order.id}
-                          className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold shadow-md shadow-sky-500/20 transition-all hover:scale-105 active:scale-95 cursor-pointer disabled:opacity-50"
-                          title="Re-send arrival reminder WhatsApp notification to customer"
-                        >
-                          <MessageCircle size={12} className={notifyingId === order.id ? 'animate-spin' : ''} />
-                          <span>{notifyingId === order.id ? '...' : `Resend Ready • ${order.notification_count || 1}`}</span>
-                        </button>
-                      </div>
-                    ) : (
-                      <button
-                        onClick={() => handleNotifyArrival(order)}
-                        disabled={notifyingId === order.id}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold shadow-md shadow-sky-500/20 transition-all hover:scale-105 active:scale-95 cursor-pointer disabled:opacity-50"
-                        title="Manually send WhatsApp arrival notification to customer"
-                      >
-                        <MessageCircle size={13} className={notifyingId === order.id ? 'animate-spin' : ''} />
-                        <span>{notifyingId === order.id ? 'Sending...' : '📱 Mark Ready'}</span>
-                      </button>
-                    )}
-
-                    {/* Pending Status Button */}
-                    {order.status !== 'Pending' && (
-                      <button
-                        onClick={() => handleUpdateStatus(order.id, 'Pending')}
-                        disabled={updatingId === order.id}
-                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-blue-500/10 border border-blue-500/30 text-blue-400 hover:bg-blue-500/20 text-xs font-semibold transition-all"
-                        title="Set status to Pending"
-                      >
-                        <Clock size={12} />
-                        <span>Pending</span>
-                      </button>
-                    )}
-
-                    {/* Waiting Status Button */}
-                    {order.status !== 'Waiting' && (
-                      <button
-                        onClick={() => handleUpdateStatus(order.id, 'Waiting')}
-                        disabled={updatingId === order.id}
-                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 hover:bg-amber-500/20 text-xs font-semibold transition-all"
-                        title="Set status to Waiting"
-                      >
-                        <Clock size={12} />
-                        <span>Waiting</span>
-                      </button>
-                    )}
-
-                    {/* Add to Pharmarack Cart */}
-                    <button
-                      onClick={() => handleAddToCart(order)}
-                      disabled={addingCartId === order.id}
-                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-primary/15 hover:bg-primary/25 border border-primary/40 text-primary text-xs font-bold transition-all disabled:opacity-50"
-                      title="Push special request item directly to Pharmarack Cart"
-                    >
-                      <ShoppingCart size={13} className={addingCartId === order.id ? 'animate-spin' : ''} />
-                      <span>{addingCartId === order.id ? 'Adding...' : 'Cart'}</span>
-                    </button>
-
-                    {/* Convert Refill */}
-                    <button
-                      onClick={() => handleConvertToRefill(order)}
-                      disabled={convertingId === order.id}
-                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-purple-400 text-xs font-semibold transition-all disabled:opacity-50"
-                      title="Convert special order into recurring patient refill schedule"
-                    >
-                      <Repeat2 size={12} className={convertingId === order.id ? 'animate-spin' : ''} />
-                      <span>{convertingId === order.id ? '...' : 'Refill'}</span>
-                    </button>
-
-                    {/* Resend WA */}
-                    <button
-                      onClick={() => handleResendBooking(order)}
-                      disabled={resendingId === order.id}
-                      className="flex items-center gap-1 px-2 py-1.5 rounded-xl bg-bg3 border border-border text-muted hover:text-primary text-xs font-semibold transition-all"
-                      title="Resend booking confirmation WhatsApp"
-                    >
-                      <MessageCircle size={12} />
-                      <span>{resendingId === order.id ? 'Sending...' : 'WA'}</span>
-                    </button>
-
-                    {/* Edit Button */}
-                    <button
-                      onClick={() => handleOpenEditModal(order)}
-                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 text-blue-400 text-xs font-bold transition-all cursor-pointer"
-                      title="Edit Special Order Request details"
-                    >
-                      <Pencil size={12} />
-                      <span>Edit</span>
-                    </button>
-
-                    {/* Cancel Button */}
-                    <button
-                      onClick={() => handleDeleteOrder(order.id, order.product)}
-                      disabled={deletingId === order.id}
-                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 hover:text-red-300 text-xs font-bold transition-all disabled:opacity-50"
-                      title="Cancel Special Order Request"
-                    >
-                      <Trash2 size={12} />
-                      <span>{deletingId === order.id ? 'Deleting...' : 'Cancel'}</span>
-                    </button>
+                  <div className="flex items-center gap-2 text-muted text-xs">
+                    <span className="text-[11px] font-medium">
+                      {isExpanded ? 'Collapse' : `Expand (${group.orders.length})`}
+                    </span>
+                    {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
                   </div>
                 </div>
+
+                {/* Customer Orders Body */}
+                {isExpanded && (
+                  <div className="p-3 space-y-2">
+                    {/* Active Orders First */}
+                    {group.activeOrders.map(order => renderOrderCard(order))}
+
+                    {/* Past Fulfilled / Cancelled Orders (Tucked Inside If Any) */}
+                    {group.pastOrders.length > 0 && (
+                      <div className="pt-1">
+                        {group.activeOrders.length > 0 && (
+                          <div className="text-[10px] font-bold uppercase tracking-wider text-muted py-1 flex items-center gap-2">
+                            <span>Past Order History ({group.pastOrders.length})</span>
+                            <div className="flex-1 h-px bg-border/40" />
+                          </div>
+                        )}
+                        <div className="space-y-1.5">
+                          {group.pastOrders.map(order => renderOrderCard(order))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             );
           })

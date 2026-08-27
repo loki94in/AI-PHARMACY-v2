@@ -16,11 +16,22 @@ export class OrderFulfillmentService {
     return OrderFulfillmentService.instance;
   }
 
-  public start() {
+  public async start() {
     if (this.intervalId) return;
+
+    try {
+      const db = await dbManager.getConnection();
+      const autoRow = await db.get("SELECT value FROM app_settings WHERE key = 'automation_enabled'");
+      const refillRow = await db.get("SELECT value FROM app_settings WHERE key = 'trigger_refills_enabled'");
+      if (autoRow?.value === 'false' || refillRow?.value === 'false') {
+        console.log('[OrderFulfillmentService] Refill scheduler disabled in Settings.');
+        return;
+      }
+    } catch (_) {}
+
     console.log('[OrderFulfillmentService] Starting background refill scheduler (every hour)...');
     
-    // Run immediately on boot
+    // Run initial evaluation on boot
     this.checkRefillsAndGenerateOrders();
 
     // Check every hour. P3 gated worker: skip ticks while the user is idle
