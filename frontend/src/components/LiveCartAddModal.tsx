@@ -2058,7 +2058,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
                 </div>
                 <div>
                   <h3 className="text-base font-bold text-text flex items-center gap-1.5">
-                    Add to Live Cart
+                    Live Cart
                     <span className="text-[10px] bg-bg3 border border-border text-muted px-1.5 py-0.5 rounded font-mono">Alt + L</span>
                     {prMode !== 'Unknown' && (
                       <span className="text-[9px] font-bold px-2 py-0.5 rounded-full border leading-none bg-emerald-500/10 text-emerald-400 border-emerald-500/30">

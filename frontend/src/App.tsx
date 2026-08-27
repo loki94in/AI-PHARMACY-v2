@@ -102,45 +102,48 @@ function App() {
   }, [theme]);
 
   useEffect(() => {
-    // Prefetch all other page chunks in the background after initial render to make page transitions instant.
-    // Staggered in small batches (instead of firing all ~20 chunks at once) to avoid network saturation and
-    // to keep heavy, rarely-needed chunks (e.g. the Migration page's Framer Motion dependency) from loading
-    // immediately alongside everything else.
-    const PREFETCH_BATCH_SIZE = 5;
-    const PREFETCH_BATCH_DELAY_MS = 200;
+    // Prefetch page chunks in the background during idle moments to make page transitions instant.
+    // Scheduled via requestIdleCallback to avoid blocking the main thread or causing setTimeout violation warnings.
     const pageKeys = Object.keys(pageImports);
-    const batches: string[][] = [];
-    for (let i = 0; i < pageKeys.length; i += PREFETCH_BATCH_SIZE) {
-      batches.push(pageKeys.slice(i, i + PREFETCH_BATCH_SIZE));
-    }
+    let cancelled = false;
+    let idleHandle: any = null;
 
-    const batchTimers: ReturnType<typeof setTimeout>[] = [];
+    const scheduleIdle = (fn: () => void) => {
+      if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+        return (window as any).requestIdleCallback(fn, { timeout: 3000 });
+      }
+      return setTimeout(fn, 200);
+    };
 
-    const prefetchChunk = (key: string) =>
-      Promise.resolve()
-        .then(() => pageImports[key]())
-        .catch((err) => {
-          console.warn(`Failed to prefetch page chunk: ${key}`, err);
-        });
+    const cancelIdle = (id: any) => {
+      if (typeof window !== 'undefined' && 'cancelIdleCallback' in window) {
+        (window as any).cancelIdleCallback(id);
+      } else {
+        clearTimeout(id);
+      }
+    };
 
     const timer = setTimeout(() => {
-      batches.forEach((batch, batchIndex) => {
-        batchTimers.push(
-          setTimeout(() => {
-            Promise.all(batch.map(prefetchChunk));
-          }, batchIndex * PREFETCH_BATCH_DELAY_MS)
-        );
-      });
-    }, 1500);
-
-    // Data prefetch for key pages now rides the IDLE warm-mount gate below
-    // (first idle>45s + visible window) instead of firing unconditionally at
-    // T+8s on every boot — the ungated Reports sales prefetch full-scanned the
-    // invoices table on every startup whether or not /reports was ever opened.
+      let idx = 0;
+      const processNext = () => {
+        if (cancelled || idx >= pageKeys.length) return;
+        const key = pageKeys[idx++];
+        Promise.resolve()
+          .then(() => pageImports[key]())
+          .catch(() => {})
+          .finally(() => {
+            if (!cancelled) {
+              idleHandle = scheduleIdle(processNext);
+            }
+          });
+      };
+      idleHandle = scheduleIdle(processNext);
+    }, 2500);
 
     return () => {
+      cancelled = true;
       clearTimeout(timer);
-      batchTimers.forEach((t) => clearTimeout(t));
+      if (idleHandle) cancelIdle(idleHandle);
     };
   }, []);
 

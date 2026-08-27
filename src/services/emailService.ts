@@ -3201,7 +3201,8 @@ export class EmailService {
       host,
       port,
       tls,
-      authTimeout: 5000,
+      authTimeout: 15000,
+      connTimeout: 15000,
       tlsOptions: { rejectUnauthorized: false },
     };
 

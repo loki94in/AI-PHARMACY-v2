@@ -539,7 +539,7 @@ const NotificationPanel = ({
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h3 className="text-sm font-black text-text tracking-tight">Activity & Alerts</h3>
+                <h3 className="text-sm font-black text-text tracking-tight">Notifications</h3>
                 {unreadCount > 0 && (
                   <span className="px-2 py-0.5 rounded-full bg-sky-500/15 border border-sky-500/30 text-sky-400 text-[10px] font-extrabold">
                     {unreadCount} unread
