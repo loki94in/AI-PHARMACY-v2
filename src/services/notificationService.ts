@@ -273,6 +273,12 @@ export class NotificationService {
     try {
       db = await dbManager.getConnection();
 
+      const enabledRow = await db.get("SELECT value FROM app_settings WHERE key = 'trigger_wa_distributor_collection_enabled'");
+      if (enabledRow?.value === 'false') {
+        console.log(`[DistributorNotif] Distributor collection automation disabled — skipping notification for invoice ${invoiceNo}`);
+        return false;
+      }
+
       // 1. Find the purchase record that matches the invoice_no or app_invoice_no
       const purchase = await db.get(
         `SELECT p.id as purchase_id, p.invoice_no, d.id as distributor_id, d.name as distributor_name, d.phone as distributor_phone
@@ -428,6 +434,12 @@ export class NotificationService {
     let db = null;
     try {
       db = await dbManager.getConnection();
+
+      const enabledRow = await db.get("SELECT value FROM app_settings WHERE key = 'trigger_wa_single_distributor_order_enabled'");
+      if (enabledRow?.value === 'false') {
+        console.log(`[CartOrderNotif] Single distributor order automation disabled — skipping notification for ${storeName}`);
+        return { ok: false, sentCount: 0, suppressedCount: 0 };
+      }
 
       // 1. Find distributor phone from database
       const distributor = await db.get(

@@ -93,6 +93,13 @@ export async function runDailyDoctorReportsIfNeeded(): Promise<void> {
 
     if (!isAuto || !isWa) return;
 
+    // Check the doctor daily summary automation toggle (default-on)
+    const summaryEnabledRow = await db.get("SELECT value FROM app_settings WHERE key = 'trigger_wa_doctor_daily_summary_enabled'");
+    if (summaryEnabledRow?.value === 'false') {
+      console.log('[Doctor Reporting] Doctor daily summary automation disabled. Skipping.');
+      return;
+    }
+
     // Check last run date
     const settingKey = 'last_doctor_reports_sent_date';
     const lastSentRow = await db.get("SELECT value FROM app_settings WHERE key = ?", [settingKey]);

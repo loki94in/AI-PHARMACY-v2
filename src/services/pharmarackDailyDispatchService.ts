@@ -325,6 +325,12 @@ async function resolveDeliveryBoyPhones(db: any, orders: any[]): Promise<{ name:
 async function sendBatchToDeliveryBoys(db: any, orders: any[], isLate = false): Promise<void> {
   if (orders.length === 0) return;
 
+  const enabledRow = await db.get("SELECT value FROM app_settings WHERE key = 'trigger_wa_pharmarack_batch_enabled'");
+  if (enabledRow?.value === 'false') {
+    console.log('[PharmarackBatch] Pharmarack batch dispatch automation disabled — skipping send.');
+    return;
+  }
+
   try {
     const { ensureWhatsAppReady } = await import('../whatsappClient.js');
     await ensureWhatsAppReady(30000);

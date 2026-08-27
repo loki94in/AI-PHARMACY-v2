@@ -1914,10 +1914,12 @@ const QuickAssistSidebar = memo(({
         });
         toastEvent.trigger(`Consolidated refill reminder sent to ${group.patient_name}!`, 'success');
         whatsappQueueEvent.triggerUpdated();
+        automationHubEvent.triggerUpdated();
       } else {
         await Promise.all(group.medicines.map(m => api.sendRefillNow(m.id).catch(() => {})));
         toastEvent.trigger(`Refill reminder sent to ${group.patient_name}!`, 'success');
         whatsappQueueEvent.triggerUpdated();
+        automationHubEvent.triggerUpdated();
       }
       refillEvent.triggerRefresh();
       onActionComplete();
@@ -2027,6 +2029,7 @@ const QuickAssistSidebar = memo(({
           targetName: group.recipient_name
         });
         whatsappQueueEvent.triggerUpdated();
+        automationHubEvent.triggerUpdated();
       }
 
       // Mark staged notifications as sent manually

@@ -626,6 +626,10 @@ router.post('/', async (req, res) => {
         // Fire-and-forget: does NOT block the API response
         (async () => {
           try {
+            const posBillEnabledRow = await db.get("SELECT value FROM app_settings WHERE key = 'trigger_wa_pos_bill_enabled'");
+            if (posBillEnabledRow?.value === 'false') {
+              return;
+            }
             const { sendMessage } = await import('../whatsappClient.js');
 
             const formatDate = (dStr?: string) => {

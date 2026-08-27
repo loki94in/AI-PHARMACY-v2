@@ -97,14 +97,14 @@ export const AUTOMATION_CATALOG: AutomationCatalogEntry[] = [
     id: 'dispatch_reminder',
     label: 'Distributor Dispatch Reminder',
     description: 'Reminds a distributor when the delivery boy has not dropped off stock.',
-    appSettingsKey: 'trigger_wa_dispatch_reminder_enabled',
+    appSettingsKey: 'trigger_dispatch_reminder_enabled',
     defaultEnabled: true,
   },
   {
     id: 'monthly_report',
     label: 'Monthly / Periodic Report',
     description: 'Sends the owner scheduled periodic reports (text, PDF, or Excel).',
-    appSettingsKey: 'trigger_wa_monthly_report_enabled',
+    appSettingsKey: 'monthly_report_enabled',
     defaultEnabled: true,
   },
   {

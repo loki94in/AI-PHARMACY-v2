@@ -109,24 +109,40 @@ export default function AutomationHubPopover({ onClose }: AutomationHubPopoverPr
           <>
             <div className="p-4 space-y-2">
               <h3 className="text-[11px] font-bold text-muted uppercase tracking-wide">Automations</h3>
-              {catalog.map(entry => (
-                <div key={entry.id} className="p-3 rounded-xl bg-bg3/30 border border-border flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-xs font-bold text-text">{entry.label}</p>
-                    <p className="text-[11px] text-muted mt-0.5">{entry.description}</p>
+              {catalog.map(entry => {
+                const isNotYetActive = entry.id === 'medicine_discovery_suggestion';
+                return (
+                  <div key={entry.id} className="p-3 rounded-xl bg-bg3/30 border border-border flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <p className="text-xs font-bold text-text">{entry.label}</p>
+                        {isNotYetActive && (
+                          <span
+                            className="text-[9px] px-1.5 py-0.5 rounded-full font-bold bg-bg3 text-muted border border-border uppercase tracking-wide"
+                            title="This automation has no WhatsApp send implemented yet — this toggle currently has no effect."
+                          >
+                            Not yet active
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-muted mt-0.5">{entry.description}</p>
+                    </div>
+                    <label
+                      className={`relative inline-flex items-center shrink-0 ${isNotYetActive ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
+                      title={isNotYetActive ? 'Not yet functional — no WhatsApp send exists for this automation yet' : undefined}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={entry.enabled}
+                        disabled={togglingId === entry.id || isNotYetActive}
+                        onChange={() => handleToggle(entry)}
+                        className="sr-only peer"
+                      />
+                      <div className="w-9 h-5 bg-bg3 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-green-500"></div>
+                    </label>
                   </div>
-                  <label className="relative inline-flex items-center cursor-pointer shrink-0">
-                    <input
-                      type="checkbox"
-                      checked={entry.enabled}
-                      disabled={togglingId === entry.id}
-                      onChange={() => handleToggle(entry)}
-                      className="sr-only peer"
-                    />
-                    <div className="w-9 h-5 bg-bg3 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-green-500"></div>
-                  </label>
-                </div>
-              ))}
+                );
+              })}
             </div>
 
             <div className="p-4 pt-0 space-y-2">

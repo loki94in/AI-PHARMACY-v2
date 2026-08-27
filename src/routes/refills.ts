@@ -1291,6 +1291,11 @@ router.post('/:id/send', async (req, res) => {
     const custRow = await db.get('SELECT language FROM customers WHERE phone = ? OR phone = ? OR id = ? LIMIT 1', [cleanPhone, cleanDigits, refill.customer_id]);
     const lang = req.body?.language || refill.language || custRow?.language || 'en';
 
+    const refillReminderEnabledRow = await db.get("SELECT value FROM app_settings WHERE key = 'trigger_wa_refill_reminder_enabled'");
+    if (refillReminderEnabledRow?.value === 'false') {
+      return res.status(409).json({ error: 'Refill reminder automation is disabled. Enable it in the Automation Hub to send reminders.' });
+    }
+
     const msg = buildRefillReminderMessage(
       patientName,
       [{ medicine_name: refill.medicine_name || 'Prescribed Medicine', quantity_needed: refill.quantity_needed || 1 }],
@@ -1306,11 +1311,11 @@ router.post('/:id/send', async (req, res) => {
     );
 
     await db.run(
-      `UPDATE patient_refills 
-       SET status = 'notified', 
-           reminder_status = 'QUEUED', 
-           reminder_job_id = ?, 
-           reminder_occurrence_date = ? 
+      `UPDATE patient_refills
+       SET status = 'notified',
+           reminder_status = 'QUEUED',
+           reminder_job_id = ?,
+           reminder_occurrence_date = ?
        WHERE id = ?`,
       [queueId, refill.next_refill_date, id]
     );
@@ -1408,6 +1413,11 @@ router.post('/send-grouped', async (req, res) => {
     const cleanDigits = cleanPhone.replace(/^91/, '');
     const custRow = await db.get('SELECT language FROM customers WHERE phone = ? OR phone = ? LIMIT 1', [cleanPhone, cleanDigits]);
     const lang = req.body?.language || rows[0]?.language || custRow?.language || 'en';
+
+    const refillReminderEnabledRow = await db.get("SELECT value FROM app_settings WHERE key = 'trigger_wa_refill_reminder_enabled'");
+    if (refillReminderEnabledRow?.value === 'false') {
+      return res.status(409).json({ error: 'Refill reminder automation is disabled. Enable it in the Automation Hub to send reminders.' });
+    }
 
     const msg = buildRefillReminderMessage(
       patientName,
@@ -1517,6 +1527,11 @@ router.post('/send-tomorrow-reminder', async (req, res) => {
     const custRow = await db.get('SELECT language FROM customers WHERE phone = ? OR phone = ? LIMIT 1', [cleanPhone, cleanDigits]);
     const lang = req.body?.language || tomorrowRefills[0]?.language || custRow?.language || 'en';
 
+    const refillReminderEnabledRow = await db.get("SELECT value FROM app_settings WHERE key = 'trigger_wa_refill_reminder_enabled'");
+    if (refillReminderEnabledRow?.value === 'false') {
+      return res.status(409).json({ error: 'Refill reminder automation is disabled. Enable it in the Automation Hub to send reminders.' });
+    }
+
     const msg = buildRefillReminderMessage(
       patientName,
       unsent.map(r => ({ medicine_name: r.medicine_name, quantity_needed: r.quantity_needed })),
@@ -1615,6 +1630,11 @@ router.post('/send-reminder-now', async (req, res) => {
     const refillDate = unsentRows[0].next_refill_date
       ? new Date(unsentRows[0].next_refill_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
       : undefined;
+
+    const refillReminderEnabledRow = await db.get("SELECT value FROM app_settings WHERE key = 'trigger_wa_refill_reminder_enabled'");
+    if (refillReminderEnabledRow?.value === 'false') {
+      return res.status(409).json({ error: 'Refill reminder automation is disabled. Enable it in the Automation Hub to send reminders.' });
+    }
 
     const msg = buildRefillReminderMessage(
       patientName,
