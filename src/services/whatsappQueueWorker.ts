@@ -307,54 +307,6 @@ class WhatsAppQueueWorker {
       }
     }
 
-    // For delivery boy summary: Check if an existing delivery boy summary already exists today
-    if (type === 'delivery_boy_summary' || type.includes('delivery_boy')) {
-      const existingBoyItem = await db.get(
-        `SELECT id, status, message FROM whatsapp_send_queue
-         WHERE number = ? AND type LIKE '%delivery_boy%' AND created_at >= ?
-         ORDER BY id DESC LIMIT 1`,
-        [cleanPhone, startOfDayMs]
-      );
-      if (existingBoyItem) {
-        if (existingBoyItem.status === 'pending') {
-          // Update the pending summary with latest consolidated summary message
-          await db.run(
-            `UPDATE whatsapp_send_queue SET message = ?, created_at = ?, scheduled_at = ? WHERE id = ?`,
-            [message, now, scheduledAt, existingBoyItem.id]
-          );
-          console.log(`[Queue Safeguard] Updated existing pending delivery boy summary #${existingBoyItem.id} with latest totals for ${cleanPhone}.`);
-          if (scheduledAt <= now) {
-            this.triggerProcessing();
-          }
-          return existingBoyItem.id;
-        }
-      }
-    }
-
-    // For distributor order types: Check if an unsent pending queue item already exists for this distributor today
-    if (type.includes('distributor') || type.includes('pharmarack_distributor_order')) {
-      const existingPending = await db.get(
-        `SELECT id, message FROM whatsapp_send_queue 
-         WHERE number = ? AND status = 'pending' AND created_at >= ? AND (type LIKE '%distributor%' OR type LIKE '%pharmarack%')
-         ORDER BY id DESC LIMIT 1`,
-        [cleanPhone, startOfDayMs]
-      );
-
-      if (existingPending && existingPending.message !== message && !existingPending.message.includes(message.trim())) {
-        const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        const combinedMessage = `${existingPending.message}\n\n📦 *SAME-DAY ADDITION (${timeStr})*:\n${message}`;
-        await db.run(
-          `UPDATE whatsapp_send_queue SET message = ?, created_at = ? WHERE id = ?`,
-          [combinedMessage, now, existingPending.id]
-        );
-        console.log(`[Queue Concatenation] Merged new same-day order items into existing pending queue item #${existingPending.id} for ${cleanPhone}.`);
-        if (scheduledAt <= now) {
-          this.triggerProcessing();
-        }
-        return existingPending.id;
-      }
-    }
-
     const fileJsonStr = file ? JSON.stringify(file) : null;
 
     // Atomic dedup + insert: the WHERE NOT EXISTS runs inside the same statement as the INSERT,
@@ -564,6 +516,7 @@ class WhatsAppQueueWorker {
         if (item.type === 'refill_reminder') {
           await db.run("UPDATE patient_refills SET reminder_status = 'SENDING' WHERE reminder_job_id = ?", [item.id]).catch(() => {});
         }
+        this.broadcastQueueState(true);
 
         try {
           let fileObj: any = undefined;
@@ -622,6 +575,8 @@ class WhatsAppQueueWorker {
             ).catch(() => {});
           }
 
+          this.broadcastQueueState(true);
+
           const suppressedNote = sendResult.suppressed ? ' (duplicate suppressed)' : '';
           console.log(`[WhatsAppQueueWorker] Verified & sent message #${item.id} to ${item.number}${suppressedNote}`);
         } catch (err: any) {
@@ -653,6 +608,7 @@ class WhatsAppQueueWorker {
                 [item.id, String(item.id)]
               ).catch(() => {});
             }
+            this.broadcastQueueState(true);
             console.log(`[WhatsAppQueueWorker] Outbox match — marking #${item.id} as sent despite error: ${errMsg}`);
           } else {
             const newRetryCount = item.retry_count + 1;
@@ -678,6 +634,8 @@ class WhatsAppQueueWorker {
                 [errMsg, item.id, String(item.id)]
               ).catch(() => {});
             }
+
+            this.broadcastQueueState(true);
 
             // Log failure notification into automation_notifications if permanently failed
             if (newStatus === 'failed_perm') {
@@ -755,17 +713,22 @@ class WhatsAppQueueWorker {
   public async deleteItem(id: number): Promise<boolean> {
     const db = await dbManager.getConnection();
     try {
+      let changed = false;
       if (id >= 900000) {
         const realNotifId = id - 900000;
         const res = await db.run("DELETE FROM automation_notifications WHERE id = ?", [realNotifId]);
-        return (res.changes || 0) > 0;
+        changed = (res.changes || 0) > 0;
       } else if (id >= 800000) {
         // Direct message placeholder — no direct row to delete or ignore
-        return true;
+        changed = true;
       } else {
         const res = await db.run("DELETE FROM whatsapp_send_queue WHERE id = ?", [id]);
-        return (res.changes || 0) > 0;
+        changed = (res.changes || 0) > 0;
       }
+      if (changed) {
+        this.broadcastQueueState(this.isProcessing);
+      }
+      return changed;
     } catch (err) {
       console.warn('[WhatsAppQueueWorker] Could not delete item:', err);
       return false;
@@ -781,6 +744,9 @@ class WhatsAppQueueWorker {
       totalCleared += (res1.changes || 0);
       const res2 = await db.run("DELETE FROM automation_notifications WHERE status IN ('failed', 'error')");
       totalCleared += (res2.changes || 0);
+      if (totalCleared > 0) {
+        this.broadcastQueueState(this.isProcessing);
+      }
     } catch (err) {
       console.warn('[WhatsAppQueueWorker] Error clearing failed items:', err);
     }
@@ -804,6 +770,7 @@ class WhatsAppQueueWorker {
 
     const result = await db.run(sql, params);
     this.triggerProcessing();
+    this.broadcastQueueState(true);
     return (result.changes || 0) > 0;
   }
 

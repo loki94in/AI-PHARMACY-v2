@@ -7,6 +7,7 @@ describe('Centralized WhatsApp Queue System', () => {
     const db = await dbManager.getConnection();
     await db.run('DELETE FROM whatsapp_send_queue');
     await db.run('DELETE FROM automation_notifications');
+    await db.run("DELETE FROM app_settings WHERE key LIKE 'whatsapp_queue_pacing_%'");
     whatsappQueueWorker.setPaused(false);
   });
 

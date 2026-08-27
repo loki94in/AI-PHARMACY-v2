@@ -69,11 +69,11 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
     setExpandedIds(prev => ({ ...prev, [id]: !prev[id] }));
   };
 
-  const fetchStatus = async () => {
+  const fetchStatus = async (forceBypassCache = false) => {
     try {
       // Dedupe with Layout's active-queue poller: reuse its fresh result
-      // instead of hitting the same endpoint again within ~2.5s.
-      const cached = peekWhatsAppQueueStatusCache(2500);
+      // instead of hitting the same endpoint again within ~2.5s unless explicitly forced.
+      const cached = forceBypassCache ? null : peekWhatsAppQueueStatusCache(2500);
       const data = cached ?? await api.getWhatsAppQueueStatus();
       cachedQueueState = data;
       setQueueState(data);
@@ -106,7 +106,7 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
       data.isProcessing
     );
     if (active && !pollIntervalRef.current) {
-      pollIntervalRef.current = setInterval(fetchStatus, 2000);
+      pollIntervalRef.current = setInterval(() => fetchStatus(true), 2000);
     } else if (!active && pollIntervalRef.current) {
       clearInterval(pollIntervalRef.current);
       pollIntervalRef.current = null;
@@ -115,9 +115,9 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- sanctioned SSE queue-event refresh flow per AGENTS.md
-    fetchStatus();
-    const unsub = whatsappQueueEvent.subscribeUpdated(() => fetchStatus());
-    const handleSse = () => fetchStatus();
+    fetchStatus(true);
+    const unsub = whatsappQueueEvent.subscribeUpdated(() => fetchStatus(true));
+    const handleSse = () => fetchStatus(true);
     window.addEventListener('sse-wa-queue-updated', handleSse);
     return () => {
       if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
@@ -311,7 +311,13 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
   const isSpecialOrder = (t: string) => 
     t === 'special_order' || t === 'quick_order' || t === 'special_order_arrived' || t === 'quick_order_resend';
   const isPurchase = (t: string) => 
-    t === 'distributor' || t === 'distributor_collection' || t === 'pharmarack_batch' || t === 'purchase_order' || t === 'shortage_order';
+    t === 'distributor' || 
+    t === 'distributor_collection' || 
+    t === 'pharmarack_batch' || 
+    t === 'pharmarack_distributor_order' || 
+    t === 'distributor_cart_order' ||
+    t === 'purchase_order' || 
+    t === 'shortage_order';
   const isDelivery = (t: string) => 
     t === 'delivery_boy' || t === 'delivery_boy_summary' || t === 'delivery_staff' || t === 'dispatch';
   const isCustomer = (t: string) => 
@@ -322,52 +328,12 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
     const raw = item.target_name;
     if (isPurchase(item.type)) {
       // Numeric-only strings are store IDs, not user-friendly names
-      if (!raw || /^\d+$/.test(raw.trim())) return 'Purchase / Distributor';
+      if (!raw || /^\d+$/.test(raw.trim())) return 'Distributor';
       return raw;
     }
     if (isDelivery(item.type)) return raw || 'Delivery Staff';
     if (isSpecialOrder(item.type)) return raw || 'Special Order';
     return raw || 'Customer';
-  };
-
-  // Helper to consolidate multiple same-day delivery boy summary dispatches into a single entry
-  const consolidateDeliveryBoyItems = (rawItems: QueueItem[]): QueueItem[] => {
-    const deliveryByDate: Record<string, QueueItem[]> = {};
-    const result: QueueItem[] = [];
-
-    for (const item of rawItems) {
-      if (isDelivery(item.type)) {
-        const dKey = getDateKey(item.created_at);
-        deliveryByDate[dKey] = deliveryByDate[dKey] || [];
-        deliveryByDate[dKey].push(item);
-      } else {
-        result.push(item);
-      }
-    }
-
-    for (const dKey of Object.keys(deliveryByDate)) {
-      const dItems = deliveryByDate[dKey];
-      if (dItems.length <= 1) {
-        result.push(...dItems);
-      } else {
-        const primary = dItems.find(i => i.type === 'delivery_boy_summary') || dItems[0];
-        const distinctMsgs = Array.from(new Set(dItems.map(i => i.message.trim()).filter(Boolean)));
-        const combinedMessage = distinctMsgs.length > 1 ? distinctMsgs.join('\n\n━━━━━━━━━━━━━━━━━━━━\n\n') : primary.message;
-        const allSent = dItems.every(i => i.status === 'sent');
-        const anyPending = dItems.some(i => i.status === 'pending' || i.status === 'sending');
-        const anyFailed = dItems.some(i => i.status.includes('failed'));
-        const aggregatedStatus = anyPending ? 'pending' : (anyFailed ? 'failed_perm' : (allSent ? 'sent' : primary.status));
-
-        result.push({
-          ...primary,
-          message: combinedMessage,
-          status: aggregatedStatus,
-          target_name: `${primary.target_name || 'Delivery Staff'} (${dItems.length} dispatches consolidated)`
-        });
-      }
-    }
-
-    return result.sort((a, b) => b.created_at - a.created_at);
   };
 
   const filteredItems = items.filter(item => {
@@ -391,7 +357,7 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
     return true; // 'all' shows everything
   });
 
-  const preparedItems = consolidateDeliveryBoyItems(filteredItems);
+  const preparedItems = filteredItems;
   const todayStr = new Date().toISOString().split('T')[0];
 
   const todayItems = preparedItems.filter(i => getDateKey(i.created_at) === todayStr);
@@ -407,16 +373,15 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
 
   // Compute Today-specific counts for tab pills and stats
   const todayRawItems = items.filter(i => getDateKey(i.created_at) === todayStr);
-  const todayConsolidatedItems = consolidateDeliveryBoyItems(todayRawItems);
 
-  const todayAllCount = todayConsolidatedItems.length;
-  const todayCustomerCount = todayConsolidatedItems.filter(i => isCustomer(i.type)).length;
-  const todayDeliveryCount = todayConsolidatedItems.filter(i => isDelivery(i.type)).length;
-  const todayPurchaseCount = todayConsolidatedItems.filter(i => isPurchase(i.type)).length;
-  const todaySpecialCount = todayConsolidatedItems.filter(i => isSpecialOrder(i.type)).length;
-  const todayPendingCount = todayConsolidatedItems.filter(i => i.status === 'pending' || i.status === 'sending').length;
-  const todaySentCount = todayConsolidatedItems.filter(i => i.status === 'sent').length;
-  const todayFailedCount = todayConsolidatedItems.filter(i => i.status === 'failed_offline' || i.status === 'failed_perm').length;
+  const todayAllCount = todayRawItems.length;
+  const todayCustomerCount = todayRawItems.filter(i => isCustomer(i.type)).length;
+  const todayDeliveryCount = todayRawItems.filter(i => isDelivery(i.type)).length;
+  const todayPurchaseCount = todayRawItems.filter(i => isPurchase(i.type)).length;
+  const todaySpecialCount = todayRawItems.filter(i => isSpecialOrder(i.type)).length;
+  const todayPendingCount = todayRawItems.filter(i => i.status === 'pending' || i.status === 'sending').length;
+  const todaySentCount = todayRawItems.filter(i => i.status === 'sent').length;
+  const todayFailedCount = todayRawItems.filter(i => i.status === 'failed_offline' || i.status === 'failed_perm').length;
 
   const counts = queueState?.counts || { pending: 0, sending: 0, sent: 0, failed_offline: 0, failed_perm: 0 };
   const pendingTotal = todayPendingCount > 0 ? todayPendingCount : ((counts.pending || 0) + (counts.sending || 0));
@@ -432,10 +397,13 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
       );
     }
     if (isPurchase(type)) {
+      const label = type === 'pharmarack_distributor_order' || type === 'distributor_cart_order'
+        ? 'Distributor Order'
+        : 'Purchase / Distributor';
       return (
         <span className="text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/35 flex items-center gap-1 shrink-0">
           <Building2 size={9} className="text-amber-400" />
-          <span>Purchase / Distributor</span>
+          <span>{label}</span>
         </span>
       );
     }
