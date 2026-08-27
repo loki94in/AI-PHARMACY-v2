@@ -3260,6 +3260,8 @@ const POS = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- stale-closure guard reads live queue
   }, []);
 
+  const hasDoctorRx = selectedDoctorId != null && doctorSuggestions.length > 0;
+
   return (
     <div className="h-full flex flex-col fade-in overflow-hidden text-text">
 
@@ -3672,20 +3674,35 @@ const POS = () => {
             )}
             
             {!isSearchExpanded && !searchTerm ? (
-              <button
-                type="button"
-                onClick={() => {
-                  setIsSearchExpanded(true);
-                  setTimeout(() => focusMedicineSearch(), 50);
-                }}
-                className="premium-btn bg-bg2 border border-border/60 hover:border-primary/50 text-text transition-all flex items-center gap-1.5 px-3 h-8 rounded-lg shrink-0 font-medium group cursor-pointer"
-              >
-                <Search size={13} className="text-primary group-hover:scale-110 transition-transform" />
-                <span className="text-[11px] font-bold">Search Medicine</span>
-                <span className="text-[9px] font-mono font-bold bg-primary/15 border border-primary/30 px-1 py-0.5 rounded text-primary">
-                  F2 / Ctrl+K
-                </span>
-              </button>
+              hasDoctorRx ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsSearchExpanded(true);
+                    setTimeout(() => focusMedicineSearch(), 50);
+                  }}
+                  title="Search Medicine (F2 / Ctrl+K)"
+                  aria-label="Search Medicine"
+                  className="h-8 w-8 rounded-lg bg-bg2 border border-border/60 hover:border-primary/50 hover:bg-primary/10 text-primary transition-all flex items-center justify-center shrink-0 group cursor-pointer shadow-sm"
+                >
+                  <Search size={14} className="group-hover:scale-110 transition-transform" />
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsSearchExpanded(true);
+                    setTimeout(() => focusMedicineSearch(), 50);
+                  }}
+                  className="premium-btn bg-bg2 border border-border/60 hover:border-primary/50 text-text transition-all flex items-center gap-1.5 px-3 h-8 rounded-lg shrink-0 font-medium group cursor-pointer"
+                >
+                  <Search size={13} className="text-primary group-hover:scale-110 transition-transform" />
+                  <span className="text-[11px] font-bold">Search Medicine</span>
+                  <span className="text-[9px] font-mono font-bold bg-primary/15 border border-primary/30 px-1 py-0.5 rounded text-primary">
+                    F2 / Ctrl+K
+                  </span>
+                </button>
+              )
             ) : (
               <div className="flex items-center gap-2 w-full animate-in fade-in duration-200">
                 <div ref={productSearchRef} className="relative flex-1">
@@ -4094,25 +4111,50 @@ const POS = () => {
               </div>
             )}
 
-              {/* Doctor's commonly-prescribed medicines — quick-add chips (usual qty preset) */}
-              {selectedDoctorId != null && doctorSuggestions.length > 0 && (
-                <div className="flex items-center gap-1 min-w-0 max-w-[46%] overflow-x-auto scrollbar-thin shrink-0">
-                  <span className="text-[9px] font-black uppercase tracking-wider text-sky shrink-0">Dr. Rx:</span>
-                  {doctorSuggestions.slice(0, 8).map(s => (
-                    <button
-                      key={s.id}
-                      type="button"
-                      onClick={() => handleDoctorSuggestionClick(s)}
-                      title={`Prescribed ${s.frequency || 1}× by Dr. ${doctor} — usual qty ${s.most_common_qty || 1}${s.most_common_loose_qty ? ` +${s.most_common_loose_qty} loose` : ''}`}
-                      className="flex items-center gap-1 px-2 py-1 rounded-lg bg-sky/10 border border-sky/25 text-sky hover:bg-sky/20 hover:border-sky/40 transition-all text-[10px] font-bold whitespace-nowrap shrink-0 cursor-pointer"
-                    >
-                      <span className="truncate max-w-[120px]">{s.name}</span>
-                      <span className="font-mono text-primary">×{s.most_common_qty || 1}{s.most_common_loose_qty ? `+${s.most_common_loose_qty}` : ''}</span>
-                    </button>
-                  ))}
+            {/* Doctor's commonly-prescribed medicines — quick-add chips (utilizes all available space) */}
+            {hasDoctorRx && !isSearchExpanded && (
+              <div
+                tabIndex={0}
+                onWheel={(e) => {
+                  if (e.deltaY !== 0) {
+                    e.currentTarget.scrollLeft += e.deltaY;
+                  }
+                }}
+                className="flex-1 min-w-0 flex items-center gap-1.5 overflow-x-auto scrollbar-thin py-0.5 px-1 bg-sky/5 rounded-xl border border-sky/15 focus:outline-none focus:ring-1 focus:ring-sky/40 transition-all cursor-grab active:cursor-grabbing select-none"
+                title="Doctor's commonly prescribed medicines. Scroll with mouse wheel or trackpad to view all."
+              >
+                <div className="flex items-center gap-1 px-2 py-1 rounded-lg bg-sky/20 border border-sky/30 text-sky text-[9px] font-black uppercase tracking-wider shrink-0 select-none">
+                  <span className="h-1.5 w-1.5 rounded-full bg-sky animate-pulse" />
+                  <span>Dr. Rx ({doctorSuggestions.length}):</span>
                 </div>
-              )}
+                {doctorSuggestions.map(s => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => handleDoctorSuggestionClick(s)}
+                    title={`Prescribed ${s.frequency || 1}× by Dr. ${doctor} — usual qty ${s.most_common_qty || 1}${s.most_common_loose_qty ? ` +${s.most_common_loose_qty} loose` : ''}`}
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-bg2/90 hover:bg-sky/20 border border-sky/25 text-text hover:text-sky hover:border-sky/40 transition-all text-[11px] font-semibold whitespace-nowrap shrink-0 cursor-pointer shadow-xs group"
+                  >
+                    <span className="truncate max-w-[150px] group-hover:font-bold">{s.name}</span>
+                    <span className="font-mono text-primary bg-primary/10 border border-primary/20 px-1 py-0.2 rounded text-[10px] font-bold">
+                      ×{s.most_common_qty || 1}{s.most_common_loose_qty ? `+${s.most_common_loose_qty}` : ''}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
 
+            {hasDoctorRx ? (
+              <button
+                type="button"
+                aria-label="AI Camera Scan"
+                title="AI Camera Scan"
+                onClick={() => setShowCamera(true)}
+                className="h-8 w-8 rounded-lg bg-gradient-to-r from-primary to-teal-500 text-white shadow-[0_2px_8px_rgba(59,130,246,0.2)] hover:shadow-[0_4px_12px_rgba(59,130,246,0.3)] hover:scale-[1.05] active:scale-[0.95] transition-all flex items-center justify-center shrink-0 cursor-pointer"
+              >
+                <Camera size={14} />
+              </button>
+            ) : (
               <button
                 type="button"
                 aria-label="AI Camera Scan"
@@ -4122,7 +4164,8 @@ const POS = () => {
                 <Camera size={13} />
                 <span>AI Camera Scan</span>
               </button>
-            </div>
+            )}
+          </div>
 
           {/* B. Cart Panel - Takes up all remaining height */}
           <div className="flex-1 glass-panel flex flex-col overflow-hidden bg-glass-bg border-glass-border relative z-10 min-h-0 min-w-0 shadow-md w-full">
