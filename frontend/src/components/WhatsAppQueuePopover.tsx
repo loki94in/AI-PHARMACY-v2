@@ -322,6 +322,11 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
     t === 'delivery_boy' || t === 'delivery_boy_summary' || t === 'delivery_staff' || t === 'dispatch';
   const isCustomer = (t: string) => 
     !isPurchase(t) && !isDelivery(t) && !isSpecialOrder(t);
+  const isFailedStatus = (status?: string) => {
+    if (!status) return false;
+    const s = status.toLowerCase();
+    return s.includes('fail') || s === 'review_required' || s === 'error';
+  };
 
   // If target_name is a raw numeric string (store ID leaked in), fall back gracefully
   const resolveDisplayName = (item: QueueItem): string => {
@@ -353,7 +358,7 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
     if (activeTab === 'special') return isSpecialOrder(item.type);
     if (activeTab === 'pending') return item.status === 'pending' || item.status === 'sending';
     if (activeTab === 'sent') return item.status === 'sent';
-    if (activeTab === 'failed') return item.status === 'failed_offline' || item.status === 'failed_perm';
+    if (activeTab === 'failed') return isFailedStatus(item.status);
     return true; // 'all' shows everything
   });
 
@@ -381,7 +386,7 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
   const todaySpecialCount = todayRawItems.filter(i => isSpecialOrder(i.type)).length;
   const todayPendingCount = todayRawItems.filter(i => i.status === 'pending' || i.status === 'sending').length;
   const todaySentCount = todayRawItems.filter(i => i.status === 'sent').length;
-  const todayFailedCount = todayRawItems.filter(i => i.status === 'failed_offline' || i.status === 'failed_perm').length;
+  const todayFailedCount = todayRawItems.filter(i => isFailedStatus(i.status)).length;
 
   const counts = queueState?.counts || { pending: 0, sending: 0, sent: 0, failed_offline: 0, failed_perm: 0 };
   const pendingTotal = todayPendingCount > 0 ? todayPendingCount : ((counts.pending || 0) + (counts.sending || 0));
@@ -1034,9 +1039,9 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
 
                   {olderDates.map(dateKey => {
                     const dateItems = olderDateGroups[dateKey] || [];
-                    const isDateExpanded = Boolean(expandedDates[dateKey]);
+                    const isDateExpanded = Boolean(expandedDates[dateKey]) || activeTab === 'failed' || activeTab === 'pending';
                     const dateSent = dateItems.filter(i => i.status === 'sent').length;
-                    const dateFailed = dateItems.filter(i => i.status.includes('failed')).length;
+                    const dateFailed = dateItems.filter(i => isFailedStatus(i.status)).length;
                     const datePending = dateItems.filter(i => i.status === 'pending' || i.status === 'sending').length;
 
                     return (

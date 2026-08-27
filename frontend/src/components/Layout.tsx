@@ -140,7 +140,7 @@ const Sidebar = memo(({
   const hoverPrefetchControl = useFetchMode('layout.hoverPrefetch');
   const menuItems = [
     { path: '/pos', label: 'Sales / POS', icon: <ShoppingCart size={18} /> },
-    { path: '/sells', label: 'Sales History / Bills', icon: <Receipt size={18} /> },
+    { path: '/sells', label: 'Sell', icon: <Receipt size={18} /> },
     { path: '/inventory', label: 'Inventory', icon: <PackageSearch size={18} /> },
     { path: '/purchase-history', label: 'Purchase History', icon: <ClipboardList size={18} /> },
     { path: '/purchases', label: 'Purchases', icon: <Receipt size={18} /> },
@@ -541,8 +541,9 @@ const NotificationPanel = ({
               <div className="flex items-center gap-2">
                 <h3 className="text-sm font-black text-text tracking-tight">Notifications</h3>
                 {unreadCount > 0 && (
-                  <span className="px-2 py-0.5 rounded-full bg-sky-500/15 border border-sky-500/30 text-sky-400 text-[10px] font-extrabold">
-                    {unreadCount} unread
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-sky-500/10 border border-sky-500/30 text-sky-400 text-[10px] font-extrabold tracking-wide shadow-sm shadow-sky-500/10">
+                    <span className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-pulse" />
+                    <span>{unreadCount} unread</span>
                   </span>
                 )}
               </div>
@@ -624,9 +625,9 @@ const NotificationPanel = ({
                   : 'text-muted hover:text-text hover:bg-bg3'
                 }`}
             >
-              Unread
+              <span>Unread</span>
               {unreadCount > 0 && (
-                <span className="px-1.5 py-0.2 rounded-md bg-sky-500/20 text-sky-400 text-[10px] font-black">
+                <span className="px-1.5 py-0.5 rounded-full bg-sky-500/15 text-sky-400 text-[10px] font-extrabold font-mono leading-none border border-sky-500/30">
                   {unreadCount}
                 </span>
               )}
@@ -1732,7 +1733,7 @@ const Topbar = memo(({
           <button
             onClick={() => quickOrderEvent.triggerOpen()}
             onMouseEnter={() => api.warmupPharmarackSession()}
-            className="p-2 text-muted hover:text-white transition-colors flex items-center justify-center relative hover:bg-white/5 rounded-xl cursor-pointer"
+            className="p-2 rounded-xl transition-all duration-200 flex items-center justify-center border border-glass-border bg-glass-bg text-muted hover:text-text hover:bg-bg3/60 cursor-pointer relative"
             title="Quick Special Request (Alt+O)"
             aria-label="Quick special request"
           >
@@ -1743,7 +1744,7 @@ const Topbar = memo(({
           <button
             onClick={() => liveCartAddEvent.triggerOpen()}
             onMouseEnter={() => api.warmupPharmarackSession()}
-            className="p-2 text-muted hover:text-white transition-colors flex items-center justify-center relative hover:bg-white/5 rounded-xl cursor-pointer"
+            className="p-2 rounded-xl transition-all duration-200 flex items-center justify-center border border-glass-border bg-glass-bg text-muted hover:text-text hover:bg-bg3/60 cursor-pointer relative"
             title="Live Cart Add (Alt+L)"
             aria-label="Live cart"
           >
@@ -1818,21 +1819,11 @@ const Topbar = memo(({
           {/* Theme toggle */}
           <button
             onClick={() => setTheme(prev => prev === 'light' ? 'dark' : 'light')}
-            className="p-2 text-muted hover:text-white transition-colors flex items-center justify-center hover:bg-white/5 rounded-xl cursor-pointer"
+            className="p-2 rounded-xl transition-all duration-200 flex items-center justify-center border border-glass-border bg-glass-bg text-muted hover:text-text hover:bg-bg3/60 cursor-pointer"
             aria-label="Toggle theme"
             title={theme === 'light' ? 'Switch to Night Mode' : 'Switch to Day Mode'}
           >
             {theme === 'light' ? <Sun size={18} /> : <Moon size={18} />}
-          </button>
-
-          {/* Settings Page Button */}
-          <button
-            onClick={() => navigate('/settings')}
-            className="p-2 text-muted hover:text-white transition-colors flex items-center justify-center hover:bg-white/5 rounded-xl cursor-pointer"
-            aria-label="Settings"
-            title="Settings & Configuration"
-          >
-            <SettingsIcon size={18} />
           </button>
         </div>
       </header>
