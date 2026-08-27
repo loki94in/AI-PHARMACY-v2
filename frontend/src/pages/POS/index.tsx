@@ -2516,7 +2516,7 @@ const POS = () => {
     }
 
     const defaultQty = opts?.presetQty ?? (originalItem?.isEmptyRow ? 1 : ((originalItem?.qty ?? 0) || 1));
-    const defaultLooseQty = opts?.presetLooseQty ?? 0;
+    const defaultLooseQty = opts?.presetLooseQty ?? (originalItem?.isEmptyRow ? 0 : (originalItem?.looseQty ?? 0));
     const compactInventory = getCompactInventoryCache();
     const allocated = allocateMedicineBatches({
       medicineId: Number(med.medicine_id || (typeof med.id === 'number' && med.id < 1000000000 ? med.id : 0)),
@@ -4276,10 +4276,14 @@ const POS = () => {
                                   setActiveRowSearchIndex(idx);
                                   setRowSearchTerm(val);
                                 }}
-                                onFocus={() => {
+                                onFocus={e => {
                                   const idx = cart.indexOf(item);
                                   setActiveRowSearchIndex(idx);
-                                  setRowSearchTerm('');
+                                  const currentName = item.isEmptyRow ? '' : (item.name || '');
+                                  setRowSearchTerm(currentName);
+                                  if (!item.isEmptyRow) {
+                                    (e.target as HTMLInputElement).select?.();
+                                  }
                                 }}
                                 onBlur={() => {
                                   setTimeout(() => {
@@ -4287,7 +4291,7 @@ const POS = () => {
                                     setRowSearchTerm('');
                                     setRowSearchResults([]);
                                     setRowSearchHighlightIndex(-1);
-                                  }, 200);
+                                  }, 250);
                                 }}
                                 onKeyDown={e => {
                                   const idx = cart.indexOf(item);
@@ -4348,12 +4352,27 @@ const POS = () => {
                                         }}
                                         className={`flex flex-col p-2.5 hover:bg-bg3 border-b border-border/10 text-left transition-all text-xs w-full ${isRowHighlighted ? 'bg-primary/10 border-l-2 border-primary' : ''}`}
                                       >
-                                        <div className="flex items-center gap-1.5 flex-wrap">
-                                          <span className="font-semibold text-text">{med.medicine_name}</span>
-                                          {rowHasPending && (
-                                            <span className="inline-flex items-center gap-1 bg-amber-500/10 border border-amber-500/30 text-amber-500 px-1.5 py-0.5 rounded text-[11px] font-bold animate-pulse">
-                                              ⚠️ {rowPendingMatches[0].requester} ({rowPendingMatches[0].qty})
-                                            </span>
+                                        <div className="flex items-center justify-between gap-1">
+                                          <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+                                            <span className="font-semibold text-text truncate">{med.medicine_name}</span>
+                                            {rowHasPending && (
+                                              <span className="inline-flex items-center gap-1 bg-amber-500/10 border border-amber-500/30 text-amber-500 px-1.5 py-0.5 rounded text-[11px] font-bold animate-pulse">
+                                                ⚠️ {rowPendingMatches[0].requester} ({rowPendingMatches[0].qty})
+                                              </span>
+                                            )}
+                                          </div>
+                                          {med.medicine_id && (
+                                            <button
+                                              type="button"
+                                              title="Quick Edit in Universal Medicine Editor"
+                                              onMouseDown={(e) => {
+                                                e.stopPropagation();
+                                                setEditMedicineId(Number(med.medicine_id));
+                                              }}
+                                              className="p-1 rounded bg-bg3/60 hover:bg-bg3 border border-border/40 text-muted hover:text-text transition-all shrink-0 cursor-pointer"
+                                            >
+                                              <Edit size={11} />
+                                            </button>
                                           )}
                                         </div>
                                         <span className="text-[11px] text-muted font-mono mt-0.5">Batch: {med.batch_no} | Exp: {med.expiry_date}</span>
