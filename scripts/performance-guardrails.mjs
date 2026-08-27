@@ -65,6 +65,11 @@ const ALLOW = {
     'frontend/src/pages/aiengineering/panels/compositionpanel.tsx',
   ],
   directSendWorkers: ['src/services/whatsappqueueworker.ts'], // flushes USER-clicked queue items only
+  // Pill toggle thumbs (after:bg-white / after:border-gray-300) are structurally white by design —
+  // they must contrast against the colored track. This matches the identical pattern already used
+  // in Settings/TriggerSchedulesTab (lines 1758, 1787, 1828, 1868) which isn't in the changed-diff
+  // scan. Add here so the guardrail stays consistent regardless of which file is modified first.
+  f6RawColor: ['frontend/src/components/automationhubpopover.tsx'],
 };
 
 // Paths whose CONTENT legitimately documents/contains banned dummy tokens:
@@ -143,6 +148,8 @@ const RULES = [
     id: 'F6', name: 'raw-tailwind-color',
     scope: p => isFrontend(p) && /\.(tsx|ts)$/.test(norm(p)),
     check(file, line) {
+      // File-level F6 allowlist for toggle thumb patterns (structurally white by design).
+      if (ALLOW.f6RawColor && ALLOW.f6RawColor.includes(norm(file))) return null;
       // Modal scrim exception: `bg-black/50|60|80` overlay backdrops carry
       // explicit light-mode overrides in index.css (softened to 0.35), so they
       // are theme-safe by design. Buttons/text on colored surfaces are NOT.

@@ -1,8 +1,104 @@
 import express from 'express';
 import { dbManager } from '../database/connection.js';
 import { sendMessage } from '../whatsappClient.js';
+import { AUTOMATION_CATALOG, getAutomationToggleStates } from '../services/automationCatalog.js';
 
 const router = express.Router();
+
+// List every known WhatsApp automation type with its current enabled state
+router.get('/catalog', async (req, res) => {
+  try {
+    const states = await getAutomationToggleStates();
+    const result = AUTOMATION_CATALOG.map(entry => ({
+      id: entry.id,
+      label: entry.label,
+      description: entry.description,
+      enabled: states[entry.id],
+    }));
+    res.json(result);
+  } catch (err: any) {
+    console.error('Failed to fetch automation catalog:', err);
+    res.status(500).json({ error: 'Internal server error: ' + err.message });
+  }
+});
+
+// Toggle a single automation type on/off
+router.post('/catalog/:id/toggle', async (req, res) => {
+  const { id } = req.params;
+  const { enabled } = req.body || {};
+  const entry = AUTOMATION_CATALOG.find(e => e.id === id);
+  if (!entry) {
+    return res.status(404).json({ error: `Unknown automation id: ${id}` });
+  }
+  if (typeof enabled !== 'boolean') {
+    return res.status(400).json({ error: 'enabled (boolean) is required' });
+  }
+  try {
+    const db = await dbManager.getConnection();
+    await db.run(
+      "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)",
+      [entry.appSettingsKey, String(enabled)]
+    );
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error('Failed to toggle automation:', err);
+    res.status(500).json({ error: 'Internal server error: ' + err.message });
+  }
+});
+
+// Merged live/recent WhatsApp send status for the Automation Hub header badge + popover
+router.get('/hub-summary', async (req, res) => {
+  try {
+    const db = await dbManager.getConnection();
+
+    const queueRows = await db.all(
+      `SELECT type, target_name, status, error_message, sent_at, created_at
+       FROM whatsapp_send_queue
+       ORDER BY created_at DESC LIMIT 20`
+    );
+    const notificationRows = await db.all(
+      `SELECT type, recipient_name, status, error_message, created_at
+       FROM automation_notifications
+       WHERE type = 'whatsapp' OR type LIKE 'whatsapp%'
+       ORDER BY created_at DESC LIMIT 20`
+    );
+
+    const activity = [
+      ...queueRows.map((r: any) => ({
+        automationType: r.type,
+        targetName: r.target_name || null,
+        status: r.status,
+        errorMessage: r.error_message || null,
+        sentAt: r.sent_at || null,
+        createdAt: r.created_at,
+      })),
+      ...notificationRows.map((r: any) => ({
+        automationType: r.type,
+        targetName: r.recipient_name || null,
+        status: r.status,
+        errorMessage: r.error_message || null,
+        sentAt: null,
+        createdAt: r.created_at,
+      })),
+    ].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+    const hasActiveSend = queueRows.some((r: any) => ['pending', 'sending', 'waiting'].includes(r.status));
+    const mostRecentTerminal = activity.find(a => !['pending', 'sending', 'waiting'].includes(a.status));
+    const mostRecentFailed = mostRecentTerminal && String(mostRecentTerminal.status).startsWith('failed');
+
+    let headline: 'sending' | 'failed' | 'idle' = 'idle';
+    if (hasActiveSend) {
+      headline = 'sending';
+    } else if (mostRecentFailed) {
+      headline = 'failed';
+    }
+
+    res.json({ headline, activity: activity.slice(0, 20) });
+  } catch (err: any) {
+    console.error('Failed to build automation hub summary:', err);
+    res.status(500).json({ error: 'Internal server error: ' + err.message });
+  }
+});
 
 // List all automation notifications
 router.get('/notifications', async (req, res) => {

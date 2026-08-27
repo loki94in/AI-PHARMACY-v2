@@ -152,6 +152,20 @@ export type {
   AutomationNotification
 };
 
+export interface AutomationHubActivityItem {
+  automationType: string;
+  targetName: string | null;
+  status: string;
+  errorMessage: string | null;
+  sentAt: number | null;
+  createdAt: string;
+}
+
+export interface AutomationHubSummary {
+  headline: 'sending' | 'failed' | 'idle';
+  activity: AutomationHubActivityItem[];
+}
+
 
 const COMPACT_INVENTORY_SESSION_KEY = 'pharmacy_compact_inventory_v1';
 
@@ -1335,6 +1349,9 @@ export const api = {
   retryNotification: (id: number) => apiClient.post(`/automation/notifications/${id}/retry`).then(res => res.data),
   cancelNotification: (id: number) => apiClient.post(`/automation/notifications/${id}/cancel`).then(res => res.data),
   manualNotification: (id: number) => apiClient.post(`/automation/notifications/${id}/manual`).then(res => res.data),
+  getAutomationCatalog: () => apiClient.get<Array<{ id: string; label: string; description: string; enabled: boolean }>>('/automation/catalog').then(res => res.data),
+  setAutomationToggle: (id: string, enabled: boolean) => apiClient.post<{ success: boolean }>(`/automation/catalog/${id}/toggle`, { enabled }).then(res => res.data),
+  getAutomationHubSummary: () => apiClient.get<AutomationHubSummary>('/automation/hub-summary').then(res => res.data),
 
   // Investigation Center
   searchInvestigation: (params: InvestigationSearchParams) => apiClient.get('/investigation/search', { params }).then(res => res.data),
@@ -1404,7 +1421,7 @@ export const api = {
   retryFailedWhatsAppQueue: () => apiClient.post<{ success: boolean; retriedCount: number; message: string }>('/whatsapp/queue/retry-failed').then(res => res.data),
   resendWhatsAppQueueItem: (id: number, payload?: { number?: string; message?: string; targetName?: string }) => apiClient.post<{ success: boolean; queueId: number; message: string }>(`/whatsapp/queue/items/${id}/resend`, payload).then(res => res.data),
   updateWhatsAppPacingConfig: (minSec: number, maxSec: number) => apiClient.post<{ success: boolean; minSec?: number; maxSec?: number; preset?: string; message: string }>('/whatsapp/queue/pacing', { minSec, maxSec }).then(res => res.data),
-  setWhatsAppQueuePacingPreset: (preset: 'turbo' | 'fast' | 'safe') => apiClient.post<{ success: boolean; preset: string; minMs: number; maxMs: number; message: string; state: WhatsAppQueueStatus | null }>('/whatsapp/queue/pacing', { preset }).then(res => res.data),
+  setWhatsAppQueuePacingPreset: (preset: 'safe') => apiClient.post<{ success: boolean; preset: string; minMs: number; maxMs: number; message: string; state: WhatsAppQueueStatus | null }>('/whatsapp/queue/pacing', { preset }).then(res => res.data),
   updateWhatsAppQueueItem: (data: { id: number; number: string; message?: string }) => apiClient.put<{ success: boolean; message: string }>('/whatsapp/queue/update-item', data).then(res => res.data),
   deleteWhatsAppQueueItem: (id: number) => apiClient.delete<{ success: boolean; deleted: boolean; message: string }>(`/whatsapp/queue/item/${id}`).then(res => res.data),
   clearFailedWhatsAppQueue: () => apiClient.post<{ success: boolean; clearedCount: number; message: string }>('/whatsapp/queue/clear-failed').then(res => res.data),

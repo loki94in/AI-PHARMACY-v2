@@ -3,35 +3,14 @@ import { createPortal } from 'react-dom';
 import {
   X, RefreshCw, Send, AlertTriangle, CheckCircle2, Clock,
   WifiOff, Edit3, Play, Pause, ShieldAlert, ChevronDown, ChevronUp, Zap, Truck, Building2, MessageSquare, Calendar, Trash2, CheckCheck,
-  Moon, Loader2
+  Moon, Loader2, ShieldCheck
 } from 'lucide-react';
 import { api, apiClient, peekWhatsAppQueueStatusCache, type WhatsAppQueueItem, type WhatsAppQueueStatus } from '../services/api';
 import { toastEvent, whatsappQueueEvent, messageSendEvent } from '../services/events';
+import { getFormattedFailureReason } from '../utils/whatsappFailureReason';
 
 type QueueItem = WhatsAppQueueItem;
 
-function getFormattedFailureReason(errorMsg?: string, status?: string): string {
-  if (!errorMsg && status === 'failed_offline') {
-    return 'PC / Internet is offline or connection lost';
-  }
-  if (!errorMsg) {
-    return 'Message delivery failed during queue dispatch attempt';
-  }
-  const msg = errorMsg.toLowerCase();
-  if (msg.includes('invalid') || msg.includes('phone') || msg.includes('number')) {
-    return 'Invalid recipient phone number format';
-  }
-  if (msg.includes('session') || msg.includes('auth') || msg.includes('token') || msg.includes('login')) {
-    return 'WhatsApp Web session disconnected / login required';
-  }
-  if (msg.includes('timeout') || msg.includes('net::err') || msg.includes('econnrefused')) {
-    return 'Network connection timeout';
-  }
-  if (msg.includes('not registered') || msg.includes('not on whatsapp')) {
-    return 'Recipient phone number is not registered on WhatsApp';
-  }
-  return errorMsg;
-}
 
 interface WhatsAppQueuePopoverProps {
   onClose: () => void;
@@ -185,14 +164,10 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
     }
   };
 
-  const handleSetPacingPreset = async (preset: 'turbo' | 'fast' | 'safe') => {
+  const handleSetPacingPreset = async (preset: 'safe') => {
     try {
       await api.setWhatsAppQueuePacingPreset(preset);
-      const msg = preset === 'turbo'
-        ? '🚀 Ultra-Fast Turbo Pacing enabled (100ms speed)' 
-        : preset === 'fast' 
-          ? '⚡ Fast Pacing enabled (1-3s)' 
-          : '🛡️ Safe Pacing enabled (8-12s)';
+      const msg = '🛡️ Safe Pacing enabled (10-15s, anti-ban floor)';
       toastEvent.trigger(msg, 'success');
       await fetchStatus();
     } catch (_err) {
@@ -856,45 +831,10 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
 
           {/* Quick Actions & Speed Pacing Controls */}
           <div className="flex flex-wrap items-center justify-between gap-3 text-xs pt-1">
-            {/* Pacing Preset Pills */}
-            <div className="flex items-center bg-bg/60 p-0.5 rounded-xl border border-glass-border/40 text-[10px] font-bold">
-              <button
-                type="button"
-                onClick={() => handleSetPacingPreset('turbo')}
-                className={`px-2 py-1 rounded-lg transition-all flex items-center gap-1 cursor-pointer ${
-                  queueState?.pacingPreset === 'turbo' || queueState?.currentPacingMinMs === 100
-                    ? 'bg-rose-500 text-white font-extrabold shadow-sm animate-pulse'
-                    : 'text-muted hover:text-text'
-                }`}
-                title="Ultra-Fast Speed: 100ms (0.1s) instant queue dispatch"
-              >
-                <Zap size={10} className="fill-current text-amber-300" />
-                <span>Turbo (100ms)</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => handleSetPacingPreset('fast')}
-                className={`px-2 py-1 rounded-lg transition-all flex items-center gap-1 cursor-pointer ${
-                  queueState?.pacingPreset === 'fast' || queueState?.currentPacingMinMs === 1000
-                    ? 'bg-amber-500 text-black font-extrabold shadow-sm'
-                    : 'text-muted hover:text-text'
-                }`}
-                title="Fast Pacing: 1-3 seconds between messages"
-              >
-                <span>Fast (1-3s)</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => handleSetPacingPreset('safe')}
-                className={`px-2 py-1 rounded-lg transition-all flex items-center gap-1 cursor-pointer ${
-                  queueState?.pacingPreset === 'safe' || (queueState?.currentPacingMinMs === 10000 && queueState?.pacingPreset !== 'fast' && queueState?.pacingPreset !== 'turbo')
-                    ? 'bg-emerald-500 text-black font-extrabold shadow-sm'
-                    : 'text-muted hover:text-text'
-                }`}
-                title="Safe Pacing: 10-12 seconds (default 11s) anti-detection spacing"
-              >
-                <span>Safe (10-12s)</span>
-              </button>
+            {/* Pacing floor notice — no faster presets exist; this is a fixed anti-ban protection, not a user choice */}
+            <div className="flex items-center gap-1.5 bg-bg/60 px-2.5 py-1.5 rounded-xl border border-glass-border/40 text-[10px] font-bold text-emerald-400">
+              <ShieldCheck size={12} />
+              <span>Safe Pacing: 10-15s between messages (fixed, anti-ban)</span>
             </div>
 
             <div className="flex items-center gap-2 flex-wrap">

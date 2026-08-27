@@ -106,6 +106,26 @@ export const whatsappQueueEvent = {
   },
 };
 
+// Global event bus helper for the WhatsApp Automation Hub entry point in the header
+export const automationHubEvent = {
+  triggerOpen: () => {
+    window.dispatchEvent(new CustomEvent('app-open-automation-hub'));
+  },
+  triggerUpdated: () => {
+    window.dispatchEvent(new CustomEvent('app-automation-hub-updated'));
+  },
+  subscribeOpen: (callback: () => void) => {
+    const handler = () => callback();
+    window.addEventListener('app-open-automation-hub', handler);
+    return () => window.removeEventListener('app-open-automation-hub', handler);
+  },
+  subscribeUpdated: (callback: () => void) => {
+    const handler = () => callback();
+    window.addEventListener('app-automation-hub-updated', handler);
+    return () => window.removeEventListener('app-automation-hub-updated', handler);
+  },
+};
+
 export interface MessageSendProgressDetail {
   recipient: string;
   messagePreview?: string;

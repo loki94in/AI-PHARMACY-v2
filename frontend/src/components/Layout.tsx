@@ -43,6 +43,7 @@ import {
   ChevronDown,
   BrainCircuit,
   MessageCircle,
+  MessageSquareText,
 } from 'lucide-react';
 import { shortcutEvent, SHORTCUT_DIRECTORY } from '../services/keyboardShortcuts';
 import {
@@ -57,11 +58,12 @@ import {
 } from 'lucide-react';
 
 
-import { toastEvent, quickOrderEvent, liveCartAddEvent, refillEvent, whatsappQueueEvent, messageSendEvent, specialOrdersEvent } from '../services/events';
+import { toastEvent, quickOrderEvent, liveCartAddEvent, refillEvent, whatsappQueueEvent, messageSendEvent, specialOrdersEvent, automationHubEvent } from '../services/events';
 import type { ToastEventDetail } from '../services/events';
 import { QuickOrderModal } from './QuickOrderModal';
 import { LiveCartAddModal } from './LiveCartAddModal';
 import { WhatsAppQueuePopover } from './WhatsAppQueuePopover';
+import AutomationHubPopover from './AutomationHubPopover';
 import { StagedReviewModal } from './StagedReviewModal';
 import { MobileConnectionModal } from './MobileConnectionModal';
 import { ConnectedDevicesFooterBar } from './ConnectedDevicesFooterBar';
@@ -869,6 +871,8 @@ const Topbar = memo(({
   onOpenStagedReview,
   onOpenConnectModal,
   onOpenWaQueue,
+  onOpenAutomationHub,
+  automationHubHeadline = 'idle',
   onMenuClick,
   compactCacheLoaded = false,
 }: {
@@ -883,6 +887,8 @@ const Topbar = memo(({
   onOpenStagedReview: () => void;
   onOpenConnectModal: () => void;
   onOpenWaQueue?: () => void;
+  onOpenAutomationHub?: () => void;
+  automationHubHeadline?: 'sending' | 'failed' | 'idle';
   onMenuClick?: () => void;
   compactCacheLoaded?: boolean;
 }) => {
@@ -1742,6 +1748,27 @@ const Topbar = memo(({
             aria-label="Live cart"
           >
             <ShoppingCart size={18} />
+          </button>
+
+          {/* WhatsApp Automation Hub */}
+          <button
+            onClick={onOpenAutomationHub}
+            className={`relative p-2 rounded-xl transition-all duration-200 flex items-center justify-center border cursor-pointer group ${
+              automationHubHeadline === 'failed'
+                ? 'bg-rose-500/15 border-rose-500/40 text-rose-400'
+                : automationHubHeadline === 'sending'
+                  ? 'bg-sky-500/15 border-sky-500/40 text-sky-400'
+                  : 'bg-glass-bg border-glass-border text-muted hover:text-text hover:bg-bg3/60'
+            }`}
+            aria-label="WhatsApp Automation Hub"
+            title="WhatsApp Automation Hub"
+          >
+            <MessageSquareText size={18} className="group-hover:scale-110 transition-transform" />
+            {automationHubHeadline !== 'idle' && (
+              <span className={`absolute -top-1.5 -right-1.5 h-2.5 w-2.5 rounded-full ring-2 ring-bg ${
+                automationHubHeadline === 'failed' ? 'bg-rose-500' : 'bg-sky-500 animate-pulse'
+              }`} />
+            )}
           </button>
 
           {/* Notification bell */}
@@ -2962,6 +2989,39 @@ export const Layout = ({
     });
   }, []);
 
+  const [showAutomationHub, setShowAutomationHub] = useState(false);
+  const [automationHubHeadline, setAutomationHubHeadline] = useState<'sending' | 'failed' | 'idle'>('idle');
+
+  useEffect(() => {
+    const unsubscribeOpen = automationHubEvent.subscribeOpen(() => setShowAutomationHub(true));
+    return unsubscribeOpen;
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const pollHeadline = async () => {
+      try {
+        const summary = await api.getAutomationHubSummary();
+        if (!cancelled) setAutomationHubHeadline(summary.headline);
+      } catch (_) {
+        // Non-fatal — badge just stays at its last known state
+      }
+    };
+    pollHeadline();
+    const unsubscribeUpdated = automationHubEvent.subscribeUpdated(pollHeadline);
+    const unsubscribeQueueUpdated = whatsappQueueEvent.subscribeUpdated(pollHeadline);
+    return () => {
+      cancelled = true;
+      unsubscribeUpdated();
+      unsubscribeQueueUpdated();
+    };
+  }, []);
+
+  const handleAutomationHubClose = () => {
+    setShowAutomationHub(false);
+    setAutomationHubHeadline('idle');
+  };
+
   const [stagedNotifications, setStagedNotifications] = useState<AutomationNotification[]>([]);
   const [compactCacheLoaded, setCompactCacheLoaded] = useState(() => isCompactInventoryCacheReady());
   const [isSystemReady, setIsSystemReady] = useState(true);
@@ -3352,6 +3412,8 @@ export const Layout = ({
           onOpenStagedReview={openStagedReview}
           onOpenConnectModal={openConnectModal}
           onOpenWaQueue={openWaQueuePopover}
+          onOpenAutomationHub={() => setShowAutomationHub(true)}
+          automationHubHeadline={automationHubHeadline}
           onMenuClick={openMobileNav}
           compactCacheLoaded={compactCacheLoaded}
         />
@@ -3411,6 +3473,12 @@ export const Layout = ({
         {showWaQueuePopover && (
           <WhatsAppQueuePopover
             onClose={() => setShowWaQueuePopover(false)}
+          />
+        )}
+
+        {showAutomationHub && (
+          <AutomationHubPopover
+            onClose={handleAutomationHubClose}
           />
         )}
 
