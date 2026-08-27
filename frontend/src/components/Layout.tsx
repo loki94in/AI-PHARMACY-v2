@@ -2397,7 +2397,7 @@ const QuickAssistSidebar = memo(({
     return (
       <div
         onClick={() => setExpanded(true)}
-        className="w-10 h-full min-h-0 overflow-hidden bg-glass-bg border-l border-glass-border flex flex-col items-center py-4 gap-4 hover:bg-bg2/40 hover:text-text transition-all duration-200 cursor-pointer shrink-0 z-20 select-none shadow-[inset_1px_0_0_rgba(255,255,255,0.02)]"
+        className="w-10 h-full min-h-0 overflow-hidden bg-bg2/90 border-l border-border flex flex-col items-center py-4 gap-4 hover:bg-bg3 hover:text-text transition-all duration-200 cursor-pointer shrink-0 z-20 select-none shadow-sm"
         title="Expand Quick Assist"
       >
         <ChevronLeftIcon size={16} className="text-muted mt-1" />
@@ -2407,7 +2407,7 @@ const QuickAssistSidebar = memo(({
           {/* 1. Refills Due Soon (Purple) */}
           {activeRefillsCount > 0 && (
             <div
-              className="flex items-center justify-center min-w-[20px] h-5 px-1 rounded-full bg-purple-500/20 text-purple-400 text-[9px] font-black border border-purple-500/40 shadow-sm"
+              className="flex items-center justify-center min-w-[20px] h-5 px-1 rounded-full bg-purple-500/15 text-purple-600 dark:text-purple-300 text-[9px] font-black border border-purple-500/30 shadow-sm"
               title={`Refills Due Soon: ${activeRefillsCount} patient(s)`}
             >
               {activeRefillsCount}
@@ -2417,7 +2417,7 @@ const QuickAssistSidebar = memo(({
           {/* 2. Quick Special Requests (Amber) */}
           {activeSpecialOrdersCount > 0 && (
             <div
-              className="flex items-center justify-center min-w-[20px] h-5 px-1 rounded-full bg-amber-500/20 text-amber-400 text-[9px] font-black border border-amber-500/40 shadow-sm animate-pulse"
+              className="flex items-center justify-center min-w-[20px] h-5 px-1 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-300 text-[9px] font-black border border-amber-500/30 shadow-sm animate-pulse"
               title={`Quick Special Requests: ${activeSpecialOrdersCount} customer(s)`}
             >
               {activeSpecialOrdersCount}
@@ -2427,7 +2427,7 @@ const QuickAssistSidebar = memo(({
           {/* 3. Staged Messages / Notifications (Emerald) */}
           {stagedNotificationsCount > 0 && (
             <div
-              className="flex items-center justify-center min-w-[20px] h-5 px-1 rounded-full bg-emerald-500/20 text-emerald-400 text-[9px] font-black border border-emerald-500/40 shadow-sm"
+              className="flex items-center justify-center min-w-[20px] h-5 px-1 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-300 text-[9px] font-black border border-emerald-500/30 shadow-sm"
               title={`Staged Messages: ${stagedNotificationsCount}`}
             >
               {stagedNotificationsCount}
@@ -2439,7 +2439,7 @@ const QuickAssistSidebar = memo(({
           style={{ writingMode: 'vertical-rl' }}
           className="flex items-center gap-1.5 text-[10px] font-black uppercase text-muted tracking-widest my-auto"
         >
-          <ActivityIcon size={12} className="rotate-90 shrink-0 text-purple-400" />
+          <ActivityIcon size={12} className="rotate-90 shrink-0 text-purple-500" />
           <span>Quick Assist</span>
         </div>
       </div>
@@ -2447,11 +2447,11 @@ const QuickAssistSidebar = memo(({
   }
 
   return (
-    <div ref={sidebarRef} className="w-80 max-w-[85vw] bg-glass-bg border-l border-glass-border backdrop-blur-xl flex flex-col h-full min-h-0 overflow-hidden shrink-0 z-20 transition-all duration-300">
+    <div ref={sidebarRef} className="w-80 max-w-[85vw] bg-bg border-l border-border shadow-2xl flex flex-col h-full min-h-0 overflow-hidden shrink-0 z-20 transition-all duration-300">
       {/* Header */}
-      <div className="p-4 border-b border-glass-border flex items-center justify-between shrink-0 bg-bg2/40">
+      <div className="p-4 border-b border-border flex items-center justify-between shrink-0 bg-bg2/80 backdrop-blur-md">
         <div className="flex items-center gap-2">
-          <ActivityIcon size={16} className="text-purple-400 shrink-0" />
+          <ActivityIcon size={16} className="text-purple-500 shrink-0" />
           <span className="text-sm font-bold text-text uppercase tracking-wider truncate">Quick Assist</span>
         </div>
         <button
@@ -2464,47 +2464,47 @@ const QuickAssistSidebar = memo(({
       </div>
 
       {/* Main content scroll */}
-      <div className="flex-1 min-h-0 overflow-y-auto p-4 flex flex-col gap-6 scrollbar-thin">
+      <div className="flex-1 min-h-0 overflow-y-auto p-4 flex flex-col gap-6 scrollbar-thin bg-bg">
         {/* Actionable Refills (Due within 7 Calendar Days) */}
         <div>
-          <div className="flex items-center justify-between mb-2 text-xs font-bold uppercase tracking-wider text-purple-400">
+          <div className="flex items-center justify-between mb-2 text-xs font-bold uppercase tracking-wider text-purple-600 dark:text-purple-400">
             <div className="flex items-center gap-1.5">
-              <BellRing size={13} className="text-purple-400" />
+              <BellRing size={13} className="text-purple-500" />
               <span>Refills Due Soon ({groupedActionableRefills.length})</span>
             </div>
             <button
               onClick={() => navigate('/crm?tab=refills')}
-              className="text-[9px] font-black text-sky-400 hover:text-sky-300 uppercase tracking-widest cursor-pointer"
+              className="text-[9px] font-black text-sky-600 dark:text-sky-400 hover:underline uppercase tracking-widest cursor-pointer"
             >
               Manage
             </button>
           </div>
           {groupedActionableRefills.length === 0 ? (
-            <p className="text-xs text-muted/50 italic pl-2 py-1">No refills due within 7 days</p>
+            <p className="text-xs text-muted/60 italic pl-2 py-1">No refills due within 7 days</p>
           ) : (
             <div className="flex flex-col gap-2.5">
               {groupedActionableRefills.map(group => {
                 const isExpanded = expandedRefillKeys.has(group.key);
                 const timingBadge = group.timingCategory === 'Overdue' ? (
-                  <span className="px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 text-[9px] font-mono font-bold">
+                  <span className="px-1.5 py-0.5 rounded bg-rose-500/15 text-rose-600 dark:text-rose-300 border border-rose-500/25 text-[9px] font-mono font-bold">
                     Overdue ({Math.abs(group.diffDays)}d)
                   </span>
                 ) : group.timingCategory === 'Today' ? (
-                  <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-[9px] font-mono font-bold">
+                  <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-600 dark:text-emerald-300 border border-emerald-500/25 text-[9px] font-mono font-bold">
                     Today
                   </span>
                 ) : group.timingCategory === 'Tomorrow' ? (
-                  <span className="px-1.5 py-0.5 rounded bg-sky-500/20 text-sky-300 text-[9px] font-mono font-bold">
+                  <span className="px-1.5 py-0.5 rounded bg-sky-500/15 text-sky-600 dark:text-sky-300 border border-sky-500/25 text-[9px] font-mono font-bold">
                     Tomorrow
                   </span>
                 ) : (
-                  <span className="px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 text-[9px] font-mono font-bold">
+                  <span className="px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-600 dark:text-purple-300 border border-purple-500/25 text-[9px] font-mono font-bold">
                     In {group.diffDays}d
                   </span>
                 );
 
                 return (
-                  <div key={group.key} className="p-3 rounded-xl bg-bg2 border border-glass-border flex flex-col gap-2 shadow-sm min-w-0 overflow-hidden transition-all">
+                  <div key={group.key} className="p-3 rounded-xl bg-bg2 border border-border flex flex-col gap-2 shadow-xs min-w-0 overflow-hidden transition-all hover:border-purple-500/30">
                     {/* Patient Header (Click to toggle expansion / fold & unfold) */}
                     <div
                       onClick={() => toggleRefillKey(group.key)}
@@ -2513,39 +2513,39 @@ const QuickAssistSidebar = memo(({
                       <div className="flex flex-col min-w-0 flex-1">
                         <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
                           <span className="font-semibold text-xs text-text truncate">{group.patient_name}</span>
-                          <span className="px-1.5 py-0.2 rounded-full bg-purple-500/15 text-purple-400 text-[9px] font-bold shrink-0">
+                          <span className="px-1.5 py-0.2 rounded-full bg-purple-500/15 text-purple-600 dark:text-purple-400 text-[9px] font-bold shrink-0 border border-purple-500/20">
                             {group.medicines.length} med{group.medicines.length > 1 ? 's' : ''}
                           </span>
                           {timingBadge}
                         </div>
                         {group.patient_phone && (
-                          <span className="text-[10px] text-muted truncate">{group.patient_phone}</span>
+                          <span className="text-[10px] text-muted truncate font-mono">{group.patient_phone}</span>
                         )}
                       </div>
                       <div className="flex items-center gap-1.5 shrink-0">
                         {group.hasHoldStock && (
-                          <span className="px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/20 text-amber-500 text-[8px] font-bold uppercase tracking-wider animate-pulse shrink-0">
+                          <span className="px-1.5 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-[8px] font-bold uppercase tracking-wider animate-pulse shrink-0">
                             Hold Stock
                           </span>
                         )}
-                        <ChevronDown size={14} className={`text-muted transition-transform duration-200 ${isExpanded ? 'rotate-180 text-purple-400' : ''}`} />
+                        <ChevronDown size={14} className={`text-muted transition-transform duration-200 ${isExpanded ? 'rotate-180 text-purple-500' : ''}`} />
                       </div>
                     </div>
 
                     {/* Unfolded Medicine Names: shows only medicine names (1 if one, multiple if multiple) */}
                     {isExpanded && (
-                      <div className="flex flex-col gap-1.5 pt-1 border-t border-glass-border/50">
+                      <div className="flex flex-col gap-1.5 pt-1 border-t border-border">
                         {group.medicines.map((med) => (
                           <div
                             key={med.id}
-                            className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg bg-bg3/50 border border-border/30 text-[11px] min-w-0"
+                            className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg bg-bg3/80 border border-border text-[11px] min-w-0"
                           >
                             <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                              <Package size={11} className="text-purple-400 shrink-0" />
+                              <Package size={11} className="text-purple-500 shrink-0" />
                               <span className="font-medium text-text truncate">{med.medicine_name}</span>
                             </div>
                             <div className="flex items-center gap-1.5 shrink-0">
-                              <span className="px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 text-[10px] font-mono font-bold">
+                              <span className="px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-600 dark:text-purple-300 border border-purple-500/20 text-[10px] font-mono font-bold">
                                 Qty: {med.quantity_needed}
                               </span>
                               <span className="text-[9px] text-muted">{med.refill_interval_days}d</span>
@@ -2556,8 +2556,8 @@ const QuickAssistSidebar = memo(({
                     )}
 
                     {/* Patient Card Actions & Reminder Status Footer */}
-                    <div className="flex items-center gap-2 justify-between min-w-0 pt-1 border-t border-border/30">
-                      <div className="flex items-center gap-1 text-[9px] text-muted/70 font-medium truncate">
+                    <div className="flex items-center gap-2 justify-between min-w-0 pt-1 border-t border-border">
+                      <div className="flex items-center gap-1 text-[9px] text-muted font-medium truncate">
                         <ClockIcon size={10} className="shrink-0" />
                         <span className="truncate">
                           Due: {group.next_refill_date ? new Date(group.next_refill_date).toLocaleDateString([], { month: 'short', day: 'numeric' }) : 'N/A'}
@@ -2578,23 +2578,23 @@ const QuickAssistSidebar = memo(({
                         )}
                         {group.reminder_status === 'SENT' ? (
                           <div
-                            className="flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-[9px] font-bold shrink-0"
+                            className="flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-[9px] font-bold shrink-0"
                             title={`Reminder sent on ${formatReminderSentAt(group.reminder_sent_at)}`}
                           >
-                            <Check size={10} className="text-emerald-400" />
+                            <Check size={10} className="text-emerald-500" />
                             <span>Sent ✓</span>
                           </div>
                         ) : group.reminder_status === 'QUEUED' ? (
                           <div
-                            className="flex items-center gap-1 px-2 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-amber-400 text-[9px] font-bold shrink-0"
+                            className="flex items-center gap-1 px-2 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-[9px] font-bold shrink-0"
                             title="Reminder queued in WhatsApp dispatch queue"
                           >
-                            <ClockIcon size={10} className="text-amber-400" />
+                            <ClockIcon size={10} className="text-amber-500" />
                             <span>Queued ⏳</span>
                           </div>
                         ) : group.reminder_status === 'SENDING' ? (
-                          <div className="flex items-center gap-1 px-2 py-0.5 rounded bg-sky-500/15 border border-sky-500/30 text-sky-400 text-[9px] font-bold shrink-0">
-                            <Loader2 size={10} className="animate-spin text-sky-400" />
+                          <div className="flex items-center gap-1 px-2 py-0.5 rounded bg-sky-500/15 border border-sky-500/30 text-sky-600 dark:text-sky-400 text-[9px] font-bold shrink-0">
+                            <Loader2 size={10} className="animate-spin text-sky-500" />
                             <span>Sending 📡</span>
                           </div>
                         ) : group.reminder_status === 'FAILED' ? (
@@ -2603,7 +2603,7 @@ const QuickAssistSidebar = memo(({
                               e.stopPropagation();
                               handleSendRefillGroup(group);
                             }}
-                            className="py-0.5 px-2 rounded bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/30 text-[9px] font-bold uppercase transition-colors flex items-center gap-1 shadow-sm cursor-pointer"
+                            className="py-0.5 px-2 rounded bg-red-500/15 hover:bg-red-500/25 text-red-600 dark:text-red-400 border border-red-500/30 text-[9px] font-bold uppercase transition-colors flex items-center gap-1 shadow-sm cursor-pointer"
                             title="Reminder failed to send — click to retry"
                           >
                             <AlertIcon size={10} />
@@ -2628,7 +2628,7 @@ const QuickAssistSidebar = memo(({
                             e.stopPropagation();
                             handleCompleteRefillGroup(group);
                           }}
-                          className="py-0.5 px-2 rounded bg-bg3 hover:bg-emerald-600/30 text-muted hover:text-emerald-300 border border-border/40 text-[9px] font-bold uppercase transition-colors flex items-center gap-1 cursor-pointer"
+                          className="py-0.5 px-2 rounded bg-bg3 hover:bg-emerald-600 hover:text-white text-muted border border-border text-[9px] font-bold uppercase transition-colors flex items-center gap-1 cursor-pointer"
                           title={`Mark all refills for ${group.patient_name} as Completed`}
                         >
                           <Check size={10} />
@@ -2645,20 +2645,20 @@ const QuickAssistSidebar = memo(({
 
         {/* Quick Special Requests */}
         <div>
-          <div className="flex items-center justify-between mb-2 text-xs font-bold uppercase tracking-wider text-amber-400">
+          <div className="flex items-center justify-between mb-2 text-xs font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400">
             <div className="flex items-center gap-1.5">
-              <Package size={14} className="text-amber-400" />
+              <Package size={14} className="text-amber-500" />
               <span>Quick Special Requests ({groupedSpecialOrders.length})</span>
             </div>
             <button
               onClick={() => navigate('/crm?tab=special_orders')}
-              className="text-[9px] font-black text-amber-400 hover:text-amber-300 uppercase tracking-widest cursor-pointer"
+              className="text-[9px] font-black text-amber-600 dark:text-amber-400 hover:underline uppercase tracking-widest cursor-pointer"
             >
               View All
             </button>
           </div>
           {groupedSpecialOrders.length === 0 ? (
-            <p className="text-xs text-muted/50 italic pl-2 py-1">No active special requests</p>
+            <p className="text-xs text-muted/60 italic pl-2 py-1">No active special requests</p>
           ) : (
             <div className="flex flex-col gap-2.5">
               {groupedSpecialOrders.map(group => {
@@ -2668,12 +2668,12 @@ const QuickAssistSidebar = memo(({
                 return (
                   <div
                     key={group.key}
-                    className={`p-3 rounded-xl border flex flex-col gap-2 transition-all min-w-0 overflow-hidden ${
+                    className={`p-3 rounded-xl border flex flex-col gap-2 transition-all min-w-0 overflow-hidden shadow-xs ${
                       group.overallStatus === 'Ready'
-                        ? 'bg-sky-500/[0.04] border-sky-500/30'
+                        ? 'bg-sky-500/[0.06] border-sky-500/30'
                         : group.overallStatus === 'Ordered'
-                        ? 'bg-emerald-500/[0.04] border-emerald-500/30'
-                        : 'bg-amber-500/[0.04] border-amber-500/20'
+                        ? 'bg-emerald-500/[0.06] border-emerald-500/30'
+                        : 'bg-amber-500/[0.06] border-amber-500/30'
                     }`}
                   >
                     {/* Header (Click to toggle expansion / fold & unfold) */}
@@ -2687,11 +2687,11 @@ const QuickAssistSidebar = memo(({
                             {group.items[0]?.product || 'Special Medicine'}
                           </span>
                           {group.items.length > 1 ? (
-                            <span className="px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-400 text-[9px] font-bold shrink-0">
+                            <span className="px-1.5 py-0.2 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 text-[9px] font-bold shrink-0 border border-amber-500/20">
                               +{group.items.length - 1} more
                             </span>
                           ) : (
-                            <span className="px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-400 text-[9px] font-mono font-bold shrink-0">
+                            <span className="px-1.5 py-0.2 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 text-[9px] font-mono font-bold shrink-0 border border-amber-500/20">
                               Qty: {group.items[0]?.qty || 1}
                             </span>
                           )}
@@ -2708,10 +2708,10 @@ const QuickAssistSidebar = memo(({
                             <span
                               className={`px-1.5 py-0.5 rounded text-[9px] font-mono font-bold uppercase ${
                                 group.overallStatus === 'Ready'
-                                  ? 'bg-sky-500/20 text-sky-300 border border-sky-500/30'
+                                  ? 'bg-sky-500/15 text-sky-600 dark:text-sky-300 border border-sky-500/30'
                                   : group.overallStatus === 'Ordered'
-                                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                                  : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                                  ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-300 border border-emerald-500/30'
+                                  : 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30'
                               }`}
                             >
                               {group.overallStatus === 'Ready' && maxCount > 0
@@ -2720,23 +2720,23 @@ const QuickAssistSidebar = memo(({
                             </span>
                           );
                         })()}
-                        <ChevronDown size={14} className={`text-muted transition-transform duration-200 ${isExpanded ? 'rotate-180 text-amber-400' : ''}`} />
+                        <ChevronDown size={14} className={`text-muted transition-transform duration-200 ${isExpanded ? 'rotate-180 text-amber-500' : ''}`} />
                       </div>
                     </div>
 
                     {/* Unfolded Medicine Names: shows only medicine names (1 if one, multiple if multiple) */}
                     {isExpanded && (
-                      <div className="flex flex-col gap-1.5 pt-1 border-t border-border/30">
+                      <div className="flex flex-col gap-1.5 pt-1 border-t border-border">
                         {group.items.map((item) => (
                           <div
                             key={item.id}
-                            className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg bg-bg3/60 border border-border/30 text-[11px] min-w-0"
+                            className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg bg-bg2 border border-border text-[11px] min-w-0"
                           >
                             <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                              <Package size={11} className="text-amber-400 shrink-0" />
+                              <Package size={11} className="text-amber-500 shrink-0" />
                               <span className="font-medium text-text truncate">{item.product}</span>
                             </div>
-                            <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 text-[10px] font-mono font-bold shrink-0">
+                            <span className="px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-600 dark:text-amber-300 border border-amber-500/20 text-[10px] font-mono font-bold shrink-0">
                               Qty: {item.qty}
                             </span>
                           </div>
@@ -2745,7 +2745,7 @@ const QuickAssistSidebar = memo(({
                     )}
 
                     {/* Action Buttons Footer */}
-                    <div className="flex items-center flex-wrap gap-1.5 pt-1 border-t border-border/30 min-w-0">
+                    <div className="flex items-center flex-wrap gap-1.5 pt-1 border-t border-border min-w-0">
                       {group.overallStatus === 'Ready' ? (
                         <>
                           {(() => {
@@ -2786,7 +2786,7 @@ const QuickAssistSidebar = memo(({
                           <button
                             disabled={isProcessing}
                             onClick={() => handleUpdateGroupStatus(group, 'Completed', { navigateToPos: true })}
-                            className="flex-1 py-1 px-2 rounded bg-purple-600/80 hover:bg-purple-700 disabled:opacity-50 text-white text-[10px] font-bold tracking-wide uppercase transition-colors flex items-center justify-center gap-1 shadow-sm cursor-pointer whitespace-nowrap min-w-0"
+                            className="flex-1 py-1 px-2 rounded bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-[10px] font-bold tracking-wide uppercase transition-colors flex items-center justify-center gap-1 shadow-sm cursor-pointer whitespace-nowrap min-w-0"
                             title="Mark all requests as Completed and open POS pre-filled for this customer"
                           >
                             {isProcessing ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
@@ -2807,7 +2807,7 @@ const QuickAssistSidebar = memo(({
                           <button
                             disabled={isProcessing}
                             onClick={() => handleUpdateGroupStatus(group, 'Completed', { navigateToPos: true })}
-                            className="flex-1 py-1 px-2 rounded bg-purple-600/80 hover:bg-purple-700 disabled:opacity-50 text-white text-[10px] font-bold tracking-wide uppercase transition-colors flex items-center justify-center gap-1 shadow-sm cursor-pointer whitespace-nowrap min-w-0"
+                            className="flex-1 py-1 px-2 rounded bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-[10px] font-bold tracking-wide uppercase transition-colors flex items-center justify-center gap-1 shadow-sm cursor-pointer whitespace-nowrap min-w-0"
                             title="Mark all requests as Completed and open POS pre-filled for this customer"
                           >
                             {isProcessing ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
@@ -2818,7 +2818,7 @@ const QuickAssistSidebar = memo(({
                       <button
                         disabled={isProcessing}
                         onClick={() => handleUpdateGroupStatus(group, 'Cancelled')}
-                        className="py-1 px-2 rounded bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 text-[10px] font-bold uppercase transition-all flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50 whitespace-nowrap shrink-0"
+                        className="py-1 px-2 rounded bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-500 text-[10px] font-bold uppercase transition-all flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50 whitespace-nowrap shrink-0"
                         title="Cancel all requests for this customer"
                       >
                         Cancel
@@ -2833,8 +2833,8 @@ const QuickAssistSidebar = memo(({
 
         {/* Staged Messages */}
         <div>
-          <div className="flex items-center gap-2 mb-2 text-xs font-bold uppercase tracking-wider text-purple-400">
-            <MessageSquareIcon size={14} />
+          <div className="flex items-center gap-2 mb-2 text-xs font-bold uppercase tracking-wider text-purple-600 dark:text-purple-400">
+            <MessageSquareIcon size={14} className="text-purple-500" />
             <span>Staged Messages ({groupedNotifications.length})</span>
           </div>
           {groupedNotifications.length === 0 ? (
@@ -2844,28 +2844,28 @@ const QuickAssistSidebar = memo(({
               {groupedNotifications.map(group => {
                 const isSending = sendingNotifKeys.has(group.key);
                 return (
-                  <div key={group.key} className="p-3 rounded-xl bg-purple-500/[0.03] border border-purple-500/20 flex flex-col gap-2 min-w-0 overflow-hidden shadow-sm">
+                  <div key={group.key} className="p-3 rounded-xl bg-purple-500/[0.05] border border-purple-500/25 flex flex-col gap-2 min-w-0 overflow-hidden shadow-xs">
                     <div className="flex items-center justify-between gap-2 min-w-0">
                       <div className="flex items-center gap-1.5 min-w-0 flex-1">
                         <span className="font-semibold text-text truncate">{group.recipient_name}</span>
                         {group.messages.length > 1 && (
-                          <span className="px-1.5 py-0.2 rounded-full bg-purple-500/15 text-purple-400 text-[9px] font-bold shrink-0">
+                          <span className="px-1.5 py-0.2 rounded-full bg-purple-500/15 text-purple-600 dark:text-purple-400 text-[9px] font-bold shrink-0 border border-purple-500/20">
                             {group.messages.length} meds
                           </span>
                         )}
                       </div>
-                      <span className="text-[10px] text-purple-400 font-bold font-mono truncate shrink-0 max-w-[110px]">{group.recipient_phone}</span>
+                      <span className="text-[10px] text-purple-600 dark:text-purple-400 font-bold font-mono truncate shrink-0 max-w-[110px]">{group.recipient_phone}</span>
                     </div>
 
-                    <p className="text-[11px] text-muted leading-snug italic bg-bg3 p-2 rounded-lg border border-glass-border break-words">
+                    <p className="text-[11px] text-text/85 leading-snug italic bg-bg2 p-2.5 rounded-lg border border-border break-words font-medium">
                       "{group.consolidatedMessage}"
                     </p>
 
-                    <div className="flex items-center justify-end gap-1.5 pt-1 border-t border-border/30">
+                    <div className="flex items-center justify-end gap-1.5 pt-1 border-t border-border">
                       <button
                         type="button"
                         onClick={() => handleDismissStagedNotificationGroup(group)}
-                        className="py-1 px-2.5 rounded bg-bg2 hover:bg-bg3 text-muted hover:text-text text-[9px] font-bold uppercase transition-colors border border-border cursor-pointer flex items-center gap-1"
+                        className="py-1 px-2.5 rounded bg-bg3 hover:bg-bg border border-border text-muted hover:text-text text-[9px] font-bold uppercase transition-colors cursor-pointer flex items-center gap-1"
                         title="Dismiss staged message without sending"
                       >
                         <X size={10} /> Dismiss

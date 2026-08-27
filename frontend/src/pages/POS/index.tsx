@@ -3260,7 +3260,27 @@ const POS = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- stale-closure guard reads live queue
   }, []);
 
-  const hasDoctorRx = selectedDoctorId != null && doctorSuggestions.length > 0;
+  const inStockDoctorSuggestions = useMemo(() => {
+    if (!doctorSuggestions || doctorSuggestions.length === 0) return EMPTY_ARRAY;
+    const compactInv = getCompactInventoryCache();
+    if (!compactInv || compactInv.length === 0) return doctorSuggestions;
+
+    return doctorSuggestions.filter(s => {
+      const medId = Number(s.id);
+      const medName = (s.name || '').toLowerCase().trim();
+      const batches = compactInv.filter(item => {
+        const matchId = item.medicine_id === medId;
+        const matchName = (item.name || '').toLowerCase().trim() === medName;
+        return matchId || matchName;
+      });
+      if (batches.length === 0) return false;
+      const totalStrips = batches.reduce((sum, b) => sum + Math.max(0, Number(b.stock_qty || b.quantity || 0)), 0);
+      const totalLoose = batches.reduce((sum, b) => sum + Math.max(0, Number(b.loose_quantity || 0)), 0);
+      return totalStrips > 0 || totalLoose > 0;
+    });
+  }, [doctorSuggestions, cacheVersion]);
+
+  const hasDoctorRx = selectedDoctorId != null && inStockDoctorSuggestions.length > 0;
 
   return (
     <div className="h-full flex flex-col fade-in overflow-hidden text-text">
@@ -4125,9 +4145,9 @@ const POS = () => {
               >
                 <div className="flex items-center gap-1 px-2 py-1 rounded-lg bg-sky/20 border border-sky/30 text-sky text-[9px] font-black uppercase tracking-wider shrink-0 select-none">
                   <span className="h-1.5 w-1.5 rounded-full bg-sky animate-pulse" />
-                  <span>Dr. Rx ({doctorSuggestions.length}):</span>
+                  <span>Dr. Rx ({inStockDoctorSuggestions.length}):</span>
                 </div>
-                {doctorSuggestions.map(s => (
+                {inStockDoctorSuggestions.map(s => (
                   <button
                     key={s.id}
                     type="button"

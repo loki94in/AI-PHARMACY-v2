@@ -420,6 +420,12 @@ router.get('/doctors/:id/suggestions', async (req, res) => {
        JOIN inventory_master im ON si.inventory_id = im.id
        JOIN medicines m ON im.medicine_id = m.id
        WHERE s.doctor_id = ?
+         AND EXISTS (
+           SELECT 1 FROM inventory_master im_stock
+           WHERE im_stock.medicine_id = m.id
+             AND (im_stock.quantity > 0 OR im_stock.loose_quantity > 0)
+             AND (im_stock.expiry_date IS NULL OR im_stock.expiry_date >= date('now'))
+         )
        GROUP BY m.id ORDER BY frequency DESC LIMIT ?`,
       [doctorId, doctorId, doctorId, doctorId, doctorId, limit]
     );

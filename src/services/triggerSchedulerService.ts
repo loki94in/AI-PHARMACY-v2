@@ -20,6 +20,7 @@ export interface TriggerConfig {
 class TriggerSchedulerService {
   private scheduledTasks: Map<string, ScheduledTask> = new Map();
   private intervalHandles: Map<string, NodeJS.Timeout> = new Map();
+  private snoozedUntil: Map<string, number> = new Map();
   private isInitialized = false;
 
   /**
@@ -359,6 +360,8 @@ class TriggerSchedulerService {
       } catch (err) {
         console.error('[TriggerScheduler] Failed to schedule Doctor Report:', err);
       }
+    }
+
     // ----------------------------------------------------
     // Trigger 9: Email PDF Invoice Poller
     // ----------------------------------------------------
@@ -396,8 +399,6 @@ class TriggerSchedulerService {
     this.isInitialized = true;
     console.log('[TriggerScheduler] Dynamic trigger schedule initialization complete.');
   }
-
-  private snoozedUntil: Map<string, number> = new Map();
 
   /**
    * Return list of upcoming automations scheduled within lookaheadMinutes (default 5 minutes)
