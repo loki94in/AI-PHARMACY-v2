@@ -1,4 +1,5 @@
 import { dbManager } from '../database/connection.js';
+import { eventService } from './eventService.js';
 import { sendMessage, getWhatsAppStatus, shouldRouteToBusiness, initClient, hasSavedSession, hashMessageBody, normalizeWhatsAppPhone, isWhatsAppExplicitlyDisabled } from '../whatsappClient.js';
 
 export interface QueueItem {
@@ -647,6 +648,16 @@ class WhatsAppQueueWorker {
                   ['whatsapp_queue_failure', item.target_name || 'Distributor', item.number, item.message, errMsg, `queue-${item.id}`, Date.now()]
                 );
               } catch (_) {}
+
+              // Broadcast toast alert to frontend toaster popup
+              const targetDesc = item.target_name ? `${item.target_name} (${item.number})` : item.number;
+              const cleanReason = errMsg.includes('No LID for user')
+                ? 'Number not registered on WhatsApp'
+                : errMsg;
+              eventService.broadcast('toast_alert', {
+                type: 'error',
+                message: `❌ WhatsApp to ${targetDesc} failed: ${cleanReason}`
+              });
             }
           }
         }

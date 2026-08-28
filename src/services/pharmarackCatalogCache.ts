@@ -180,6 +180,14 @@ export async function syncCatalog(): Promise<{ synced: number; errors: number }>
       return { synced: 0, errors: 0 };
     }
 
+    // Check connectivity before making distributor store list network calls
+    const { checkConnectivity } = await import('../utils/networkDetector.js');
+    const isOnline = await checkConnectivity();
+    if (!isOnline) {
+      console.log('[Catalog Cache] Skipped background sync: System is offline.');
+      return { synced: 0, errors: 0 };
+    }
+
     // Fetch store list
     const storeRes = await fetchPharmarackApi('https://pharmretail-api.pharmarack.com/user/api/v2/store-list', {
       method: 'GET',

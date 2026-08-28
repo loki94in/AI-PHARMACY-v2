@@ -367,6 +367,15 @@ export class TokenRefreshScheduler {
       }
       this.hasLoggedNoToken = false;
 
+      // Connectivity check: Skip heartbeat and browser restores if offline
+      const { checkConnectivity } = await import('../utils/networkDetector.js');
+      const isOnline = await checkConnectivity();
+      if (!isOnline) {
+        // Silently skip probe without spamming logs or launching Chrome
+        skipped = true;
+        return false;
+      }
+
       if (token) {
         console.log(`[TokenRefreshScheduler] Session heartbeat probe (${trigger})...`);
         try {

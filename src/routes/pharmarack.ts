@@ -981,12 +981,14 @@ export async function warmupStartupCart(): Promise<void> {
       startupSyncCoordinator.markCartLoaded();
       return;
     }
-    // Skip a redundant upstream hit when a recent load already populated the cache
-    // (e.g. user visited the cart page before this warm-up ran).
-    if (serverCartCache && Date.now() - serverCartCache.ts < 30_000) {
-      startupSyncCoordinator.markCartLoaded();
+    // Skip if offline to avoid boot timeout errors and unnecessary network retry loops
+    const { checkConnectivity } = await import('../utils/networkDetector.js');
+    const isOnline = await checkConnectivity();
+    if (!isOnline) {
+      console.log('[StartupSync] Offline: skipping boot cart warm-up.');
       return;
     }
+
     const { distributors, totalItems } = await loadLiveCartCore();
     serverCartCache = { distributors, totalItems, ts: Date.now() };
     startupSyncCoordinator.markCartLoaded();

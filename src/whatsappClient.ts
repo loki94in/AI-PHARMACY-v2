@@ -840,6 +840,14 @@ export async function initClient(options: { forceQr?: boolean } = {}): Promise<W
     return null;
   }
 
+  // Connectivity check: Do not launch Puppeteer/Chrome if offline
+  const { checkConnectivity } = await import('./utils/networkDetector.js');
+  const isOnline = await checkConnectivity();
+  if (!isOnline) {
+    console.log('[WhatsApp] Offline: skipping WhatsApp browser launch until network is restored.');
+    return null;
+  }
+
   initializing = true;
 
   initPromise = (async () => {

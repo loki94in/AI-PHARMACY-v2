@@ -56,6 +56,7 @@ const SSE_CUSTOM_EVENTS: Record<string, string[]> = {
   migration_update: ['sse-migration-update'],
   google_verification_required: ['sse-google-verification'],
   google_verification_solved: ['sse-google-verification'],
+  toast_alert: ['app-show-toast'],
 };
 
 // Chrome-owned queries rendered OUTSIDE KeepAliveOutlet pages (Layout /
@@ -112,9 +113,10 @@ export function useGlobalSseInvalidation(enabled: boolean = true) {
         });
       }
       (SSE_CUSTOM_EVENTS[type] || []).forEach(evtName => {
-        // detail carries the full parsed SSE frame so page-level listeners
+        // detail carries the full parsed SSE frame (or unpacked payload for toasts) so page-level listeners
         // can consume payloads without opening their own EventSource
-        window.dispatchEvent(new CustomEvent(evtName, { detail: parsed }));
+        const detailData = (evtName === 'app-show-toast' && parsed?.payload) ? parsed.payload : parsed;
+        window.dispatchEvent(new CustomEvent(evtName, { detail: detailData }));
       });
     };
 

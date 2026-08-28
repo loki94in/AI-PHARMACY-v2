@@ -21,7 +21,8 @@ router.get('/services-status', async (_req, res) => {
     const waStatus = await getWhatsAppStatus();
 
     // 3. System internet status
-    const internetConnected = true;
+    const { checkConnectivity } = await import('../utils/networkDetector.js');
+    const internetConnected = await checkConnectivity();
 
     // 4. Config-gater flags — read in one batch query, no polling loop
     const gaterRows: Array<{ key: string; value: string }> = await db.all(

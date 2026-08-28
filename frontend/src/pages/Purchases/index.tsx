@@ -2011,11 +2011,7 @@ const Purchases: React.FC = () => {
                   const match = learned.medicine;
                   updatedItems[i].medicine_id = match.id;
                   updatedItems[i].medicine_name = match.name;
-                  updatedItems[i].manufacturer = match.manufacturer;
-                  updatedItems[i].mrp = updatedItems[i].mrp || match.mrp || 0;
-                  updatedItems[i].rate = updatedItems[i].rate || match.rate || 0;
-                  updatedItems[i].cgst_per = updatedItems[i].cgst_per || match.cgst_per || 0;
-                  updatedItems[i].sgst_per = updatedItems[i].sgst_per || match.sgst_per || 0;
+                  updatedItems[i].manufacturer = match.manufacturer || updatedItems[i].manufacturer;
                   updatedItems[i].amount = calculateItemAmount(updatedItems[i]);
                   updatedItems[i].prefill_matched = true;
                   hasChanges = true;
@@ -2080,11 +2076,7 @@ const Purchases: React.FC = () => {
                 if (bestMatch) {
                   updatedItems[i].medicine_id = bestMatch.id;
                   updatedItems[i].medicine_name = bestMatch.name;
-                  updatedItems[i].manufacturer = bestMatch.manufacturer;
-                  updatedItems[i].mrp = updatedItems[i].mrp || bestMatch.mrp || 0;
-                  updatedItems[i].rate = updatedItems[i].rate || bestMatch.rate || 0;
-                  updatedItems[i].cgst_per = updatedItems[i].cgst_per || bestMatch.cgst_per || 0;
-                  updatedItems[i].sgst_per = updatedItems[i].sgst_per || bestMatch.sgst_per || 0;
+                  updatedItems[i].manufacturer = bestMatch.manufacturer || updatedItems[i].manufacturer;
                   updatedItems[i].amount = calculateItemAmount(updatedItems[i]);
                   updatedItems[i].prefill_matched = true;
                   hasChanges = true;
@@ -2604,11 +2596,7 @@ const Purchases: React.FC = () => {
             const match = learned.medicine;
             newItems[i].medicine_id = match.id;
             newItems[i].medicine_name = match.name;
-            newItems[i].manufacturer = match.manufacturer;
-            newItems[i].mrp = newItems[i].mrp || match.mrp || 0;
-            newItems[i].rate = newItems[i].rate || match.rate || 0;
-            newItems[i].cgst_per = newItems[i].cgst_per || match.cgst_per || 0;
-            newItems[i].sgst_per = newItems[i].sgst_per || match.sgst_per || 0;
+            newItems[i].manufacturer = match.manufacturer || newItems[i].manufacturer;
             continue;
           }
 
@@ -2620,11 +2608,7 @@ const Purchases: React.FC = () => {
             if (match) {
               newItems[i].medicine_id = match.id;
               newItems[i].medicine_name = match.name;
-              newItems[i].manufacturer = match.manufacturer;
-              newItems[i].mrp = newItems[i].mrp || match.mrp || 0;
-              newItems[i].rate = newItems[i].rate || match.rate || 0;
-              newItems[i].cgst_per = newItems[i].cgst_per || match.cgst_per || 0;
-              newItems[i].sgst_per = newItems[i].sgst_per || match.sgst_per || 0;
+              newItems[i].manufacturer = match.manufacturer || newItems[i].manufacturer;
             } else {
               newItems[i].medicine_id = null;
               newItems[i].medicine_name = mName;
@@ -3777,38 +3761,25 @@ const Purchases: React.FC = () => {
                                       e.preventDefault();
                                       selectBatch(index, b);
                                     }}
-                                    className={`w-full text-left p-2.5 transition-colors flex flex-col gap-1 ${
+                                    className={`w-full text-left p-2 transition-colors flex items-center justify-between gap-2 ${
                                       isHighlighted ? 'bg-primary/20 font-bold' : 'hover:bg-bg3'
                                     }`}
                                   >
-                                    <div className="flex items-center justify-between">
-                                      <span className="font-mono font-bold text-sm text-text bg-white/5 px-1.5 py-0.5 rounded border border-glass-border">
-                                        {b.batch_no}
-                                      </span>
+                                    <span className="font-mono font-bold text-sm text-text bg-bg3 px-1.5 py-0.5 rounded border border-glass-border">
+                                      {b.batch_no}
+                                    </span>
+                                    <div className="flex items-center gap-3 text-xs font-mono">
                                       {b.expiry_date && (
-                                        <span className="text-xs font-mono text-amber-300 font-medium">
+                                        <span className="text-amber-300 font-medium">
                                           Exp: {formatExpiryToMMYY(b.expiry_date)}
                                         </span>
                                       )}
-                                    </div>
-                                    <div className="flex items-center justify-between text-[11px] text-muted">
-                                      <div className="flex items-center gap-2">
-                                        {b.rate > 0 && (
-                                          <span className="text-emerald-400 font-semibold">Rate: ₹{Number(b.rate).toFixed(2)}</span>
-                                        )}
-                                        {b.mrp > 0 && (
-                                          <span>MRP: ₹{Number(b.mrp).toFixed(2)}</span>
-                                        )}
-                                      </div>
-                                      {b.quantity > 0 && (
-                                        <span className="text-sky text-[10px] font-medium">Stock: {b.quantity}</span>
+                                      {b.mrp > 0 && (
+                                        <span className="text-text font-semibold">
+                                          MRP: ₹{Number(b.mrp).toFixed(2)}
+                                        </span>
                                       )}
                                     </div>
-                                    {b.distributor_name && (
-                                      <div className="text-[10px] text-muted truncate">
-                                        🏢 {b.distributor_name} {b.purchase_date ? `(${b.purchase_date.substring(0, 10)})` : ''}
-                                      </div>
-                                    )}
                                   </button>
                                 );
                               })
