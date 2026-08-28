@@ -594,12 +594,12 @@ router.get('/catalog-search', async (req, res) => {
       }
     }
 
-    // Pass 2: Infix / Trigram search ONLY when Pass 1 returned 0 prefix hits
-    // (e.g. user typed middle keyword). Uses FTS5 trigram index for <10ms response.
-    if (rows.length === 0 && q.length >= 3) {
+    // Pass 2: Infix / Trigram search when Pass 1 returned <15 prefix hits
+    // (sparse-term completeness). Uses FTS5 trigram index for <10ms response.
+    if (rows.length < 15 && q.length >= 2) {
       try {
         const cleanToken = q.replace(/[^a-zA-Z0-9 ]/g, ' ').trim();
-        if (cleanToken.length >= 3) {
+        if (cleanToken.length >= 2) {
           const ftsRows = await db.all(
             `SELECT m.id, m.name, m.item_code, m.manufacturer, m.strength, m.packaging, m.pack_unit, m.mrp, m.rate, m.cgst_per, m.sgst_per, m.hsn_code, m.generic_name
              FROM medicines_fts f

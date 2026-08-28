@@ -418,6 +418,33 @@ const getInstantNarrowedResults = (term: string): Medicine[] => {
   });
 };
 
+// Local compact inventory preview for cold search cache
+const getInstantLocalInventoryPreview = (term: string): Medicine[] => {
+  const compact = getCompactInventoryCache();
+  if (!compact || compact.length === 0) return [];
+  const lower = term.toLowerCase().trim();
+  const matched = compact.filter(c => c.name && c.name.toLowerCase().includes(lower));
+  return matched.slice(0, 25).map(c => ({
+    id: c.medicine_id || (c as any).id,
+    name: c.name,
+    generic_name: '',
+    manufacturer: c.manufacturer || '',
+    pack_unit: '',
+    pack_size: c.pack_size ?? undefined,
+    strength: '',
+    mrp: c.mrp,
+    rate: c.cost_price || 0,
+    sell_price: c.sell_price,
+    scheme_paid: 0,
+    scheme_free: 0,
+    cgst_per: 6,
+    sgst_per: 6,
+    hsn_code: '',
+    stock_qty: c.stock_qty,
+    loose_qty: (c as any).loose_quantity ?? (c as any).loose_qty ?? 0,
+  }));
+};
+
 // ONE row per medicine NAME in the Purchases dropdown. The master catalog
 // still contains a few legacy duplicate-name groups (same medicine, different
 // ids); backend collapses them, this guards stale module caches mid-session.
@@ -1489,7 +1516,7 @@ const Purchases: React.FC = () => {
     setActiveMedicineIndex(index);
 
     const cleanTerm = (term || '').trim();
-    if (!cleanTerm || cleanTerm.length < 3) {
+    if (!cleanTerm || cleanTerm.length < 2) {
       searchSeqRef.current += 1;
       setSearchResults([]);
       setSearchHighlightIndex(-1);
@@ -1517,8 +1544,9 @@ const Purchases: React.FC = () => {
     // The debounced backend fetch below then replaces this with the complete,
     // authoritative list for the exact term.
     const narrowed = getInstantNarrowedResults(cleanTerm);
-    if (narrowed.length > 0) {
-      setSearchResults(narrowed);
+    const instantPreview = narrowed.length > 0 ? narrowed : getInstantLocalInventoryPreview(cleanTerm);
+    if (instantPreview.length > 0) {
+      setSearchResults(instantPreview);
       setSearchHighlightIndex(-1);
     }
 
@@ -1529,7 +1557,7 @@ const Purchases: React.FC = () => {
     // the debounce is the dominant latency: 150 ms keeps first-paint at
     // POS-like speed while the instant layers cover every revisit.
     const seq = ++searchSeqRef.current;
-    if (narrowed.length === 0) {
+    if (instantPreview.length === 0) {
       setSearchResults([]);
       setSearchHighlightIndex(-1);
     }
@@ -3518,7 +3546,7 @@ const Purchases: React.FC = () => {
                               </span>
                             )}
                           </div>
-                          {activeSearchIndex === index && searchSearching && searchResults.length === 0 && item.medicine_name.trim().length >= 3 && (
+                          {activeSearchIndex === index && searchSearching && searchResults.length === 0 && item.medicine_name.trim().length >= 2 && (
                             <div ref={searchResultsRef} className={`absolute z-[9999] w-[440px] max-w-[90vw] bg-bg2 border border-glass-border rounded-xl shadow-2xl p-3 left-0 backdrop-blur-xl ${
                               purchaseSearchDropUp
                                 ? 'bottom-full mb-1'
@@ -3530,7 +3558,7 @@ const Purchases: React.FC = () => {
                               </div>
                             </div>
                           )}
-                          {activeSearchIndex === index && !searchSearching && searchResults.length === 0 && item.medicine_name.trim().length >= 3 && (
+                          {activeSearchIndex === index && !searchSearching && searchResults.length === 0 && item.medicine_name.trim().length >= 2 && (
                             <div ref={searchResultsRef} className={`absolute z-[9999] w-[440px] max-w-[90vw] bg-bg2 border border-glass-border rounded-xl shadow-2xl p-2 left-0 backdrop-blur-xl ${
                               purchaseSearchDropUp
                                 ? 'bottom-full mb-1'
