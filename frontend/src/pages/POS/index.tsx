@@ -4,7 +4,7 @@ import { useOnClickOutside } from '../../hooks/useOnClickOutside';
 import { createPortal } from 'react-dom';
 import { Search, ShoppingCart, Trash2, CheckCircle, Camera, Plus, X, Phone, Calendar, UserCheck, Edit, Loader2, Send, Zap, Printer, MessageSquare, FileText } from 'lucide-react';
 import AICamera from '../../components/AICamera';
-import { api, apiClient, getCompactInventoryCache, isCompactInventoryCacheReady,
+import { api, apiClient, getCompactInventoryCache, isCompactInventoryCacheReady, ensureCompactInventoryReady,
   type SpecialOrder, type CompactInventoryItem } from '../../services/api';
 import { useApiQuery } from '../../hooks/useApiQuery';
 import { useQueryClient } from '@tanstack/react-query';
@@ -1698,11 +1698,15 @@ const POS = () => {
   // Local row search autocomplete
   useEffect(() => {
     const term = rowSearchTerm.trim();
-      if (activeRowSearchIndex === null || term.length < 2) {
+    if (activeRowSearchIndex === null || term.length < 2) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- clears row dropdown on short term
       setRowSearchResults([]);
       setRowSearchHighlightIndex(-1);
       return;
+    }
+
+    if (mappedInventory.length === 0) {
+      ensureCompactInventoryReady().then(() => setCacheVersion(v => v + 1)).catch(() => {});
     }
 
     const filtered = filterLocalInventory(term, mappedInventory);
@@ -2107,27 +2111,40 @@ const POS = () => {
     }
   }, [searchTerm]);
 
+  const suggestAbortRef = useRef<AbortController | null>(null);
+
   // Fetch fuzzy did-you-mean suggestions when results are thin
   useEffect(() => {
-      if (searchTerm.trim().length < 2 || searchResults.length >= 5) {
+    if (searchTerm.trim().length < 2 || searchResults.length >= 5) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- thin-results suggestion prefetch guard
       setSuggestions([]);
       return;
     }
 
+    if (suggestAbortRef.current) {
+      suggestAbortRef.current.abort();
+    }
+    const controller = new AbortController();
+    suggestAbortRef.current = controller;
+
     const timer = setTimeout(async () => {
       try {
-        const data = await api.suggestMedicine(searchTerm.trim());
+        const data = await api.suggestMedicine(searchTerm.trim(), controller.signal);
         if (Array.isArray(data)) {
           const filtered = data.filter(sug => !(searchResults.some(r => (r.medicine_name || '').toLowerCase() === sug.name.toLowerCase())));
 
           setSuggestions(filtered);
         }
-      } catch (err) {
-        console.error('Failed to load suggestions in POS:', err);
+      } catch (err: any) {
+        if (err?.name !== 'CanceledError' && err?.name !== 'AbortError' && err?.code !== 'ERR_CANCELED') {
+          console.error('Failed to load suggestions in POS:', err);
+        }
       }
     }, 200);
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
   }, [searchTerm, searchResults]);
 
   // Local autocomplete (replaces React Query useApiQuery to eliminate layout shift and latency)
@@ -2139,6 +2156,24 @@ const POS = () => {
     };
     window.addEventListener('inventory-cache-ready', handler);
     window.addEventListener('compact-inventory-ready', handler);
+    window.addEventListener('stock-write-completed', handler);
+
+    // On window focus / visibility wake-up after idle: verify cache readiness
+    const handleWakeUp = () => {
+      if (document.visibilityState === 'visible') {
+        const cache = getCompactInventoryCache();
+        if (!cache || cache.length === 0) {
+          ensureCompactInventoryReady().then(handler).catch(() => {});
+        }
+      }
+    };
+    window.addEventListener('focus', handleWakeUp);
+    document.addEventListener('visibilitychange', handleWakeUp);
+
+    // Initial / recovery verification
+    if (!isCompactInventoryCacheReady()) {
+      ensureCompactInventoryReady().then(handler).catch(() => {});
+    }
 
     // Fallback: unlock inventory index within 1.5s even on cold boot delays
     const fallbackTimer = setTimeout(() => {
@@ -2149,6 +2184,9 @@ const POS = () => {
       clearTimeout(fallbackTimer);
       window.removeEventListener('inventory-cache-ready', handler);
       window.removeEventListener('compact-inventory-ready', handler);
+      window.removeEventListener('stock-write-completed', handler);
+      window.removeEventListener('focus', handleWakeUp);
+      document.removeEventListener('visibilitychange', handleWakeUp);
     };
   }, []);
 
@@ -2460,6 +2498,9 @@ const POS = () => {
     }
 
     const filtered = filterLocalInventory(term, mappedInventory);
+    if (filtered.length === 0 && mappedInventory.length === 0) {
+      ensureCompactInventoryReady().then(() => setCacheVersion(v => v + 1)).catch(() => {});
+    }
     const groupedData = groupBatches(filtered);
 
     // Premium Barcode Auto-Add Feature:

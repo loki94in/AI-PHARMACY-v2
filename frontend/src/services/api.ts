@@ -5,6 +5,7 @@ const API_URL = '/api';
 
 export const apiClient = axios.create({
   baseURL: API_URL,
+  timeout: 15000,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -189,16 +190,40 @@ export const peekWhatsAppQueueStatusCache = (maxAgeMs = 2500): WhatsAppQueueStat
   return waQueueStatusCache && Date.now() - waQueueStatusCache.at < maxAgeMs ? waQueueStatusCache.data : null;
 };
 
-export const getCompactInventoryCache = (): CompactInventoryItem[] => {
-  if (compactInventoryCache) return compactInventoryCache;
-  if (typeof window !== 'undefined' && window.__INVENTORY__) {
-    compactInventoryCache = window.__INVENTORY__ as CompactInventoryItem[];
-    return compactInventoryCache || [];
+let compactInventoryFetchPromise: Promise<CompactInventoryItem[]> | null = null;
+
+export const ensureCompactInventoryReady = async (): Promise<CompactInventoryItem[]> => {
+  if (compactInventoryCache && compactInventoryCache.length > 0) {
+    return compactInventoryCache;
   }
-  return [];
+  if (compactInventoryFetchPromise) {
+    return compactInventoryFetchPromise;
+  }
+  compactInventoryFetchPromise = api.getCompactInventory()
+    .catch((err) => {
+      console.warn('[API] ensureCompactInventoryReady auto-recovery failed:', err);
+      return getCompactInventoryCache();
+    })
+    .finally(() => {
+      compactInventoryFetchPromise = null;
+    });
+  return compactInventoryFetchPromise;
 };
 
-export const isCompactInventoryCacheReady = (): boolean => compactInventoryCache !== null;
+export const getCompactInventoryCache = (): CompactInventoryItem[] => {
+  if (compactInventoryCache && compactInventoryCache.length > 0) return compactInventoryCache;
+  if (typeof window !== 'undefined' && window.__INVENTORY__ && (window.__INVENTORY__ as CompactInventoryItem[]).length > 0) {
+    compactInventoryCache = window.__INVENTORY__ as CompactInventoryItem[];
+    return compactInventoryCache;
+  }
+  // If cache is empty and running in browser, kick off silent background recovery
+  if (typeof window !== 'undefined' && !compactInventoryFetchPromise) {
+    void ensureCompactInventoryReady();
+  }
+  return compactInventoryCache || [];
+};
+
+export const isCompactInventoryCacheReady = (): boolean => compactInventoryCache !== null && compactInventoryCache.length > 0;
 
 export const setCompactInventoryCache = (
   data: CompactInventoryItem[],
@@ -906,7 +931,8 @@ export const api = {
     apiClient.post('/purchases/match-items', { names, distributor_id: distributorId }).then(res => res.data),
   historyPrefill: (name: string) =>
     apiClient.get<HistoryPrefillResult>('/purchases/history-prefill', { params: { name } }).then(res => res.data),
-  catalogSearch: (q: string) => apiClient.get('/inventory/catalog-search', { params: { q } }).then(res => res.data),
+  catalogSearch: (q: string, signal?: AbortSignal) =>
+    apiClient.get('/inventory/catalog-search', { params: { q }, signal, timeout: 8000 }).then(res => res.data),
   getBatchInfo: (medicineId: number, batchNo: string) => apiClient.get('/inventory/batch-info', { params: { medicine_id: medicineId, batch_no: batchNo } }).then(res => res.data),
   createMedicineAlias: (aliasName: string, medicineId: number) => apiClient.post('/inventory/medicines/alias', { alias_name: aliasName, medicine_id: medicineId }).then(res => res.data),
   getLearnedMapping: (name: string) => apiClient.get('/learning/mapping', { params: { name } }).then(res => res.data),
@@ -1127,7 +1153,8 @@ export const api = {
   exportVerifiedCsv: (status = 'manual') => apiClient.get('/enrichment/export', { params: { status }, responseType: 'blob' }).then(res => res.data),
 
   // POS fuzzy suggestions
-  suggestMedicine: (q: string) => apiClient.get('/sales/suggest-medicine', { params: { q } }).then(res => res.data),
+  suggestMedicine: (q: string, signal?: AbortSignal) =>
+    apiClient.get('/sales/suggest-medicine', { params: { q }, signal, timeout: 6000 }).then(res => res.data),
   queueFromPos: (medicine_id: number) => apiClient.post('/sales/queue-from-pos', { medicine_id }).then(res => res.data),
   
   // Utilities (Barcode generation)
@@ -1355,6 +1382,8 @@ export const api = {
   getAutomationCatalog: () => apiClient.get<Array<{ id: string; label: string; description: string; enabled: boolean }>>('/automation/catalog').then(res => res.data),
   setAutomationToggle: (id: string, enabled: boolean) => apiClient.post<{ success: boolean }>(`/automation/catalog/${id}/toggle`, { enabled }).then(res => res.data),
   getAutomationHubSummary: () => apiClient.get<AutomationHubSummary>('/automation/hub-summary').then(res => res.data),
+  resolveAutomationFailure: (params: { id?: string; rawId?: number; source?: string; resolveAll?: boolean }) =>
+    apiClient.post<{ success: boolean; message: string }>('/automation/resolve-failure', params).then(res => res.data),
 
   // Investigation Center
   searchInvestigation: (params: InvestigationSearchParams) => apiClient.get('/investigation/search', { params }).then(res => res.data),

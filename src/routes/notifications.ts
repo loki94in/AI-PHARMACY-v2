@@ -85,7 +85,17 @@ router.get('/notifications/stream', (req, res) => {
 
   eventService.on('server_event', listener);
 
+  // Send lightweight comment keepalive ping every 25s to keep connection alive through NAT/proxies
+  const keepAliveTimer = setInterval(() => {
+    try {
+      res.write(':ping\n\n');
+    } catch {
+      clearInterval(keepAliveTimer);
+    }
+  }, 25000);
+
   req.on('close', () => {
+    clearInterval(keepAliveTimer);
     eventService.removeListener('server_event', listener);
   });
 

@@ -104,15 +104,28 @@ describe('Automation hub summary endpoint', () => {
     expect(res.body.headline).toBe('sending');
   });
 
-  it('GET /hub-summary returns headline "failed" when the most recent terminal item failed', async () => {
+  it('GET /hub-summary returns headline "failed" and unresolvedFailuresCount > 0 when item failed', async () => {
     const db = await dbManager.getConnection();
     await db.run("DELETE FROM whatsapp_send_queue");
     await db.run(
-      "INSERT INTO whatsapp_send_queue (number, message, type, status, target_name, error_message) VALUES ('919999999999', 'test', 'credit_reminder', 'failed_perm', 'Test Customer', 'Invalid phone number')"
+      "INSERT INTO whatsapp_send_queue (number, message, type, status, target_name, error_message, acknowledged) VALUES ('919999999999', 'test', 'credit_reminder', 'failed_perm', 'Test Customer', 'Invalid phone number', 0)"
     );
     const res = await request(app).get('/api/automation/hub-summary');
     expect(res.body.headline).toBe('failed');
+    expect(res.body.unresolvedFailuresCount).toBe(1);
     expect(res.body.activity.length).toBeGreaterThan(0);
     expect(res.body.activity[0].errorMessage).toBe('Invalid phone number');
+  });
+
+  it('POST /resolve-failure marks failed items as resolved', async () => {
+    const resolveRes = await request(app)
+      .post('/api/automation/resolve-failure')
+      .send({ resolveAll: true });
+    expect(resolveRes.status).toBe(200);
+    expect(resolveRes.body.success).toBe(true);
+
+    const summaryRes = await request(app).get('/api/automation/hub-summary');
+    expect(summaryRes.body.unresolvedFailuresCount).toBe(0);
+    expect(summaryRes.body.headline).toBe('idle');
   });
 });

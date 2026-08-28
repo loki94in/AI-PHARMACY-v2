@@ -911,7 +911,9 @@ export async function ensureSchema(dbPath: string) {
       media_url TEXT,
       file_json TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      sent_at INTEGER DEFAULT NULL
+      sent_at INTEGER DEFAULT NULL,
+      acknowledged INTEGER DEFAULT 0,
+      resolved_at INTEGER DEFAULT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_wa_send_queue_status ON whatsapp_send_queue (status);
 
@@ -926,7 +928,9 @@ export async function ensureSchema(dbPath: string) {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       reference_id TEXT,
       needs_confirmation INTEGER DEFAULT 0,
-      lifecycle_status TEXT DEFAULT 'sent'
+      lifecycle_status TEXT DEFAULT 'sent',
+      acknowledged INTEGER DEFAULT 0,
+      resolved_at INTEGER DEFAULT NULL
     );
 
     CREATE TABLE IF NOT EXISTS session_refresh_logs (

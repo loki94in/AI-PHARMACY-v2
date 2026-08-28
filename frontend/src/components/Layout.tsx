@@ -358,10 +358,12 @@ const FlashToast = ({
   toast,
   onDismiss,
   onOpenReview,
+  onOpenAutomationHub,
 }: {
   toast: (ToastEventDetail & { id: number }) | null;
   onDismiss: () => void;
   onOpenReview: () => void;
+  onOpenAutomationHub?: () => void;
 }) => {
   if (!toast) return null;
 
@@ -374,23 +376,39 @@ const FlashToast = ({
   }[toast.type] || { bg: 'bg-bg2 border-border text-text shadow-[0_10px_30px_rgba(0,0,0,0.5)]', icon: <Info size={15} className="shrink-0 text-muted" /> };
 
   const isStagedSync = toast.message.toLowerCase().includes('sync') || toast.message.toLowerCase().includes('staged');
+  const isWaFailure = toast.type === 'error' && (toast.message.toLowerCase().includes('whatsapp') || toast.message.toLowerCase().includes('automation'));
 
   return (
     <div
       key={toast.id}
+      onClick={() => {
+        if (isWaFailure && onOpenAutomationHub) {
+          onOpenAutomationHub();
+          onDismiss();
+        }
+      }}
       className={`
         fixed top-4 left-1/2 -translate-x-1/2 z-toast
         flex items-center gap-2.5 px-4 py-2.5 rounded-2xl
         border ${cfg.bg}
         animate-soft-toast opacity-100
         min-w-[260px] max-w-[450px]
+        ${isWaFailure ? 'cursor-pointer hover:border-red-400/80 transition-colors' : ''}
       `}
     >
       {cfg.icon}
-      <span className="text-sm font-semibold flex-1 leading-snug">{toast.message}</span>
+      <span className="text-sm font-semibold flex-1 leading-snug">
+        {toast.message}
+        {isWaFailure && (
+          <span className="block text-[10px] text-sky-400 font-bold uppercase tracking-wider mt-0.5">
+            Click to view in Automation Hub →
+          </span>
+        )}
+      </span>
       {isStagedSync && (
         <button
-          onClick={() => {
+          onClick={(e) => {
+            e.stopPropagation();
             onOpenReview();
             onDismiss();
           }}
@@ -400,7 +418,10 @@ const FlashToast = ({
         </button>
       )}
       <button
-        onClick={onDismiss}
+        onClick={(e) => {
+          e.stopPropagation();
+          onDismiss();
+        }}
         className="ml-1.5 opacity-50 hover:opacity-100 transition-opacity shrink-0"
         aria-label="Dismiss"
       >
@@ -1534,7 +1555,12 @@ const Topbar = memo(({
 
   return (
     <>
-      <FlashToast toast={flashToast} onDismiss={() => setFlashToast(null)} onOpenReview={onOpenStagedReview} />
+      <FlashToast
+        toast={flashToast}
+        onDismiss={() => setFlashToast(null)}
+        onOpenReview={onOpenStagedReview}
+        onOpenAutomationHub={onOpenAutomationHub}
+      />
 
       <header className="h-14 bg-glass-bg border-b border-glass-border backdrop-blur-xl flex items-center justify-between px-3 sm:px-6 relative z-sticky-header shrink-0">
         <div className="flex items-center gap-3 min-w-0">

@@ -131,16 +131,31 @@ export interface AutomationNotification {
 }
 
 export interface AutomationHubActivityItem {
+  id?: string;
+  rawId?: number;
+  source?: 'queue' | 'notification';
   automationType: string;
   targetName: string | null;
+  phone?: string | null;
+  message?: string | null;
   status: string;
   errorMessage: string | null;
   sentAt: number | null;
   createdAt: string;
+  acknowledged?: number;
+  resolvedAt?: number | null;
 }
 
 export interface AutomationHubSummary {
   headline: 'sending' | 'failed' | 'idle';
+  unresolvedFailuresCount?: number;
+  activeSendingItem?: {
+    id: number;
+    targetName: string;
+    type: string;
+    status: string;
+    createdAt: number | string;
+  } | null;
   activity: AutomationHubActivityItem[];
 }
 

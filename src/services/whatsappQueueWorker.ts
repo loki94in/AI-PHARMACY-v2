@@ -118,6 +118,21 @@ class WhatsAppQueueWorker {
       if (!colNames.has('scheduled_at')) {
         await db.run("ALTER TABLE whatsapp_send_queue ADD COLUMN scheduled_at INTEGER");
       }
+      if (!colNames.has('acknowledged')) {
+        await db.run("ALTER TABLE whatsapp_send_queue ADD COLUMN acknowledged INTEGER DEFAULT 0");
+      }
+      if (!colNames.has('resolved_at')) {
+        await db.run("ALTER TABLE whatsapp_send_queue ADD COLUMN resolved_at INTEGER DEFAULT NULL");
+      }
+
+      const notifCols = await db.all("PRAGMA table_info(automation_notifications)");
+      const notifColNames = new Set(notifCols.map((c: any) => c.name));
+      if (!notifColNames.has('acknowledged')) {
+        await db.run("ALTER TABLE automation_notifications ADD COLUMN acknowledged INTEGER DEFAULT 0");
+      }
+      if (!notifColNames.has('resolved_at')) {
+        await db.run("ALTER TABLE automation_notifications ADD COLUMN resolved_at INTEGER DEFAULT NULL");
+      }
       this.schemaEnsured = true;
     } catch (_) {}
   }
@@ -341,6 +356,11 @@ class WhatsAppQueueWorker {
       }
     }
 
+    const lastId = result.lastID || 0;
+    try {
+      eventService.broadcast('automation_hub_updated', { type: 'enqueued', id: lastId, targetName: resolvedTargetName, automationType: type });
+    } catch (_) {}
+
     // Trigger processing if scheduled time is now or past; otherwise arm a
     // one-shot timer so a delayed send still fires without needing the poll
     // loop to be running (lazy loop — owner rule 2026-08).
@@ -350,7 +370,7 @@ class WhatsAppQueueWorker {
       const delay = Math.min(scheduledAt - now, 2147483647);
       setTimeout(() => this.triggerProcessing(), delay);
     }
-    return result.lastID || 0;
+    return lastId;
   }
 
   /** Purge sent items older than 24 hours and recover any interrupted items from app restarts */
@@ -576,91 +596,100 @@ class WhatsAppQueueWorker {
             ).catch(() => {});
           }
 
-          this.broadcastQueueState(true);
-
-          const suppressedNote = sendResult.suppressed ? ' (duplicate suppressed)' : '';
-          console.log(`[WhatsAppQueueWorker] Verified & sent message #${item.id} to ${item.number}${suppressedNote}`);
-        } catch (err: any) {
-          const errMsg = err?.message || 'Failed to send message';
-
-          // Puppeteer detached-frame errors can occur after delivery — verify outbox before failing
-          const outboxMatch = await this.hasRecentOutboxMatch(db, item.number, item.message);
-          if (outboxMatch) {
-            const sentAt = Date.now();
-            await db.run(
-              "UPDATE whatsapp_send_queue SET status = 'sent', sent_at = ?, error_message = NULL WHERE id = ?",
-              [sentAt, item.id]
-            );
-            await db.run(
-              "UPDATE automation_notifications SET status = 'sent', error_message = NULL WHERE reference_id = ? OR reference_id = ?",
-              [`queue_${item.id}`, String(item.id)]
-            ).catch(() => {});
-
-            if (item.type === 'pharmarack_distributor_order') {
-              await this.markPharmarackOrderSent(db, item.target_name);
-            }
-            if (item.type === 'refill_reminder') {
-              await db.run(
-                "UPDATE patient_refills SET reminder_status = 'SENT', reminder_sent_at = datetime('now'), status = 'notified' WHERE reminder_job_id = ?",
-                [item.id]
-              ).catch(() => {});
-              await db.run(
-                "UPDATE automation_notifications SET status = 'sent' WHERE (reference_id IN (SELECT CAST(id AS TEXT) FROM patient_refills WHERE reminder_job_id = ?) OR reference_id = ?) AND type = 'refill_reminder'",
-                [item.id, String(item.id)]
-              ).catch(() => {});
-            }
             this.broadcastQueueState(true);
-            console.log(`[WhatsAppQueueWorker] Outbox match — marking #${item.id} as sent despite error: ${errMsg}`);
-          } else {
-            const newRetryCount = item.retry_count + 1;
-            const newStatus = newRetryCount >= 3 ? 'failed_perm' : 'failed_offline';
+            try {
+              eventService.broadcast('automation_hub_updated', { type: 'sent', id: item.id });
+            } catch (_) {}
 
-            console.warn(`[WhatsAppQueueWorker] Failed to send #${item.id} (attempt ${newRetryCount}/3): ${errMsg}`);
-            await db.run(
-              "UPDATE whatsapp_send_queue SET status = ?, retry_count = ?, error_message = ? WHERE id = ?",
-              [newStatus, newRetryCount, errMsg, item.id]
-            );
-            await db.run(
-              "UPDATE automation_notifications SET status = 'failed', error_message = ? WHERE reference_id = ? OR reference_id = ?",
-              [errMsg, `queue_${item.id}`, String(item.id)]
-            ).catch(() => {});
+            const suppressedNote = sendResult.suppressed ? ' (duplicate suppressed)' : '';
+            console.log(`[WhatsAppQueueWorker] Verified & sent message #${item.id} to ${item.number}${suppressedNote}`);
+          } catch (err: any) {
+            const errMsg = err?.message || 'Failed to send message';
 
-            if (item.type === 'refill_reminder') {
+            // Puppeteer detached-frame errors can occur after delivery — verify outbox before failing
+            const outboxMatch = await this.hasRecentOutboxMatch(db, item.number, item.message);
+            if (outboxMatch) {
+              const sentAt = Date.now();
               await db.run(
-                "UPDATE patient_refills SET reminder_status = 'FAILED' WHERE reminder_job_id = ?",
-                [item.id]
-              ).catch(() => {});
+                "UPDATE whatsapp_send_queue SET status = 'sent', sent_at = ?, error_message = NULL WHERE id = ?",
+                [sentAt, item.id]
+              );
               await db.run(
-                "UPDATE automation_notifications SET status = 'failed', error_message = ? WHERE (reference_id IN (SELECT CAST(id AS TEXT) FROM patient_refills WHERE reminder_job_id = ?) OR reference_id = ?) AND type = 'refill_reminder'",
-                [errMsg, item.id, String(item.id)]
+                "UPDATE automation_notifications SET status = 'sent', error_message = NULL WHERE reference_id = ? OR reference_id = ?",
+                [`queue_${item.id}`, String(item.id)]
               ).catch(() => {});
-            }
 
-            this.broadcastQueueState(true);
-
-            // Log failure notification into automation_notifications if permanently failed
-            if (newStatus === 'failed_perm') {
-              try {
+              if (item.type === 'pharmarack_distributor_order') {
+                await this.markPharmarackOrderSent(db, item.target_name);
+              }
+              if (item.type === 'refill_reminder') {
                 await db.run(
-                  `INSERT INTO automation_notifications 
-                   (type, recipient_name, recipient_phone, message, status, error_message, reference_id, created_at)
-                   VALUES (?, ?, ?, ?, 'failed', ?, ?, ?)`,
-                  ['whatsapp_queue_failure', item.target_name || 'Distributor', item.number, item.message, errMsg, `queue-${item.id}`, Date.now()]
-                );
+                  "UPDATE patient_refills SET reminder_status = 'SENT', reminder_sent_at = datetime('now'), status = 'notified' WHERE reminder_job_id = ?",
+                  [item.id]
+                ).catch(() => {});
+                await db.run(
+                  "UPDATE automation_notifications SET status = 'sent' WHERE (reference_id IN (SELECT CAST(id AS TEXT) FROM patient_refills WHERE reminder_job_id = ?) OR reference_id = ?) AND type = 'refill_reminder'",
+                  [item.id, String(item.id)]
+                ).catch(() => {});
+              }
+              this.broadcastQueueState(true);
+              try {
+                eventService.broadcast('automation_hub_updated', { type: 'sent', id: item.id });
+              } catch (_) {}
+              console.log(`[WhatsAppQueueWorker] Outbox match — marking #${item.id} as sent despite error: ${errMsg}`);
+            } else {
+              const newRetryCount = item.retry_count + 1;
+              const newStatus = newRetryCount >= 3 ? 'failed_perm' : 'failed_offline';
+
+              console.warn(`[WhatsAppQueueWorker] Failed to send #${item.id} (attempt ${newRetryCount}/3): ${errMsg}`);
+              await db.run(
+                "UPDATE whatsapp_send_queue SET status = ?, retry_count = ?, error_message = ? WHERE id = ?",
+                [newStatus, newRetryCount, errMsg, item.id]
+              );
+              await db.run(
+                "UPDATE automation_notifications SET status = 'failed', error_message = ? WHERE reference_id = ? OR reference_id = ?",
+                [errMsg, `queue_${item.id}`, String(item.id)]
+              ).catch(() => {});
+
+              if (item.type === 'refill_reminder') {
+                await db.run(
+                  "UPDATE patient_refills SET reminder_status = 'FAILED' WHERE reminder_job_id = ?",
+                  [item.id]
+                ).catch(() => {});
+                await db.run(
+                  "UPDATE automation_notifications SET status = 'failed', error_message = ? WHERE (reference_id IN (SELECT CAST(id AS TEXT) FROM patient_refills WHERE reminder_job_id = ?) OR reference_id = ?) AND type = 'refill_reminder'",
+                  [errMsg, item.id, String(item.id)]
+                ).catch(() => {});
+              }
+
+              this.broadcastQueueState(true);
+              try {
+                eventService.broadcast('automation_hub_updated', { type: 'failed', id: item.id, error: errMsg });
               } catch (_) {}
 
-              // Broadcast toast alert to frontend toaster popup
-              const targetDesc = item.target_name ? `${item.target_name} (${item.number})` : item.number;
-              const cleanReason = errMsg.includes('No LID for user')
-                ? 'Number not registered on WhatsApp'
-                : errMsg;
-              eventService.broadcast('toast_alert', {
-                type: 'error',
-                message: `❌ WhatsApp to ${targetDesc} failed: ${cleanReason}`
-              });
+              // Log failure notification into automation_notifications if permanently failed
+              if (newStatus === 'failed_perm') {
+                try {
+                  await db.run(
+                    `INSERT INTO automation_notifications 
+                     (type, recipient_name, recipient_phone, message, status, error_message, reference_id, created_at)
+                     VALUES (?, ?, ?, ?, 'failed', ?, ?, ?)`,
+                    ['whatsapp_queue_failure', item.target_name || 'Distributor', item.number, item.message, errMsg, `queue-${item.id}`, Date.now()]
+                  );
+                } catch (_) {}
+
+                // Broadcast toast alert to frontend toaster popup
+                const targetDesc = item.target_name ? `${item.target_name} (${item.number})` : item.number;
+                const cleanReason = errMsg.includes('No LID for user')
+                  ? 'Number not registered on WhatsApp'
+                  : errMsg;
+                eventService.broadcast('toast_alert', {
+                  type: 'error',
+                  message: `❌ WhatsApp to ${targetDesc} failed: ${cleanReason}`
+                });
+              }
             }
           }
-        }
 
         // Check dynamically if more pending items exist in the database (including newly arrived manual messages)
         const remainingCheck = await db.get(

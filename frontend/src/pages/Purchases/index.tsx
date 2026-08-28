@@ -3,7 +3,7 @@ import {} from '../../hooks/useDeferredEffect';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Edit, Camera, CheckCircle, Mail, Package, X, Plus, BookOpen, AlertTriangle, ShieldAlert, Factory, RefreshCw, ExternalLink, Loader2 } from 'lucide-react';
 import { useOnClickOutside } from '../../hooks/useOnClickOutside';
-import { api, apiClient, getCompactInventoryCache } from '../../services/api';
+import { api, apiClient, getCompactInventoryCache, ensureCompactInventoryReady } from '../../services/api';
 import { useApiQuery } from '../../hooks/useApiQuery';
 
 import { useQueryClient } from '@tanstack/react-query';
@@ -421,7 +421,10 @@ const getInstantNarrowedResults = (term: string): Medicine[] => {
 // Local compact inventory preview for cold search cache
 const getInstantLocalInventoryPreview = (term: string): Medicine[] => {
   const compact = getCompactInventoryCache();
-  if (!compact || compact.length === 0) return [];
+  if (!compact || compact.length === 0) {
+    void ensureCompactInventoryReady();
+    return [];
+  }
   const lower = term.toLowerCase().trim();
   const matched = compact.filter(c => c.name && c.name.toLowerCase().includes(lower));
   return matched.slice(0, 25).map(c => ({
@@ -1503,6 +1506,7 @@ const Purchases: React.FC = () => {
   };
 
   const searchTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchAbortRef = React.useRef<AbortController | null>(null);
   // Monotonic search sequence: a slow earlier request can never overwrite the
   // results of a newer keystroke.
   const searchSeqRef = React.useRef(0);
@@ -1510,6 +1514,10 @@ const Purchases: React.FC = () => {
   const searchMedicines = (term: string, index: number) => {
     if (searchTimeoutRef.current) {
       clearTimeout(searchTimeoutRef.current);
+    }
+    if (searchAbortRef.current) {
+      searchAbortRef.current.abort();
+      searchAbortRef.current = null;
     }
 
     setActiveSearchIndex(index);
@@ -1537,7 +1545,7 @@ const Purchases: React.FC = () => {
       return;
     }
 
-    // POS-cart-like instant narrowing (owner request): if a LONGER-family term
+    // POS-cart-like instant narrowing: if a LONGER-family term
     // was already fetched (e.g. "dol" while now typing "dolo 6"), filter those
     // cached MASTER rows locally and paint immediately — zero network, still
     // single-source (every row came from the master endpoint this session).
@@ -1562,9 +1570,13 @@ const Purchases: React.FC = () => {
       setSearchHighlightIndex(-1);
     }
     setSearchSearching(true);
+
+    const controller = new AbortController();
+    searchAbortRef.current = controller;
+
     searchTimeoutRef.current = setTimeout(async () => {
       try {
-        const response = await api.catalogSearch(cleanTerm) as CatalogSearchRow[] | null;
+        const response = await api.catalogSearch(cleanTerm, controller.signal) as CatalogSearchRow[] | null;
         if (seq !== searchSeqRef.current) return; // superseded keystroke
         if (Array.isArray(response)) {
           const deduped = dedupeMedicinesByName(response as Medicine[]);
@@ -1573,8 +1585,10 @@ const Purchases: React.FC = () => {
           setSearchResults(deduped);
           setSearchHighlightIndex(-1);
         }
-      } catch (error) {
-        console.error('Error searching medicines:', error);
+      } catch (error: any) {
+        if (error?.name !== 'CanceledError' && error?.name !== 'AbortError' && error?.code !== 'ERR_CANCELED') {
+          console.error('Error searching medicines in Purchases:', error);
+        }
       } finally {
         if (seq === searchSeqRef.current) {
           setSearchSearching(false);
@@ -1587,6 +1601,9 @@ const Purchases: React.FC = () => {
     return () => {
       if (searchTimeoutRef.current) {
         clearTimeout(searchTimeoutRef.current);
+      }
+      if (searchAbortRef.current) {
+        searchAbortRef.current.abort();
       }
     };
   }, []);

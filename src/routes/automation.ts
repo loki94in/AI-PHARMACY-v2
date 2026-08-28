@@ -52,50 +52,111 @@ router.get('/hub-summary', async (req, res) => {
     const db = await dbManager.getConnection();
 
     const queueRows = await db.all(
-      `SELECT type, target_name, status, error_message, sent_at, created_at
+      `SELECT id, type, target_name, number, message, status, error_message, sent_at, created_at, acknowledged, resolved_at
        FROM whatsapp_send_queue
-       ORDER BY created_at DESC LIMIT 20`
+       ORDER BY created_at DESC LIMIT 30`
     );
     const notificationRows = await db.all(
-      `SELECT type, recipient_name, status, error_message, created_at
+      `SELECT id, type, recipient_name, recipient_phone, message, status, error_message, created_at, reference_id, acknowledged, resolved_at
        FROM automation_notifications
-       WHERE type = 'whatsapp' OR type LIKE 'whatsapp%'
-       ORDER BY created_at DESC LIMIT 20`
+       WHERE type = 'whatsapp' OR type LIKE 'whatsapp%' OR type LIKE '%whatsapp%' OR type LIKE '%order%' OR type LIKE '%refill%' OR type LIKE '%invoice%' OR type LIKE '%credit%'
+       ORDER BY created_at DESC LIMIT 30`
     );
 
     const activity = [
       ...queueRows.map((r: any) => ({
+        id: `q_${r.id}`,
+        rawId: r.id,
+        source: 'queue',
         automationType: r.type,
         targetName: r.target_name || null,
+        phone: r.number || null,
+        message: r.message || null,
         status: r.status,
         errorMessage: r.error_message || null,
         sentAt: r.sent_at || null,
         createdAt: r.created_at,
+        acknowledged: Number(r.acknowledged || 0),
+        resolvedAt: r.resolved_at || null,
       })),
       ...notificationRows.map((r: any) => ({
+        id: `n_${r.id}`,
+        rawId: r.id,
+        source: 'notification',
         automationType: r.type,
         targetName: r.recipient_name || null,
+        phone: r.recipient_phone || null,
+        message: r.message || null,
         status: r.status,
         errorMessage: r.error_message || null,
         sentAt: null,
         createdAt: r.created_at,
+        acknowledged: Number(r.acknowledged || 0),
+        resolvedAt: r.resolved_at || null,
       })),
     ].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
-    const hasActiveSend = queueRows.some((r: any) => ['pending', 'sending', 'waiting'].includes(r.status));
-    const mostRecentTerminal = activity.find(a => !['pending', 'sending', 'waiting'].includes(a.status));
-    const mostRecentFailed = mostRecentTerminal && String(mostRecentTerminal.status).startsWith('failed');
+    const activeSendingRow = queueRows.find((r: any) => ['pending', 'sending', 'waiting'].includes(r.status));
+    const hasActiveSend = Boolean(activeSendingRow);
+    
+    // Count unacknowledged/unresolved failed messages
+    const unresolvedFailures = activity.filter(a => String(a.status).startsWith('failed') && a.acknowledged === 0);
+    const unresolvedFailuresCount = unresolvedFailures.length;
 
     let headline: 'sending' | 'failed' | 'idle' = 'idle';
     if (hasActiveSend) {
       headline = 'sending';
-    } else if (mostRecentFailed) {
+    } else if (unresolvedFailuresCount > 0) {
       headline = 'failed';
     }
 
-    res.json({ headline, activity: activity.slice(0, 20) });
+    const activeSendingItem = activeSendingRow ? {
+      id: activeSendingRow.id,
+      targetName: activeSendingRow.target_name || activeSendingRow.number || 'Recipient',
+      type: activeSendingRow.type,
+      status: activeSendingRow.status,
+      createdAt: activeSendingRow.created_at,
+    } : null;
+
+    res.json({
+      headline,
+      unresolvedFailuresCount,
+      activeSendingItem,
+      activity: activity.slice(0, 30)
+    });
   } catch (err: any) {
     console.error('Failed to build automation hub summary:', err);
+    res.status(500).json({ error: 'Internal server error: ' + err.message });
+  }
+});
+
+// Resolve / acknowledge failed WhatsApp automation(s) to dismiss persistent red failure badges
+router.post('/resolve-failure', async (req, res) => {
+  const { id, rawId, source, resolveAll } = req.body || {};
+  try {
+    const db = await dbManager.getConnection();
+    const now = Date.now();
+
+    if (resolveAll) {
+      await db.run("UPDATE whatsapp_send_queue SET acknowledged = 1, resolved_at = ? WHERE status LIKE 'failed%'", [now]);
+      await db.run("UPDATE automation_notifications SET acknowledged = 1, resolved_at = ? WHERE status LIKE 'failed%'", [now]);
+    } else if (source === 'queue' || (typeof id === 'string' && id.startsWith('q_'))) {
+      const qId = rawId || (typeof id === 'string' ? id.replace('q_', '') : id);
+      await db.run("UPDATE whatsapp_send_queue SET acknowledged = 1, resolved_at = ? WHERE id = ?", [now, qId]);
+    } else if (source === 'notification' || (typeof id === 'string' && id.startsWith('n_'))) {
+      const nId = rawId || (typeof id === 'string' ? id.replace('n_', '') : id);
+      await db.run("UPDATE automation_notifications SET acknowledged = 1, resolved_at = ? WHERE id = ?", [now, nId]);
+    } else if (rawId) {
+      await db.run("UPDATE whatsapp_send_queue SET acknowledged = 1, resolved_at = ? WHERE id = ?", [now, rawId]);
+      await db.run("UPDATE automation_notifications SET acknowledged = 1, resolved_at = ? WHERE id = ?", [now, rawId]);
+    }
+
+    const { eventService } = await import('../services/eventService.js');
+    eventService.broadcast('automation_hub_updated', { type: 'resolved' });
+
+    res.json({ success: true, message: 'Failure marked as resolved' });
+  } catch (err: any) {
+    console.error('Failed to resolve automation failure:', err);
     res.status(500).json({ error: 'Internal server error: ' + err.message });
   }
 });

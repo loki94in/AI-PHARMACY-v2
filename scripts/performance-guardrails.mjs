@@ -63,6 +63,8 @@ const ALLOW = {
     // Transient 2s poll armed ONLY between a user's Stop click and worker halt,
     // self-clearing on completion — same class as the while-open queue poll.
     'frontend/src/pages/aiengineering/panels/compositionpanel.tsx',
+    // 10s transient send countdown animation timer in open popover, self-clearing on completion
+    'frontend/src/components/automationhubpopover.tsx',
   ],
   directSendWorkers: ['src/services/whatsappqueueworker.ts'], // flushes USER-clicked queue items only
   // Pill toggle thumbs (after:bg-white / after:border-gray-300) are structurally white by design —
