@@ -5,7 +5,7 @@ import { createPortal } from 'react-dom';
 import { Search, ShoppingCart, Trash2, CheckCircle, Camera, Plus, X, Phone, Calendar, UserCheck, Edit, Loader2, Send, Zap, Printer, MessageSquare, FileText } from 'lucide-react';
 import AICamera from '../../components/AICamera';
 import { api, apiClient, getCompactInventoryCache, isCompactInventoryCacheReady, ensureCompactInventoryReady,
-  type SpecialOrder, type CompactInventoryItem } from '../../services/api';
+  getCompactInventoryIndex, type SpecialOrder, type CompactInventoryItem } from '../../services/api';
 import { useApiQuery } from '../../hooks/useApiQuery';
 import { useQueryClient } from '@tanstack/react-query';
 import { toastEvent } from '../../services/events';
@@ -522,46 +522,37 @@ const EMPTY_ARRAY: never[] = [];
 const filterLocalInventory = (query: string, inventory: PosBatchItem[]): PosBatchItem[] => {
   if (!query || query.trim().length < 2) return [];
   const term = query.trim().toLowerCase();
-  
-  // Filter strictly for items present in active inventory with positive stock AND NOT EXPIRED
-  const validInventory = inventory.filter(item => {
-    const hasInventory = !!item.inventory_id && (Number(item.stock_qty || item.quantity || 0) > 0 || Number(item.loose_quantity || 0) > 0);
-    const expired = isExpiredDate(item.expiry_date || item.expiry);
-    return hasInventory && !expired;
-  });
+  const index = getCompactInventoryIndex();
+  const useIndex = index.length === inventory.length;
 
-  // Prefix matches first
-  const prefixes = validInventory.filter(item => 
-    (item.medicine_name && item.medicine_name.toLowerCase().startsWith(term)) ||
-    (item.name && item.name.toLowerCase().startsWith(term)) ||
-    (item.item_code && item.item_code.toLowerCase().startsWith(term)) ||
-    (item.short_code && item.short_code.toLowerCase().startsWith(term)) ||
-    (item.therapeutic && item.therapeutic.toLowerCase().startsWith(term)) ||
-    (item.sub_therapeutic && item.sub_therapeutic.toLowerCase().startsWith(term)) ||
-    (item.batch_no && item.batch_no.toLowerCase().startsWith(term))
-  );
-  
+  const prefixes: PosBatchItem[] = [];
+  const infixes: PosBatchItem[] = [];
+
+  const len = inventory.length;
+  for (let i = 0; i < len; i++) {
+    const item = inventory[i];
+    const isValid = useIndex ? index[i].isValidForPos : (
+      !!item.inventory_id && (Number(item.stock_qty || item.quantity || 0) > 0 || Number(item.loose_quantity || 0) > 0) && !isExpiredDate(item.expiry_date || item.expiry)
+    );
+    if (!isValid) continue;
+
+    const name = useIndex ? index[i].nameLower : (item.medicine_name || item.name || '').toLowerCase();
+    const code = useIndex ? index[i].itemCodeLower : (item.item_code || '').toLowerCase();
+    const batch = useIndex ? index[i].batchNoLower : (item.batch_no || '').toLowerCase();
+
+    if (name.startsWith(term) || code.startsWith(term) || batch.startsWith(term)) {
+      prefixes.push(item);
+      if (prefixes.length >= 30) return prefixes;
+    } else if (name.includes(term) || code.includes(term) || batch.includes(term)) {
+      if (prefixes.length + infixes.length < 30) {
+        infixes.push(item);
+      }
+    }
+  }
+
   if (prefixes.length >= 15) {
     return prefixes.slice(0, 30);
   }
-  
-  // Infix matches second
-  const infixes = validInventory.filter(item => 
-    ((item.medicine_name && item.medicine_name.toLowerCase().includes(term)) ||
-    (item.name && item.name.toLowerCase().includes(term)) ||
-    (item.item_code && item.item_code.toLowerCase().includes(term)) ||
-    (item.short_code && item.short_code.toLowerCase().includes(term)) ||
-    (item.therapeutic && item.therapeutic.toLowerCase().includes(term)) ||
-    (item.sub_therapeutic && item.sub_therapeutic.toLowerCase().includes(term)) ||
-    (item.batch_no && item.batch_no.toLowerCase().includes(term))) &&
-    !(item.medicine_name && item.medicine_name.toLowerCase().startsWith(term)) &&
-    !(item.name && item.name.toLowerCase().startsWith(term)) &&
-    !(item.item_code && item.item_code.toLowerCase().startsWith(term)) &&
-    !(item.short_code && item.short_code.toLowerCase().startsWith(term)) &&
-    !(item.therapeutic && item.therapeutic.toLowerCase().startsWith(term)) &&
-    !(item.batch_no && item.batch_no.toLowerCase().startsWith(term))
-  );
-  
   return [...prefixes, ...infixes].slice(0, 30);
 };
 
@@ -1687,12 +1678,7 @@ const POS = () => {
   const mappedInventory = useMemo(() => {
     void cacheVersion; // intentional external-cache invalidation trigger
     const compactInventory = getCompactInventoryCache();
-    return compactInventory.map(item => ({
-      ...item,
-      medicine_name: item.name,
-      quantity: item.stock_qty,
-      alternatives: []
-    }));
+    return compactInventory as unknown as PosBatchItem[];
   }, [cacheVersion]);
 
   // Local row search autocomplete

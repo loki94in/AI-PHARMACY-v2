@@ -210,10 +210,89 @@ export const ensureCompactInventoryReady = async (): Promise<CompactInventoryIte
   return compactInventoryFetchPromise;
 };
 
+let lastCompactInventoryFetchTime = 0;
+
+export interface PrecomputedInventoryIndex {
+  nameLower: string;
+  itemCodeLower: string;
+  batchNoLower: string;
+  manufacturerLower: string;
+  isValidForPos: boolean;
+}
+
+let compactInventoryIndex: PrecomputedInventoryIndex[] = [];
+
+function isExpiredDateFast(expiryStr: string | null | undefined): boolean {
+  if (!expiryStr) return false;
+  const str = String(expiryStr).trim();
+  if (!str) return false;
+  const now = new Date();
+  const curYear = now.getFullYear();
+  const curMonth = now.getMonth() + 1;
+  const mmYyyy = str.match(/^(\d{1,2})[\/\-](\d{2,4})$/);
+  if (mmYyyy) {
+    const m = parseInt(mmYyyy[1], 10);
+    let y = parseInt(mmYyyy[2], 10);
+    if (y < 100) y += 2000;
+    if (y < curYear) return true;
+    if (y === curYear && m < curMonth) return true;
+    return false;
+  }
+  const iso = str.match(/^(\d{4})[\/\-](\d{1,2})/);
+  if (iso) {
+    const y = parseInt(iso[1], 10);
+    const m = parseInt(iso[2], 10);
+    if (y < curYear) return true;
+    if (y === curYear && m < curMonth) return true;
+    return false;
+  }
+  return false;
+}
+
+function buildPrecomputedInventoryIndex(items: CompactInventoryItem[]): PrecomputedInventoryIndex[] {
+  const len = items.length;
+  const index: PrecomputedInventoryIndex[] = new Array(len);
+  for (let i = 0; i < len; i++) {
+    const item = items[i];
+    const nameLower = (item.name || item.medicine_name || '').toLowerCase();
+    const itemCodeLower = (item.item_code || '').toLowerCase();
+    const batchNoLower = (item.batch_no || '').toLowerCase();
+    const manufacturerLower = (item.manufacturer || '').toLowerCase();
+    const stock = Number(item.stock_qty ?? item.quantity ?? 0);
+    const loose = Number(item.loose_quantity ?? item.loose_qty ?? 0);
+    const hasInventory = !!(item.inventory_id || item.id) && (stock > 0 || loose > 0);
+    const expired = isExpiredDateFast(item.expiry_date);
+    index[i] = {
+      nameLower,
+      itemCodeLower,
+      batchNoLower,
+      manufacturerLower,
+      isValidForPos: hasInventory && !expired,
+    };
+  }
+  return index;
+}
+
+export const getCompactInventoryIndex = (): PrecomputedInventoryIndex[] => {
+  if (compactInventoryIndex.length > 0) return compactInventoryIndex;
+  if (compactInventoryCache && compactInventoryCache.length > 0) {
+    compactInventoryIndex = buildPrecomputedInventoryIndex(compactInventoryCache);
+    return compactInventoryIndex;
+  }
+  return [];
+};
+
 export const getCompactInventoryCache = (): CompactInventoryItem[] => {
-  if (compactInventoryCache && compactInventoryCache.length > 0) return compactInventoryCache;
+  if (compactInventoryCache && compactInventoryCache.length > 0) {
+    // If cache is > 15 minutes old (e.g. after long idle return), trigger a silent background refresh
+    if (typeof window !== 'undefined' && !compactInventoryFetchPromise && Date.now() - lastCompactInventoryFetchTime > 15 * 60 * 1000) {
+      void ensureCompactInventoryReady();
+    }
+    return compactInventoryCache;
+  }
   if (typeof window !== 'undefined' && window.__INVENTORY__ && (window.__INVENTORY__ as CompactInventoryItem[]).length > 0) {
     compactInventoryCache = window.__INVENTORY__ as CompactInventoryItem[];
+    compactInventoryIndex = buildPrecomputedInventoryIndex(compactInventoryCache);
     return compactInventoryCache;
   }
   // If cache is empty and running in browser, kick off silent background recovery
@@ -230,6 +309,8 @@ export const setCompactInventoryCache = (
   options?: { persist?: boolean }
 ) => {
   compactInventoryCache = data;
+  lastCompactInventoryFetchTime = Date.now();
+  compactInventoryIndex = buildPrecomputedInventoryIndex(data);
   if (typeof window !== 'undefined') {
     if (options?.persist !== false) {
       try {
@@ -245,6 +326,8 @@ export const setCompactInventoryCache = (
 
 export const invalidateCompactInventoryCache = (): void => {
   compactInventoryCache = null;
+  compactInventoryIndex = [];
+  lastCompactInventoryFetchTime = 0;
   if (typeof window !== 'undefined') {
     try {
       sessionStorage.removeItem(COMPACT_INVENTORY_SESSION_KEY);

@@ -58,6 +58,8 @@ const SSE_CUSTOM_EVENTS: Record<string, string[]> = {
   google_verification_required: ['sse-google-verification'],
   google_verification_solved: ['sse-google-verification'],
   toast_alert: ['app-show-toast'],
+  automation_hub_updated: ['app-automation-hub-updated'],
+  message_send_progress: ['app-message-send-progress'],
 };
 
 // Chrome-owned queries rendered OUTSIDE KeepAliveOutlet pages (Layout /

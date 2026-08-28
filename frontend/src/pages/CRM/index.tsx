@@ -2365,6 +2365,8 @@ const DistributorMessagesSection: React.FC = () => {
     try {
       await apiClient.post(`/automation/notifications/${id}/retry`);
       toastEvent.trigger('Message queued for retry', 'success', '/crm');
+      whatsappQueueEvent.triggerUpdated();
+      automationHubEvent.triggerUpdated();
       await load();
     } catch { toastEvent.trigger('Retry failed', 'error', '/crm'); }
     finally { setRetrying(null); }

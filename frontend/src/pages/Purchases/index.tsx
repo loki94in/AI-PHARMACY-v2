@@ -3,7 +3,7 @@ import {} from '../../hooks/useDeferredEffect';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Edit, Camera, CheckCircle, Mail, Package, X, Plus, BookOpen, AlertTriangle, ShieldAlert, Factory, RefreshCw, ExternalLink, Loader2 } from 'lucide-react';
 import { useOnClickOutside } from '../../hooks/useOnClickOutside';
-import { api, apiClient, getCompactInventoryCache, ensureCompactInventoryReady } from '../../services/api';
+import { api, apiClient, getCompactInventoryCache, ensureCompactInventoryReady, getCompactInventoryIndex, type CompactInventoryItem } from '../../services/api';
 import { useApiQuery } from '../../hooks/useApiQuery';
 
 import { useQueryClient } from '@tanstack/react-query';
@@ -426,8 +426,18 @@ const getInstantLocalInventoryPreview = (term: string): Medicine[] => {
     return [];
   }
   const lower = term.toLowerCase().trim();
-  const matched = compact.filter(c => c.name && c.name.toLowerCase().includes(lower));
-  return matched.slice(0, 25).map(c => ({
+  const index = getCompactInventoryIndex();
+  const useIndex = index.length === compact.length;
+  const matched: CompactInventoryItem[] = [];
+  for (let i = 0; i < compact.length; i++) {
+    const item = compact[i];
+    const name = useIndex ? index[i].nameLower : (item.name || '').toLowerCase();
+    if (name.includes(lower)) {
+      matched.push(item);
+      if (matched.length >= 25) break;
+    }
+  }
+  return matched.map(c => ({
     id: c.medicine_id || (c as any).id,
     name: c.name,
     generic_name: '',

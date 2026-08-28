@@ -6,7 +6,7 @@ import {
   Moon, Loader2, ShieldCheck
 } from 'lucide-react';
 import { api, apiClient, peekWhatsAppQueueStatusCache, type WhatsAppQueueItem, type WhatsAppQueueStatus } from '../services/api';
-import { toastEvent, whatsappQueueEvent, messageSendEvent } from '../services/events';
+import { toastEvent, whatsappQueueEvent, messageSendEvent, automationHubEvent } from '../services/events';
 import { getFormattedFailureReason } from '../utils/whatsappFailureReason';
 
 type QueueItem = WhatsAppQueueItem;
@@ -186,8 +186,11 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
 
   const handleRetryFailed = async () => {
     try {
+      messageSendEvent.triggerSendProgress('WhatsApp Queue Retry', 'Retrying failed messages...', 10);
       const res = await api.retryFailedWhatsAppQueue();
       toastEvent.trigger(res.message || 'Reset failed items to pending', 'success');
+      whatsappQueueEvent.triggerUpdated();
+      automationHubEvent.triggerUpdated();
       await fetchStatus();
     } catch (_err) {
       toastEvent.trigger('Failed to retry messages', 'error');
@@ -206,8 +209,11 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
       // Mapped rows (failure log id>=900000 / direct messages id>=800000) have no backing
       // whatsapp_send_queue row — pass the visible payload so the backend can still re-enqueue.
       const item = cachedQueueState?.recentItems?.find(i => i.id === id);
+      messageSendEvent.triggerSendProgress(item?.target_name || item?.number || 'Recipient', 'Resending WhatsApp message...', 10);
       const res = await api.resendWhatsAppQueueItem(id, item ? { number: item.number, message: item.message, targetName: item.target_name } : undefined);
       toastEvent.trigger(res.message || 'Message resent for immediate delivery', 'success');
+      whatsappQueueEvent.triggerUpdated();
+      automationHubEvent.triggerUpdated();
       await fetchStatus();
     } catch (err) {
       const e = err as LocalApiError;

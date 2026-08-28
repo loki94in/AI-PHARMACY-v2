@@ -86,9 +86,20 @@ export class WhatsappInvoiceService {
         const pdfFilename = `invoice_${invoice.invoice_no.replace(/[^a-zA-Z0-9-]/g, '_')}_${Date.now()}.pdf`;
         const fullPdfPath = path.join(UPLOADS_DIR, pdfFilename);
         await pdfInvoiceService.generateInvoicePdf(invoiceId, fullPdfPath);
-        pdfPath = fullPdfPath;
+        if (fs.existsSync(fullPdfPath)) {
+          pdfPath = fullPdfPath;
+        }
       } catch (pdfErr) {
         console.warn(`PDF invoice attachment generation note for invoice ${invoice.invoice_no}:`, pdfErr);
+      }
+
+      if (!pdfPath) {
+        await db.run(
+          `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, error_message, reference_id)
+           VALUES (?, ?, ?, ?, 'failed', 'PDF_GENERATION_FAILED', ?)`,
+          [invoice.payment_medium === 'CREDIT' ? 'credit_sale_invoice' : 'pos_sale_invoice', invoice.customer_name || 'Customer', phone, caption, `invoice_${invoiceId}`]
+        ).catch(() => {});
+        return false;
       }
 
       // Enqueue message with attached PDF into centralized queue
@@ -106,7 +117,7 @@ export class WhatsappInvoiceService {
         await db.run(
           `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
            VALUES (?, ?, ?, ?, ?, ?)`,
-          ['credit_sale_invoice', invoice.customer_name || 'Customer', phone, caption, 'sent', `invoice_${invoiceId}`]
+          [invoice.payment_medium === 'CREDIT' ? 'credit_sale_invoice' : 'pos_sale_invoice', invoice.customer_name || 'Customer', phone, caption, 'queued', `invoice_${invoiceId}`]
         );
         textQueued = true;
       } catch (textErr: any) {

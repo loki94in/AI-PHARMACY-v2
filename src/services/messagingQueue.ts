@@ -167,6 +167,10 @@ export class MessagingQueue {
     if (result.changes && result.changes > 0) {
       console.log(`[MessagingQueue] Marked message ID ${id} for retry.`);
       this.start();
+      try {
+        const { eventService } = await import('./eventService.js');
+        eventService.broadcast('automation_hub_updated', { type: 'retry', id });
+      } catch (_) {}
       this.processQueue().catch(err => console.error('[MessagingQueue] Async process fail:', err));
       return true;
     }

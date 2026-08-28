@@ -538,6 +538,20 @@ class WhatsAppQueueWorker {
           await db.run("UPDATE patient_refills SET reminder_status = 'SENDING' WHERE reminder_job_id = ?", [item.id]).catch(() => {});
         }
         this.broadcastQueueState(true);
+        try {
+          eventService.broadcast('message_send_progress', {
+            id: `queue-${item.id}`,
+            recipient: item.target_name || item.number || 'WhatsApp Message',
+            messagePreview: item.type || 'WhatsApp Message',
+            durationSec: 10,
+          });
+          eventService.broadcast('automation_hub_updated', {
+            type: 'sending',
+            id: item.id,
+            targetName: item.target_name || item.number,
+            automationType: item.type,
+          });
+        } catch (_) {}
 
         try {
           let fileObj: any = undefined;
@@ -746,6 +760,10 @@ class WhatsAppQueueWorker {
       "UPDATE whatsapp_send_queue SET status = 'pending', retry_count = 0, error_message = NULL WHERE status IN ('failed_offline', 'failed_perm', 'review_required')"
     );
     this.triggerProcessing();
+    this.broadcastQueueState(true);
+    try {
+      eventService.broadcast('automation_hub_updated', { type: 'retry_all', count: result.changes || 0 });
+    } catch (_) {}
     return result.changes || 0;
   }
 
