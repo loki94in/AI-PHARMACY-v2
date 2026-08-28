@@ -1690,6 +1690,18 @@ router.get('/search-medicine', async (req, res) => {
       }
     }
     
+    // Sort prefix matches first, then strictly alphabetically A-Z
+    const cleanLower = cleanQuery.toLowerCase();
+    rows.sort((a, b) => {
+      const nameA = String(a.medicine_name || '').toLowerCase();
+      const nameB = String(b.medicine_name || '').toLowerCase();
+      const aStarts = nameA.startsWith(cleanLower);
+      const bStarts = nameB.startsWith(cleanLower);
+      if (aStarts && !bStarts) return -1;
+      if (!aStarts && bStarts) return 1;
+      return nameA.localeCompare(nameB, undefined, { numeric: true, sensitivity: 'base' });
+    });
+
     // Map SQLite numeric values back to boolean for is_out_of_stock compatibility
     for (const row of rows) {
       row.is_out_of_stock = row.is_out_of_stock === 1;

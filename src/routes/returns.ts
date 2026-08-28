@@ -294,10 +294,17 @@ router.get('/lookup-purchases', async (req, res) => {
     }
     db = await dbManager.getConnection();
 
-    // Fuzzy matching for medicine names
-    const medicines = await db.all('SELECT id, name FROM medicines WHERE name LIKE ? LIMIT 10', [`%${name}%`]);
+    const cleanName = String(name).trim();
+    // Prefix matches first, then infix matches, ordered prefix-first and alphabetically
+    const medicines = await db.all(
+      `SELECT id, name FROM medicines 
+       WHERE name LIKE ? OR name LIKE ? 
+       ORDER BY CASE WHEN name LIKE ? THEN 0 ELSE 1 END ASC, name ASC 
+       LIMIT 15`,
+      [`${cleanName}%`, `%${cleanName}%`, `${cleanName}%`]
+    );
     if (medicines.length === 0) {
-            return res.json([]);
+      return res.json([]);
     }
 
     const medicineIds = medicines.map(m => m.id);
@@ -320,7 +327,22 @@ router.get('/lookup-purchases', async (req, res) => {
     query += ` ORDER BY p.date DESC LIMIT 100`;
 
     const purchaseRecords = await db.all(query, params);
-        res.json(purchaseRecords);
+    
+    // Sort prefix medicine names first, then strictly alphabetically A-Z
+    const cleanLower = cleanName.toLowerCase();
+    purchaseRecords.sort((a: any, b: any) => {
+      const nameA = String(a.medicine_name || '').toLowerCase();
+      const nameB = String(b.medicine_name || '').toLowerCase();
+      const aStarts = nameA.startsWith(cleanLower);
+      const bStarts = nameB.startsWith(cleanLower);
+      if (aStarts && !bStarts) return -1;
+      if (!aStarts && bStarts) return 1;
+      const nameCmp = nameA.localeCompare(nameB, undefined, { numeric: true, sensitivity: 'base' });
+      if (nameCmp !== 0) return nameCmp;
+      return String(b.purchase_date || '').localeCompare(String(a.purchase_date || ''));
+    });
+
+    res.json(purchaseRecords);
   } catch (err: any) {
     console.error('Error looking up purchases:', err);
     res.status(500).json({ error: 'Internal server error' });

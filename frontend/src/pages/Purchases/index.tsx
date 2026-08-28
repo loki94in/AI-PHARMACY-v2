@@ -19,6 +19,7 @@ import {} from '../../utils/phone';
 import { PhoneInputWithBadge } from '../../components/PhoneInputWithBadge';
 import { SaveBillSpecialPriceModal } from '../../components/SaveBillSpecialPriceModal';
 import { isValidDistributorName } from '../../utils/distributorValidator';
+import { rankAndSortMedicines } from '../../utils/searchRanker';
 
 /* eslint-disable react-hooks/refs -- conditional JSX ref assignment is standard React pattern */
 
@@ -411,11 +412,7 @@ const getInstantNarrowedResults = (term: string): Medicine[] => {
     }
   }
   if (!bestEntry || bestKey === target) return [];
-  const lowerTerm = target.toLowerCase();
-  return bestEntry.results.filter(m => {
-    const name = String(m.name || '').toLowerCase();
-    return name.includes(lowerTerm);
-  });
+  return rankAndSortMedicines(bestEntry.results, target);
 };
 
 // Local compact inventory preview for cold search cache
@@ -428,15 +425,20 @@ const getInstantLocalInventoryPreview = (term: string): Medicine[] => {
   const lower = term.toLowerCase().trim();
   const index = getCompactInventoryIndex();
   const useIndex = index.length === compact.length;
-  const matched: CompactInventoryItem[] = [];
+  const prefixMatched: CompactInventoryItem[] = [];
+  const infixMatched: CompactInventoryItem[] = [];
   for (let i = 0; i < compact.length; i++) {
     const item = compact[i];
     const name = useIndex ? index[i].nameLower : (item.name || '').toLowerCase();
-    if (name.includes(lower)) {
-      matched.push(item);
-      if (matched.length >= 25) break;
+    if (name.startsWith(lower)) {
+      prefixMatched.push(item);
+    } else if (name.includes(lower)) {
+      infixMatched.push(item);
     }
   }
+  prefixMatched.sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { numeric: true, sensitivity: 'base' }));
+  infixMatched.sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { numeric: true, sensitivity: 'base' }));
+  const matched = [...prefixMatched, ...infixMatched].slice(0, 30);
   return matched.map(c => ({
     id: c.medicine_id || (c as any).id,
     name: c.name,
@@ -1590,9 +1592,9 @@ const Purchases: React.FC = () => {
         if (seq !== searchSeqRef.current) return; // superseded keystroke
         if (Array.isArray(response)) {
           const deduped = dedupeMedicinesByName(response as Medicine[]);
-          deduped.sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
-          storeCachedSearchResults(cleanTerm, deduped);
-          setSearchResults(deduped);
+          const ranked = rankAndSortMedicines(deduped, cleanTerm);
+          storeCachedSearchResults(cleanTerm, ranked);
+          setSearchResults(ranked);
           setSearchHighlightIndex(-1);
         }
       } catch (error: any) {

@@ -246,6 +246,17 @@ async function performPharmarackSearch(qRaw: string, storeId: number | null, isM
         };
       });
 
+      const qLower = qRaw.toLowerCase().trim();
+      results.sort((a: any, b: any) => {
+        const nameA = String(a.name || '').toLowerCase();
+        const nameB = String(b.name || '').toLowerCase();
+        const aStarts = nameA.startsWith(qLower);
+        const bStarts = nameB.startsWith(qLower);
+        if (aStarts && !bStarts) return -1;
+        if (!aStarts && bStarts) return 1;
+        return nameA.localeCompare(nameB, undefined, { numeric: true, sensitivity: 'base' });
+      });
+
       searchCache.set(qRaw, storeId, isMapped, results);
       return { status: 'ok', items: results };
     }
@@ -253,6 +264,16 @@ async function performPharmarackSearch(qRaw: string, storeId: number | null, isM
     // Fallback: If live OpenSearch returns 0 items, search local catalog cache
     const offline = await searchOfflineCatalogFallback(qRaw, storeId, isMapped);
     if (offline.length > 0) {
+      const qLower = qRaw.toLowerCase().trim();
+      offline.sort((a: any, b: any) => {
+        const nameA = String(a.name || '').toLowerCase();
+        const nameB = String(b.name || '').toLowerCase();
+        const aStarts = nameA.startsWith(qLower);
+        const bStarts = nameB.startsWith(qLower);
+        if (aStarts && !bStarts) return -1;
+        if (!aStarts && bStarts) return 1;
+        return nameA.localeCompare(nameB, undefined, { numeric: true, sensitivity: 'base' });
+      });
       searchCache.set(qRaw, storeId, isMapped, offline);
     }
     return { status: 'ok', items: offline };

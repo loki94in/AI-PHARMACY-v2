@@ -18,6 +18,7 @@ import { PhoneInputWithBadge } from '../../components/PhoneInputWithBadge';
 import { isExpiredDate, toDateInputValue } from '../../utils/date';
 import { printCurrentBill } from '../../utils/printBill';
 import { useDraftStore } from '../../lib/cache/useDraftStore';
+import { rankAndSortMedicines } from '../../utils/searchRanker';
 
 const getLocalDateString = (d: Date = new Date()) => {
   const yyyy = d.getFullYear();
@@ -525,8 +526,13 @@ const filterLocalInventory = (query: string, inventory: PosBatchItem[]): PosBatc
   const index = getCompactInventoryIndex();
   const useIndex = index.length === inventory.length;
 
-  const prefixes: PosBatchItem[] = [];
-  const infixes: PosBatchItem[] = [];
+  const fefoRank = (stripQty: number, exp?: string) =>
+    `${Number(stripQty) > 0 ? 0 : 1}|${exp || '9999-12'}`;
+
+  const normKey = (n: unknown) => String(n || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+
+  const prefixMap = new Map<string, PosBatchItem>();
+  const infixMap = new Map<string, PosBatchItem>();
 
   const len = inventory.length;
   for (let i = 0; i < len; i++) {
@@ -540,15 +546,58 @@ const filterLocalInventory = (query: string, inventory: PosBatchItem[]): PosBatc
     const code = useIndex ? index[i].itemCodeLower : (item.item_code || '').toLowerCase();
     const batch = useIndex ? index[i].batchNoLower : (item.batch_no || '').toLowerCase();
 
-    if (name.startsWith(term) || code.startsWith(term) || batch.startsWith(term)) {
-      prefixes.push(item);
-      if (prefixes.length >= 30) return prefixes;
-    } else if (name.includes(term) || code.includes(term) || batch.includes(term)) {
-      if (prefixes.length + infixes.length < 30) {
-        infixes.push(item);
+    const isPrefix = name.startsWith(term) || code.startsWith(term) || batch.startsWith(term);
+    const isInfix = !isPrefix && (name.includes(term) || code.includes(term) || batch.includes(term));
+
+    if (!isPrefix && !isInfix) continue;
+
+    const targetMap = isPrefix ? prefixMap : infixMap;
+    const key = normKey(item.medicine_name || item.name) || String(item.medicine_id || item.inventory_id || i);
+    const stripQty = Number(item.stock_qty || item.quantity || 0);
+    const looseQty = Number(item.loose_quantity || item.loose_qty || 0);
+
+    const existing = targetMap.get(key);
+    if (!existing) {
+      targetMap.set(key, {
+        ...item,
+        medicine_name: item.medicine_name || item.name,
+        name: item.name || item.medicine_name,
+        quantity: stripQty,
+        stock_qty: stripQty,
+        batch_quantity: stripQty,
+        loose_quantity: looseQty,
+        __fefoRank: fefoRank(stripQty, item.expiry_date || item.expiry),
+      });
+    } else {
+      existing.quantity = (existing.quantity || 0) + stripQty;
+      existing.stock_qty = (existing.stock_qty || 0) + stripQty;
+      existing.loose_quantity = (existing.loose_quantity || 0) + looseQty;
+
+      const rank = fefoRank(stripQty, item.expiry_date || item.expiry);
+      if (rank < (existing.__fefoRank || '9|9999-12')) {
+        existing.__fefoRank = rank;
+        existing.inventory_id = item.inventory_id;
+        existing.batch_no = item.batch_no;
+        existing.expiry_date = item.expiry_date;
+        existing.mrp = item.mrp;
+        existing.cost_price = item.cost_price;
+        existing.unit_price = item.unit_price;
+        existing.batch_quantity = stripQty;
       }
     }
   }
+
+  const prefixes = Array.from(prefixMap.values());
+  const infixes = Array.from(infixMap.values());
+
+  const sortAlpha = (a: PosBatchItem, b: PosBatchItem) => {
+    const nameA = String(a.medicine_name || a.name || '');
+    const nameB = String(b.medicine_name || b.name || '');
+    return nameA.localeCompare(nameB, undefined, { numeric: true, sensitivity: 'base' });
+  };
+
+  prefixes.sort(sortAlpha);
+  infixes.sort(sortAlpha);
 
   if (prefixes.length >= 15) {
     return prefixes.slice(0, 30);
@@ -1681,6 +1730,14 @@ const POS = () => {
     return compactInventory as unknown as PosBatchItem[];
   }, [cacheVersion]);
 
+  const rowCatalogSearchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const rowCatalogSearchAbortRef = useRef<AbortController | null>(null);
+  const rowCatalogSearchSeqRef = useRef(0);
+
+  const headerCatalogSearchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const headerCatalogSearchAbortRef = useRef<AbortController | null>(null);
+  const headerCatalogSearchSeqRef = useRef(0);
+
   // Local row search autocomplete
   useEffect(() => {
     const term = rowSearchTerm.trim();
@@ -1696,9 +1753,72 @@ const POS = () => {
     }
 
     const filtered = filterLocalInventory(term, mappedInventory);
-    const grouped = groupBatches(filtered);
-    setRowSearchResults(grouped);
+    setRowSearchResults(filtered);
     setRowSearchHighlightIndex(-1);
+
+    if (rowCatalogSearchTimeoutRef.current) clearTimeout(rowCatalogSearchTimeoutRef.current);
+    if (rowCatalogSearchAbortRef.current) {
+      rowCatalogSearchAbortRef.current.abort();
+      rowCatalogSearchAbortRef.current = null;
+    }
+
+    const seq = ++rowCatalogSearchSeqRef.current;
+    const controller = new AbortController();
+    rowCatalogSearchAbortRef.current = controller;
+
+    rowCatalogSearchTimeoutRef.current = setTimeout(async () => {
+      try {
+        const catalogRows = await api.catalogSearch(term, controller.signal) as any[] | null;
+        if (seq !== rowCatalogSearchSeqRef.current) return;
+        if (Array.isArray(catalogRows) && catalogRows.length > 0) {
+          const normKey = (n: unknown) => String(n || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+          const localMap = new Map<string, PosBatchItem>();
+          for (const item of filtered) {
+            localMap.set(normKey(item.medicine_name || item.name), item);
+            if (item.medicine_id) localMap.set(`id_${item.medicine_id}`, item);
+          }
+
+          const merged = [...filtered];
+          for (const m of catalogRows) {
+            const hasStock = Number(m.stock_qty || 0) > 0 || Number(m.loose_qty || 0) > 0;
+            if (!hasStock) continue;
+            const key = normKey(m.name);
+            const idKey = `id_${m.id}`;
+            if (!localMap.has(key) && !localMap.has(idKey)) {
+              const masterItem: PosBatchItem = {
+                id: m.id,
+                medicine_id: m.id,
+                medicine_name: m.name,
+                name: m.name,
+                item_code: m.item_code || '',
+                manufacturer: m.manufacturer || '',
+                packaging: m.packaging || '',
+                pack_size: Number(m.pack_size || 1),
+                mrp: Number(m.mrp || 0),
+                unit_price: Number(m.rate || m.mrp || 0),
+                cost_price: Number(m.rate || 0),
+                sell_price: m.mrp || 0,
+                quantity: Number(m.stock_qty || 0),
+                stock_qty: Number(m.stock_qty || 0),
+                loose_quantity: Number(m.loose_qty || 0),
+                is_out_of_stock: false,
+                batch_no: '',
+                expiry_date: '',
+              };
+              merged.push(masterItem);
+              localMap.set(key, masterItem);
+              localMap.set(idKey, masterItem);
+            }
+          }
+          const ranked = rankAndSortMedicines(merged, term).slice(0, 30);
+          setRowSearchResults(ranked);
+        }
+      } catch (err: any) {
+        if (err?.name !== 'CanceledError' && err?.name !== 'AbortError' && err?.code !== 'ERR_CANCELED') {
+          console.warn('Row catalog search error in POS:', err);
+        }
+      }
+    }, 150);
   }, [rowSearchTerm, activeRowSearchIndex, mappedInventory]);
 
   // Synchronize selection refs to avoid closure staleness in async callbacks
@@ -2487,12 +2607,11 @@ const POS = () => {
     if (filtered.length === 0 && mappedInventory.length === 0) {
       ensureCompactInventoryReady().then(() => setCacheVersion(v => v + 1)).catch(() => {});
     }
-    const groupedData = groupBatches(filtered);
 
     // Premium Barcode Auto-Add Feature:
     const barcodeTerm = term.toUpperCase();
-    if (groupedData.length === 1) {
-      const matched = groupedData[0];
+    if (filtered.length === 1) {
+      const matched = filtered[0];
       const barcode = (matched.item_code || '').toUpperCase().trim();
       if (barcode === barcodeTerm && matched.inventory_id && !matched.is_out_of_stock) {
         fetchDetailsAndAddToCart(matched);
@@ -2502,10 +2621,74 @@ const POS = () => {
         return;
       }
     }
-    setSearchResults(groupedData);
+    setSearchResults(filtered);
     setSearchHighlightIndex(-1);
     setOnlineResults([]);
     setSearchingOnline(false);
+
+    if (headerCatalogSearchTimeoutRef.current) clearTimeout(headerCatalogSearchTimeoutRef.current);
+    if (headerCatalogSearchAbortRef.current) {
+      headerCatalogSearchAbortRef.current.abort();
+      headerCatalogSearchAbortRef.current = null;
+    }
+
+    const seq = ++headerCatalogSearchSeqRef.current;
+    const controller = new AbortController();
+    headerCatalogSearchAbortRef.current = controller;
+
+    headerCatalogSearchTimeoutRef.current = setTimeout(async () => {
+      try {
+        const catalogRows = await api.catalogSearch(term, controller.signal) as any[] | null;
+        if (seq !== headerCatalogSearchSeqRef.current) return;
+        if (Array.isArray(catalogRows) && catalogRows.length > 0) {
+          const normKey = (n: unknown) => String(n || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+          const localMap = new Map<string, PosBatchItem>();
+          for (const item of filtered) {
+            localMap.set(normKey(item.medicine_name || item.name), item);
+            if (item.medicine_id) localMap.set(`id_${item.medicine_id}`, item);
+          }
+
+          const merged = [...filtered];
+          for (const m of catalogRows) {
+            const hasStock = Number(m.stock_qty || 0) > 0 || Number(m.loose_qty || 0) > 0;
+            if (!hasStock) continue;
+            const key = normKey(m.name);
+            const idKey = `id_${m.id}`;
+            if (!localMap.has(key) && !localMap.has(idKey)) {
+              const masterItem: PosBatchItem = {
+                id: m.id,
+                medicine_id: m.id,
+                medicine_name: m.name,
+                name: m.name,
+                item_code: m.item_code || '',
+                manufacturer: m.manufacturer || '',
+                packaging: m.packaging || '',
+                pack_size: Number(m.pack_size || 1),
+                mrp: Number(m.mrp || 0),
+                unit_price: Number(m.rate || m.mrp || 0),
+                cost_price: Number(m.rate || 0),
+                sell_price: m.mrp || 0,
+                quantity: Number(m.stock_qty || 0),
+                stock_qty: Number(m.stock_qty || 0),
+                loose_quantity: Number(m.loose_qty || 0),
+                is_out_of_stock: false,
+                batch_no: '',
+                expiry_date: '',
+              };
+              merged.push(masterItem);
+              localMap.set(key, masterItem);
+              localMap.set(idKey, masterItem);
+            }
+          }
+          const ranked = rankAndSortMedicines(merged, term).slice(0, 30);
+          setSearchResults(ranked);
+        }
+      } catch (err: any) {
+        if (err?.name !== 'CanceledError' && err?.name !== 'AbortError' && err?.code !== 'ERR_CANCELED') {
+          console.warn('Header catalog search error in POS:', err);
+        }
+      }
+    }, 150);
   // eslint-disable-next-line react-hooks/exhaustive-deps -- handler identity churn must not refire
   }, [searchTerm, mappedInventory]);
 
@@ -4452,7 +4635,7 @@ const POS = () => {
                                     const locTag = med.location || med.rack || (med as any).shelf || '';
                                     return (
                                       <button
-                                        key={med.inventory_id}
+                                        key={med.inventory_id || med.id || `row_med_${mIdx}`}
                                         type="button"
                                         data-highlighted={isRowHighlighted ? "true" : "false"}
                                         onMouseEnter={() => setRowSearchHighlightIndex(mIdx)}

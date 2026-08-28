@@ -732,9 +732,24 @@ const RefillsSection: React.FC = () => {
         }));
       } else {
         const lower = clean.toLowerCase();
-        const matched = compactCache.filter(c => (c.name || c.medicine_name || '').toLowerCase().includes(lower));
+        const prefixMatched: typeof compactCache = [];
+        const infixMatched: typeof compactCache = [];
+        for (const c of compactCache) {
+          const mName = (c.name || c.medicine_name || '').toLowerCase();
+          if (mName.startsWith(lower)) {
+            prefixMatched.push(c);
+          } else if (mName.includes(lower)) {
+            infixMatched.push(c);
+          }
+        }
+        const sortAlpha = (a: any, b: any) =>
+          String(a.name || a.medicine_name || '').localeCompare(String(b.name || b.medicine_name || ''), undefined, { numeric: true, sensitivity: 'base' });
+        prefixMatched.sort(sortAlpha);
+        infixMatched.sort(sortAlpha);
+        const combined = [...prefixMatched, ...infixMatched];
+
         const seen = new Map<number, MedicineSuggestion>();
-        for (const m of matched) {
+        for (const m of combined) {
           const medId = m.medicine_id || m.id;
           if (!seen.has(medId)) {
             seen.set(medId, {

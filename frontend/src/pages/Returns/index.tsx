@@ -14,6 +14,7 @@ import CustomerReturn from '../CustomerReturn';
 import CustomerReturnHistory from '../CustomerReturnHistory';
 import ExpiryReturnReview from './ExpiryReturnReview';
 import { CalendarDays, Users, History, ShieldAlert } from 'lucide-react';
+import { rankAndSortMedicines } from '../../utils/searchRanker';
 
 const generateUUID = () => {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -717,7 +718,8 @@ const Returns: React.FC = () => {
       searchTimeoutRef.current = setTimeout(async () => {
         try {
           const response = await api.lookupPurchases(term);
-          setSearchResults((Array.isArray(response) ? response : (response?.data || [])) as LocalPurchaseLookupRow[]);
+          const raw = (Array.isArray(response) ? response : (response?.data || [])) as LocalPurchaseLookupRow[];
+          setSearchResults(rankAndSortMedicines(raw, term));
           setSearchHighlightIndex(-1);
         } catch (error) {
           console.error('Error prefetching medicines:', error);
@@ -732,7 +734,8 @@ const Returns: React.FC = () => {
     searchTimeoutRef.current = setTimeout(async () => {
       try {
         const response = await api.lookupPurchases(term);
-        setSearchResults((Array.isArray(response) ? response : (response?.data || [])) as LocalPurchaseLookupRow[]);
+        const raw = (Array.isArray(response) ? response : (response?.data || [])) as LocalPurchaseLookupRow[];
+        setSearchResults(rankAndSortMedicines(raw, term));
         setSearchHighlightIndex(-1);
       } catch (error) {
         console.error('Error searching medicines:', error);

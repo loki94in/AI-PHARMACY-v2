@@ -110,8 +110,16 @@ router.get('/medicines', async (req, res) => {
     const whereString = whereClauses.length > 0 ? ' WHERE ' + whereClauses.join(' AND ') : '';
     countQuery += whereString;
     
-    const sort = (req.query.sort as string) || 'id_desc';
-    const orderString = sort === 'name_asc' ? 'ORDER BY name ASC' : 'ORDER BY id DESC';
+    const sort = (req.query.sort as string) || '';
+    let orderString = 'ORDER BY id DESC';
+    if (sort === 'name_asc') {
+      orderString = 'ORDER BY name ASC';
+    } else if (sort === 'id_desc') {
+      orderString = 'ORDER BY id DESC';
+    } else if (search && search.trim()) {
+      const cleanPrefix = search.trim();
+      orderString = `ORDER BY CASE WHEN medicines.name LIKE '${cleanPrefix.replace(/'/g, "''")}%' THEN 0 ELSE 1 END ASC, medicines.name ASC`;
+    }
 
     const buildQuery = (limitVal: number, offsetVal: number) => `
       WITH target_medicines AS (
@@ -183,6 +191,19 @@ router.get('/medicines', async (req, res) => {
       medicines = medicines.slice(0, limit);
     }
     
+    if (search && (!req.query.sort || req.query.sort === 'name_asc')) {
+      const cleanSearchLower = search.trim().toLowerCase();
+      medicines.sort((a: any, b: any) => {
+        const nameA = String(a.name || '').toLowerCase();
+        const nameB = String(b.name || '').toLowerCase();
+        const aStarts = nameA.startsWith(cleanSearchLower);
+        const bStarts = nameB.startsWith(cleanSearchLower);
+        if (aStarts && !bStarts) return -1;
+        if (!aStarts && bStarts) return 1;
+        return nameA.localeCompare(nameB, undefined, { numeric: true, sensitivity: 'base' });
+      });
+    }
+
     let suggestions: string[] = [];
     if (search && medicines.length === 0) {
       try {

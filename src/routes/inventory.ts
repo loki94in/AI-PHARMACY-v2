@@ -704,6 +704,17 @@ router.get('/catalog-search', async (req, res) => {
       }
       rows.length = 0;
       rows.push(...collapsed);
+
+      const cleanQ = q.toLowerCase();
+      rows.sort((a, b) => {
+        const nameA = String(a.name || '').toLowerCase();
+        const nameB = String(b.name || '').toLowerCase();
+        const aStarts = nameA.startsWith(cleanQ);
+        const bStarts = nameB.startsWith(cleanQ);
+        if (aStarts && !bStarts) return -1;
+        if (!aStarts && bStarts) return 1;
+        return nameA.localeCompare(nameB, undefined, { numeric: true, sensitivity: 'base' });
+      });
     }
 
     res.json(rows);
