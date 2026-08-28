@@ -706,14 +706,32 @@ router.post('/', async (req, res) => {
             }
             waMsg += `— AI Pharmacy OS`;
 
+            let pdfPath: string | undefined = undefined;
+            try {
+              const uploadsDir = path.resolve(getAppDataDir(), 'uploads');
+              if (!fs.existsSync(uploadsDir)) {
+                fs.mkdirSync(uploadsDir, { recursive: true });
+              }
+              const sanitizeNo = String(invoice_no || '').replace(/[^a-zA-Z0-9-]/g, '_');
+              const pdfFilename = `invoice_${sanitizeNo}_${Date.now()}.pdf`;
+              const fullPdfPath = path.join(uploadsDir, pdfFilename);
+              const { pdfInvoiceService } = await import('../services/pdfInvoiceService.js');
+              await pdfInvoiceService.generateInvoicePdf(invoiceId, fullPdfPath);
+              pdfPath = fullPdfPath;
+            } catch (pdfErr) {
+              console.warn(`[POS WhatsApp] Invoice PDF generation note for invoice #${invoice_no}:`, pdfErr);
+            }
+
             const { whatsappQueueWorker } = await import('../services/whatsappQueueWorker.js');
             const queueId = await whatsappQueueWorker.enqueue(
               phoneForWA,
               waMsg,
               isCredit ? 'pos_credit_invoice' : 'pos_sale_invoice',
-              nameForWA
+              nameForWA,
+              undefined,
+              pdfPath
             );
-            console.log(`[POS WhatsApp] Enqueued bill notification for ${invoice_no} to ${phoneForWA} (queue ID: #${queueId})`);
+            console.log(`[POS WhatsApp] Enqueued bill notification with PDF for ${invoice_no} to ${phoneForWA} (queue ID: #${queueId})`);
 
             await db.run(
               `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)

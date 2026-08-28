@@ -77,16 +77,32 @@ export class WhatsappInvoiceService {
       }
       caption += `— AI Pharmacy OS`;
 
-      // 1. Enqueue text message into centralized queue
+      // Generate PDF attachment
+      let pdfPath: string | undefined = undefined;
+      try {
+        if (!fs.existsSync(UPLOADS_DIR)) {
+          fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+        }
+        const pdfFilename = `invoice_${invoice.invoice_no.replace(/[^a-zA-Z0-9-]/g, '_')}_${Date.now()}.pdf`;
+        const fullPdfPath = path.join(UPLOADS_DIR, pdfFilename);
+        await pdfInvoiceService.generateInvoicePdf(invoiceId, fullPdfPath);
+        pdfPath = fullPdfPath;
+      } catch (pdfErr) {
+        console.warn(`PDF invoice attachment generation note for invoice ${invoice.invoice_no}:`, pdfErr);
+      }
+
+      // Enqueue message with attached PDF into centralized queue
       let textQueued = false;
       try {
         const queueId = await whatsappQueueWorker.enqueue(
           phone,
           caption,
           invoice.payment_medium === 'CREDIT' ? 'pos_credit_invoice' : 'pos_sale_invoice',
-          invoice.customer_name || 'Customer'
+          invoice.customer_name || 'Customer',
+          undefined,
+          pdfPath
         );
-        console.log(`Dispatched WhatsApp notification for invoice ${invoice.invoice_no} to centralized queue (#${queueId})`);
+        console.log(`Dispatched WhatsApp notification with attached PDF for invoice ${invoice.invoice_no} to centralized queue (#${queueId})`);
         await db.run(
           `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
            VALUES (?, ?, ?, ?, ?, ?)`,
@@ -95,28 +111,6 @@ export class WhatsappInvoiceService {
         textQueued = true;
       } catch (textErr: any) {
         console.error(`Failed to enqueue WhatsApp notification for invoice ${invoice.invoice_no}:`, textErr);
-      }
-
-      // 2. Asynchronously attempt to generate and enqueue PDF attachment if PDF service is available
-      try {
-        if (!fs.existsSync(UPLOADS_DIR)) {
-          fs.mkdirSync(UPLOADS_DIR, { recursive: true });
-        }
-        const pdfFilename = `invoice_${invoice.invoice_no.replace(/[^a-zA-Z0-9-]/g, '_')}_${Date.now()}.pdf`;
-        const pdfPath = path.join(UPLOADS_DIR, pdfFilename);
-        await pdfInvoiceService.generateInvoicePdf(invoiceId, pdfPath);
-        const pdfCaption = `📄 Attached PDF Bill for Invoice #${invoice.invoice_no}`;
-        await whatsappQueueWorker.enqueue(
-          phone,
-          pdfCaption,
-          'invoice_pdf_document',
-          invoice.customer_name || 'Customer',
-          undefined,
-          pdfPath
-        );
-        console.log(`Enqueued PDF attachment for invoice ${invoice.invoice_no} into centralized WhatsApp queue`);
-      } catch (pdfErr) {
-        console.warn(`PDF invoice attachment generation skipped/failed for invoice ${invoice.invoice_no}:`, pdfErr);
       }
 
       return textQueued;

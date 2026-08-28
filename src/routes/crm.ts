@@ -1,12 +1,15 @@
 import express from 'express';
 import { dbManager } from '../database/connection.js';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { sendDailyDoctorReports } from '../services/doctorReportingService.js';
 import { whatsappQueueWorker } from '../services/whatsappQueueWorker.js';
+import { pdfInvoiceService } from '../services/pdfInvoiceService.js';
 import { normalizeWhatsAppPhone } from '../whatsappClient.js';
 import { getMessage } from '../i18n/getMessage.js';
 import { sanitizeDoctorName } from '../utils/doctorUtils.js';
+import { getAppDataDir } from '../config/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -639,11 +642,27 @@ router.post('/credit-customers/:id/send-reminder', async (req, res) => {
       });
     }
 
+    let pdfPath: string | undefined = undefined;
+    try {
+      const uploadsDir = path.resolve(getAppDataDir(), 'uploads');
+      if (!fs.existsSync(uploadsDir)) {
+        fs.mkdirSync(uploadsDir, { recursive: true });
+      }
+      const pdfFilename = `credit_statement_cust_${id}_${Date.now()}.pdf`;
+      const fullPdfPath = path.join(uploadsDir, pdfFilename);
+      await pdfInvoiceService.generateCreditStatementPdf(Number(id), fullPdfPath);
+      pdfPath = fullPdfPath;
+    } catch (pdfErr) {
+      console.warn(`[CRM Credit Reminder] PDF generation note for customer ${id}:`, pdfErr);
+    }
+
     const queueId = await whatsappQueueWorker.enqueue(
       cleanPhone,
       message,
       'credit_reminder',
-      customer.name || 'Customer'
+      customer.name || 'Customer',
+      undefined,
+      pdfPath
     );
 
     whatsappQueueWorker.triggerProcessing();

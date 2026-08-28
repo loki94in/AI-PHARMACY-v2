@@ -1,11 +1,14 @@
 import express from 'express';
 import { dbManager } from '../database/connection.js';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { sendMessage } from '../whatsappClient.js';
 import { getStoreMedicalName, getStoreMedicalNameAndPhone, buildOrderReadyNotificationMessage } from '../services/storeSettingsService.js';
 import { whatsappQueueWorker } from '../services/whatsappQueueWorker.js';
+import { pdfInvoiceService } from '../services/pdfInvoiceService.js';
 import { eventService } from '../services/eventService.js';
+import { getAppDataDir } from '../config/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -316,13 +319,27 @@ async function enqueueArrivalWhatsApp(db: any, order: any, options?: { skipDedup
 
   const msg = await buildOrderReadyNotificationMessage(order.requester, order.product, order.qty, db, lang);
 
+  let pdfPath: string | undefined = undefined;
+  try {
+    const uploadsDir = path.resolve(getAppDataDir(), 'uploads');
+    if (!fs.existsSync(uploadsDir)) {
+      fs.mkdirSync(uploadsDir, { recursive: true });
+    }
+    const pdfFilename = `special_order_slip_${order.id}_${Date.now()}.pdf`;
+    const fullPdfPath = path.join(uploadsDir, pdfFilename);
+    await pdfInvoiceService.generateSpecialOrderSlipPdf(Number(order.id), fullPdfPath);
+    pdfPath = fullPdfPath;
+  } catch (pdfErr) {
+    console.warn(`[Orders] Special order PDF slip generation note for #${order.id}:`, pdfErr);
+  }
+
   await whatsappQueueWorker.enqueue(
     formattedPhone,
     msg,
     'special_order',
     order.requester || 'Customer',
     undefined,
-    undefined,
+    pdfPath,
     undefined,
     { skipDedupe: options?.skipDedupe }
   );

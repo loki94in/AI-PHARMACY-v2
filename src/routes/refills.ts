@@ -1,13 +1,16 @@
-﻿import express from 'express';
+import express from 'express';
 import { dbManager } from '../database/connection.js';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { checkAllRefills, cleanupStagedRefillNotifications } from '../services/refillService.js';
 import { sendMessage, normalizeWhatsAppPhone } from '../whatsappClient.js';
 import { whatsappQueueWorker } from '../services/whatsappQueueWorker.js';
+import { pdfInvoiceService } from '../services/pdfInvoiceService.js';
 import { getMessage } from '../i18n/getMessage.js';
 import { getConfiguredPharmacyName } from '../services/storeSettingsService.js';
 import { eventService } from '../services/eventService.js';
+import { getAppDataDir } from '../config/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1303,11 +1306,27 @@ router.post('/:id/send', async (req, res) => {
       lang
     );
 
+    let pdfPath: string | undefined = undefined;
+    try {
+      const uploadsDir = path.resolve(getAppDataDir(), 'uploads');
+      if (!fs.existsSync(uploadsDir)) {
+        fs.mkdirSync(uploadsDir, { recursive: true });
+      }
+      const pdfFilename = `refill_slip_${id}_${Date.now()}.pdf`;
+      const fullPdfPath = path.join(uploadsDir, pdfFilename);
+      await pdfInvoiceService.generateRefillSchedulePdf(Number(id), fullPdfPath);
+      pdfPath = fullPdfPath;
+    } catch (pdfErr) {
+      console.warn(`[Refills] PDF generation note for refill ${id}:`, pdfErr);
+    }
+
     const queueId = await whatsappQueueWorker.enqueue(
       cleanPhone,
       msg,
       'refill_reminder',
-      patientName
+      patientName,
+      undefined,
+      pdfPath
     );
 
     await db.run(
