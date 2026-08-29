@@ -596,7 +596,7 @@ router.get('/:id/items', async (req, res) => {
     const rows = await db.all(`
       SELECT
         ri.*,
-        COALESCE(m.name, ri.medicine_name) AS medicine_name,
+        COALESCE(m.name, 'Unknown Medicine') AS medicine_name,
         r.distributor_id,
         d.name                             AS distributor_name,
         p.invoice_no,
@@ -634,7 +634,7 @@ router.get('/:id/resolve-missing', async (req, res) => {
     // Get base items + parent return context
     const items = await db.all(`
       SELECT ri.*,
-        COALESCE(m.name, ri.medicine_name) AS medicine_name,
+        COALESCE(m.name, 'Unknown Medicine') AS medicine_name,
         r.original_invoice_id,
         r.distributor_id                   AS ret_distributor_id,
         d.name                             AS ret_distributor_name,
