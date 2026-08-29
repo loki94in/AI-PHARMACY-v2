@@ -3525,9 +3525,9 @@ const POS = () => {
 
           {/* Editing Bill Banner */}
           {editingInvoiceId && (
-            <div className="bg-amber-500/15 border border-amber-500/30 text-amber-500 px-3.5 py-2 rounded-xl flex items-center justify-between gap-2 text-xs font-bold shrink-0 shadow-md animate-pulse">
+            <div className="bg-amber-500/15 border border-amber-500/30 text-amber-500 px-3.5 py-2 rounded-xl flex items-center justify-between gap-2 text-sm font-bold shrink-0 shadow-md animate-pulse">
               <div className="flex items-center gap-2">
-                <Edit size={15} />
+                <Edit size={16} />
                 <span>Editing Saved Bill #{editingInvoiceNo || editingInvoiceId} (Modifying Existing Bill)</span>
               </div>
               <button
@@ -3538,7 +3538,7 @@ const POS = () => {
                   clearCart();
                   toastEvent.trigger('Cancelled edit bill mode', 'info');
                 }}
-                className="px-2.5 py-1 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 rounded-lg text-amber-300 text-[10px] font-extrabold uppercase tracking-wider transition-all cursor-pointer"
+                className="px-2.5 py-1 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 rounded-lg text-amber-300 text-xs font-extrabold uppercase tracking-wider transition-all cursor-pointer"
               >
                 Cancel Edit
               </button>
@@ -3547,15 +3547,15 @@ const POS = () => {
 
           {/* Phone Draft Banner */}
           {finalizingStagedSale && !editingInvoiceId && (
-            <div className="bg-sky/10 border border-sky/30 text-sky px-3.5 py-2 rounded-xl flex items-center justify-between gap-2 text-xs font-bold shrink-0 shadow-md">
+            <div className="bg-sky/10 border border-sky/30 text-sky px-3.5 py-2 rounded-xl flex items-center justify-between gap-2 text-sm font-bold shrink-0 shadow-md">
               <div className="flex items-center gap-2 min-w-0">
-                <Phone size={15} className="shrink-0" />
+                <Phone size={16} className="shrink-0" />
                 <span className="truncate">Finalizing phone draft #{finalizingStagedSale.id} — verify against live stock, then save to create the real bill</span>
               </div>
               <button
                 type="button"
                 onClick={() => setFinalizingStagedSale(null)}
-                className="px-2.5 py-1 bg-sky/20 hover:bg-sky/30 border border-sky/40 rounded-lg text-[10px] font-extrabold uppercase tracking-wider transition-all cursor-pointer shrink-0"
+                className="px-2.5 py-1 bg-sky/20 hover:bg-sky/30 border border-sky/40 rounded-lg text-xs font-extrabold uppercase tracking-wider transition-all cursor-pointer shrink-0"
               >
                 Detach
               </button>
@@ -3565,7 +3565,7 @@ const POS = () => {
           {/* Top Control Ribbon: Patient, WhatsApp, Doctor, Date, Tabs */}
           <div className="glass-panel p-2.5 bg-glass-bg border-glass-border shrink-0 relative z-40 shadow-sm rounded-2xl w-full min-w-0 flex flex-col gap-2">
             {selectedCustomerId && matchedRefill && (
-              <div className="p-2.5 rounded-xl bg-violet-500/10 border border-violet-500/20 text-violet-300 text-xs font-semibold flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 shadow-sm animate-fade-in">
+              <div className="p-2.5 rounded-xl bg-violet-500/10 border border-violet-500/20 text-violet-300 text-sm font-semibold flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 shadow-sm animate-fade-in">
                 <div className="flex items-center gap-2 min-w-0">
                   <span className="h-2 w-2 rounded-full bg-violet-400 animate-pulse shrink-0" />
                   <span className="truncate">
@@ -3588,14 +3588,14 @@ const POS = () => {
                   <button
                     type="button"
                     onClick={handleAcceptRefill}
-                    className="px-3 py-1 bg-violet-500 hover:bg-violet-600 text-white rounded-lg font-bold text-[10px] transition-all shadow-sm cursor-pointer flex items-center gap-1"
+                    className="px-3 py-1 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-bold text-xs transition-all shadow-sm cursor-pointer flex items-center gap-1"
                   >
                     + Add to Bill
                   </button>
                   <button
                     type="button"
                     onClick={() => { setDismissedRefillId(matchedRefill.id || 999999); setMatchedRefill(null); }}
-                    className="px-2.5 py-1 bg-bg3/50 hover:bg-bg3 text-muted hover:text-text rounded-lg font-bold text-[10px] transition-all border border-glass-border cursor-pointer"
+                    className="px-2.5 py-1 bg-bg3/50 hover:bg-bg3 text-muted hover:text-text rounded-lg font-bold text-xs transition-all border border-glass-border cursor-pointer"
                   >
                     Ignore
                   </button>
@@ -3612,7 +3612,7 @@ const POS = () => {
                     name="patient_name"
                     type="text"
                     autoComplete="off"
-                    className="premium-input text-xs font-semibold h-8.5 px-3 flex-1 w-full bg-bg2/60 border-border/70 rounded-xl placeholder:text-muted/40"
+                    className="premium-input text-sm font-semibold h-9 px-3 flex-1 w-full bg-bg2/60 border-border/70 rounded-xl placeholder:text-muted/40"
                     placeholder="Walk-in Customer"
                     value={patientName}
                     onChange={e => {
@@ -3657,9 +3657,9 @@ const POS = () => {
                     aria-label="Patient Name"
                   />
                   {showPatientSuggestions && (
-                    <div ref={patientSuggestionsRef} className="absolute left-0 right-0 top-full z-[100] mt-1 bg-bg2 border border-border rounded-xl overflow-hidden max-h-44 overflow-y-auto shadow-2xl">
+                    <div ref={patientSuggestionsRef} className="absolute left-0 right-0 top-full z-[100] mt-1 bg-bg2 border border-border rounded-xl overflow-hidden max-h-48 overflow-y-auto shadow-2xl">
                       {isPatientFuzzyMatch && (
-                        <div className="px-3 py-1.5 bg-amber-500/10 text-amber-400 text-[11px] font-bold border-b border-amber-500/20 flex items-center gap-1.5">
+                        <div className="px-3 py-1.5 bg-amber-500/10 text-amber-400 text-xs font-bold border-b border-amber-500/20 flex items-center gap-1.5">
                           <span>🔍</span> No exact match. Did you mean:
                         </div>
                       )}
@@ -3680,7 +3680,7 @@ const POS = () => {
                               setShowPatientSuggestions(false);
                               setPatientHighlightIndex(-1);
                             }}
-                            className={`w-full text-left px-3 py-2 text-xs border-b border-border/10 transition-all flex items-center justify-between gap-2 ${
+                            className={`w-full text-left px-3 py-2 text-sm border-b border-border/10 transition-all flex items-center justify-between gap-2 ${
                               idx === patientHighlightIndex
                                 ? 'bg-primary/20 text-text font-bold'
                                 : hasCreditDue
@@ -3692,14 +3692,14 @@ const POS = () => {
                               <span className="font-semibold truncate">{c.name}</span>
                               {c.active_refill === 1 && (
                                 <span
-                                  className="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-violet-500/15 border border-violet-500/30 text-violet-400 text-[9px] font-bold"
+                                  className="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-violet-500/15 border border-violet-500/30 text-violet-400 text-[11px] font-bold"
                                   title="Active refill schedule — returning refill patient"
                                 >
                                   🔁 Refill
                                 </span>
                               )}
                               {hasCreditDue && (
-                                <span className="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-amber-500 text-[9px] font-bold">
+                                <span className="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-amber-500 text-[11px] font-bold">
                                   Credit ₹{Number(c.credit_balance || 0).toFixed(0)}
                                 </span>
                               )}
@@ -3707,13 +3707,13 @@ const POS = () => {
                             <span className="flex items-center gap-2 shrink-0">
                               {!c.active_refill && (c.purchase_count || 0) > 0 && c.last_sale_date && (
                                 <span
-                                  className="text-muted text-[10px] font-semibold"
+                                  className="text-muted text-xs font-semibold"
                                   title={`Returning patient — ${c.purchase_count} purchase${(c.purchase_count || 0) > 1 ? 's' : ''}`}
                                 >
                                   ↩ last {new Date(c.last_sale_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
                                 </span>
                               )}
-                              {c.phone && <span className="text-muted font-mono text-[11px]">{c.phone}</span>}
+                              {c.phone && <span className="text-muted font-mono text-[13px]">{c.phone}</span>}
                             </span>
                           </button>
                         );
@@ -3722,10 +3722,10 @@ const POS = () => {
                   )}
                   <button
                     onClick={() => setShowPatientModal(true)}
-                    className="h-8.5 w-8.5 rounded-xl bg-primary/10 hover:bg-primary/20 border border-primary/20 text-primary transition-all flex items-center justify-center shrink-0 cursor-pointer"
+                    className="h-9 w-9 rounded-xl bg-primary/10 hover:bg-primary/20 border border-primary/20 text-primary transition-all flex items-center justify-center shrink-0 cursor-pointer"
                     title="Manage Patient Profile & Refills"
                   >
-                    <Plus size={14} className="stroke-[3]" />
+                    <Plus size={15} className="stroke-[3]" />
                   </button>
                 </div>
               </div>
@@ -3738,7 +3738,7 @@ const POS = () => {
                     name="patient_phone"
                     type="text"
                     autoComplete="off"
-                    className="premium-input text-xs font-mono font-semibold h-8.5 px-3 w-full text-text bg-bg2/60 border-border/70 rounded-xl placeholder:text-muted/40"
+                    className="premium-input text-sm font-mono font-semibold h-9 px-3 w-full text-text bg-bg2/60 border-border/70 rounded-xl placeholder:text-muted/40"
                     placeholder="Mobile / WhatsApp..."
                     value={patientPhone}
                     onChange={e => setPatientPhone(sanitizePhoneInput(e.target.value))}
@@ -3758,7 +3758,7 @@ const POS = () => {
                   />
                   <button
                     onClick={() => setSendWhatsApp(!sendWhatsApp)}
-                    className={`h-8.5 px-2.5 rounded-xl border text-[9px] font-extrabold uppercase tracking-wider flex items-center gap-1 transition-all select-none shrink-0 cursor-pointer ${
+                    className={`h-9 px-2.5 rounded-xl border text-[11px] font-extrabold uppercase tracking-wider flex items-center gap-1 transition-all select-none shrink-0 cursor-pointer ${
                       sendWhatsApp
                         ? 'bg-green/15 border-green/30 text-green hover:bg-green/25'
                         : 'bg-bg border-border text-muted hover:text-text hover:bg-bg2'
@@ -3780,7 +3780,7 @@ const POS = () => {
                     type="text"
                     autoComplete="off"
                     aria-label="Prescribing Doctor"
-                    className="premium-input text-xs font-semibold h-8.5 pl-3 pr-6 bg-bg2/60 border-border/70 w-full text-text focus:border-sky rounded-xl placeholder:text-muted/40"
+                    className="premium-input text-sm font-semibold h-9 pl-3 pr-6 bg-bg2/60 border-border/70 w-full text-text focus:border-sky rounded-xl placeholder:text-muted/40"
                     placeholder="Select Doctor..."
                     value={doctor}
                     onChange={e => {
@@ -3858,7 +3858,7 @@ const POS = () => {
                               setDoctorHighlightIndex(-1);
                               focusCartMedicineInput();
                             }}
-                            className={`w-full text-left px-3 py-2 text-xs border-b border-border/10 transition-all font-semibold ${
+                            className={`w-full text-left px-3 py-2 text-sm border-b border-border/10 transition-all font-semibold ${
                               idx === doctorHighlightIndex
                                 ? 'bg-sky/20 text-text font-bold'
                                 : 'text-text hover:bg-sky/10'
@@ -3868,7 +3868,7 @@ const POS = () => {
                           </button>
                         ))
                       ) : (
-                        <div className="px-3 py-2 text-xs text-muted italic">
+                        <div className="px-3 py-2 text-sm text-muted italic">
                           Press Enter to add: "{doctor}"
                         </div>
                       )}
@@ -3881,10 +3881,10 @@ const POS = () => {
                       type="button"
                       onClick={handleOpenEditDoctorModal}
                       aria-label="Edit Selected Doctor Profile"
-                      className="h-8.5 w-8.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-400 transition-all flex items-center justify-center shrink-0 cursor-pointer shadow-sm"
+                      className="h-9 w-9 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-400 transition-all flex items-center justify-center shrink-0 cursor-pointer shadow-sm"
                       title="Edit Selected Doctor Profile Directly"
                     >
-                      <Edit size={14} className="stroke-[2.5]" />
+                      <Edit size={15} className="stroke-[2.5]" />
                     </button>
                   )}
 
@@ -3892,10 +3892,10 @@ const POS = () => {
                     type="button"
                     onClick={handleOpenNewDoctorModal}
                     aria-label="Register New Doctor"
-                    className="h-8.5 w-8.5 rounded-xl bg-sky/10 hover:bg-sky/20 border border-sky/20 text-sky transition-all flex items-center justify-center shrink-0 cursor-pointer"
+                    className="h-9 w-9 rounded-xl bg-sky/10 hover:bg-sky/20 border border-sky/20 text-sky transition-all flex items-center justify-center shrink-0 cursor-pointer"
                     title="Register New Doctor"
                   >
-                    <Plus size={14} className="stroke-[3]" />
+                    <Plus size={15} className="stroke-[3]" />
                   </button>
                 </div>
               </div>
@@ -3907,7 +3907,7 @@ const POS = () => {
                   name="billing_date"
                   type="date"
                   autoComplete="off"
-                  className="premium-input text-xs font-semibold h-8.5 px-2.5 text-text w-full font-mono bg-bg2/60 border-border/70 rounded-xl"
+                  className="premium-input text-sm font-semibold h-9 px-2.5 text-text w-full font-mono bg-bg2/60 border-border/70 rounded-xl"
                   value={toDateInputValue(date)}
                   onChange={e => setDate(e.target.value)}
                   aria-label="Transaction Date"
@@ -3919,8 +3919,8 @@ const POS = () => {
           {/* A. Search & Scan Medicine Bar */}
           <div className="glass-panel p-2 flex items-center gap-2 bg-glass-bg border-glass-border relative z-30 shrink-0 shadow-sm rounded-2xl w-full min-w-0 transition-all duration-300">
             {!inventoryIndexReady && (
-              <div className="flex items-center gap-2 px-3 py-1 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-500 text-xs font-semibold">
-                <Loader2 size={13} className="animate-spin shrink-0" />
+              <div className="flex items-center gap-2 px-3 py-1 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-500 text-sm font-semibold">
+                <Loader2 size={14} className="animate-spin shrink-0" />
                 <span>Preparing index…</span>
               </div>
             )}
@@ -3935,9 +3935,9 @@ const POS = () => {
                   }}
                   title="Search Medicine (F2 / Ctrl+K)"
                   aria-label="Search Medicine"
-                  className="h-8 w-8 rounded-lg bg-bg2 border border-border/60 hover:border-primary/50 hover:bg-primary/10 text-primary transition-all flex items-center justify-center shrink-0 group cursor-pointer shadow-sm"
+                  className="h-9 w-9 rounded-lg bg-bg2 border border-border/60 hover:border-primary/50 hover:bg-primary/10 text-primary transition-all flex items-center justify-center shrink-0 group cursor-pointer shadow-sm"
                 >
-                  <Search size={14} className="group-hover:scale-110 transition-transform" />
+                  <Search size={15} className="group-hover:scale-110 transition-transform" />
                 </button>
               ) : (
                 <button
@@ -3946,11 +3946,11 @@ const POS = () => {
                     setIsSearchExpanded(true);
                     setTimeout(() => focusMedicineSearch(), 50);
                   }}
-                  className="premium-btn bg-bg2 border border-border/60 hover:border-primary/50 text-text transition-all flex items-center gap-1.5 px-3 h-8 rounded-lg shrink-0 font-medium group cursor-pointer"
+                  className="premium-btn bg-bg2 border border-border/60 hover:border-primary/50 text-text transition-all flex items-center gap-1.5 px-3 h-9 rounded-lg shrink-0 font-medium group cursor-pointer"
                 >
-                  <Search size={13} className="text-primary group-hover:scale-110 transition-transform" />
-                  <span className="text-[11px] font-bold">Search Medicine</span>
-                  <span className="text-[9px] font-mono font-bold bg-primary/15 border border-primary/30 px-1 py-0.5 rounded text-primary">
+                  <Search size={14} className="text-primary group-hover:scale-110 transition-transform" />
+                  <span className="text-[13px] font-bold">Search Medicine</span>
+                  <span className="text-[11px] font-mono font-bold bg-primary/15 border border-primary/30 px-1 py-0.5 rounded text-primary">
                     F2 / Ctrl+K
                   </span>
                 </button>
@@ -3959,7 +3959,7 @@ const POS = () => {
               <div className="flex items-center gap-2 w-full animate-in fade-in duration-200">
                 <div ref={productSearchRef} className="relative flex-1">
                   <span className="absolute inset-y-0 left-3 flex items-center pointer-events-none text-muted">
-                    {inventoryIndexReady ? <Search size={15} /> : <Loader2 size={15} className="animate-spin text-primary" />}
+                    {inventoryIndexReady ? <Search size={16} /> : <Loader2 size={16} className="animate-spin text-primary" />}
                   </span>
                   <input
                     id="medicine-search-input"
@@ -3969,7 +3969,7 @@ const POS = () => {
                     aria-label="Search medicine by name, composition, batch, or price"
                     placeholder={inventoryIndexReady ? "Search medicine by name, composition, batch, or price... (Ctrl + K)" : "Warming up search index..."}
                     disabled={!inventoryIndexReady}
-                    className="premium-input w-full text-xs pl-9 pr-14 py-2 bg-bg2/50 border-border/60 text-text rounded-xl focus:ring-primary/20 disabled:opacity-60 disabled:cursor-wait font-medium"
+                    className="premium-input w-full text-sm pl-9.5 pr-14 py-2 bg-bg2/50 border-border/60 text-text rounded-xl focus:ring-primary/20 disabled:opacity-60 disabled:cursor-wait font-medium"
                     value={searchTerm}
                     onFocus={() => {
                       setIsSearchExpanded(true);
@@ -4042,7 +4042,7 @@ const POS = () => {
                         className="text-muted hover:text-text p-1 cursor-pointer"
                         title="Clear text"
                       >
-                        <X size={12} />
+                        <X size={13} />
                       </button>
                     )}
                     <button
@@ -4055,14 +4055,14 @@ const POS = () => {
                       className="text-muted hover:text-text p-1 cursor-pointer rounded hover:bg-bg3"
                       title="Collapse search bar"
                     >
-                      <X size={14} />
+                      <X size={15} />
                     </button>
                   </div>
                   {showSearchDropdown && searchTerm.trim().length >= 3 && searchResults.length === 0 && (
                     <div className="absolute left-0 right-0 top-full z-[100] mt-2 bg-bg2 border border-border rounded-2xl overflow-hidden max-h-80 overflow-y-auto shadow-2xl backdrop-blur-xl">
                       {suggestions.length > 0 && (
                         <div className="p-3 border-b border-border/30 bg-violet-500/5">
-                        <span className="text-[13px] font-bold text-violet-400 uppercase tracking-wider block mb-1.5">Did you mean:</span>
+                        <span className="text-[15px] font-bold text-violet-400 uppercase tracking-wider block mb-1.5">Did you mean:</span>
                         <div className="flex gap-2 flex-wrap">
                           {suggestions.map((sug) => (
                             <button
@@ -4071,7 +4071,7 @@ const POS = () => {
                               onClick={() => {
                                 setSearchTerm(sug.name);
                               }}
-                              className="px-2.5 py-1.5 text-[16px] rounded-lg bg-violet-500/10 hover:bg-violet-500/20 text-violet-300 border border-violet-500/20 transition-all font-medium"
+                              className="px-2.5 py-1.5 text-[18px] rounded-lg bg-violet-500/10 hover:bg-violet-500/20 text-violet-300 border border-violet-500/20 transition-all font-medium"
                             >
                               {sug.name}
                             </button>
@@ -4079,7 +4079,7 @@ const POS = () => {
                         </div>
                       </div>
                     )}
-                    <div className="p-3 border-b border-border/30 text-[13px] font-bold text-muted uppercase tracking-wider bg-bg3/55">
+                    <div className="p-3 border-b border-border/30 text-[15px] font-bold text-muted uppercase tracking-wider bg-bg3/55">
                       ⚠️ No matching inventory found
                     </div>
                     <div className="flex flex-col">
@@ -4100,25 +4100,25 @@ const POS = () => {
                           setSearchTerm('');
                           setShowSearchDropdown(false);
                         }}
-                        className="flex items-center justify-between p-3.5 hover:bg-bg3 border-b border-border/20 text-left transition-all text-[16px] w-full group"
+                        className="flex items-center justify-between p-3.5 hover:bg-bg3 border-b border-border/20 text-left transition-all text-[18px] w-full group"
                       >
                         <div className="flex flex-col gap-1">
                           <span className="font-semibold text-text group-hover:text-primary transition-all">Add "{searchTerm.trim()}" directly to cart (Quick Add)</span>
-                          <span className="text-[13px] text-muted font-normal">Added as custom entry — please input real rate, batch, and expiry</span>
+                          <span className="text-[15px] text-muted font-normal">Added as custom entry — please input real rate, batch, and expiry</span>
                         </div>
-                        <span className="text-[14px] bg-primary/10 border border-primary/20 text-primary py-1.5 px-3 rounded-lg font-bold group-hover:bg-primary group-hover:text-white transition-all">+ Add</span>
+                        <span className="text-[16px] bg-primary/10 border border-primary/20 text-primary py-1.5 px-3 rounded-lg font-bold group-hover:bg-primary group-hover:text-white transition-all">+ Add</span>
                       </button>
 
                       {searchingOnline && (
-                        <div className="flex items-center justify-center p-4 text-[16px] text-muted gap-2 border-t border-border/20 bg-bg3/20">
-                          <Loader2 size={14} className="animate-spin text-sky" />
+                        <div className="flex items-center justify-center p-4 text-[18px] text-muted gap-2 border-t border-border/20 bg-bg3/20">
+                          <Loader2 size={15} className="animate-spin text-sky" />
                           <span>Searching internet for active compositions...</span>
                         </div>
                       )}
 
                       {onlineResults.length > 0 && (
                         <>
-                          <div className="p-3 bg-bg3/55 border-t border-border/30 text-[13px] font-bold text-sky uppercase tracking-wider">
+                          <div className="p-3 bg-bg3/55 border-t border-border/30 text-[15px] font-bold text-sky uppercase tracking-wider">
                             🌐 Internet Suggestion (Auto-Enrich to Database)
                           </div>
                           {onlineResults.map((sug, sidx) => (
@@ -4126,14 +4126,14 @@ const POS = () => {
                               key={`online_${sidx}`}
                               type="button"
                               onClick={() => handleSelectOnlineSuggestion(sug)}
-                              className="flex items-center justify-between p-3.5 hover:bg-bg3 border-b border-border/10 text-left transition-all text-[16px] w-full group"
+                              className="flex items-center justify-between p-3.5 hover:bg-bg3 border-b border-border/10 text-left transition-all text-[18px] w-full group"
                             >
                               <div className="flex flex-col gap-1">
                                 <span className="font-semibold text-text group-hover:text-sky transition-all">{sug.name}</span>
-                                <span className="text-[13px] text-muted font-normal">Active Salts: <strong className="text-text">{sug.api_reference || '—'}</strong></span>
-                                {sug.manufacturer && <span className="text-[13px] text-muted font-normal">Mfr: {sug.manufacturer}</span>}
+                                <span className="text-[15px] text-muted font-normal">Active Salts: <strong className="text-text">{sug.api_reference || '—'}</strong></span>
+                                {sug.manufacturer && <span className="text-[15px] text-muted font-normal">Mfr: {sug.manufacturer}</span>}
                               </div>
-                              <span className="text-[14px] bg-sky/10 border border-sky/20 text-sky py-1.5 px-3 rounded-lg font-bold group-hover:bg-sky group-hover:text-white transition-all">✨ Import & Add</span>
+                              <span className="text-[16px] bg-sky/10 border border-sky/20 text-sky py-1.5 px-3 rounded-lg font-bold group-hover:bg-sky group-hover:text-white transition-all">✨ Import & Add</span>
                             </button>
                           ))}
                         </>
@@ -4147,7 +4147,7 @@ const POS = () => {
                   <div ref={searchResultsRef} className="absolute left-0 right-0 top-full z-[100] mt-2 bg-bg2 border border-border rounded-2xl overflow-hidden max-h-80 overflow-y-auto shadow-2xl backdrop-blur-xl">
                     {suggestions.length > 0 && (
                       <div className="p-3 border-b border-border/30 bg-violet-500/5">
-                        <span className="text-[13px] font-bold text-violet-400 uppercase tracking-wider block mb-1.5">Did you mean:</span>
+                        <span className="text-[15px] font-bold text-violet-400 uppercase tracking-wider block mb-1.5">Did you mean:</span>
                         <div className="flex gap-2 flex-wrap">
                           {suggestions.map((sug) => (
                             <button
@@ -4161,7 +4161,7 @@ const POS = () => {
                                 }).catch(err => console.error('Failed to learn correction:', err));
                                 setSearchTerm(sug.name);
                               }}
-                              className="px-2.5 py-1.5 text-[16px] rounded-lg bg-violet-500/10 hover:bg-violet-500/20 text-violet-300 border border-violet-500/20 transition-all font-medium"
+                              className="px-2.5 py-1.5 text-[18px] rounded-lg bg-violet-500/10 hover:bg-violet-500/20 text-violet-300 border border-violet-500/20 transition-all font-medium"
                             >
                               {sug.name}
                             </button>
@@ -4169,7 +4169,7 @@ const POS = () => {
                         </div>
                       </div>
                     )}
-                    <div className="p-3 border-b border-border/30 bg-bg3/55 text-[13px] font-bold text-muted uppercase tracking-wider">
+                    <div className="p-3 border-b border-border/30 bg-bg3/55 text-[15px] font-bold text-muted uppercase tracking-wider">
                       Matching Inventory Records:
                     </div>
                     <div className="flex flex-col">
@@ -4211,7 +4211,7 @@ const POS = () => {
                                 setSearchResults([]);
                                 setShowSearchDropdown(false);
                               }}
-                              className={`flex items-center justify-between p-3.5 hover:bg-bg3 border-b border-border/10 text-left transition-all text-[16px] w-full group ${
+                              className={`flex items-center justify-between p-3.5 hover:bg-bg3 border-b border-border/10 text-left transition-all text-[18px] w-full group ${
                                 isAlt ? 'pl-8 bg-sky/5' : ''
                               } ${
                                 isLowStockAlert ? 'bg-amber-500/5 hover:bg-amber-500/10 border-l-2 border-amber-500' : ''
@@ -4221,15 +4221,15 @@ const POS = () => {
                             >
                               <div className="flex flex-col gap-1">
                                 <div className="flex items-center gap-1.5 flex-wrap">
-                                  {isAlt && <span className="text-[13px] bg-sky/20 text-sky px-1.5 py-0.5 rounded font-bold mr-1">ALT</span>}
+                                  {isAlt && <span className="text-[15px] bg-sky/20 text-sky px-1.5 py-0.5 rounded font-bold mr-1">ALT</span>}
                                   <span className="font-semibold text-text group-hover:text-primary transition-all">{item.medicine_name}</span>
                                   {isLowStockAlert && (
-                                    <span className="text-[10px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30 px-1.5 py-0.5 rounded flex items-center gap-1 uppercase tracking-wider">
+                                    <span className="text-xs font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30 px-1.5 py-0.5 rounded flex items-center gap-1 uppercase tracking-wider">
                                       ⚠️ Low Stock ({remainingPacks} Left • Refill Needed)
                                     </span>
                                   )}
                                 </div>
-                                <span className="text-[13px] text-muted">
+                                <span className="text-[15px] text-muted">
                                   Company: <span className="text-text font-semibold">{item.manufacturer || '—'}</span>
                                   {item.quantity !== undefined && (() => {
                                     const remainingLoose = remainingUnits % packSize;
@@ -4253,7 +4253,7 @@ const POS = () => {
                                         console.error('Failed to queue medicine from POS:', err);
                                       }
                                     }}
-                                    className="text-[13px] text-violet-400 hover:text-violet-300 font-bold underline cursor-pointer w-fit mt-0.5"
+                                    className="text-[15px] text-violet-400 hover:text-violet-300 font-bold underline cursor-pointer w-fit mt-0.5"
                                   >
                                     Verify composition ↗
                                   </span>
@@ -4261,7 +4261,7 @@ const POS = () => {
                               </div>
                               <div className="flex items-center gap-4">
                                 <div className="text-right">
-                                  <div className="font-mono text-green font-bold">MRP: ₹{Math.round(item.mrp ?? 0)}</div>
+                                  <div className="font-mono text-green font-bold text-base">MRP: ₹{Math.round(item.mrp ?? 0)}</div>
                                 </div>
                                 <div className="flex items-center gap-2">
                                   <button
@@ -4273,9 +4273,9 @@ const POS = () => {
                                     className="p-1.5 rounded-lg bg-bg border border-border/40 text-muted hover:text-text hover:bg-bg3 transition-all"
                                     title="Quick Edit Medicine"
                                   >
-                                    <Edit size={12} />
+                                    <Edit size={14} />
                                   </button>
-                                  <span className="text-[14px] bg-primary/10 border border-primary/20 text-primary py-1.5 px-3 rounded-lg font-bold group-hover:bg-primary group-hover:text-white transition-all">+ Add</span>
+                                  <span className="text-[16px] bg-primary/10 border border-primary/20 text-primary py-1.5 px-3 rounded-lg font-bold group-hover:bg-primary group-hover:text-white transition-all">+ Add</span>
                                 </div>
                               </div>
                             </button>
@@ -4293,15 +4293,15 @@ const POS = () => {
                         if (isOutOfStock) {
                           return (
                             <div key={`oos_${med.medicine_id}`} className="flex flex-col border-b border-border/10">
-                              <div className="p-3 bg-red-500/5 text-[16px] w-full flex flex-col gap-1 border-l-2 border-red-500">
+                              <div className="p-3 bg-red-500/5 text-[18px] w-full flex flex-col gap-1 border-l-2 border-red-500">
                                  <div className="flex items-center justify-between">
                                    <div>
                                      <span className="font-bold text-red-400 line-through mr-2">{med.medicine_name}</span>
-                                     <span className="text-[13px] text-red-400 font-bold uppercase border border-red-500/20 px-1.5 py-0.5 rounded bg-red-500/10">Out of Stock</span>
+                                     <span className="text-[15px] text-red-400 font-bold uppercase border border-red-500/20 px-1.5 py-0.5 rounded bg-red-500/10">Out of Stock</span>
                                    </div>
                                  </div>
                                  {med.alternatives && med.alternatives.length > 0 && (
-                                   <div className="text-[13px] text-sky font-bold flex items-center gap-1.5 mt-1">
+                                   <div className="text-[15px] text-sky font-bold flex items-center gap-1.5 mt-1">
                                      <span className="h-1.5 w-1.5 bg-sky rounded-full animate-ping"></span> 
                                      Alternatives in stock (same composition):
                                    </div>
@@ -4317,7 +4317,7 @@ const POS = () => {
                             {renderMedicineItem(med, false)}
                             {med.alternatives && med.alternatives.length > 0 && (
                               <div className="flex flex-col border-l-2 border-sky/30 ml-2 bg-bg3/30">
-                                <div className="px-6 py-1.5 bg-sky/5 text-[13px] text-sky font-bold uppercase tracking-wider flex items-center gap-1">
+                                <div className="px-6 py-1.5 bg-sky/5 text-[15px] text-sky font-bold uppercase tracking-wider flex items-center gap-1">
                                   <span className="rotate-90">↳</span> Substitutes Available:
                                 </div>
                                 {med.alternatives.map(alt => renderMedicineItem(alt, true))}
@@ -4328,15 +4328,15 @@ const POS = () => {
                       })}
                       
                       {searchingOnline && (
-                        <div className="flex items-center justify-center p-3 text-[16px] text-muted gap-2 border-t border-border/10 bg-bg3/25">
-                          <Loader2 size={14} className="animate-spin text-sky" />
+                        <div className="flex items-center justify-center p-3 text-[18px] text-muted gap-2 border-t border-border/10 bg-bg3/25">
+                          <Loader2 size={15} className="animate-spin text-sky" />
                           <span>Searching internet for active compositions...</span>
                         </div>
                       )}
 
                       {onlineResults.length > 0 && (
                         <>
-                          <div className="p-3 border-t border-border/30 bg-bg3/55 text-[13px] font-bold text-sky uppercase tracking-wider">
+                          <div className="p-3 border-t border-border/30 bg-bg3/55 text-[15px] font-bold text-sky uppercase tracking-wider">
                             🌐 Internet Suggestion (Auto-Enrich to Database):
                           </div>
                           {onlineResults.map((sug, sidx) => (
@@ -4344,14 +4344,14 @@ const POS = () => {
                               key={`online_${sidx}`}
                               type="button"
                               onClick={() => handleSelectOnlineSuggestion(sug)}
-                              className="flex items-center justify-between p-3.5 hover:bg-bg3 border-b border-border/10 text-left transition-all text-[16px] w-full group"
+                              className="flex items-center justify-between p-3.5 hover:bg-bg3 border-b border-border/10 text-left transition-all text-[18px] w-full group"
                             >
                               <div className="flex flex-col gap-1">
                                 <span className="font-semibold text-text group-hover:text-sky transition-all">{sug.name}</span>
-                                <span className="text-[13px] text-muted font-normal">Active Salts: <strong className="text-text">{sug.api_reference || '—'}</strong></span>
-                                {sug.manufacturer && <span className="text-[13px] text-muted font-normal">Mfr: {sug.manufacturer}</span>}
+                                <span className="text-[15px] text-muted font-normal">Active Salts: <strong className="text-text">{sug.api_reference || '—'}</strong></span>
+                                {sug.manufacturer && <span className="text-[15px] text-muted font-normal">Mfr: {sug.manufacturer}</span>}
                               </div>
-                              <span className="text-[14px] bg-sky/10 border border-sky/20 text-sky py-1.5 px-3 rounded-lg font-bold group-hover:bg-sky group-hover:text-white transition-all">✨ Import & Add</span>
+                              <span className="text-[16px] bg-sky/10 border border-sky/20 text-sky py-1.5 px-3 rounded-lg font-bold group-hover:bg-sky group-hover:text-white transition-all">✨ Import & Add</span>
                             </button>
                           ))}
                         </>
@@ -4375,7 +4375,7 @@ const POS = () => {
                 className="flex-1 min-w-0 flex items-center gap-1.5 overflow-x-auto scrollbar-thin py-0.5 px-1 bg-sky/5 rounded-xl border border-sky/15 focus:outline-none focus:ring-1 focus:ring-sky/40 transition-all cursor-grab active:cursor-grabbing select-none"
                 title="Doctor's commonly prescribed medicines. Scroll with mouse wheel or trackpad to view all."
               >
-                <div className="flex items-center gap-1 px-2 py-1 rounded-lg bg-sky/20 border border-sky/30 text-sky text-[9px] font-black uppercase tracking-wider shrink-0 select-none">
+                <div className="flex items-center gap-1 px-2 py-1 rounded-lg bg-sky/20 border border-sky/30 text-sky text-[11px] font-black uppercase tracking-wider shrink-0 select-none">
                   <span className="h-1.5 w-1.5 rounded-full bg-sky animate-pulse" />
                   <span>Dr. Rx ({inStockDoctorSuggestions.length}):</span>
                 </div>
@@ -4385,10 +4385,10 @@ const POS = () => {
                     type="button"
                     onClick={() => handleDoctorSuggestionClick(s)}
                     title={`Prescribed ${s.frequency || 1}× by Dr. ${doctor} — usual qty ${s.most_common_qty || 1}${s.most_common_loose_qty ? ` +${s.most_common_loose_qty} loose` : ''}`}
-                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-bg2/90 hover:bg-sky/20 border border-sky/25 text-text hover:text-sky hover:border-sky/40 transition-all text-[11px] font-semibold whitespace-nowrap shrink-0 cursor-pointer shadow-xs group"
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-bg2/90 hover:bg-sky/20 border border-sky/25 text-text hover:text-sky hover:border-sky/40 transition-all text-[13px] font-semibold whitespace-nowrap shrink-0 cursor-pointer shadow-xs group"
                   >
                     <span className="truncate max-w-[150px] group-hover:font-bold">{s.name}</span>
-                    <span className="font-mono text-primary bg-primary/10 border border-primary/20 px-1 py-0.2 rounded text-[10px] font-bold">
+                    <span className="font-mono text-primary bg-primary/10 border border-primary/20 px-1 py-0.2 rounded text-xs font-bold">
                       ×{s.most_common_qty || 1}{s.most_common_loose_qty ? `+${s.most_common_loose_qty}` : ''}
                     </span>
                   </button>
@@ -4402,18 +4402,18 @@ const POS = () => {
                 aria-label="AI Camera Scan"
                 title="AI Camera Scan"
                 onClick={() => setShowCamera(true)}
-                className="h-8 w-8 rounded-lg bg-gradient-to-r from-primary to-teal-500 text-white shadow-[0_2px_8px_rgba(59,130,246,0.2)] hover:shadow-[0_4px_12px_rgba(59,130,246,0.3)] hover:scale-[1.05] active:scale-[0.95] transition-all flex items-center justify-center shrink-0 cursor-pointer"
+                className="h-9 w-9 rounded-lg bg-gradient-to-r from-primary to-teal-500 text-white shadow-[0_2px_8px_rgba(59,130,246,0.2)] hover:shadow-[0_4px_12px_rgba(59,130,246,0.3)] hover:scale-[1.05] active:scale-[0.95] transition-all flex items-center justify-center shrink-0 cursor-pointer"
               >
-                <Camera size={14} />
+                <Camera size={15} />
               </button>
             ) : (
               <button
                 type="button"
                 aria-label="AI Camera Scan"
                 onClick={() => setShowCamera(true)}
-                className="premium-btn bg-gradient-to-r from-primary to-teal-500 text-white shadow-[0_2px_8px_rgba(59,130,246,0.2)] hover:shadow-[0_4px_12px_rgba(59,130,246,0.3)] hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center gap-1.5 px-3 h-8 rounded-lg shrink-0 font-bold text-[11px]"
+                className="premium-btn bg-gradient-to-r from-primary to-teal-500 text-white shadow-[0_2px_8px_rgba(59,130,246,0.2)] hover:shadow-[0_4px_12px_rgba(59,130,246,0.3)] hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center gap-1.5 px-3 h-9 rounded-lg shrink-0 font-bold text-[13px]"
               >
-                <Camera size={13} />
+                <Camera size={14} />
                 <span>AI Camera Scan</span>
               </button>
             )}
@@ -4432,13 +4432,13 @@ const POS = () => {
                     <div
                       key={t.id}
                       onClick={() => switchTab(t.id)}
-                      className={`flex items-center gap-2 px-3.5 py-1.8 rounded-xl border font-bold text-xs transition-all select-none cursor-pointer flex-shrink-0 whitespace-nowrap ${
+                      className={`flex items-center gap-2 px-3.5 py-2 rounded-xl border font-bold text-sm transition-all select-none cursor-pointer flex-shrink-0 whitespace-nowrap ${
                         isActive 
                           ? 'bg-primary/10 border-primary text-primary shadow-[inset_0_0_12px_rgba(59,130,246,0.1)]' 
                           : 'bg-bg border-border text-muted hover:text-text hover:bg-bg2'
                       }`}
                     >
-                      <ShoppingCart size={13} className={isActive ? 'text-primary' : 'text-muted'} />
+                      <ShoppingCart size={14} className={isActive ? 'text-primary' : 'text-muted'} />
                       <span>{displayName} ({count})</span>
                       {tabs.length > 1 && (
                         <span 
@@ -4446,7 +4446,7 @@ const POS = () => {
                           className="hover:bg-bg3 rounded-full p-0.5 ml-1 transition-all cursor-pointer flex items-center justify-center text-muted hover:text-text"
                           title="Close Tab"
                         >
-                          <X size={10} />
+                          <X size={11} />
                         </span>
                       )}
                     </div>
@@ -4454,10 +4454,10 @@ const POS = () => {
                 })}
                 <button
                   onClick={addNewTab}
-                  className="flex items-center justify-center flex-shrink-0 p-1.5 rounded-xl border border-dashed border-border text-muted hover:text-text hover:border-text transition-all bg-bg hover:bg-bg2 h-[28px] w-[28px]"
+                  className="flex items-center justify-center flex-shrink-0 p-1.5 rounded-xl border border-dashed border-border text-muted hover:text-text hover:border-text transition-all bg-bg hover:bg-bg2 h-[32px] w-[32px]"
                   title="Add New Cart"
                 >
-                  <Plus size={13} />
+                  <Plus size={14} />
                 </button>
               </div>
               
@@ -4466,36 +4466,36 @@ const POS = () => {
                   <button
                     type="button"
                     onClick={() => specialOrdersControl.requestLoad()}
-                    className="px-3 py-1.5 rounded-xl text-[10px] font-extrabold uppercase bg-amber-500/10 border border-amber-500/20 text-amber-500 hover:bg-amber-500/20 transition-all cursor-pointer mr-1"
+                    className="px-3 py-1.5 rounded-xl text-xs font-extrabold uppercase bg-amber-500/10 border border-amber-500/20 text-amber-500 hover:bg-amber-500/20 transition-all cursor-pointer mr-1"
                   >
                     Load Special Orders
                   </button>
                 )}
                 <button 
                   onClick={clearCart}
-                  className="premium-btn bg-red/10 border border-red/20 text-red text-xs py-1.5 px-3 hover:bg-red/20 transition-all flex items-center gap-1.5 rounded-xl"
+                  className="premium-btn bg-red/10 border border-red/20 text-red text-sm py-1.5 px-3 hover:bg-red/20 transition-all flex items-center gap-1.5 rounded-xl"
                 >
-                  <Trash2 size={12} /> Clear Cart
+                  <Trash2 size={13} /> Clear Cart
                 </button>
               </div>
             </div>
 
             {/* Cart Table Container */}
             <div className="flex-1 overflow-auto bg-bg/25 scrollbar-thin">
-              <table className="w-full text-left border-collapse text-xs">
+              <table className="w-full text-left border-collapse text-sm">
                 <thead className="sticky top-0 bg-bg2/95 backdrop-blur-xl z-10">
                   <tr>
-                    <th className="py-2 px-2.5 text-xs font-bold text-muted uppercase tracking-wider border-b-2 border-border">Medicine</th>
-                    <th className="py-2 px-2.5 text-xs font-bold text-muted uppercase tracking-wider border-b-2 border-border">Batch</th>
-                    <th className="py-2 px-2.5 text-xs font-bold text-muted uppercase tracking-wider border-b-2 border-border text-center">Expiry</th>
-                    <th className="py-2 px-2.5 text-xs font-bold text-muted uppercase tracking-wider border-b-2 border-border text-center">Strip</th>
-                    <th className="py-2 px-2.5 text-xs font-bold text-muted uppercase tracking-wider border-b-2 border-border text-center">Loose</th>
-                    <th className="py-2 px-2.5 text-xs font-bold text-muted uppercase tracking-wider border-b-2 border-border text-center">Live Stock</th>
-                    <th className="py-2 px-2.5 text-xs font-bold text-muted uppercase tracking-wider border-b-2 border-border text-center">Disc %</th>
-                    <th className="py-2 px-2.5 text-xs font-bold text-muted uppercase tracking-wider border-b-2 border-border text-right">Rate</th>
-                    <th className="py-2 px-2.5 text-xs font-bold text-muted uppercase tracking-wider border-b-2 border-border text-right">MRP</th>
-                    <th className="py-2 px-2.5 text-xs font-bold text-muted uppercase tracking-wider border-b-2 border-border text-right">Total</th>
-                    <th className="py-2 px-2.5 text-xs font-bold text-muted tracking-wider border-b-2 border-border"></th>
+                    <th className="py-2.5 px-3 text-sm font-bold text-muted uppercase tracking-wider border-b-2 border-border">Medicine</th>
+                    <th className="py-2.5 px-3 text-sm font-bold text-muted uppercase tracking-wider border-b-2 border-border">Batch</th>
+                    <th className="py-2.5 px-3 text-sm font-bold text-muted uppercase tracking-wider border-b-2 border-border text-center">Expiry</th>
+                    <th className="py-2.5 px-3 text-sm font-bold text-muted uppercase tracking-wider border-b-2 border-border text-center">Strip</th>
+                    <th className="py-2.5 px-3 text-sm font-bold text-muted uppercase tracking-wider border-b-2 border-border text-center">Loose</th>
+                    <th className="py-2.5 px-3 text-sm font-bold text-muted uppercase tracking-wider border-b-2 border-border text-center">Live Stock</th>
+                    <th className="py-2.5 px-3 text-sm font-bold text-muted uppercase tracking-wider border-b-2 border-border text-center">Disc %</th>
+                    <th className="py-2.5 px-3 text-sm font-bold text-muted uppercase tracking-wider border-b-2 border-border text-right">Rate</th>
+                    <th className="py-2.5 px-3 text-sm font-bold text-muted uppercase tracking-wider border-b-2 border-border text-right">MRP</th>
+                    <th className="py-2.5 px-3 text-sm font-bold text-muted uppercase tracking-wider border-b-2 border-border text-right">Total</th>
+                    <th className="py-2.5 px-3 text-sm font-bold text-muted tracking-wider border-b-2 border-border"></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -4524,8 +4524,6 @@ const POS = () => {
                     // 3-Color Classification System:
                     // Color 1 (Theme Normal): Registered in Local Inventory with active stock & batch
                     // Color 2 (Amber Tint): Exists in Master Catalog, but NOT in active local inventory (0 stock)
-                    // Color 3 (Purple Tint): Completely new / manual / unmapped item
-
                     const rowStatusClass = "border-b border-border/30 hover:bg-bg2/40";
                     let statusBadge = null;
 
@@ -4534,9 +4532,9 @@ const POS = () => {
                     }
 
                     return (
-                      <tr key={item.id} data-medicine-id={item.medicine_id} className={`transition-all h-[38px] ${rowStatusClass}`}>
+                      <tr key={item.id} data-medicine-id={item.medicine_id} className={`transition-all h-[44px] ${rowStatusClass}`}>
                         {/* Medicine Search/Change */}
-                        <td className="py-1 px-2.5 min-w-[180px] relative">
+                        <td className="py-1 px-2.5 min-w-[190px] relative">
                           <div className="flex items-center">
                             {statusBadge}
                             {item.scanImage && (
@@ -4547,12 +4545,12 @@ const POS = () => {
                                   src={item.scanImage}
                                   alt="Scan thumbnail"
                                   decoding="async"
-                                  className="w-7 h-7 object-cover rounded-lg border border-border/60 hover:border-primary/60 transition-all cursor-zoom-in shadow-sm"
+                                  className="w-7.5 h-7.5 object-cover rounded-lg border border-border/60 hover:border-primary/60 transition-all cursor-zoom-in shadow-sm"
                                   onClick={() => setZoomedImage(item.scanImage ?? null)}
                                 />
                                 <div className="absolute left-0 bottom-full mb-2 hidden group-hover/thumb:block z-[100] bg-bg2 border border-border rounded-xl p-2 shadow-2xl w-48 animate-in fade-in duration-150">
                                   <img src={item.scanImage} alt="Scan preview" decoding="async" className="w-full h-auto rounded-lg object-contain" />
-                                  <div className="text-[8px] text-muted text-center mt-1 font-semibold">Click to enlarge</div>
+                                  <div className="text-[10px] text-muted text-center mt-1 font-semibold">Click to enlarge</div>
                                 </div>
                               </div>
                             )}
@@ -4562,7 +4560,7 @@ const POS = () => {
                                 name={`row_med_name_${cart.indexOf(item)}`}
                                 type="text" 
                                 autoComplete="off"
-                                className="w-full bg-transparent border-0 border-b border-transparent hover:border-border/60 focus:border-primary/60 focus:ring-0 text-sm font-semibold text-text py-0.5 px-1 rounded"
+                                className="w-full bg-transparent border-0 border-b border-transparent hover:border-border/60 focus:border-primary/60 focus:ring-0 text-base font-semibold text-text py-0.5 px-1 rounded"
                                 value={activeRowSearchIndex === cart.indexOf(item) ? rowSearchTerm : item.name}
                                 onChange={e => {
                                   const val = e.target.value;
@@ -4641,7 +4639,7 @@ const POS = () => {
                               {activeRowSearchIndex === cart.indexOf(item) && rowSearchTerm.trim().length >= 2 && rowSearchResults.length > 0 && (
                                 <div 
                                   ref={rowSearchResultsRef} 
-                                  className={`absolute left-0 right-0 z-[9999] bg-bg2 border-2 border-primary/40 rounded-xl overflow-hidden max-h-56 overflow-y-auto w-[340px] shadow-[0_20px_50px_rgba(0,0,0,0.8)] backdrop-blur-xl ${
+                                  className={`absolute left-0 right-0 z-[9999] bg-bg2 border-2 border-primary/40 rounded-xl overflow-hidden max-h-56 overflow-y-auto w-[360px] shadow-[0_20px_50px_rgba(0,0,0,0.8)] backdrop-blur-xl ${
                                     rowSearchDropUp
                                       ? 'bottom-full mb-1'
                                       : 'top-full mt-1'
@@ -4665,20 +4663,20 @@ const POS = () => {
                                           const idx = cart.indexOf(item);
                                           fetchDetailsAndChangeRowMedicine(idx, med);
                                         }}
-                                        className={`flex flex-col p-2.5 hover:bg-bg3 border-b border-border/10 text-left transition-all text-xs w-full cursor-pointer ${isRowHighlighted ? 'bg-primary/20 border-l-2 border-primary text-text' : ''}`}
+                                        className={`flex flex-col p-2.5 hover:bg-bg3 border-b border-border/10 text-left transition-all text-sm w-full cursor-pointer ${isRowHighlighted ? 'bg-primary/20 border-l-2 border-primary text-text' : ''}`}
                                       >
                                         <div className="flex items-center justify-between gap-1">
                                           <div className="flex items-center gap-1.5 flex-wrap min-w-0">
                                             <span className="font-semibold text-text truncate">{med.medicine_name}</span>
                                             {rowHasPending && (
-                                              <span className="inline-flex items-center gap-1 bg-amber-500/10 border border-amber-500/30 text-amber-500 px-1.5 py-0.5 rounded text-[11px] font-bold animate-pulse">
+                                              <span className="inline-flex items-center gap-1 bg-amber-500/10 border border-amber-500/30 text-amber-500 px-1.5 py-0.5 rounded text-xs font-bold animate-pulse">
                                                 ⚠️ {rowPendingMatches[0].requester} ({rowPendingMatches[0].qty})
                                               </span>
                                             )}
                                           </div>
                                           <div className="flex items-center gap-1 shrink-0">
                                             {locTag && (
-                                              <span className="text-[10px] bg-bg3/80 border border-border/40 text-muted px-1.5 py-0.5 rounded font-mono font-bold" title="Store Location / Rack">
+                                              <span className="text-[11px] bg-bg3/80 border border-border/40 text-muted px-1.5 py-0.5 rounded font-mono font-bold" title="Store Location / Rack">
                                                 📍 {locTag}
                                               </span>
                                             )}
@@ -4692,13 +4690,13 @@ const POS = () => {
                                                 }}
                                                 className="p-1 rounded bg-bg3/60 hover:bg-bg3 border border-border/40 text-muted hover:text-text transition-all shrink-0 cursor-pointer"
                                               >
-                                                <Edit size={11} />
+                                                <Edit size={12} />
                                               </button>
                                             )}
                                           </div>
                                         </div>
-                                        <span className="text-[11px] text-muted font-mono mt-0.5">Batch: {med.batch_no} | Exp: {med.expiry_date}</span>
-                                        <span className="text-[11px] text-green font-bold font-mono mt-0.5">
+                                        <span className="text-[13px] text-muted font-mono mt-0.5">Batch: {med.batch_no} | Exp: {med.expiry_date}</span>
+                                        <span className="text-[13px] text-green font-bold font-mono mt-0.5">
                                           MRP: ₹{Math.round(med.mrp ?? 0)} | Stock: {(() => {
                                             const packSize = Number(med.pack_size || 1);
                                             const totalUnits = Number(med.quantity || 0) * packSize + Number(med.loose_quantity ?? med.loose_qty ?? 0);
@@ -4735,7 +4733,7 @@ const POS = () => {
                               id={`row-batch-input-${cart.indexOf(item)}`}
                               type="button"
                               disabled={item.isEmptyRow}
-                              className={`w-28 text-center flex items-center justify-between gap-1 bg-bg/60 border border-border/60 hover:border-primary/50 focus:border-primary/80 focus:ring-1 focus:ring-primary/20 text-xs font-mono font-semibold py-1 px-2 h-7 rounded-lg transition-all ${item.isEmptyRow ? 'cursor-not-allowed opacity-40' : 'cursor-pointer hover:bg-bg3/50'}`}
+                              className={`w-32 text-center flex items-center justify-between gap-1 bg-bg/60 border border-border/60 hover:border-primary/50 focus:border-primary/80 focus:ring-1 focus:ring-primary/20 text-sm font-mono font-semibold py-1 px-2 h-8 rounded-lg transition-all ${item.isEmptyRow ? 'cursor-not-allowed opacity-40' : 'cursor-pointer hover:bg-bg3/50'}`}
                               onClick={() => {
                                 if (item.isEmptyRow) return;
                                 const rowKey = String(item.id);
@@ -4789,17 +4787,17 @@ const POS = () => {
                                 {item.batch || (item.isEmptyRow ? '—' : 'Select')}
                               </span>
                               {!item.isEmptyRow && (
-                                <svg className="w-3 h-3 text-muted shrink-0 opacity-60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <svg className="w-3.5 h-3.5 text-muted shrink-0 opacity-60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
                                 </svg>
                               )}
                             </button>
                             
                             {activeBatchRowId === String(item.id) && rowBatchesList.length > 0 && (
-                              <div className="absolute left-0 z-[100] mt-1 bg-bg2 border border-border rounded-xl overflow-hidden max-h-48 overflow-y-auto w-64 text-left shadow-2xl animate-in fade-in zoom-in-95 duration-100">
-                                <div className="p-2 border-b border-border/30 bg-bg3/60 text-[11px] font-bold text-muted uppercase tracking-wider flex items-center justify-between">
+                              <div className="absolute left-0 z-[100] mt-1 bg-bg2 border border-border rounded-xl overflow-hidden max-h-48 overflow-y-auto w-68 text-left shadow-2xl animate-in fade-in zoom-in-95 duration-100">
+                                <div className="p-2 border-b border-border/30 bg-bg3/60 text-[13px] font-bold text-muted uppercase tracking-wider flex items-center justify-between">
                                   <span>Switch Batch</span>
-                                  <span className="text-[10px] font-normal text-muted/70">{rowBatchesList.length} available</span>
+                                  <span className="text-xs font-normal text-muted/70">{rowBatchesList.length} available</span>
                                 </div>
                                 {rowBatchesList.map(b => {
                                   const otherCartQty = cart.reduce((sum, c) => {
@@ -4846,13 +4844,13 @@ const POS = () => {
                                         }));
                                         setActiveBatchRowId(null);
                                       }}
-                                      className={`w-full text-left px-2.5 py-1.5 hover:bg-sky/15 border-b border-border/10 text-xs font-mono transition-all block ${isCurrent ? 'bg-sky/10 text-sky font-semibold' : 'text-text'}`}
+                                      className={`w-full text-left px-2.5 py-1.5 hover:bg-sky/15 border-b border-border/10 text-sm font-mono transition-all block ${isCurrent ? 'bg-sky/10 text-sky font-semibold' : 'text-text'}`}
                                     >
                                       <div className="flex items-center justify-between">
                                         <span className="font-bold">{b.batch_no}</span>
-                                        {isCurrent && <span className="text-[10px] text-sky font-sans">Active</span>}
+                                        {isCurrent && <span className="text-xs text-sky font-sans">Active</span>}
                                       </div>
-                                      <span className="text-muted block text-[11px] mt-0.5">Exp: {b.expiry_date || 'N/A'} | Stock: {liveStock} Str {b.loose_quantity !== undefined && b.loose_quantity > 0 ? `/ ${b.loose_quantity} Tab` : ''} | MRP: ₹{b.mrp}</span>
+                                      <span className="text-muted block text-[13px] mt-0.5">Exp: {b.expiry_date || 'N/A'} | Stock: {liveStock} Str {b.loose_quantity !== undefined && b.loose_quantity > 0 ? `/ ${b.loose_quantity} Tab` : ''} | MRP: ₹{b.mrp}</span>
                                     </button>
                                   );
                                 })}
@@ -4863,7 +4861,7 @@ const POS = () => {
                         
                         {/* Expiry */}
                         <td className="py-1 px-2.5 text-center">
-                          <div className={`font-mono text-xs font-bold px-2 py-0.5 rounded-md inline-block shadow-sm ${expBadgeClass}`}>
+                          <div className={`font-mono text-sm font-bold px-2 py-0.5 rounded-md inline-block shadow-sm ${expBadgeClass}`}>
                             {item.isEmptyRow ? '-' : item.expiry}
                           </div>
                         </td>
@@ -4873,11 +4871,11 @@ const POS = () => {
                         <td className="py-1 px-2.5 text-center">
                           {(() => {
                             if (item.isEmptyRow) {
-                              return <div className="font-mono text-xs font-bold text-muted">-</div>;
+                              return <div className="font-mono text-sm font-bold text-muted">-</div>;
                             }
                             return (
                               <div className="flex items-center justify-center">
-                                <div className="flex items-center gap-1 bg-bg/40 border border-border/40 hover:border-border/80 focus-within:border-primary/50 focus-within:ring-1 focus-within:ring-primary/20 rounded-lg px-2 py-0.5 h-7">
+                                <div className="flex items-center gap-1 bg-bg/40 border border-border/40 hover:border-border/80 focus-within:border-primary/50 focus-within:ring-1 focus-within:ring-primary/20 rounded-lg px-2 py-0.5 h-8">
                                   <input 
                                     id={`row-qty-input-${cart.indexOf(item)}`}
                                     name={`row_qty_${cart.indexOf(item)}`}
@@ -4885,7 +4883,7 @@ const POS = () => {
                                     data-pos-field="qty"
                                     type="number"
                                     autoComplete="off" 
-                                    className="w-10 text-center bg-transparent border-0 focus:ring-0 p-0 text-sm font-mono font-bold text-text focus:outline-none"
+                                    className="w-12 text-center bg-transparent border-0 focus:ring-0 p-0 text-base font-mono font-bold text-text focus:outline-none"
                                     value={item.qty !== undefined && item.qty !== null ? item.qty : ''}
                                     onChange={e => updateCartItem(item.id, 'qty', e.target.value === '' ? 0 : Math.max(0, Number(e.target.value)))}
                                     min="0"
@@ -4909,14 +4907,14 @@ const POS = () => {
                                             if (prevLoose && !prevLoose.disabled) {
                                               prevLoose.focus();
                                               prevLoose.select?.();
-                                             } else {
-                                               const prevQty = document.getElementById(`row-qty-input-${curIdx - 1}`);
-                                               if (prevQty) { prevQty.focus(); (prevQty as HTMLInputElement).select?.(); }
-                                             }
-                                           } else {
-                                             const docEl = document.getElementById('doctor-name-input');
-                                             if (docEl) { docEl.focus(); (docEl as HTMLInputElement).select?.(); }
-                                           }
+                                            } else {
+                                              const prevQty = document.getElementById(`row-qty-input-${curIdx - 1}`);
+                                              if (prevQty) { prevQty.focus(); (prevQty as HTMLInputElement).select?.(); }
+                                            }
+                                          } else {
+                                            const docEl = document.getElementById('doctor-name-input');
+                                            if (docEl) { docEl.focus(); (docEl as HTMLInputElement).select?.(); }
+                                          }
                                         } else {
                                           e.preventDefault();
                                           const looseInput = document.getElementById(`row-loose-input-${curIdx}`) as HTMLInputElement | null;
@@ -4946,12 +4944,12 @@ const POS = () => {
                         <td className="py-1 px-2.5 text-center">
                           {(() => {
                             if (item.isEmptyRow) {
-                              return <div className="font-mono text-xs font-bold text-muted">-</div>;
+                              return <div className="font-mono text-sm font-bold text-muted">-</div>;
                             }
                             const isLooseAllowed = item.allow_loose_sale === undefined || !!item.allow_loose_sale;
                             return (
                               <div className="flex items-center justify-center">
-                                <div className={`flex items-center gap-0.5 border rounded-lg px-1.5 py-0.5 h-7 transition-all ${
+                                <div className={`flex items-center gap-0.5 border rounded-lg px-1.5 py-0.5 h-8 transition-all ${
                                   isLooseAllowed 
                                     ? 'bg-amber-500/5 border-amber-500/20 hover:border-amber-500/40 focus-within:border-amber-500/50 focus-within:ring-1 focus-within:ring-amber-500/20' 
                                     : 'bg-rose-500/5 border-rose-500/20 opacity-75'
@@ -4963,7 +4961,7 @@ const POS = () => {
                                     data-pos-field="looseQty"
                                     type="number"
                                     autoComplete="off" 
-                                    className={`w-9 text-center bg-transparent border-0 focus:ring-0 p-0 text-sm font-mono font-bold focus:outline-none ${
+                                    className={`w-11 text-center bg-transparent border-0 focus:ring-0 p-0 text-base font-mono font-bold focus:outline-none ${
                                       isLooseAllowed ? 'text-amber-500' : 'text-muted cursor-not-allowed'
                                     }`}
                                     value={isLooseAllowed ? (item.looseQty !== undefined && item.looseQty !== null ? item.looseQty : '') : ''}
@@ -5008,7 +5006,7 @@ const POS = () => {
                                       e.stopPropagation();
                                       toggleAllowLooseSale(item);
                                     }}
-                                    className="text-[11px] p-0.5 opacity-60 hover:opacity-100 transition-opacity"
+                                    className="text-xs p-0.5 opacity-60 hover:opacity-100 transition-opacity"
                                     title={isLooseAllowed ? "Loose sale allowed (Click to lock to Full Pack Only)" : "Full Pack Only (Click to allow loose tablet sales)"}
                                   >
                                     {isLooseAllowed ? '🔓' : '🔒'}
@@ -5023,7 +5021,7 @@ const POS = () => {
                         <td className="py-1 px-2.5 text-center">
                           {(() => {
                             if (item.isEmptyRow) {
-                              return <div className="font-mono text-xs font-bold text-muted">-</div>;
+                              return <div className="font-mono text-sm font-bold text-muted">-</div>;
                             }
                             const compactInventory = getCompactInventoryCache();
                             const batchMatch = compactInventory.find(b => 
@@ -5077,7 +5075,7 @@ const POS = () => {
                                     ? '100% of batch stock allocated to this bill (0 remaining on shelf)'
                                     : `Remaining batch stock on shelf after this sale: ${remainingStock} strip(s), ${remainingLoose} loose`
                                 }
-                                className={`text-xs select-none font-bold font-mono px-2 py-0.5 rounded-md border inline-flex items-center gap-1 ${
+                                className={`text-sm select-none font-bold font-mono px-2 py-0.5 rounded-md border inline-flex items-center gap-1 ${
                                   isTrueOutOfStock
                                     ? 'bg-red/5 border-red/20 text-red animate-pulse'
                                     : isFullStockInCart
@@ -5088,7 +5086,7 @@ const POS = () => {
                                 }`}>
                                 <span>{remainingStock} / {remainingLoose}</span>
                                 {isFullStockInCart && (
-                                  <span className="text-[10px] uppercase font-bold text-amber-400 ml-0.5" title="100% of batch stock allocated to this bill">(All In Cart)</span>
+                                  <span className="text-xs uppercase font-bold text-amber-400 ml-0.5" title="100% of batch stock allocated to this bill">(All In Cart)</span>
                                 )}
                               </div>
                             );
@@ -5098,7 +5096,7 @@ const POS = () => {
                         {/* Discount */}
                         <td className="py-1 px-2.5 text-center">
                           <div className="flex items-center justify-center">
-                            <div className={`relative flex items-center bg-bg/50 border rounded-lg px-1.5 py-0.5 h-7 transition-all ${
+                            <div className={`relative flex items-center bg-bg/50 border rounded-lg px-1.5 py-0.5 h-8 transition-all ${
                               item.isEmptyRow 
                                 ? 'opacity-40 border-border/30 cursor-not-allowed' 
                                 : (item.discount && Number(item.discount) > 0)
@@ -5113,7 +5111,7 @@ const POS = () => {
                                 type="number" 
                                 step="0.5"
                                 autoComplete="off"
-                                className={`w-12 text-center bg-transparent border-0 focus:ring-0 p-0 text-xs font-mono font-bold focus:outline-none ${
+                                className={`w-13 text-center bg-transparent border-0 focus:ring-0 p-0 text-sm font-mono font-bold focus:outline-none ${
                                   (item.discount && Number(item.discount) > 0) ? 'text-sky-400' : 'text-text'
                                 } ${item.isEmptyRow ? 'cursor-not-allowed' : ''}`}
                                 value={item.isEmptyRow ? '' : (item.discount === 0 || item.discount === undefined || item.discount === null ? '' : item.discount)}
@@ -5155,7 +5153,7 @@ const POS = () => {
                                 }}
                               />
                               {!item.isEmptyRow && (
-                                <span className="text-[10px] text-muted font-bold ml-0.5 select-none">%</span>
+                                <span className="text-xs text-muted font-bold ml-0.5 select-none">%</span>
                               )}
                             </div>
                           </div>
@@ -5170,7 +5168,7 @@ const POS = () => {
                             data-pos-field="unitPrice"
                             type="number"
                             autoComplete="off" 
-                            className={`w-16 text-right font-mono bg-bg/40 border border-border/40 hover:border-border/80 focus:border-primary/50 focus:ring-1 focus:ring-primary/20 text-xs py-0.5 px-1 h-7 rounded-lg font-bold text-emerald-400 ${item.isEmptyRow ? 'opacity-40 cursor-not-allowed' : ''}`} 
+                            className={`w-20 text-right font-mono bg-bg/40 border border-border/40 hover:border-border/80 focus:border-primary/50 focus:ring-1 focus:ring-primary/20 text-sm py-0.5 px-1 h-8 rounded-lg font-bold text-emerald-400 ${item.isEmptyRow ? 'opacity-40 cursor-not-allowed' : ''}`} 
                             value={item.isEmptyRow ? '' : (item.unitPrice !== undefined && item.unitPrice !== null ? item.unitPrice : (item.sell_price !== undefined && item.sell_price !== null ? item.sell_price : (item.mrp || '')))}
                             placeholder="0.00"
                             onChange={e => {
@@ -5219,7 +5217,7 @@ const POS = () => {
                             data-pos-field="mrp"
                             type="number"
                             autoComplete="off" 
-                            className={`w-16 text-right font-mono bg-bg/40 border border-border/40 hover:border-border/80 focus:border-primary/50 focus:ring-1 focus:ring-primary/20 text-xs py-0.5 px-1 h-7 rounded-lg ${item.isEmptyRow ? 'opacity-40 cursor-not-allowed' : ''}`} 
+                            className={`w-20 text-right font-mono bg-bg/40 border border-border/40 hover:border-border/80 focus:border-primary/50 focus:ring-1 focus:ring-primary/20 text-sm py-0.5 px-1 h-8 rounded-lg ${item.isEmptyRow ? 'opacity-40 cursor-not-allowed' : ''}`} 
                             value={item.isEmptyRow ? '' : (item.mrp || '')}
                             placeholder="0.00"
                             onChange={e => updateCartItem(item.id, 'mrp', Math.max(0, Number(e.target.value)))}
@@ -5250,7 +5248,7 @@ const POS = () => {
 
                         {/* Total */}
                         <td className="py-1 px-2.5 text-right">
-                          <div className="font-mono text-xs font-bold text-green pr-1">
+                          <div className="font-mono text-sm font-bold text-green pr-1">
                             {item.isEmptyRow ? '-' : `₹${Math.round(itemTotal)}`}
                           </div>
                         </td>
@@ -5268,13 +5266,13 @@ const POS = () => {
                               className={`p-1 rounded-md transition-all ${item.medicine_id ? 'hover:bg-sky/10 text-muted hover:text-sky' : 'opacity-30 cursor-not-allowed text-muted'}`}
                               title="Quick Edit Medicine"
                             >
-                              <Edit size={14} />
+                              <Edit size={15} />
                             </button>
                             <button 
                               onClick={() => removeFromCart(item.id)}
                               className="p-1 hover:bg-red/10 text-muted hover:text-red rounded-md transition-all"
                             >
-                              <Trash2 size={14} />
+                              <Trash2 size={15} />
                             </button>
                           </div>
                         </td>
@@ -5292,11 +5290,11 @@ const POS = () => {
         <div className="shrink-0 w-full flex flex-row items-center gap-2 px-3 py-1.5 bg-bg2/95 border-t border-glass-border/50 shadow-[0_-4px_16px_rgba(0,0,0,0.14)] overflow-x-auto">
 
           {/* Section 1: Customer (single line) */}
-          <div className="flex items-center gap-1.5 min-w-[130px] border-r border-glass-border/30 pr-2.5 shrink-0">
-            <UserCheck size={12} className="text-primary shrink-0" />
+          <div className="flex items-center gap-1.5 min-w-[140px] border-r border-glass-border/30 pr-2.5 shrink-0">
+            <UserCheck size={14} className="text-primary shrink-0" />
             <div className="flex flex-col leading-tight">
-              <span className="text-[10px] font-bold text-text truncate max-w-[110px]">{patientName || 'Walk-in'}</span>
-              <span className="text-[9px] text-muted font-mono truncate">
+              <span className="text-xs font-bold text-text truncate max-w-[120px]">{patientName || 'Walk-in'}</span>
+              <span className="text-[11px] text-muted font-mono truncate">
                 {patientPhone || '—'}
                 {patientPhone && <span className="ml-1 text-green font-bold">· WA</span>}
                 {selectedCustomerId && <span className="ml-1 text-primary font-bold">· Reg</span>}
@@ -5305,11 +5303,11 @@ const POS = () => {
           </div>
 
           {/* Section 2: Bill Breakdown (single line) */}
-          <div className="flex items-center gap-2 min-w-[200px] border-r border-glass-border/30 pr-2.5 shrink-0">
-            <FileText size={11} className="text-muted shrink-0" />
-            <span className="text-[9px] text-muted">Sub:</span>
-            <span className="font-mono font-bold text-text text-[10px]">₹{Math.round(subtotal)}</span>
-            <span className="text-[9px] text-muted ml-1">Disc%</span>
+          <div className="flex items-center gap-2 min-w-[220px] border-r border-glass-border/30 pr-2.5 shrink-0">
+            <FileText size={13} className="text-muted shrink-0" />
+            <span className="text-[11px] text-muted">Sub:</span>
+            <span className="font-mono font-bold text-text text-xs">₹{Math.round(subtotal)}</span>
+            <span className="text-[11px] text-muted ml-1">Disc%</span>
             <input
               id="pos-bill-discount-input"
               name="pos_bill_discount"
@@ -5318,10 +5316,10 @@ const POS = () => {
               value={discount === 0 || discount === undefined || discount === null ? '' : discount}
               onChange={e => setDiscount(e.target.value === '' ? 0 : Math.min(100, Math.max(0, Number(e.target.value))))}
               placeholder="0"
-              className="w-10 bg-bg border border-glass-border rounded px-1 py-0 font-mono font-bold text-center text-text text-[10px] focus:outline-none focus:border-primary/50 h-5"
+              className="w-12 bg-bg border border-glass-border rounded px-1.5 py-0.5 font-mono font-bold text-center text-text text-xs focus:outline-none focus:border-primary/50 h-6"
             />
             {discountAmount > 0 && (
-              <span className="font-mono font-bold text-amber-500 text-[10px]">-₹{Math.round(discountAmount)}</span>
+              <span className="font-mono font-bold text-amber-500 text-xs">-₹{Math.round(discountAmount)}</span>
             )}
           </div>
 
@@ -5336,7 +5334,7 @@ const POS = () => {
                 key={pm.id}
                 type="button"
                 onClick={() => setPaymentMedium(pm.id)}
-                className={`py-0.5 px-1.5 rounded text-[9px] font-extrabold uppercase border text-center transition-all cursor-pointer ${
+                className={`py-1 px-2 rounded text-[11px] font-extrabold uppercase border text-center transition-all cursor-pointer ${
                   paymentMedium === pm.id
                     ? `${pm.activeClass} ring-1 ring-primary/20`
                     : 'bg-bg3/40 border-glass-border/30 text-muted hover:text-text hover:bg-bg3'
@@ -5349,8 +5347,8 @@ const POS = () => {
 
           {/* Section 4: Net Payable (compact) */}
           <div className="flex items-baseline gap-1.5 px-2.5 py-1 rounded-lg bg-primary/5 border border-primary/20 shrink-0">
-            <span className="text-[9px] font-black text-primary uppercase tracking-widest">Total</span>
-            <span className="text-lg font-black font-mono text-primary leading-none">₹{grandTotal.toLocaleString()}</span>
+            <span className="text-[11px] font-black text-primary uppercase tracking-widest">Total</span>
+            <span className="text-xl font-black font-mono text-primary leading-none">₹{grandTotal.toLocaleString()}</span>
           </div>
 
           {/* Section 5: Action Buttons */}
@@ -5358,24 +5356,24 @@ const POS = () => {
             <button
               onClick={() => handleCompleteSale(undefined, true)}
               disabled={cart.length === 0}
-              className={`py-1 px-3 rounded-lg text-[10px] font-bold uppercase tracking-wider flex items-center gap-1.5 transition-all cursor-pointer border ${
+              className={`py-1.5 px-3.5 rounded-lg text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 transition-all cursor-pointer border ${
                 cart.length === 0
                   ? 'bg-bg3 border-glass-border text-muted cursor-not-allowed'
                   : 'bg-sky/15 border-sky/30 text-sky hover:bg-sky/25'
               }`}
             >
-              <Zap size={12} /> Direct Save
+              <Zap size={13} /> Direct Save
             </button>
             <button
               onClick={() => handleCompleteSale(undefined, false)}
               disabled={cart.length === 0}
-              className={`py-1.5 px-4 rounded-lg text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 transition-all cursor-pointer shadow-md ${
+              className={`py-2 px-4.5 rounded-lg text-xs font-black uppercase tracking-wider flex items-center gap-1.5 transition-all cursor-pointer shadow-md ${
                 cart.length === 0
                   ? 'bg-bg3 border border-glass-border text-muted cursor-not-allowed'
                   : 'bg-green text-white hover:bg-emerald-600 shadow-[0_0_14px_rgba(16,185,129,0.3)] hover:-translate-y-px'
               }`}
             >
-              <CheckCircle size={13} />
+              <CheckCircle size={15} />
               Save & Print (Ctrl+S)
             </button>
           </div>

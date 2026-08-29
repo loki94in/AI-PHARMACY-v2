@@ -85,13 +85,13 @@ export const LocalBackupPanel: React.FC<LocalBackupPanelProps> = ({ onRunMigrati
             <Database className="w-5 h-5" />
           </div>
           <div>
-            <h3 className="text-base font-semibold text-text flex items-center gap-2">
+            <h3 className="text-lg font-semibold text-text flex items-center gap-2">
               Local RedBook & DGH Backups
               <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-sky/15 text-sky border border-sky/30">
                 {backups.length}
               </span>
             </h3>
-            <p className="text-xs text-muted">Auto-detected backup files from system drives</p>
+            <p className="text-sm text-muted">Auto-detected backup files from system drives</p>
           </div>
         </div>
 
@@ -117,7 +117,7 @@ export const LocalBackupPanel: React.FC<LocalBackupPanelProps> = ({ onRunMigrati
               className="flex flex-col items-center justify-center py-16 text-center space-y-3"
             >
               <Loader2 className="w-8 h-8 text-sky animate-spin" />
-              <p className="text-sm text-muted">Scanning D:\redbook, DGH_Backup & local folders...</p>
+              <p className="text-base text-muted">Scanning D:\redbook, DGH_Backup & local folders...</p>
             </motion.div>
           ) : error ? (
             <motion.div
@@ -129,17 +129,17 @@ export const LocalBackupPanel: React.FC<LocalBackupPanelProps> = ({ onRunMigrati
             >
               <div className="flex items-start gap-3 w-full">
                 <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
-                <div className="text-sm text-left">
+                <div className="text-base text-left">
                   <p className="font-medium">Backup Scanner Error</p>
-                  <p className="opacity-90 mt-0.5 text-xs">{error}</p>
+                  <p className="opacity-90 mt-0.5 text-sm">{error}</p>
                 </div>
               </div>
               <button
                 onClick={fetchBackups}
                 disabled={loading}
-                className="px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 rounded-lg text-xs font-bold uppercase transition-all flex items-center gap-1.5 disabled:opacity-50"
+                className="px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 rounded-lg text-sm font-bold uppercase transition-all flex items-center gap-1.5 disabled:opacity-50"
               >
-                <RefreshCw size={12} className={loading ? 'animate-spin' : ''} /> Retry Scan
+                <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> Retry Scan
               </button>
             </motion.div>
           ) : backups.length === 0 ? (
@@ -151,8 +151,8 @@ export const LocalBackupPanel: React.FC<LocalBackupPanelProps> = ({ onRunMigrati
               className="flex flex-col items-center justify-center py-16 text-center text-muted space-y-2 border border-dashed border-glass-border rounded-lg"
             >
               <HardDrive className="w-10 h-10 opacity-40" />
-              <p className="text-sm font-medium text-text">No Local Backup Files Found</p>
-              <p className="text-xs max-w-xs">
+              <p className="text-base font-medium text-text">No Local Backup Files Found</p>
+              <p className="text-sm max-w-xs">
                 Place SQL dumps or ZIP archives in <code className="text-sky bg-bg3/60 px-1 py-0.5 rounded">D:\redbook\DGH_Backup</code> to enable 1-click auto-import.
               </p>
             </motion.div>
@@ -172,11 +172,11 @@ export const LocalBackupPanel: React.FC<LocalBackupPanelProps> = ({ onRunMigrati
                       <Database className="w-4 h-4" />
                     </div>
                     <div className="min-w-0 flex-1">
-                      <h4 className="text-sm font-medium text-text truncate group-hover:text-sky transition-colors" title={backup.name}>
+                      <h4 className="text-base font-medium text-text truncate group-hover:text-sky transition-colors" title={backup.name}>
                         {backup.name}
                       </h4>
-                      <div className="flex flex-wrap items-center gap-2 mt-1 text-xs text-muted">
-                        <span className="px-2 py-0.5 rounded bg-bg3 text-text/80 font-mono text-[11px]">
+                      <div className="flex flex-wrap items-center gap-2 mt-1 text-sm text-muted">
+                        <span className="px-2 py-0.5 rounded bg-bg3 text-text/80 font-mono text-xs">
                           {backup.sourceLabel}
                         </span>
                         <span>•</span>

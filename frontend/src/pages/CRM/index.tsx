@@ -3002,11 +3002,11 @@ function isSameChat(chat: WaChatItem, targetChatId: string, resolvedNum?: string
       {/* Top Controls: Engine Status & Action Controls */}
       <div className="flex items-center justify-between gap-3 bg-bg2 p-2.5 rounded-2xl border border-border shadow-sm shrink-0">
         <div className="flex items-center gap-2 select-none">
-          <div className="px-3 py-1.5 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-xs font-bold flex items-center gap-2 shadow-sm">
+          <div className="px-3 py-1.5 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-sm font-bold flex items-center gap-2 shadow-sm">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
             <span>Live WhatsApp CRM Engine</span>
           </div>
-          <span className="text-[11px] text-muted hidden sm:inline">
+          <span className="text-xs text-muted hidden sm:inline">
             Drag panel handle to customize width (auto-saved)
           </span>
         </div>
@@ -3014,19 +3014,19 @@ function isSameChat(chat: WaChatItem, targetChatId: string, resolvedNum?: string
         <div className="flex items-center gap-2">
           <button
             onClick={() => setShowNewChatModal(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/30 text-xs font-bold transition-all active:scale-95"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/30 text-sm font-bold transition-all active:scale-95"
             title="Start new chat with any phone number"
           >
-            <MessageSquare size={13} />
+            <MessageSquare size={15} />
             <span>New Chat</span>
           </button>
 
           <button
             onClick={() => setShowManageModal(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-bg3 border border-border text-text hover:text-primary text-xs font-bold transition-all active:scale-95"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-bg3 border border-border text-text hover:text-primary text-sm font-bold transition-all active:scale-95"
             title="Manage Message Templates"
           >
-            <Zap size={13} className="text-primary" />
+            <Zap size={15} className="text-primary" />
             <span>Manage Templates</span>
           </button>
 
@@ -3039,10 +3039,10 @@ function isSameChat(chat: WaChatItem, targetChatId: string, resolvedNum?: string
                 toastEvent.trigger((err as LocalApiError).response?.data?.error || 'Failed to launch WhatsApp window', 'error');
               }
             }}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold transition-all shadow-sm active:scale-95"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-bold transition-all shadow-sm active:scale-95"
             title="Open native live Google Chrome window logged into WhatsApp Web"
           >
-            <ExternalLink size={13} />
+            <ExternalLink size={15} />
             <span>Open Live Chrome Window</span>
           </button>
 
@@ -3059,10 +3059,10 @@ function isSameChat(chat: WaChatItem, targetChatId: string, resolvedNum?: string
                 }
               }
             }}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 hover:bg-rose-500/20 text-xs font-bold transition-all active:scale-95"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 hover:bg-rose-500/20 text-sm font-bold transition-all active:scale-95"
             title="Log out and clear all stored WhatsApp login data"
           >
-            <LogOut size={13} />
+            <LogOut size={15} />
             <span>Logout WhatsApp</span>
           </button>
         </div>

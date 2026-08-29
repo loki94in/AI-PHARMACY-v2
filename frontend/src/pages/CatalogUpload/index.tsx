@@ -1202,17 +1202,17 @@ const CatalogUpload = () => {
                   {/* Processing Summary Dashboard (8 Stats) */}
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
                     <div className="bg-bg2 border border-border p-4 rounded-xl text-center flex flex-col justify-center">
-                      <p className="text-2xl font-black text-text">{stats.total.toLocaleString()}</p>
-                      <p className="text-[10px] text-muted font-bold uppercase tracking-wider mt-1">Total Uploaded</p>
+                      <p className="text-3xl font-black text-text">{stats.total.toLocaleString()}</p>
+                      <p className="text-xs text-muted font-bold uppercase tracking-wider mt-1">Total Uploaded</p>
                     </div>
                     
                     <div 
                       onClick={() => setShowNewColor(p => !p)}
                       className={`bg-bg2 border border-border p-4 rounded-xl text-center cursor-pointer select-none hover:scale-[1.02] transition-transform ${showNewColor ? 'bg-bg3 border-green/30' : 'opacity-65'}`}
                     >
-                      <p className="text-2xl font-black text-green">{stats.new.toLocaleString()}</p>
-                      <p className="text-[10px] text-muted font-bold uppercase tracking-wider mt-1">New Medicines</p>
-                      <span className={`text-[8px] font-bold uppercase tracking-wider mt-1.5 px-1.5 py-0.5 rounded-full inline-block border ${showNewColor ? 'bg-glass-bg border-glass-border text-green' : 'bg-bg border-glass-border text-muted'}`}>
+                      <p className="text-3xl font-black text-green">{stats.new.toLocaleString()}</p>
+                      <p className="text-xs text-muted font-bold uppercase tracking-wider mt-1">New Medicines</p>
+                      <span className={`text-[10px] font-bold uppercase tracking-wider mt-1.5 px-1.5 py-0.5 rounded-full inline-block border ${showNewColor ? 'bg-glass-bg border-glass-border text-green' : 'bg-bg border-glass-border text-muted'}`}>
                         {showNewColor ? 'Highlighted' : 'Muted'}
                       </span>
                     </div>
@@ -1221,36 +1221,36 @@ const CatalogUpload = () => {
                       onClick={() => setShowExistingColor(p => !p)}
                       className={`bg-bg2 border border-border p-4 rounded-xl text-center cursor-pointer select-none hover:scale-[1.02] transition-transform ${showExistingColor ? 'bg-bg3 border-amber-500/30' : 'opacity-65'}`}
                     >
-                      <p className="text-2xl font-black text-amber-500">{stats.existing.toLocaleString()}</p>
-                      <p className="text-[10px] text-muted font-bold uppercase tracking-wider mt-1">Existing Matched</p>
-                      <span className={`text-[8px] font-bold uppercase tracking-wider mt-1.5 px-1.5 py-0.5 rounded-full inline-block border ${showExistingColor ? 'bg-glass-bg border-glass-border text-amber-500' : 'bg-bg border-glass-border text-muted'}`}>
+                      <p className="text-3xl font-black text-amber-500">{stats.existing.toLocaleString()}</p>
+                      <p className="text-xs text-muted font-bold uppercase tracking-wider mt-1">Existing Matched</p>
+                      <span className={`text-[10px] font-bold uppercase tracking-wider mt-1.5 px-1.5 py-0.5 rounded-full inline-block border ${showExistingColor ? 'bg-glass-bg border-glass-border text-amber-500' : 'bg-bg border-glass-border text-muted'}`}>
                         {showExistingColor ? 'Highlighted' : 'Muted'}
                       </span>
                     </div>
 
                     <div className="bg-bg2 border border-border p-4 rounded-xl text-center flex flex-col justify-center">
-                      <p className="text-2xl font-black text-red-400">{stats.duplicates.toLocaleString()}</p>
-                      <p className="text-[10px] text-muted font-bold uppercase tracking-wider mt-1">Duplicate Medicines</p>
+                      <p className="text-3xl font-black text-red-400">{stats.duplicates.toLocaleString()}</p>
+                      <p className="text-xs text-muted font-bold uppercase tracking-wider mt-1">Duplicate Medicines</p>
                     </div>
 
                     <div className="bg-bg2 border border-border p-4 rounded-xl text-center flex flex-col justify-center">
-                      <p className="text-2xl font-black text-amber-500">{stagedReviews.filter(r => r.status === 'pending').length}</p>
-                      <p className="text-[10px] text-muted font-bold uppercase tracking-wider mt-1">Requiring Review</p>
+                      <p className="text-3xl font-black text-amber-500">{stagedReviews.filter(r => r.status === 'pending').length}</p>
+                      <p className="text-xs text-muted font-bold uppercase tracking-wider mt-1">Requiring Review</p>
                     </div>
 
                     <div className="bg-bg2 border border-border p-4 rounded-xl text-center flex flex-col justify-center">
-                      <p className="text-2xl font-black text-blue-400">{newlyDetectedColumns.length}</p>
-                      <p className="text-[10px] text-muted font-bold uppercase tracking-wider mt-1">New Columns</p>
+                      <p className="text-3xl font-black text-blue-400">{newlyDetectedColumns.length}</p>
+                      <p className="text-xs text-muted font-bold uppercase tracking-wider mt-1">New Columns</p>
                     </div>
 
                     <div className="bg-bg2 border border-border p-4 rounded-xl text-center flex flex-col justify-center">
-                      <p className="text-2xl font-black text-green">{stagedReviews.filter(r => r.status === 'approved').length}</p>
-                      <p className="text-[10px] text-muted font-bold uppercase tracking-wider mt-1">Successfully Approved</p>
+                      <p className="text-3xl font-black text-green">{stagedReviews.filter(r => r.status === 'approved').length}</p>
+                      <p className="text-xs text-muted font-bold uppercase tracking-wider mt-1">Successfully Approved</p>
                     </div>
 
                     <div className="bg-bg2 border border-border p-4 rounded-xl text-center flex flex-col justify-center">
-                      <p className="text-2xl font-black text-red-500">{stagedReviews.filter(r => r.status === 'rejected').length}</p>
-                      <p className="text-[10px] text-muted font-bold uppercase tracking-wider mt-1">Rejected / Excluded</p>
+                      <p className="text-3xl font-black text-red-500">{stagedReviews.filter(r => r.status === 'rejected').length}</p>
+                      <p className="text-xs text-muted font-bold uppercase tracking-wider mt-1">Rejected / Excluded</p>
                     </div>
                   </div>
 
@@ -1258,7 +1258,7 @@ const CatalogUpload = () => {
                   <div className="flex border-b border-border mb-4">
                     <button
                       onClick={() => setActiveReviewSubTab('staged')}
-                      className={`px-4 py-2 text-xs font-bold border-b-2 transition-all ${
+                      className={`px-4 py-2 text-sm font-bold border-b-2 transition-all ${
                         activeReviewSubTab === 'staged'
                           ? 'border-primary text-text'
                           : 'border-transparent text-muted hover:text-text'
@@ -1271,7 +1271,7 @@ const CatalogUpload = () => {
                         setActiveReviewSubTab('details');
                         if (jobId) fetchReviews(jobId);
                       }}
-                      className={`px-4 py-2 text-xs font-bold border-b-2 transition-all flex items-center gap-1.5 ${
+                      className={`px-4 py-2 text-sm font-bold border-b-2 transition-all flex items-center gap-1.5 ${
                         activeReviewSubTab === 'details'
                           ? 'border-primary text-text'
                           : 'border-transparent text-muted hover:text-text'
@@ -1284,15 +1284,15 @@ const CatalogUpload = () => {
                   {/* Preview Grid Tab Content */}
                   {activeReviewSubTab === 'staged' && (
                     <div className="flex-1 flex flex-col overflow-hidden">
-                      <h5 className="font-bold text-xs text-gray-400 mb-2 uppercase tracking-wider">
+                      <h5 className="font-bold text-sm text-gray-400 mb-2 uppercase tracking-wider">
                         Catalogue Preview (First 100 lines)
                       </h5>
                       <div className="flex-1 overflow-auto border border-glass-border/30 rounded-xl bg-black/20">
-                        <table className="w-full text-left text-xs text-gray-300">
+                        <table className="w-full text-left text-sm text-gray-300">
                           <thead className="sticky top-0 bg-glass-bg border-b border-glass-border">
                             <tr>
                               {previewHeaders.map((header) => (
-                                <th key={header} className="p-3 font-bold uppercase tracking-wide text-gray-400">{header}</th>
+                                <th key={header} className="p-3 font-bold uppercase tracking-wide text-gray-400 text-sm">{header}</th>
                               ))}
                             </tr>
                           </thead>

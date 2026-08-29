@@ -445,8 +445,8 @@ const Inventory = () => {
           {/* Left: item count */}
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-1.5">
-              <PackageSearch size={14} className="text-primary" />
-              <span className="text-xs text-muted">
+              <PackageSearch size={16} className="text-primary" />
+              <span className="text-sm text-muted">
                 <span className="text-text font-bold font-mono">{items.length.toLocaleString()}</span>
                 {totalItems > 0 && (
                   <span className="text-muted"> / <span className="font-mono font-bold text-text">{totalItems.toLocaleString()}</span></span>
@@ -462,7 +462,7 @@ const Inventory = () => {
             <select
               value={stockFilter}
               onChange={(e) => setStockFilter(e.target.value)}
-              className="h-7 px-2.5 rounded-lg border bg-bg3 border-glass-border text-muted hover:text-text text-[11px] font-semibold transition-all cursor-pointer focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 appearance-none"
+              className="h-8 px-3 rounded-lg border bg-bg3 border-glass-border text-muted hover:text-text text-[13px] font-semibold transition-all cursor-pointer focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 appearance-none"
             >
               <option value="all">All Stock</option>
               <option value="positive">In Stock (&gt;0)</option>
@@ -473,20 +473,20 @@ const Inventory = () => {
             {/* Export CSV */}
             <button
               onClick={() => handleExport('csv')}
-              className="h-7 flex items-center gap-1.5 px-2.5 rounded-lg border bg-bg3 border-glass-border text-muted hover:text-text hover:bg-bg2 text-[11px] font-semibold transition-all"
+              className="h-8 flex items-center gap-1.5 px-3 rounded-lg border bg-bg3 border-glass-border text-muted hover:text-text hover:bg-bg2 text-[13px] font-semibold transition-all"
               title="Export to CSV"
             >
-              <Download size={12} />
+              <Download size={14} />
               CSV
             </button>
 
             {/* Export PDF */}
             <button
               onClick={() => handleExport('pdf')}
-              className="h-7 flex items-center gap-1.5 px-2.5 rounded-lg border bg-bg3 border-glass-border text-muted hover:text-text hover:bg-bg2 text-[11px] font-semibold transition-all"
+              className="h-8 flex items-center gap-1.5 px-3 rounded-lg border bg-bg3 border-glass-border text-muted hover:text-text hover:bg-bg2 text-[13px] font-semibold transition-all"
               title="Export to PDF"
             >
-              <Download size={12} />
+              <Download size={14} />
               PDF
             </button>
 
@@ -494,37 +494,37 @@ const Inventory = () => {
             <div className="relative" ref={colMenuRef}>
               <button
                 onClick={() => setShowColMenu(p => !p)}
-                className={`h-7 flex items-center gap-1.5 px-2.5 rounded-lg border text-[11px] font-semibold transition-all ${
+                className={`h-8 flex items-center gap-1.5 px-3 rounded-lg border text-[13px] font-semibold transition-all ${
                   showColMenu
                     ? 'bg-primary/15 border-primary/40 text-primary'
                     : 'bg-bg3 border-glass-border text-muted hover:text-text hover:bg-bg2'
                 }`}
                 title="Toggle columns"
               >
-                <Columns3 size={12} />
+                <Columns3 size={14} />
                 Columns
                 {visibleCols.size < COL_KEYS.length && (
-                  <span className="px-1 rounded-full bg-primary/20 text-primary font-mono text-[9px]">
+                  <span className="px-1 rounded-full bg-primary/20 text-primary font-mono text-[11px]">
                     {COL_KEYS.length - visibleCols.size} hidden
                   </span>
                 )}
               </button>
               {showColMenu && (
-                <div className="absolute right-0 top-full mt-2 z-[200] w-44 bg-bg2 border border-glass-border rounded-xl shadow-2xl overflow-hidden">
+                <div className="absolute right-0 top-full mt-2 z-[200] w-48 bg-bg2 border border-glass-border rounded-xl shadow-2xl overflow-hidden">
                   <div className="flex items-center justify-between px-3 py-2 border-b border-glass-border/30">
-                    <span className="text-[10px] font-black uppercase tracking-wider text-muted">Columns</span>
+                    <span className="text-xs font-black uppercase tracking-wider text-muted">Columns</span>
                     <div className="flex items-center gap-2">
                       <button
                         onClick={() => {
                           setVisibleCols(defaultVisible);
                           localStorage.setItem('inv-page-cols', JSON.stringify([...defaultVisible]));
                         }}
-                        className="text-[9px] font-bold text-primary hover:text-primary/80 transition-colors"
+                        className="text-[11px] font-bold text-primary hover:text-primary/80 transition-colors"
                       >
                         Reset
                       </button>
                       <button onClick={() => setShowColMenu(false)} className="text-muted hover:text-text">
-                        <X size={12} />
+                        <X size={14} />
                       </button>
                     </div>
                   </div>
@@ -535,14 +535,14 @@ const Inventory = () => {
                         onClick={() => toggleCol(key)}
                         className="w-full flex items-center gap-2.5 px-3 py-1.5 hover:bg-primary/5 transition-colors text-left"
                       >
-                        <span className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 transition-all ${
+                        <span className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-all ${
                           visibleCols.has(key)
                             ? 'bg-primary border-primary'
                             : 'bg-transparent border-glass-border/60'
                         }`}>
-                          {visibleCols.has(key) && <Check size={9} className="text-white" />}
+                          {visibleCols.has(key) && <Check size={11} className="text-white bg-primary" />}
                         </span>
-                        <span className={`text-[11px] font-semibold ${visibleCols.has(key) ? 'text-text' : 'text-muted/60'}`}>
+                        <span className={`text-[13px] font-semibold ${visibleCols.has(key) ? 'text-text' : 'text-muted/60'}`}>
                           {label}
                         </span>
                       </button>
@@ -563,76 +563,76 @@ const Inventory = () => {
               {/* Medicine */}
               <th className="p-2.5 text-left flex-1 align-bottom">
                 <div className="flex flex-col gap-1">
-                  <span className="text-[10px] font-black uppercase tracking-widest text-muted/70">Medicine</span>
+                  <span className="text-xs font-black uppercase tracking-widest text-muted/70">Medicine</span>
                   <input
                     type="text"
                     placeholder="Search..."
                     value={colFilters.medicine}
                     onChange={e => setColFilters({ ...colFilters, medicine: e.target.value })}
-                    className="w-full px-2 py-1 bg-bg3 border border-glass-border rounded-md text-[11px] text-text font-normal placeholder:text-muted/40 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all"
+                    className="w-full px-2.5 py-1.5 bg-bg3 border border-glass-border rounded-md text-[13px] text-text font-normal placeholder:text-muted/40 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all"
                   />
                 </div>
               </th>
               {col('id') && (
                 <th className="p-2.5 text-left w-16 shrink-0 align-bottom">
                   <div className="flex flex-col gap-1">
-                    <span className="text-[10px] font-black uppercase tracking-widest text-muted/70">ID</span>
-                    <input type="text" placeholder="..." value={colFilters.id} onChange={e => setColFilters({ ...colFilters, id: e.target.value })} className="w-full px-2 py-1 bg-bg3 border border-glass-border rounded-md text-[11px] text-text placeholder:text-muted/40 focus:outline-none focus:border-primary/50 transition-all" />
+                    <span className="text-xs font-black uppercase tracking-widest text-muted/70">ID</span>
+                    <input type="text" placeholder="..." value={colFilters.id} onChange={e => setColFilters({ ...colFilters, id: e.target.value })} className="w-full px-2 py-1.5 bg-bg3 border border-glass-border rounded-md text-[13px] text-text placeholder:text-muted/40 focus:outline-none focus:border-primary/50 transition-all" />
                   </div>
                 </th>
               )}
               {col('batch') && (
                 <th className="p-2.5 text-left w-28 shrink-0 align-bottom">
                   <div className="flex flex-col gap-1">
-                    <span className="text-[10px] font-black uppercase tracking-widest text-muted/70">Batch</span>
-                    <input type="text" placeholder="..." value={colFilters.batch} onChange={e => setColFilters({ ...colFilters, batch: e.target.value })} className="w-full px-2 py-1 bg-bg3 border border-glass-border rounded-md text-[11px] text-text placeholder:text-muted/40 focus:outline-none focus:border-primary/50 transition-all" />
+                    <span className="text-xs font-black uppercase tracking-widest text-muted/70">Batch</span>
+                    <input type="text" placeholder="..." value={colFilters.batch} onChange={e => setColFilters({ ...colFilters, batch: e.target.value })} className="w-full px-2 py-1.5 bg-bg3 border border-glass-border rounded-md text-[13px] text-text placeholder:text-muted/40 focus:outline-none focus:border-primary/50 transition-all" />
                   </div>
                 </th>
               )}
               {col('expiry') && (
                 <th className="p-2.5 text-left w-24 shrink-0 align-bottom">
                   <div className="flex flex-col gap-1">
-                    <span className="text-[10px] font-black uppercase tracking-widest text-muted/70">Expiry</span>
-                    <input type="text" placeholder="MM/YY" value={colFilters.expiry} onChange={e => setColFilters({ ...colFilters, expiry: e.target.value })} className="w-full px-2 py-1 bg-bg3 border border-glass-border rounded-md text-[11px] text-text placeholder:text-muted/40 focus:outline-none focus:border-primary/50 transition-all" />
+                    <span className="text-xs font-black uppercase tracking-widest text-muted/70">Expiry</span>
+                    <input type="text" placeholder="MM/YY" value={colFilters.expiry} onChange={e => setColFilters({ ...colFilters, expiry: e.target.value })} className="w-full px-2 py-1.5 bg-bg3 border border-glass-border rounded-md text-[13px] text-text placeholder:text-muted/40 focus:outline-none focus:border-primary/50 transition-all" />
                   </div>
                 </th>
               )}
               {col('packs') && (
                 <th className="p-2.5 text-left w-28 shrink-0 align-bottom">
                   <div className="flex flex-col gap-1">
-                    <span className="text-[10px] font-black uppercase tracking-widest text-muted/70">Packs</span>
-                    <input type="text" placeholder="..." value={colFilters.packs} onChange={e => setColFilters({ ...colFilters, packs: e.target.value })} className="w-full px-2 py-1 bg-bg3 border border-glass-border rounded-md text-[11px] text-text placeholder:text-muted/40 focus:outline-none focus:border-primary/50 transition-all" />
+                    <span className="text-xs font-black uppercase tracking-widest text-muted/70">Packs</span>
+                    <input type="text" placeholder="..." value={colFilters.packs} onChange={e => setColFilters({ ...colFilters, packs: e.target.value })} className="w-full px-2 py-1.5 bg-bg3 border border-glass-border rounded-md text-[13px] text-text placeholder:text-muted/40 focus:outline-none focus:border-primary/50 transition-all" />
                   </div>
                 </th>
               )}
               {col('loose') && (
                 <th className="p-2.5 text-left w-24 shrink-0 align-bottom">
                   <div className="flex flex-col gap-1">
-                    <span className="text-[10px] font-black uppercase tracking-widest text-muted/70">Loose</span>
-                    <input type="text" placeholder="..." value={colFilters.loose} onChange={e => setColFilters({ ...colFilters, loose: e.target.value })} className="w-full px-2 py-1 bg-bg3 border border-glass-border rounded-md text-[11px] text-text placeholder:text-muted/40 focus:outline-none focus:border-primary/50 transition-all" />
+                    <span className="text-xs font-black uppercase tracking-widest text-muted/70">Loose</span>
+                    <input type="text" placeholder="..." value={colFilters.loose} onChange={e => setColFilters({ ...colFilters, loose: e.target.value })} className="w-full px-2 py-1.5 bg-bg3 border border-glass-border rounded-md text-[13px] text-text placeholder:text-muted/40 focus:outline-none focus:border-primary/50 transition-all" />
                   </div>
                 </th>
               )}
               {col('mrp') && (
                 <th className="p-2.5 text-left w-24 shrink-0 align-bottom">
                   <div className="flex flex-col gap-1">
-                    <span className="text-[10px] font-black uppercase tracking-widest text-muted/70">MRP</span>
-                    <input type="text" placeholder="₹..." value={colFilters.mrp} onChange={e => setColFilters({ ...colFilters, mrp: e.target.value })} className="w-full px-2 py-1 bg-bg3 border border-glass-border rounded-md text-[11px] text-text placeholder:text-muted/40 focus:outline-none focus:border-primary/50 transition-all" />
+                    <span className="text-xs font-black uppercase tracking-widest text-muted/70">MRP</span>
+                    <input type="text" placeholder="₹..." value={colFilters.mrp} onChange={e => setColFilters({ ...colFilters, mrp: e.target.value })} className="w-full px-2 py-1.5 bg-bg3 border border-glass-border rounded-md text-[13px] text-text placeholder:text-muted/40 focus:outline-none focus:border-primary/50 transition-all" />
                   </div>
                 </th>
               )}
               {col('sell_price') && (
                 <th className="p-2.5 text-left w-24 shrink-0 align-bottom">
                   <div className="flex flex-col gap-1">
-                    <span className="text-[10px] font-black uppercase tracking-widest text-muted/70">Sell Price</span>
+                    <span className="text-xs font-black uppercase tracking-widest text-muted/70">Sell Price</span>
                   </div>
                 </th>
               )}
               {col('rack') && (
                 <th className="p-2.5 text-left w-24 shrink-0 align-bottom">
                   <div className="flex flex-col gap-1">
-                    <span className="text-[10px] font-black uppercase tracking-widest text-muted/70">Rack</span>
-                    <input type="text" placeholder="..." value={colFilters.rack} onChange={e => setColFilters({ ...colFilters, rack: e.target.value })} className="w-full px-2 py-1 bg-bg3 border border-glass-border rounded-md text-[11px] text-text placeholder:text-muted/40 focus:outline-none focus:border-primary/50 transition-all" />
+                    <span className="text-xs font-black uppercase tracking-widest text-muted/70">Rack</span>
+                    <input type="text" placeholder="..." value={colFilters.rack} onChange={e => setColFilters({ ...colFilters, rack: e.target.value })} className="w-full px-2 py-1.5 bg-bg3 border border-glass-border rounded-md text-[13px] text-text placeholder:text-muted/40 focus:outline-none focus:border-primary/50 transition-all" />
                   </div>
                 </th>
               )}
@@ -640,19 +640,19 @@ const Inventory = () => {
           }
           body={
             items.length === 0 ? (
-              <tr className="flex items-center justify-center p-12 text-muted text-sm w-full absolute top-0 left-0">
+              <tr className="flex items-center justify-center p-12 text-muted text-base w-full absolute top-0 left-0">
                 <td className="flex flex-col items-center gap-3 text-center">
-                  <PackageSearch size={36} className="text-muted/30" />
+                  <PackageSearch size={38} className="text-muted/30" />
                   <span className="font-semibold text-text">No medicines match your search.</span>
                   {colFilters.medicine.trim().length >= 2 && (
                     <div className="flex flex-col items-center gap-2 mt-1">
-                      <span className="text-[13px] text-amber-400 font-medium">
+                      <span className="text-[15px] text-amber-400 font-medium">
                         🔍 No exact match for "{colFilters.medicine}". Please check spelling or search by general name.
                       </span>
                       <button
                         type="button"
                         onClick={() => setColFilters({ ...colFilters, medicine: '' })}
-                        className="px-3 py-1 bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 rounded-lg text-[12px] font-bold transition-all"
+                        className="px-3 py-1.5 bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 rounded-lg text-sm font-bold transition-all"
                       >
                         Clear Search Filter
                       </button>
@@ -690,31 +690,31 @@ const Inventory = () => {
                     onClick={() => handleRowClick(item)}
                   >
                     {/* Medicine name */}
-                    <td className="px-3 py-0 text-[13px] font-semibold flex-1 flex items-center gap-2 truncate min-w-0">
+                    <td className="px-3 py-0 text-[15px] font-semibold flex-1 flex items-center gap-2 truncate min-w-0">
                       <span className="truncate text-text">{item.name || item.medicine_name || item.batch_number || 'Unnamed Item'}</span>
                       {hasPending && (
-                        <span className="inline-flex items-center gap-1 bg-amber/10 border border-amber/30 text-amber px-1.5 py-0.5 rounded-md text-[10px] font-bold shrink-0">
+                        <span className="inline-flex items-center gap-1 bg-amber/10 border border-amber/30 text-amber px-1.5 py-0.5 rounded-md text-xs font-bold shrink-0">
                           ⚠ {pendingMatches[0].qty} req
                         </span>
                       )}
                     </td>
-                    {col('id') && <td className="px-3 py-0 text-[12px] text-muted w-16 shrink-0 font-mono">{item.id}</td>}
-                    {col('batch') && <td className="px-3 py-0 text-[12px] text-muted w-28 shrink-0 font-mono truncate">{item.batch_number || '—'}</td>}
+                    {col('id') && <td className="px-3 py-0 text-sm text-muted w-16 shrink-0 font-mono">{item.id}</td>}
+                    {col('batch') && <td className="px-3 py-0 text-sm text-muted w-28 shrink-0 font-mono truncate">{item.batch_number || '—'}</td>}
                     {col('expiry') && (
-                      <td className="px-3 py-0 text-[12px] w-24 shrink-0">
+                      <td className="px-3 py-0 text-sm w-24 shrink-0">
                         <span className="text-muted font-mono">{formatExpiryToMMYY(item.expiry_date) || '—'}</span>
                       </td>
                     )}
                     {col('packs') && (
                       <td className="px-3 py-0 w-28 shrink-0">
-                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-md border text-[12px] font-bold ${stockBadge}`}>
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-md border text-sm font-bold ${stockBadge}`}>
                           {stockQty}
                         </span>
                       </td>
                     )}
                     {col('loose') && (
                       <td className="px-3 py-0 w-24 shrink-0">
-                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-md border text-[12px] font-bold ${
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-md border text-sm font-bold ${
                           !item.loose_quantity || item.loose_quantity <= 0
                             ? 'bg-glass-bg border-glass-border text-muted/50'
                             : 'bg-primary/10 border-primary/25 text-primary'
@@ -724,17 +724,17 @@ const Inventory = () => {
                       </td>
                     )}
                     {col('mrp') && (
-                      <td className="px-3 py-0 text-[12px] w-24 shrink-0 font-semibold text-green">
+                      <td className="px-3 py-0 text-sm w-24 shrink-0 font-semibold text-green">
                         ₹{item.mrp?.toFixed(2) || '0.00'}
                       </td>
                     )}
                     {col('sell_price') && (
-                      <td className="px-3 py-0 text-[12px] w-24 shrink-0 font-semibold text-primary font-mono">
+                      <td className="px-3 py-0 text-sm w-24 shrink-0 font-semibold text-primary font-mono">
                         {item.sell_price ? `₹${Number(item.sell_price).toFixed(2)}` : <span className="opacity-30">—</span>}
                       </td>
                     )}
                     {col('rack') && (
-                      <td className="px-3 py-0 text-[12px] text-muted w-24 shrink-0 truncate font-mono">
+                      <td className="px-3 py-0 text-sm text-muted w-24 shrink-0 truncate font-mono">
                         {item.rack_location || <span className="opacity-30">—</span>}
                       </td>
                     )}
@@ -760,26 +760,26 @@ const Inventory = () => {
 
       {/* ── Sliding Details Drawer ─────────────────────────────────────── */}
       {createPortal(
-        <div className={`fixed top-0 right-0 h-full w-full max-w-[460px] bg-bg/97 backdrop-blur-2xl border-l border-glass-border shadow-[-12px_0_48px_rgba(0,0,0,0.4)] transition-transform duration-300 ease-in-out z-drawer flex flex-col ${panelOpen ? 'translate-x-0' : 'translate-x-full'}`}>
+        <div className={`fixed top-0 right-0 h-full w-full max-w-[480px] bg-bg/97 backdrop-blur-2xl border-l border-glass-border shadow-[-12px_0_48px_rgba(0,0,0,0.4)] transition-transform duration-300 ease-in-out z-drawer flex flex-col ${panelOpen ? 'translate-x-0' : 'translate-x-full'}`}>
           {selectedItem && (
             <>
               {/* Drawer Header */}
               <div className="px-6 py-4 border-b border-glass-border bg-bg2/60 shrink-0">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
-                    <span className="text-[10px] font-black uppercase tracking-widest text-primary bg-primary/10 border border-primary/20 px-2 py-0.5 rounded-md inline-block mb-2">
+                    <span className="text-xs font-black uppercase tracking-widest text-primary bg-primary/10 border border-primary/20 px-2 py-0.5 rounded-md inline-block mb-2">
                       {selectedItem.item_type || 'Medicine'}
                     </span>
                     {isEditing ? (
                       <input
                         type="text"
-                        className="text-lg font-bold w-full px-3 py-1.5 bg-bg3 border border-glass-border rounded-xl text-text focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/20 transition-all"
+                        className="text-xl font-bold w-full px-3 py-1.5 bg-bg3 border border-glass-border rounded-xl text-text focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/20 transition-all"
                         value={editForm.name ?? ''}
                         onChange={e => setEditForm({ ...editForm, name: e.target.value })}
                         placeholder="Medicine Name"
                       />
                     ) : (
-                      <h4 className="text-lg font-bold text-text truncate leading-tight" title={selectedItem.name || selectedItem.medicine_name}>
+                      <h4 className="text-xl font-bold text-text truncate leading-tight" title={selectedItem.name || selectedItem.medicine_name}>
                         {selectedItem.name || selectedItem.medicine_name}
                       </h4>
                     )}
@@ -810,16 +810,16 @@ const Inventory = () => {
                             rack_location: selectedItem.rack_location,
                           });
                         }}
-                        className="flex-1 py-1.5 rounded-xl border border-glass-border hover:bg-bg3 text-muted hover:text-text text-sm font-semibold transition-all"
+                        className="flex-1 py-2 rounded-xl border border-glass-border hover:bg-bg3 text-muted hover:text-text text-base font-semibold transition-all"
                       >
                         Cancel
                       </button>
                       <button
                         onClick={handleSave}
                         disabled={isSaving}
-                        className="flex-1 py-1.5 rounded-xl bg-primary hover:bg-primary/90 text-white text-sm font-bold transition-all flex items-center justify-center gap-2"
+                        className="flex-1 py-2 rounded-xl bg-primary hover:bg-primary/90 text-white text-base font-bold transition-all flex items-center justify-center gap-2"
                       >
-                        {isSaving ? <RefreshCw size={14} className="animate-spin" /> : <Save size={14} />}
+                        {isSaving ? <RefreshCw size={15} className="animate-spin" /> : <Save size={15} />}
                         Save Changes
                       </button>
                     </>
@@ -827,26 +827,26 @@ const Inventory = () => {
                     <>
                       <button
                         onClick={() => handleSellItem(selectedItem)}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/15 border border-emerald-500/30 hover:bg-emerald-500/25 text-emerald-400 text-[12px] font-bold transition-all"
+                        className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/30 hover:bg-emerald-500/25 text-emerald-400 text-sm font-bold transition-all"
                         title="Sell / Refill this medicine in POS"
                       >
-                        <ShoppingCart size={13} />
+                        <ShoppingCart size={14} />
                         Sell → POS
                       </button>
                       <button
                         onClick={() => setIsEditing(true)}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-bg3 border border-glass-border hover:bg-bg2 text-muted hover:text-text text-[12px] font-semibold transition-all"
+                        className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-bg3 border border-glass-border hover:bg-bg2 text-muted hover:text-text text-sm font-semibold transition-all"
                         title="Edit batch details"
                       >
-                        <Edit size={13} />
+                        <Edit size={14} />
                         Edit Batch
                       </button>
                       <button
                         onClick={() => { setPanelOpen(false); setUniversalEditMedicineId(selectedItem.medicine_id || selectedItem.id); }}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-sky/10 border border-sky/30 hover:bg-sky/20 text-sky text-[12px] font-bold transition-all"
+                        className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-sky/10 border border-sky/30 hover:bg-sky/20 text-sky text-sm font-bold transition-all"
                         title="Edit globally across the app"
                       >
-                        <Edit size={13} />
+                        <Edit size={14} />
                         Universal Edit
                       </button>
                     </>
@@ -862,10 +862,10 @@ const Inventory = () => {
                        selectedItem.name.toLowerCase().includes(o.product.toLowerCase().trim())
                 ).map(o => (
                   <div key={o.id} className="mx-4 mt-4 bg-amber/10 border border-amber/30 text-amber-200 p-3.5 rounded-xl flex items-start gap-3">
-                    <AlertTriangle className="text-amber shrink-0 mt-0.5" size={16} />
+                    <AlertTriangle className="text-amber shrink-0 mt-0.5" size={17} />
                     <div>
-                      <div className="font-bold text-[11px] text-amber uppercase tracking-wide">Pending Special Request</div>
-                      <p className="text-[11px] text-amber-300/80 mt-1 leading-relaxed">
+                      <div className="font-bold text-[13px] text-amber uppercase tracking-wide">Pending Special Request</div>
+                      <p className="text-[13px] text-amber-300/80 mt-1 leading-relaxed">
                         <strong>{o.requester}</strong> ({o.phone}) needs <strong>{o.qty}</strong> unit(s). Reserve when restocking.
                       </p>
                     </div>
@@ -877,19 +877,19 @@ const Inventory = () => {
                   <div className="grid grid-cols-2 gap-3">
                     {/* Stock Qty */}
                     <div className="bg-bg2/60 border border-glass-border rounded-xl p-3.5">
-                      <span className="text-[10px] font-black uppercase tracking-widest text-muted block mb-1.5">Stock Packs</span>
+                      <span className="text-xs font-black uppercase tracking-widest text-muted block mb-1.5">Stock Packs</span>
                       {isEditing ? (
                         <div className="flex items-center gap-1.5">
                           <button onClick={() => setEditForm({ ...editForm, stock_quantity: Math.max(0, (editForm.stock_quantity || 0) - 1) })} className="p-1.5 rounded-lg bg-bg3 hover:bg-bg2 text-text transition-colors border border-glass-border">
-                            <Minus size={13} />
+                            <Minus size={14} />
                           </button>
-                          <input type="number" className="flex-1 min-w-0 px-2 py-1.5 bg-bg3 border border-glass-border rounded-lg text-sm text-text text-center focus:border-primary focus:outline-none transition-all" value={editForm.stock_quantity ?? ''} onChange={e => setEditForm({ ...editForm, stock_quantity: Number(e.target.value) })} />
+                          <input type="number" className="flex-1 min-w-0 px-2 py-1.5 bg-bg3 border border-glass-border rounded-lg text-base text-text text-center focus:border-primary focus:outline-none transition-all" value={editForm.stock_quantity ?? ''} onChange={e => setEditForm({ ...editForm, stock_quantity: Number(e.target.value) })} />
                           <button onClick={() => setEditForm({ ...editForm, stock_quantity: (editForm.stock_quantity || 0) + 1 })} className="p-1.5 rounded-lg bg-bg3 hover:bg-bg2 text-text transition-colors border border-glass-border">
-                            <Plus size={13} />
+                            <Plus size={14} />
                           </button>
                         </div>
                       ) : (
-                        <span className={`text-2xl font-black ${(selectedItem.stock_quantity || 0) <= 0 ? 'text-red' : (selectedItem.stock_quantity || 0) < 10 ? 'text-amber' : 'text-green'}`}>
+                        <span className={`text-[28px] font-black ${(selectedItem.stock_quantity || 0) <= 0 ? 'text-red' : (selectedItem.stock_quantity || 0) < 10 ? 'text-amber' : 'text-green'}`}>
                           {selectedItem.stock_quantity}
                         </span>
                       )}
@@ -897,28 +897,28 @@ const Inventory = () => {
 
                     {/* MRP */}
                     <div className="bg-bg2/60 border border-glass-border rounded-xl p-3.5">
-                      <span className="text-[10px] font-black uppercase tracking-widest text-muted block mb-1.5">MRP Price</span>
+                      <span className="text-xs font-black uppercase tracking-widest text-muted block mb-1.5">MRP Price</span>
                       {isEditing ? (
                         <div className="relative">
-                          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted text-sm">₹</span>
-                          <input type="number" step="0.01" className="w-full pl-6 pr-2 py-1.5 bg-bg3 border border-glass-border rounded-lg text-sm text-green font-bold focus:border-primary focus:outline-none transition-all" value={editForm.mrp ?? ''} onChange={e => setEditForm({ ...editForm, mrp: Number(e.target.value) })} />
+                          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted text-base">₹</span>
+                          <input type="number" step="0.01" className="w-full pl-6 pr-2 py-1.5 bg-bg3 border border-glass-border rounded-lg text-base text-green font-bold focus:border-primary focus:outline-none transition-all" value={editForm.mrp ?? ''} onChange={e => setEditForm({ ...editForm, mrp: Number(e.target.value) })} />
                         </div>
                       ) : (
-                        <span className="text-2xl font-black text-green">₹{selectedItem.mrp?.toFixed(2) || '0.00'}</span>
+                        <span className="text-[28px] font-black text-green">₹{selectedItem.mrp?.toFixed(2) || '0.00'}</span>
                       )}
                     </div>
 
                     {/* Loose Units */}
                     <div className="bg-bg2/60 border border-glass-border rounded-xl p-3.5">
                       <div className="flex items-center justify-between mb-1.5">
-                        <span className="text-[10px] font-black uppercase tracking-widest text-muted block">Loose Units</span>
+                        <span className="text-xs font-black uppercase tracking-widest text-muted block">Loose Units</span>
                         {isEditing && (
-                          <label className="flex items-center gap-1.5 cursor-pointer text-[10px] font-bold text-primary">
+                          <label className="flex items-center gap-1.5 cursor-pointer text-xs font-bold text-primary">
                             <input 
                               type="checkbox" 
                               checked={editForm.allow_loose_sale !== undefined ? !!editForm.allow_loose_sale : true} 
                               onChange={e => setEditForm({ ...editForm, allow_loose_sale: e.target.checked ? 1 : 0 })}
-                              className="rounded border-glass-border bg-bg3 text-primary focus:ring-0 w-3.5 h-3.5"
+                              className="rounded border-glass-border bg-bg3 text-primary focus:ring-0 w-4 h-4"
                             />
                             <span>Allow Loose</span>
                           </label>
@@ -927,17 +927,17 @@ const Inventory = () => {
                       {isEditing ? (
                         <div className="flex items-center gap-1.5">
                           <button onClick={() => setEditForm({ ...editForm, loose_quantity: Math.max(0, (editForm.loose_quantity || 0) - 1) })} className="p-1.5 rounded-lg bg-bg3 hover:bg-bg2 text-text transition-colors border border-glass-border">
-                            <Minus size={13} />
+                            <Minus size={14} />
                           </button>
-                          <input type="number" className="flex-1 min-w-0 px-2 py-1.5 bg-bg3 border border-glass-border rounded-lg text-sm text-text text-center focus:border-primary focus:outline-none transition-all" value={editForm.loose_quantity ?? ''} onChange={e => setEditForm({ ...editForm, loose_quantity: Number(e.target.value) })} />
+                          <input type="number" className="flex-1 min-w-0 px-2 py-1.5 bg-bg3 border border-glass-border rounded-lg text-base text-text text-center focus:border-primary focus:outline-none transition-all" value={editForm.loose_quantity ?? ''} onChange={e => setEditForm({ ...editForm, loose_quantity: Number(e.target.value) })} />
                           <button onClick={() => setEditForm({ ...editForm, loose_quantity: (editForm.loose_quantity || 0) + 1 })} className="p-1.5 rounded-lg bg-bg3 hover:bg-bg2 text-text transition-colors border border-glass-border">
-                            <Plus size={13} />
+                            <Plus size={14} />
                           </button>
                         </div>
                       ) : (
                         <div className="flex items-center justify-between">
-                          <span className="text-2xl font-black text-primary">{selectedItem.loose_quantity || 0}</span>
-                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
+                          <span className="text-[28px] font-black text-primary">{selectedItem.loose_quantity || 0}</span>
+                          <span className={`text-xs font-bold px-2 py-0.5 rounded border ${
                             (selectedItem.allow_loose_sale === undefined || selectedItem.allow_loose_sale) 
                               ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' 
                               : 'bg-rose-500/10 text-rose-400 border-rose-500/30'
@@ -950,11 +950,11 @@ const Inventory = () => {
 
                     {/* Rack */}
                     <div className="bg-bg2/60 border border-glass-border rounded-xl p-3.5">
-                      <span className="text-[10px] font-black uppercase tracking-widest text-muted block mb-1.5">Rack Location</span>
+                      <span className="text-xs font-black uppercase tracking-widest text-muted block mb-1.5">Rack Location</span>
                       {isEditing ? (
-                        <input type="text" className="w-full px-2.5 py-1.5 bg-bg3 border border-glass-border rounded-lg text-sm text-text focus:border-primary focus:outline-none transition-all" value={editForm.rack_location ?? ''} onChange={e => setEditForm({ ...editForm, rack_location: e.target.value })} />
+                        <input type="text" className="w-full px-2.5 py-1.5 bg-bg3 border border-glass-border rounded-lg text-base text-text focus:border-primary focus:outline-none transition-all" value={editForm.rack_location ?? ''} onChange={e => setEditForm({ ...editForm, rack_location: e.target.value })} />
                       ) : (
-                        <span className="text-lg font-black text-text font-mono">{selectedItem.rack_location || <span className="text-muted/40">—</span>}</span>
+                        <span className="text-xl font-black text-text font-mono">{selectedItem.rack_location || <span className="text-muted/40">—</span>}</span>
                       )}
                     </div>
                   </div>
@@ -962,19 +962,19 @@ const Inventory = () => {
                   {/* Batch + Expiry */}
                   <div className="grid grid-cols-2 gap-3">
                     <div className="bg-bg2/60 border border-glass-border rounded-xl p-3.5">
-                      <span className="text-[10px] font-black uppercase tracking-widest text-muted block mb-1.5">Batch No.</span>
+                      <span className="text-xs font-black uppercase tracking-widest text-muted block mb-1.5">Batch No.</span>
                       {isEditing ? (
-                        <input type="text" className="w-full px-2.5 py-1.5 bg-bg3 border border-glass-border rounded-lg text-sm text-text focus:border-primary focus:outline-none transition-all" value={editForm.batch_number ?? ''} onChange={e => setEditForm({ ...editForm, batch_number: e.target.value })} />
+                        <input type="text" className="w-full px-2.5 py-1.5 bg-bg3 border border-glass-border rounded-lg text-base text-text focus:border-primary focus:outline-none transition-all" value={editForm.batch_number ?? ''} onChange={e => setEditForm({ ...editForm, batch_number: e.target.value })} />
                       ) : (
-                        <span className="text-sm font-bold text-text font-mono">{selectedItem.batch_number || '—'}</span>
+                        <span className="text-base font-bold text-text font-mono">{selectedItem.batch_number || '—'}</span>
                       )}
                     </div>
                     <div className="bg-bg2/60 border border-glass-border rounded-xl p-3.5">
-                      <span className="text-[10px] font-black uppercase tracking-widest text-muted block mb-1.5">Expiry Date</span>
+                      <span className="text-xs font-black uppercase tracking-widest text-muted block mb-1.5">Expiry Date</span>
                       {isEditing ? (
-                        <input type="text" placeholder="MM/YY" className="w-full px-2.5 py-1.5 bg-bg3 border border-glass-border rounded-lg text-sm text-text focus:border-primary focus:outline-none transition-all" value={editForm.expiry_date ?? ''} onChange={e => setEditForm({ ...editForm, expiry_date: formatExpiryToMMYY(e.target.value) })} />
+                        <input type="text" placeholder="MM/YY" className="w-full px-2.5 py-1.5 bg-bg3 border border-glass-border rounded-lg text-base text-text focus:border-primary focus:outline-none transition-all" value={editForm.expiry_date ?? ''} onChange={e => setEditForm({ ...editForm, expiry_date: formatExpiryToMMYY(e.target.value) })} />
                       ) : (
-                        <span className="text-sm font-bold text-text font-mono">{formatExpiryToMMYY(selectedItem.expiry_date) || selectedItem.expiry_date || '—'}</span>
+                        <span className="text-base font-bold text-text font-mono">{formatExpiryToMMYY(selectedItem.expiry_date) || selectedItem.expiry_date || '—'}</span>
                       )}
                     </div>
                   </div>
@@ -983,69 +983,69 @@ const Inventory = () => {
                 {/* Medical Profile (openFDA) */}
                 <div className="px-4 pb-6 space-y-3">
                   <div className="flex items-center gap-2 border-t border-glass-border/50 pt-4">
-                    <BookOpen size={13} className="text-muted" />
-                    <span className="text-[10px] font-black uppercase tracking-widest text-muted">Medical Profile · OpenFDA</span>
+                    <BookOpen size={14} className="text-muted" />
+                    <span className="text-xs font-black uppercase tracking-widest text-muted">Medical Profile · OpenFDA</span>
                   </div>
 
                   {detailsLoading ? (
                     <div className="flex flex-col items-center justify-center py-10 gap-3">
-                      <RefreshCw className="animate-spin text-primary" size={22} />
-                      <span className="text-sm text-muted">Fetching OpenFDA monograph…</span>
+                      <RefreshCw className="animate-spin text-primary" size={24} />
+                      <span className="text-base text-muted">Fetching OpenFDA monograph…</span>
                     </div>
                   ) : enrichedData ? (
                     <div className="space-y-3 fade-in">
                       {/* Active Ingredients */}
                       <div className="bg-bg2/60 border border-glass-border rounded-xl p-3.5">
-                        <span className="text-[10px] font-black uppercase tracking-widest text-muted block mb-2">Active Ingredients</span>
+                        <span className="text-xs font-black uppercase tracking-widest text-muted block mb-2">Active Ingredients</span>
                         <div className="flex flex-wrap gap-1.5">
                           {enrichedData.activeIngredients && enrichedData.activeIngredients.length > 0 ? (
                             enrichedData.activeIngredients.map((ing: string, i: number) => (
-                              <span key={i} className="px-2.5 py-1 rounded-full text-[11px] font-semibold bg-primary/10 text-primary border border-primary/20">
+                              <span key={i} className="px-2.5 py-1 rounded-full text-[13px] font-semibold bg-primary/10 text-primary border border-primary/20">
                                 {ing}
                               </span>
                             ))
                           ) : (
-                            <span className="text-sm text-muted italic">Generic formula not indexed.</span>
+                            <span className="text-base text-muted italic">Generic formula not indexed.</span>
                           )}
                         </div>
                       </div>
 
                       {/* Indications */}
                       <div className="bg-bg2/60 border border-glass-border rounded-xl p-3.5">
-                        <span className="text-[10px] font-black uppercase tracking-widest text-sky flex items-center gap-1.5 mb-2">
-                          <BookOpen size={11} /> Indications &amp; Usage
+                        <span className="text-xs font-black uppercase tracking-widest text-sky flex items-center gap-1.5 mb-2">
+                          <BookOpen size={13} /> Indications &amp; Usage
                         </span>
-                        <p className="text-[12px] text-muted leading-relaxed max-h-28 overflow-y-auto">{enrichedData.indications || 'Not available.'}</p>
+                        <p className="text-sm text-muted leading-relaxed max-h-28 overflow-y-auto">{enrichedData.indications || 'Not available.'}</p>
                       </div>
 
                       {/* Warnings */}
                       <div className="bg-amber/5 border border-amber/20 rounded-xl p-3.5">
-                        <span className="text-[10px] font-black uppercase tracking-widest text-amber flex items-center gap-1.5 mb-2">
-                          <AlertTriangle size={11} /> Warnings
+                        <span className="text-xs font-black uppercase tracking-widest text-amber flex items-center gap-1.5 mb-2">
+                          <AlertTriangle size={13} /> Warnings
                         </span>
-                        <p className="text-[12px] text-amber-300/80 leading-relaxed max-h-28 overflow-y-auto">{enrichedData.warnings || 'No active safety warnings.'}</p>
+                        <p className="text-sm text-amber-300/80 leading-relaxed max-h-28 overflow-y-auto">{enrichedData.warnings || 'No active safety warnings.'}</p>
                       </div>
 
                       {/* Adverse Reactions */}
                       <div className="bg-red/5 border border-red/20 rounded-xl p-3.5">
-                        <span className="text-[10px] font-black uppercase tracking-widest text-red flex items-center gap-1.5 mb-2">
-                          <ShieldAlert size={11} /> Adverse Reactions
+                        <span className="text-xs font-black uppercase tracking-widest text-red flex items-center gap-1.5 mb-2">
+                          <ShieldAlert size={13} /> Adverse Reactions
                         </span>
-                        <p className="text-[12px] text-red-300 leading-relaxed max-h-28 overflow-y-auto">{enrichedData.sideEffects || 'No adverse reactions logged.'}</p>
+                        <p className="text-sm text-red-300 leading-relaxed max-h-28 overflow-y-auto">{enrichedData.sideEffects || 'No adverse reactions logged.'}</p>
                       </div>
 
                       {/* Source */}
-                      <div className="flex items-center justify-between text-[11px] text-muted px-1">
-                        <span className="flex items-center gap-1.5"><Factory size={12} /> {enrichedData.manufacturer || selectedItem.manufacturer || 'Unknown manufacturer'}</span>
-                        <span className="px-2 py-0.5 rounded-full bg-green/10 text-green font-bold uppercase text-[10px] border border-green/20">
+                      <div className="flex items-center justify-between text-[13px] text-muted px-1">
+                        <span className="flex items-center gap-1.5"><Factory size={14} /> {enrichedData.manufacturer || selectedItem.manufacturer || 'Unknown manufacturer'}</span>
+                        <span className="px-2 py-0.5 rounded-full bg-green/10 text-green font-bold uppercase text-[11px] border border-green/20">
                           {enrichedData.enrichmentSource || 'FDA'}
                         </span>
                       </div>
                     </div>
                   ) : (
                     <div className="bg-bg2/40 border border-glass-border rounded-xl p-6 flex flex-col items-center gap-2 text-center">
-                      <PackageSearch size={24} className="text-muted/30" />
-                      <span className="text-sm text-muted italic">No enrichment profile found.</span>
+                      <PackageSearch size={26} className="text-muted/30" />
+                      <span className="text-base text-muted italic">No enrichment profile found.</span>
                     </div>
                   )}
                 </div>

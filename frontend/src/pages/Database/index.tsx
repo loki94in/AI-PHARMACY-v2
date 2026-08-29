@@ -549,19 +549,19 @@ const DatabasePage = () => {
             <button
               onClick={handleSyncFromInventory}
               disabled={syncingInventory}
-              className="px-2.5 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-500/30 rounded-xl text-[11px] font-bold flex items-center gap-1.5 transition-all cursor-pointer"
+              className="px-2.5 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-500/30 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
               title="Sync all saved/purchased products from inventory into Master Database"
             >
-              <RefreshCw size={12} className={syncingInventory ? 'animate-spin' : ''} />
+              <RefreshCw size={14} className={syncingInventory ? 'animate-spin' : ''} />
               <span className="hidden sm:inline">{syncingInventory ? 'Syncing...' : 'Sync Meds'}</span>
             </button>
             <button
               onClick={handleSeedMasterCatalog}
               disabled={seedingMaster}
-              className="px-2.5 py-1.5 bg-sky-600/20 hover:bg-sky-600/30 text-sky-400 border border-sky-500/30 rounded-xl text-[11px] font-bold flex items-center gap-1.5 transition-all cursor-pointer"
+              className="px-2.5 py-1.5 bg-sky-600/20 hover:bg-sky-600/30 text-sky-400 border border-sky-500/30 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
               title="Seed/Restore full 200,000+ reference medicines catalog"
             >
-              <BookOpen size={12} className={seedingMaster ? 'animate-spin' : ''} />
+              <BookOpen size={14} className={seedingMaster ? 'animate-spin' : ''} />
               <span className="hidden sm:inline">{seedingMaster ? 'Seeding...' : 'Seed Catalog'}</span>
             </button>
           </div>
@@ -579,13 +579,13 @@ const DatabasePage = () => {
               <button
                 key={t.id}
                 onClick={() => setSearchParams({ tab: t.id })}
-                className={`flex items-center gap-2 px-3 py-1.5 font-semibold text-xs rounded-lg transition-all whitespace-nowrap cursor-pointer ${
+                className={`flex items-center gap-2 px-3 py-1.5 font-semibold text-sm rounded-lg transition-all whitespace-nowrap cursor-pointer ${
                   isActive
                     ? 'bg-bg2 text-primary font-bold shadow-sm border border-border'
                     : 'text-muted hover:text-text hover:bg-bg3/80 border border-transparent'
                 }`}
               >
-                <Icon size={14} className={isActive ? 'text-primary' : 'text-muted'} />
+                <Icon size={16} className={isActive ? 'text-primary' : 'text-muted'} />
                 <span>{t.label}</span>
               </button>
             );

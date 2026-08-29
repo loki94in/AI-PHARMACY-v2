@@ -347,7 +347,7 @@ export default function PhoneSales() {
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value as 'all' | 'pending' | 'approved' | 'rejected')}
-            className="premium-input px-3 py-1.5 text-xs bg-bg border border-border rounded-xl text-text focus:outline-none"
+            className="premium-input px-3 py-1.5 text-sm bg-bg border border-border rounded-xl text-text focus:outline-none"
           >
             <option value="all">All Statuses</option>
             <option value="pending">Pending Review</option>
@@ -360,7 +360,7 @@ export default function PhoneSales() {
             className="p-2 rounded-xl bg-bg border border-border hover:bg-bg3 hover:border-glass-border text-muted hover:text-text transition-all shrink-0"
             title="Refresh List"
           >
-            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+            <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
           </button>
         </div>
       </div>
@@ -371,20 +371,20 @@ export default function PhoneSales() {
         {/* LEFT PANEL: TIMELINE VIEW */}
         <div className="w-full lg:w-2/5 flex flex-col bg-glass-bg border border-glass-border rounded-2xl overflow-hidden backdrop-blur-xl">
           <div className="p-4 border-b border-glass-border bg-white/[0.02] flex justify-between items-center shrink-0">
-            <h3 className="font-bold text-xs uppercase tracking-wider text-muted">Sync Timeline ({filteredSales.length})</h3>
+            <h3 className="font-bold text-sm uppercase tracking-wider text-muted">Sync Timeline ({filteredSales.length})</h3>
           </div>
 
           <div className="flex-1 overflow-y-auto p-4 custom-scrollbar space-y-4">
             {loading ? (
               <div className="flex flex-col items-center justify-center py-20 text-muted">
                 <RefreshCw size={28} className="animate-spin text-primary mb-3" />
-                <p className="text-xs">Loading transaction history...</p>
+                <p className="text-sm">Loading transaction history...</p>
               </div>
             ) : filteredSales.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-24 text-center text-muted">
                 <Clock className="text-muted/20 mb-3" size={36} />
-                <p className="font-bold text-xs text-text">No staged sales found</p>
-                <p className="text-[10px] text-muted max-w-[200px] mt-1">Waiting for remote users to record and sync offline orders.</p>
+                <p className="font-bold text-sm text-text">No staged sales found</p>
+                <p className="text-xs text-muted max-w-[200px] mt-1">Waiting for remote users to record and sync offline orders.</p>
               </div>
             ) : (
               <div className="relative pl-6 border-l border-border/40 ml-3 space-y-6 py-2">
@@ -433,34 +433,34 @@ export default function PhoneSales() {
                       {/* Header */}
                       <div className="flex justify-between items-start gap-2 mb-1.5">
                         <div className="min-w-0">
-                          <h4 className="font-bold text-xs text-text truncate max-w-[160px] group-hover:text-primary transition-colors">
+                          <h4 className="font-bold text-sm text-text truncate max-w-[160px] group-hover:text-primary transition-colors">
                             {sale.patient_name || 'Walk-in Customer'}
                           </h4>
-                          <span className="text-[10px] text-muted font-mono">{sale.patient_phone || 'No Phone'}</span>
+                          <span className="text-xs text-muted font-mono">{sale.patient_phone || 'No Phone'}</span>
                         </div>
-                        <div className="text-[9px] text-muted flex items-center gap-1 font-mono">
-                          <Calendar size={10} />
+                        <div className="text-[11px] text-muted flex items-center gap-1 font-mono">
+                          <Calendar size={12} />
                           {formatDate(sale.sale_date)}
                         </div>
                       </div>
 
                       {/* Item summary list */}
-                      <p className="text-[10px] text-muted line-clamp-1 mb-2.5">{itemSummary || 'No medicines in draft'}</p>
+                      <p className="text-xs text-muted line-clamp-1 mb-2.5">{itemSummary || 'No medicines in draft'}</p>
 
                       {sale.sold_from_device && (
-                        <span className="inline-flex items-center gap-1 text-[9px] font-semibold text-primary bg-primary/10 border border-primary/20 rounded px-1.5 py-0.5 mb-2">
-                          <Smartphone size={9} />
+                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-primary bg-primary/10 border border-primary/20 rounded px-1.5 py-0.5 mb-2">
+                          <Smartphone size={11} />
                           From: {sale.sold_from_device}
                         </span>
                       )}
 
                       {/* Footer */}
                       <div className="flex justify-between items-center">
-                        <span className="text-xs font-bold text-accent">
+                        <span className="text-sm font-bold text-accent">
                           ₹{Number(items.reduce((sum, i) => sum + (i.quantity * i.unit_price), 0)).toLocaleString('en-IN')}
                         </span>
                         
-                        <span className={`px-2 py-0.5 rounded text-[9px] font-bold border capitalize ${statusBadge}`}>
+                        <span className={`px-2 py-0.5 rounded text-[11px] font-bold border capitalize ${statusBadge}`}>
                           {sale.status === 'pending' ? 'Reviewing' : sale.status}
                         </span>
                       </div>
@@ -481,10 +481,10 @@ export default function PhoneSales() {
               <div className="p-4 border-b border-glass-border bg-white/[0.02] flex justify-between items-center shrink-0">
                 <div>
                   <div className="flex items-center gap-2">
-                    <h3 className="font-bold text-xs uppercase tracking-wider text-muted">Staged Review Panel</h3>
-                    <span className="px-2 py-0.5 rounded-full text-[9px] font-mono bg-bg3 text-muted">ID: #{selectedSale.id}</span>
+                    <h3 className="font-bold text-sm uppercase tracking-wider text-muted">Staged Review Panel</h3>
+                    <span className="px-2 py-0.5 rounded-full text-[11px] font-mono bg-bg3 text-muted">ID: #{selectedSale.id}</span>
                   </div>
-                  <p className="text-[10px] text-muted mt-0.5">Synced {formatDate(selectedSale.sale_date)}</p>
+                  <p className="text-xs text-muted mt-0.5">Synced {formatDate(selectedSale.sale_date)}</p>
                 </div>
                 
                 <div className="flex gap-2">

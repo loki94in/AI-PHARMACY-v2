@@ -448,7 +448,7 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
       >
         <div className="flex items-center justify-between px-6 py-4 border-b border-glass-border">
           <div>
-            <h3 className="text-lg font-semibold text-text">
+            <h3 className="text-xl font-semibold text-text">
               {phase === 'review' && 'Review & Map Columns'}
               {phase === 'importing' && 'Importing Data...'}
               {phase === 'staging' && 'Review Staging Data'}
@@ -456,7 +456,7 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
               {phase === 'success' && 'Import Complete!'}
               {phase === 'error' && 'Import Failed'}
             </h3>
-            <p className="text-xs text-muted mt-0.5 font-mono">{fileEntry.originalName}</p>
+            <p className="text-sm text-muted mt-0.5 font-mono">{fileEntry.originalName}</p>
           </div>
           {(phase === 'review' || phase === 'staging') && (
             <button onClick={onClose} className="text-muted hover:text-text transition-colors">
@@ -476,8 +476,8 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
                       <Database size={32} />
                     </div>
                     <div>
-                      <h4 className="text-lg font-semibold text-text">Database Backup / SQL Dump Detected</h4>
-                      <p className="text-sm text-muted mt-1 max-w-md">
+                      <h4 className="text-xl font-semibold text-text">Database Backup / SQL Dump Detected</h4>
+                      <p className="text-base text-muted mt-1 max-w-md">
                         Column mapping is not required. Import writes to a staging database first — you will review counts and conflicts before committing to the live database.
                       </p>
                     </div>
@@ -499,9 +499,9 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
                     {validation.errors.length > 0 && (
                       <div className="p-4 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400 flex items-start gap-3">
                         <AlertTriangle className="w-5 h-5 flex-shrink-0 mt-0.5" />
-                        <div className="text-sm">
+                        <div className="text-base">
                           <p className="font-semibold">Format Warnings Detected</p>
-                          <p className="opacity-90 mt-0.5">
+                          <p className="opacity-90 mt-0.5 text-sm">
                             {validation.errors.length} formatting anomalies found in the sample rows. Review mappings before continuing.
                           </p>
                         </div>
@@ -516,15 +516,15 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
               <motion.div key="importing" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex flex-col items-center justify-center py-12 space-y-6 text-center">
                 <Loader2 className="w-16 h-16 text-sky animate-spin" />
                 <div className="space-y-2">
-                  <h4 className="text-lg font-medium text-text">Writing to Staging Database</h4>
-                  <p className="text-sm text-muted max-w-md h-5 font-mono">{status?.message || 'Processing rows...'}</p>
+                  <h4 className="text-xl font-medium text-text">Writing to Staging Database</h4>
+                  <p className="text-base text-muted max-w-md h-5 font-mono">{status?.message || 'Processing rows...'}</p>
                 </div>
                 {status && (
                   <div className="w-full max-w-md space-y-2">
                     <div className="relative h-2 bg-bg3/60 rounded-full overflow-hidden border border-glass-border">
                       <motion.div className="absolute top-0 bottom-0 left-0 bg-sky" animate={{ width: `${status.progress || 0}%` }} />
                     </div>
-                    <div className="flex justify-between text-xs text-muted font-mono">
+                    <div className="flex justify-between text-sm text-muted font-mono">
                       <span>{status.progress || 0}% Completed</span>
                       {status.errorCount > 0 && <span className="text-rose-400">{status.errorCount} skips/errors</span>}
                     </div>
@@ -536,7 +536,7 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
             {phase === 'staging' && (
               <motion.div key="staging" initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -10 }} className="space-y-5">
                 <div className="p-4 rounded-xl bg-sky/5 border border-sky/20">
-                  <p className="text-sm text-text">
+                  <p className="text-base text-text">
                     Import finished into <span className="font-mono text-sky">staging.db</span>. Review the counts below before committing. A backup of your current database will be created automatically.
                   </p>
                 </div>
@@ -545,8 +545,8 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                     {statRows.map(row => (
                       <div key={row.label} className="p-3 rounded-lg bg-bg3/40 border border-glass-border text-center">
-                        <p className="text-xs text-muted">{row.label}</p>
-                        <p className="text-lg font-mono font-semibold text-text mt-1">{row.value.toLocaleString()}</p>
+                        <p className="text-sm text-muted">{row.label}</p>
+                        <p className="text-xl font-mono font-semibold text-text mt-1">{row.value.toLocaleString()}</p>
                       </div>
                     ))}
                   </div>

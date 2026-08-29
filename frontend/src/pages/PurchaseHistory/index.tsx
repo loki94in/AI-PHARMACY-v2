@@ -438,7 +438,7 @@ const PurchaseHistory = () => {
       <div className="flex border-b border-glass-border/30 mb-0 select-none">
         <button
           onClick={() => setActiveTab('history')}
-          className={`px-4 py-2 text-xs font-bold uppercase tracking-wider border-b-2 transition-all ${activeTab === 'history'
+          className={`px-4 py-2 text-sm font-bold uppercase tracking-wider border-b-2 transition-all ${activeTab === 'history'
               ? 'border-primary text-primary'
               : 'border-transparent text-muted hover:text-text'
             }`}
@@ -447,14 +447,14 @@ const PurchaseHistory = () => {
         </button>
         <button
           onClick={() => setActiveTab('reconciliation')}
-          className={`px-4 py-2 text-xs font-bold uppercase tracking-wider border-b-2 transition-all flex items-center gap-2 ${activeTab === 'reconciliation'
+          className={`px-4 py-2 text-sm font-bold uppercase tracking-wider border-b-2 transition-all flex items-center gap-2 ${activeTab === 'reconciliation'
               ? 'border-primary text-primary'
               : 'border-transparent text-muted hover:text-text'
             }`}
         >
           Reconcile Distributor Orders
           {getUnreconciledCount() > 0 && (
-            <span className="bg-red text-white text-[10px] px-2 py-0.5 rounded-full font-bold animate-pulse">
+            <span className="bg-red text-white text-xs px-2 py-0.5 rounded-full font-bold animate-pulse">
               {getUnreconciledCount()} Missing
             </span>
           )}
@@ -464,18 +464,18 @@ const PurchaseHistory = () => {
       {activeTab === 'history' ? (
         <div className="glass-panel flex-1 flex flex-col overflow-hidden mt-3">
           {/* Purchase Analytics Summary */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-0 bg-bg border-b border-glass-border text-xs shrink-0 select-none">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-0 bg-bg border-b border-glass-border text-sm shrink-0 select-none">
             <div className="p-4 border-r border-glass-border/30 flex flex-col gap-0.5">
-              <span className="text-muted text-[10px] uppercase font-bold tracking-wider">Total Purchases</span>
-              <span className="text-xl font-bold text-text font-mono">{totalPurchases}</span>
+              <span className="text-muted text-xs uppercase font-bold tracking-wider">Total Purchases</span>
+              <span className="text-2xl font-bold text-text font-mono">{totalPurchases}</span>
             </div>
             <div className="p-4 border-r border-glass-border/30 flex flex-col gap-0.5">
-              <span className="text-muted text-[10px] uppercase font-bold tracking-wider">Total Value</span>
-              <span className="text-xl font-bold text-primary font-mono">₹{totalAmount.toFixed(2)}</span>
+              <span className="text-muted text-xs uppercase font-bold tracking-wider">Total Value</span>
+              <span className="text-2xl font-bold text-primary font-mono">₹{totalAmount.toFixed(2)}</span>
             </div>
             <div className="p-4 flex flex-col gap-0.5">
-              <span className="text-muted text-[10px] uppercase font-bold tracking-wider">Total Paid</span>
-              <span className="text-xl font-bold text-green font-mono">₹{paidAmount.toFixed(2)}</span>
+              <span className="text-muted text-xs uppercase font-bold tracking-wider">Total Paid</span>
+              <span className="text-2xl font-bold text-green font-mono">₹{paidAmount.toFixed(2)}</span>
             </div>
           </div>
 
@@ -487,30 +487,30 @@ const PurchaseHistory = () => {
                 placeholder="Search by order ID, invoice number, or product name..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full px-4 py-2 bg-bg3 border border-glass-border rounded-xl text-xs text-text placeholder:text-muted/50 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all"
+                className="w-full px-4 py-2 bg-bg3 border border-glass-border rounded-xl text-sm text-text placeholder:text-muted/50 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all"
               />
             </div>
             <div className="flex items-center gap-2 flex-wrap">
-              <div className="flex items-center gap-1.5 bg-bg3 border border-glass-border rounded-xl px-3 py-1.5 text-xs text-text">
-                <Calendar size={13} className="text-muted" />
-                <span className="text-muted text-[10px] uppercase font-bold">From:</span>
+              <div className="flex items-center gap-1.5 bg-bg3 border border-glass-border rounded-xl px-3 py-1.5 text-sm text-text">
+                <Calendar size={15} className="text-muted" />
+                <span className="text-muted text-xs uppercase font-bold">From:</span>
                 <input
                   type="date"
                   value={toDateInputValue(dateRangeHelper.dateRange.from)}
                   onChange={(e) => dateRangeHelper.handleFromChange(e.target.value)}
-                  className="bg-transparent text-xs text-text focus:outline-none cursor-pointer"
+                  className="bg-transparent text-sm text-text focus:outline-none cursor-pointer"
                 />
-                <span className="text-muted text-[10px] uppercase font-bold ml-1">To:</span>
+                <span className="text-muted text-xs uppercase font-bold ml-1">To:</span>
                 <input
                   type="date"
                   value={toDateInputValue(dateRangeHelper.dateRange.to)}
                   onChange={(e) => dateRangeHelper.handleToChange(e.target.value)}
-                  className="bg-transparent text-xs text-text focus:outline-none cursor-pointer"
+                  className="bg-transparent text-sm text-text focus:outline-none cursor-pointer"
                 />
                 {(dateRangeHelper.dateRange.from || dateRangeHelper.dateRange.to) && (
                   <button
                     onClick={() => dateRangeHelper.clearFilters()}
-                    className="text-[10px] text-red font-bold hover:underline ml-1 cursor-pointer"
+                    className="text-xs text-red font-bold hover:underline ml-1 cursor-pointer"
                     title="Clear Date Range"
                   >
                     Clear
@@ -519,18 +519,18 @@ const PurchaseHistory = () => {
               </div>
               <button
                 onClick={() => handleExport('csv')}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-xl border bg-bg3 border-glass-border text-muted hover:text-text text-xs font-bold transition-all cursor-pointer"
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl border bg-bg3 border-glass-border text-muted hover:text-text text-sm font-bold transition-all cursor-pointer"
                 title="Export to CSV"
               >
-                <Download size={13} />
+                <Download size={15} />
                 CSV
               </button>
               <button
                 onClick={() => handleExport('pdf')}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-xl border bg-bg3 border-glass-border text-muted hover:text-text text-xs font-bold transition-all cursor-pointer"
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl border bg-bg3 border-glass-border text-muted hover:text-text text-sm font-bold transition-all cursor-pointer"
                 title="Export to PDF"
               >
-                <Download size={13} />
+                <Download size={15} />
                 PDF
               </button>
             </div>
@@ -541,24 +541,24 @@ const PurchaseHistory = () => {
             {isFetching && items.length === 0 ? (
               <div className="p-8 text-center text-muted font-semibold">
                 <div className="flex justify-center items-center gap-2">
-                  <Loader2 size={18} className="animate-spin text-primary" />
+                  <Loader2 size={20} className="animate-spin text-primary" />
                   Loading history...
                 </div>
               </div>
             ) : items.length === 0 ? (
               <div className="flex-1 flex flex-col items-center justify-center text-muted p-12">
-                <AlertCircle size={40} className="mb-3 opacity-30 text-muted" />
-                <p className="text-base font-bold text-text">No transactions found</p>
-                <p className="text-xs opacity-70 mt-1">Try adjusting your search or filters</p>
+                <AlertCircle size={44} className="mb-3 opacity-30 text-muted" />
+                <p className="text-lg font-bold text-text">No transactions found</p>
+                <p className="text-sm opacity-70 mt-1">Try adjusting your search or filters</p>
               </div>
             ) : (
               <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
                 <InfiniteTable
                   totalSize={rowVirtualizer.getTotalSize()}
                   containerRef={parentRef}
-                  className="border-0 bg-transparent text-xs"
+                  className="border-0 bg-transparent text-sm"
                   header={
-                    <tr className="flex items-center min-w-[1000px] bg-bg2/95 border-b border-glass-border text-xs font-bold text-muted uppercase tracking-wider select-none align-top">
+                    <tr className="flex items-center min-w-[1000px] bg-bg2/95 border-b border-glass-border text-sm font-bold text-muted uppercase tracking-wider select-none align-top">
                       <th className="w-32 shrink-0 px-6 py-4">
                         <div className="flex flex-col gap-1.5">
                           <span>Purchase ID</span>
@@ -567,7 +567,7 @@ const PurchaseHistory = () => {
                             placeholder="Search ID..."
                             value={colFilterId}
                             onChange={e => setColFilterId(e.target.value)}
-                            className="w-full px-2 py-1 bg-bg3 border border-glass-border rounded-lg text-xs text-text placeholder:text-muted/40 font-normal focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
+                            className="w-full px-2.5 py-1.5 bg-bg3 border border-glass-border rounded-lg text-sm text-text placeholder:text-muted/40 font-normal focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
                           />
                         </div>
                       </th>
@@ -579,7 +579,7 @@ const PurchaseHistory = () => {
                             placeholder="Search distributor..."
                             value={colFilterDistributor}
                             onChange={e => setColFilterDistributor(e.target.value)}
-                            className="w-full px-2 py-1 bg-bg3 border border-glass-border rounded-lg text-xs text-text placeholder:text-muted/40 font-normal focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
+                            className="w-full px-2.5 py-1.5 bg-bg3 border border-glass-border rounded-lg text-sm text-text placeholder:text-muted/40 font-normal focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
                           />
                         </div>
                       </th>
@@ -591,7 +591,7 @@ const PurchaseHistory = () => {
                             placeholder="Search Invoice..."
                             value={colFilterInvoiceNo}
                             onChange={e => setColFilterInvoiceNo(e.target.value)}
-                            className="w-full px-2 py-1 bg-bg3 border border-glass-border rounded-lg text-xs text-text placeholder:text-muted/40 font-normal focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
+                            className="w-full px-2.5 py-1.5 bg-bg3 border border-glass-border rounded-lg text-sm text-text placeholder:text-muted/40 font-normal focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
                           />
                         </div>
                       </th>
@@ -602,7 +602,7 @@ const PurchaseHistory = () => {
                             type="date"
                             value={toDateInputValue(colFilterDate)}
                             onChange={e => setColFilterDate(e.target.value)}
-                            className="w-full px-2 py-1 bg-bg3 border border-glass-border rounded-lg text-xs text-text font-normal focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
+                            className="w-full px-2.5 py-1.5 bg-bg3 border border-glass-border rounded-lg text-sm text-text font-normal focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
                           />
                         </div>
                       </th>
@@ -616,14 +616,14 @@ const PurchaseHistory = () => {
                               placeholder="Min"
                               value={colFilterMinAmount}
                               onChange={e => setColFilterMinAmount(e.target.value)}
-                              className="w-1/2 px-1 py-1 bg-bg3 border border-glass-border rounded-lg text-xs text-text placeholder:text-muted/40 font-normal focus:outline-none focus:border-primary/50"
+                              className="w-1/2 px-1.5 py-1.5 bg-bg3 border border-glass-border rounded-lg text-sm text-text placeholder:text-muted/40 font-normal focus:outline-none focus:border-primary/50"
                             />
                             <input
                               type="number"
                               placeholder="Max"
                               value={colFilterMaxAmount}
                               onChange={e => setColFilterMaxAmount(e.target.value)}
-                              className="w-1/2 px-1 py-1 bg-bg3 border border-glass-border rounded-lg text-xs text-text placeholder:text-muted/40 font-normal focus:outline-none focus:border-primary/50"
+                              className="w-1/2 px-1.5 py-1.5 bg-bg3 border border-glass-border rounded-lg text-sm text-text placeholder:text-muted/40 font-normal focus:outline-none focus:border-primary/50"
                             />
                           </div>
                         </div>
@@ -641,7 +641,7 @@ const PurchaseHistory = () => {
                                 setColFilterMinAmount('');
                                 setColFilterMaxAmount('');
                               }}
-                              className="text-xs text-red hover:underline font-bold"
+                              className="text-sm text-red hover:underline font-bold"
                             >
                               Clear
                             </button>
@@ -662,38 +662,38 @@ const PurchaseHistory = () => {
                           size={virtualRow.size}
                           className="min-w-[1000px] border-b border-glass-border/30 hover:bg-glass-bg transition-colors items-center flex"
                         >
-                          <td className="w-32 shrink-0 px-6 py-4 text-muted font-mono">
+                          <td className="w-32 shrink-0 px-6 py-4 text-muted font-mono text-sm">
                             #{tx.id.toString().padStart(6, '0')}
                           </td>
-                          <td className="flex-1 min-w-[200px] px-6 py-4 text-text font-medium truncate" title={tx.distributor_name}>
+                          <td className="flex-1 min-w-[200px] px-6 py-4 text-text font-medium truncate text-base" title={tx.distributor_name}>
                             {tx.distributor_name || '-'}
                           </td>
-                          <td className="w-40 shrink-0 px-6 py-4 text-muted font-mono text-xs truncate" title={tx.invoice_no}>
+                          <td className="w-40 shrink-0 px-6 py-4 text-muted font-mono text-sm truncate" title={tx.invoice_no}>
                             {tx.invoice_no || '-'}
                           </td>
-                          <td className="w-48 shrink-0 px-6 py-4 text-muted whitespace-nowrap">
+                          <td className="w-48 shrink-0 px-6 py-4 text-muted whitespace-nowrap text-sm">
                             {formatDisplayDate(tx.date, true)}
                           </td>
-                          <td className="w-28 shrink-0 text-right px-6 py-4 text-muted font-medium">
+                          <td className="w-28 shrink-0 text-right px-6 py-4 text-muted font-medium text-sm">
                             {tx.total_qty || 0}
                           </td>
                           <td className="w-40 shrink-0 text-right px-6 py-4 whitespace-nowrap">
                             {tx.cn_amount && tx.cn_amount > 0 ? (
                               <div className="flex flex-col items-end">
                                 <div className="flex items-center gap-1.5 justify-end">
-                                  <span className="text-xs text-muted/60 line-through">
+                                  <span className="text-sm text-muted/60 line-through">
                                     ₹{(tx.original_amount || (tx.total_amount + tx.cn_amount)).toFixed(2)}
                                   </span>
-                                  <span className="text-text font-medium">
+                                  <span className="text-text font-medium text-base">
                                     ₹{tx.total_amount?.toFixed(2) || '0.00'}
                                   </span>
                                 </div>
-                                <span className="text-[10px] text-primary font-semibold px-1.5 py-0.5 rounded bg-primary/10 border border-primary/20 mt-1 transition-all">
+                                <span className="text-xs text-primary font-semibold px-1.5 py-0.5 rounded bg-primary/10 border border-primary/20 mt-1 transition-all">
                                   CN Applied: -₹{tx.cn_amount.toFixed(2)}
                                 </span>
                               </div>
                             ) : (
-                              <span className="text-text font-medium">
+                              <span className="text-text font-medium text-base">
                                 ₹{tx.total_amount?.toFixed(2) || '0.00'}
                               </span>
                             )}
@@ -701,7 +701,7 @@ const PurchaseHistory = () => {
                           <td className="w-32 shrink-0 text-center px-6 py-4">
                             <div className="flex items-center justify-center gap-2">
                               <button onClick={() => openView(tx.id)} className="text-muted hover:text-primary transition-colors p-1 rounded hover:bg-primary/10" title="View Details">
-                                <Eye size={16} />
+                                <Eye size={18} />
                               </button>
                               <button
                                 onClick={() => handlePrintBillBarcodes(tx.id, tx.items)}
@@ -709,10 +709,10 @@ const PurchaseHistory = () => {
                                 className="text-muted hover:text-purple-400 transition-colors p-1 rounded hover:bg-purple-500/10 cursor-pointer disabled:opacity-50"
                                 title="Generate & Print Product Barcodes for this Bill"
                               >
-                                {generatingBarcodeId === tx.id ? <RefreshCw size={16} className="animate-spin text-purple-400" /> : <QrCode size={16} />}
+                                {generatingBarcodeId === tx.id ? <RefreshCw size={18} className="animate-spin text-purple-400" /> : <QrCode size={18} />}
                               </button>
                               <button onClick={() => openEdit(tx.id)} className="text-muted hover:text-primary transition-colors p-1 rounded hover:bg-primary/10" title="Edit Purchase">
-                                <Edit size={16} />
+                                <Edit size={18} />
                               </button>
                               <button
                                 onClick={() => {
@@ -727,7 +727,7 @@ const PurchaseHistory = () => {
                                 }}
                                 className="text-muted hover:text-red transition-colors p-1 rounded hover:bg-red/10" title="Delete Purchase"
                               >
-                                <Trash2 size={16} />
+                                <Trash2 size={18} />
                               </button>
                             </div>
                           </td>
@@ -1039,50 +1039,50 @@ const PurchaseHistory = () => {
             <div className="p-6 overflow-y-auto max-h-[60vh] space-y-6">
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 bg-bg3 p-4 rounded-xl border border-glass-border">
                 <div>
-                  <span className="text-xs text-muted block mb-1">Invoice No.</span>
-                  <strong className="text-text text-sm font-mono">{viewPurchase.purchase.invoice_no || 'N/A'}</strong>
+                  <span className="text-sm text-muted block mb-1">Invoice No.</span>
+                  <strong className="text-text text-base font-mono">{viewPurchase.purchase.invoice_no || 'N/A'}</strong>
                 </div>
                 <div>
-                  <span className="text-xs text-muted block mb-1">Date</span>
-                  <strong className="text-text text-sm">{formatDisplayDate(viewPurchase.purchase.date)}</strong>
+                  <span className="text-sm text-muted block mb-1">Date</span>
+                  <strong className="text-text text-base">{formatDisplayDate(viewPurchase.purchase.date)}</strong>
                 </div>
                 <div>
-                  <span className="text-xs text-muted block mb-1">Distributor</span>
-                  <strong className="text-text text-sm">{viewPurchase.purchase.distributor_name}</strong>
+                  <span className="text-sm text-muted block mb-1">Distributor</span>
+                  <strong className="text-text text-base">{viewPurchase.purchase.distributor_name}</strong>
                 </div>
                 <div>
-                  <span className="text-xs text-muted block mb-1">Total Amount</span>
-                  <strong className="text-green text-sm font-bold font-mono">₹{viewPurchase.purchase.total_amount?.toFixed(2) || '0.00'}</strong>
+                  <span className="text-sm text-muted block mb-1">Total Amount</span>
+                  <strong className="text-green text-base font-bold font-mono">₹{viewPurchase.purchase.total_amount?.toFixed(2) || '0.00'}</strong>
                 </div>
               </div>
 
               {viewPurchase.purchase.cn_amount > 0 && (
                 <div className="bg-primary/10 border border-primary/20 rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-primary/20 border border-primary/30 flex items-center justify-center text-primary font-bold text-lg font-mono">
+                    <div className="w-10 h-10 rounded-lg bg-primary/20 border border-primary/30 flex items-center justify-center text-primary font-bold text-xl font-mono">
                       CN
                     </div>
                     <div>
-                      <span className="text-xs text-primary font-semibold block">Credit Note Applied</span>
-                      <span className="text-xs text-muted font-mono">No: {viewPurchase.purchase.cn_number || 'N/A'}</span>
+                      <span className="text-sm text-primary font-semibold block">Credit Note Applied</span>
+                      <span className="text-sm text-muted font-mono">No: {viewPurchase.purchase.cn_number || 'N/A'}</span>
                     </div>
                   </div>
                   <div className="flex items-center gap-6">
                     <div className="text-right">
-                      <span className="text-xs text-muted block">Original Bill Total</span>
-                      <span className="text-sm text-muted font-medium line-through">
+                      <span className="text-sm text-muted block">Original Bill Total</span>
+                      <span className="text-base text-muted font-medium line-through">
                         ₹{(viewPurchase.purchase.original_amount || (viewPurchase.purchase.total_amount + viewPurchase.purchase.cn_amount)).toFixed(2)}
                       </span>
                     </div>
                     <div className="text-right">
-                      <span className="text-xs text-primary block">CN Discount</span>
-                      <span className="text-sm text-primary font-semibold">
+                      <span className="text-sm text-primary block">CN Discount</span>
+                      <span className="text-base text-primary font-semibold">
                         -₹{viewPurchase.purchase.cn_amount.toFixed(2)}
                       </span>
                     </div>
                     <div className="text-right">
-                      <span className="text-xs text-muted block">Net Amount Paid</span>
-                      <span className="text-sm text-green font-bold">
+                      <span className="text-sm text-muted block">Net Amount Paid</span>
+                      <span className="text-base text-green font-bold">
                         ₹{viewPurchase.purchase.total_amount.toFixed(2)}
                       </span>
                     </div>
@@ -1097,32 +1097,32 @@ const PurchaseHistory = () => {
                     <div className="flex items-center gap-4">
                       <img src={billBarcode.qrDataUrl} alt="Bill QR" className="w-16 h-16 rounded bg-bg p-1 shrink-0 shadow-sm" />
                       <div>
-                        <div className="text-[10px] font-bold text-muted uppercase tracking-wider mb-1 flex items-center gap-1.5">
-                          <QrCode size={12} /> Purchase Bill Barcode (Code128 + QR)
+                        <div className="text-xs font-bold text-muted uppercase tracking-wider mb-1 flex items-center gap-1.5">
+                          <QrCode size={14} /> Purchase Bill Barcode (Code128 + QR)
                         </div>
                         <img src={billBarcode.code128DataUrl} alt="Bill Code128" className="h-10 bg-bg p-1 rounded max-w-[220px]" />
-                        <div className="text-[10px] font-mono text-muted mt-1">{billBarcode.barcodeText}</div>
+                        <div className="text-xs font-mono text-muted mt-1">{billBarcode.barcodeText}</div>
                       </div>
                     </div>
                     <button
                       onClick={() => window.open(billBarcode.pdfUrl, '_blank')}
-                      className="px-3.5 py-2 bg-primary/20 hover:bg-primary text-primary hover:text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 border border-primary/30 shrink-0 cursor-pointer"
+                      className="px-3.5 py-2 bg-primary/20 hover:bg-primary text-primary hover:text-white rounded-lg text-sm font-bold transition-all flex items-center gap-1.5 border border-primary/30 shrink-0 cursor-pointer"
                       title="Print the scannable QR + barcode label for this purchase bill"
                     >
-                      <Printer size={14} /> Print Bill Label
+                      <Printer size={16} /> Print Bill Label
                     </button>
                   </>
                 ) : loadingBillBarcode ? (
-                  <span className="text-xs text-muted py-2 flex items-center gap-2"><RefreshCw size={12} className="animate-spin" /> Loading bill barcode...</span>
+                  <span className="text-sm text-muted py-2 flex items-center gap-2"><RefreshCw size={14} className="animate-spin" /> Loading bill barcode...</span>
                 ) : (
-                  <span className="text-xs text-muted py-2">Bill barcode unavailable</span>
+                  <span className="text-sm text-muted py-2">Bill barcode unavailable</span>
                 )}
               </div>
 
               <div>
-                <h4 className="text-sm font-bold text-text mb-3">Items</h4>
+                <h4 className="text-base font-bold text-text mb-3">Items</h4>
                 <div className="border border-glass-border rounded-xl overflow-hidden">
-                  <table className="w-full text-left text-xs">
+                  <table className="w-full text-left text-sm">
                     <thead className="bg-bg3 text-muted border-b border-glass-border uppercase font-semibold">
                       <tr>
                         <th className="px-4 py-3">Medicine</th>
@@ -1153,7 +1153,7 @@ const PurchaseHistory = () => {
                               className="text-purple-400 hover:text-purple-300 p-1.5 transition-colors cursor-pointer disabled:opacity-50 hover:bg-purple-500/10 rounded"
                               title="Print Barcode sticker for this specific product (missing/damaged barcode)"
                             >
-                              {generatingItemIndex === i ? <RefreshCw size={14} className="animate-spin" /> : <QrCode size={14} />}
+                              {generatingItemIndex === i ? <RefreshCw size={16} className="animate-spin" /> : <QrCode size={16} />}
                             </button>
                           </td>
                         </tr>
@@ -1169,15 +1169,15 @@ const PurchaseHistory = () => {
                 type="button"
                 onClick={() => handlePrintBillBarcodes(viewPurchase.purchase.id, viewPurchase.items)}
                 disabled={generatingBarcodeId === viewPurchase.purchase.id}
-                className="px-4 py-2 text-xs font-bold rounded-xl bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 border border-purple-500/40 transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                className="px-4 py-2 text-sm font-bold rounded-xl bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 border border-purple-500/40 transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
                 title="Generate and print barcodes for all products in this bill"
               >
-                {generatingBarcodeId === viewPurchase.purchase.id ? <RefreshCw size={14} className="animate-spin" /> : <QrCode size={14} />}
+                {generatingBarcodeId === viewPurchase.purchase.id ? <RefreshCw size={16} className="animate-spin" /> : <QrCode size={16} />}
                 Print All Barcodes
               </button>
               <button
                 onClick={closeView}
-                className="px-5 py-2 text-xs font-bold rounded-xl bg-bg3 hover:bg-glass-bg text-muted hover:text-text border border-glass-border transition-all cursor-pointer"
+                className="px-5 py-2 text-sm font-bold rounded-xl bg-bg3 hover:bg-glass-bg text-muted hover:text-text border border-glass-border transition-all cursor-pointer"
               >
                 Close Preview
               </button>
@@ -1187,9 +1187,9 @@ const PurchaseHistory = () => {
                   closeView();
                   openEdit(idToEdit);
                 }}
-                className="px-5 py-2 text-xs font-bold rounded-xl bg-primary/10 hover:bg-primary/20 text-primary border border-primary/30 transition-all flex items-center gap-2 cursor-pointer"
+                className="px-5 py-2 text-sm font-bold rounded-xl bg-primary/10 hover:bg-primary/20 text-primary border border-primary/30 transition-all flex items-center gap-2 cursor-pointer"
               >
-                <Edit size={16} />
+                <Edit size={18} />
                 Edit Purchase
               </button>
             </div>

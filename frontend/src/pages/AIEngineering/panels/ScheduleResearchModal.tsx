@@ -68,23 +68,23 @@ const ScheduleResearchModal: React.FC<Props> = ({ item, onClose, onClassified })
         <div className="sticky top-0 z-sticky-header bg-bg/95 backdrop-blur border-b border-glass-border px-5 py-4 flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <Globe size={16} className="text-primary shrink-0" />
-              <h2 className="text-base font-black text-text truncate">{item.name}</h2>
+              <Globe size={18} className="text-primary shrink-0" />
+              <h2 className="text-lg font-black text-text truncate">{item.name}</h2>
               {r?.suggestion && (
-                <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border uppercase ${MATCH_CHIP[r.suggestion]}`}>
+                <span className={`text-xs font-black px-2 py-0.5 rounded-full border uppercase ${MATCH_CHIP[r.suggestion]}`}>
                   Suggested: Schedule {r.suggestion}
                 </span>
               )}
               {r && (
-                <span className="text-[9px] font-bold text-muted uppercase tracking-wider px-2 py-0.5 rounded-full bg-bg3 border border-glass-border">
+                <span className="text-[11px] font-bold text-muted uppercase tracking-wider px-2 py-0.5 rounded-full bg-bg3 border border-glass-border">
                   via {r.engine === 'google' ? 'Google' : 'DuckDuckGo'}
                 </span>
               )}
             </div>
-            <p className="text-[11px] text-muted mt-1 truncate">Query: “{r?.query ?? '…'}”</p>
+            <p className="text-xs text-muted mt-1 truncate">Query: “{r?.query ?? '…'}”</p>
           </div>
           <button onClick={onClose} className="p-2 rounded-lg text-muted hover:text-text hover:bg-bg3 transition-colors cursor-pointer shrink-0">
-            <X size={16} />
+            <X size={18} />
           </button>
         </div>
 

@@ -378,14 +378,14 @@ const CompositionPanel: React.FC = () => {
         <div className="flex items-center justify-between flex-wrap gap-4">
           <div className="flex items-center gap-3">
             <div className="p-2.5 rounded-xl bg-violet-500/10 text-violet-400">
-              <Beaker size={22} />
+              <Beaker size={24} />
             </div>
             <div>
-              <h2 className="text-lg font-bold text-text">Composition Enrichment</h2>
-              <p className="text-xs text-muted">Auto-fills at 85%+ match. 60-85% needs review. Below is unmatched. Verified compositions power same-salt substitutes in billing.</p>
+              <h2 className="text-xl font-bold text-text">Composition Enrichment</h2>
+              <p className="text-sm text-muted">Auto-fills at 85%+ match. 60-85% needs review. Below is unmatched. Verified compositions power same-salt substitutes in billing.</p>
               {statusError && (
-                <p className="text-xs text-amber-400 mt-0.5 flex items-center gap-1">
-                  <AlertTriangle size={11} />{statusError}
+                <p className="text-sm text-amber-400 mt-0.5 flex items-center gap-1">
+                  <AlertTriangle size={13} />{statusError}
                 </p>
               )}
             </div>
@@ -396,33 +396,33 @@ const CompositionPanel: React.FC = () => {
             <button
               onClick={() => fileInputRef.current?.click()}
               disabled={importing}
-              className="px-3 py-2 rounded-xl bg-bg3 text-muted hover:text-text border border-glass-border text-xs font-medium flex items-center gap-1.5 transition-all disabled:opacity-50"
+              className="px-3 py-2 rounded-xl bg-bg3 text-muted hover:text-text border border-glass-border text-sm font-medium flex items-center gap-1.5 transition-all disabled:opacity-50"
               title="Import Salt Master CSV"
             >
-              {importing ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+              {importing ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
               Import Master
             </button>
             <button
               onClick={handleExportMaster}
-              className="px-3 py-2 rounded-xl bg-bg3 text-muted hover:text-text border border-glass-border text-xs font-medium flex items-center gap-1.5 transition-all"
+              className="px-3 py-2 rounded-xl bg-bg3 text-muted hover:text-text border border-glass-border text-sm font-medium flex items-center gap-1.5 transition-all"
             >
-              <Download size={14} /> Export Master
+              <Download size={16} /> Export Master
             </button>
             <button
               onClick={handleExportVerified}
-              className="px-3 py-2 rounded-xl bg-bg3 text-muted hover:text-text border border-glass-border text-xs font-medium flex items-center gap-1.5 transition-all"
+              className="px-3 py-2 rounded-xl bg-bg3 text-muted hover:text-text border border-glass-border text-sm font-medium flex items-center gap-1.5 transition-all"
             >
-              <Download size={14} /> Export Verified
+              <Download size={16} /> Export Verified
             </button>
 
             {isRunning && (
               <button
                 onClick={handleStopEnrichment}
                 disabled={stopping}
-                className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-red-600 to-rose-600 text-text font-semibold text-sm flex items-center gap-2 hover:from-red-500 hover:to-rose-500 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-red-500/20"
+                className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-red-600 to-rose-600 text-text font-semibold text-base flex items-center gap-2 hover:from-red-500 hover:to-rose-500 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-red-500/20"
                 title="Stop enrichment at next batch boundary"
               >
-                {stopping ? <Loader2 size={16} className="animate-spin" /> : <Square size={16} />}
+                {stopping ? <Loader2 size={18} className="animate-spin" /> : <Square size={18} />}
                 {stopping ? 'Stopping...' : 'Stop'}
               </button>
             )}
@@ -430,28 +430,28 @@ const CompositionPanel: React.FC = () => {
             <button
               onClick={handleStartEnrichment}
               disabled={starting || isRunning}
-              className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-violet-600 to-purple-600 text-text font-semibold text-sm flex items-center gap-2 hover:from-violet-500 hover:to-purple-500 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-violet-500/20"
+              className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-violet-600 to-purple-600 text-text font-semibold text-base flex items-center gap-2 hover:from-violet-500 hover:to-purple-500 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-violet-500/20"
             >
               {isRunning ? (
-                <><Loader2 size={16} className="animate-spin" /> Running...</>
+                <><Loader2 size={18} className="animate-spin" /> Running...</>
               ) : starting ? (
-                <><Loader2 size={16} className="animate-spin" /> Starting...</>
+                <><Loader2 size={18} className="animate-spin" /> Starting...</>
               ) : (
-                <><Play size={16} /> Start Enrichment</>
+                <><Play size={18} /> Start Enrichment</>
               )}
             </button>
           </div>
         </div>
 
         {importMsg && (
-          <div className="mt-2 text-xs px-3 py-1 rounded-lg w-fit bg-emerald-500/10 text-emerald-400">
+          <div className="mt-2 text-sm px-3 py-1 rounded-lg w-fit bg-emerald-500/10 text-emerald-400">
             {importMsg}
           </div>
         )}
 
         {status && (
           <div className="mt-4">
-            <div className="flex justify-between text-xs text-muted mb-1.5">
+            <div className="flex justify-between text-sm text-muted mb-1.5">
               <span>{status.enriched.toLocaleString()} / {status.total.toLocaleString()} enriched</span>
               <span className="font-bold text-violet-400">{enrichedPct}%</span>
             </div>
@@ -462,8 +462,8 @@ const CompositionPanel: React.FC = () => {
               />
             </div>
             {isRunning && (
-              <p className="text-[10px] text-violet-400/70 mt-1 flex items-center gap-1">
-                <Loader2 size={9} className="animate-spin" /> Enrichment is running in the background...
+              <p className="text-xs text-violet-400/70 mt-1 flex items-center gap-1">
+                <Loader2 size={11} className="animate-spin" /> Enrichment is running in the background...
               </p>
             )}
           </div>
@@ -472,24 +472,24 @@ const CompositionPanel: React.FC = () => {
         {status && (
           <div className="grid grid-cols-5 gap-3 mt-4">
             <div className="bg-bg3/50 rounded-lg p-3 text-center">
-              <div className="text-lg font-bold text-emerald-400">{status.enriched.toLocaleString()}</div>
-              <div className="text-[10px] text-muted uppercase tracking-wider">Matched</div>
+              <div className="text-xl font-bold text-emerald-400">{status.enriched.toLocaleString()}</div>
+              <div className="text-xs text-muted uppercase tracking-wider">Matched</div>
             </div>
             <div className="bg-bg3/50 rounded-lg p-3 text-center">
-              <div className="text-lg font-bold text-amber-400">{status.needsReview.toLocaleString()}</div>
-              <div className="text-[10px] text-muted uppercase tracking-wider">Review</div>
+              <div className="text-xl font-bold text-amber-400">{status.needsReview.toLocaleString()}</div>
+              <div className="text-xs text-muted uppercase tracking-wider">Review</div>
             </div>
             <div className="bg-bg3/50 rounded-lg p-3 text-center">
-              <div className="text-lg font-bold text-red-400">{status.unmatched.toLocaleString()}</div>
-              <div className="text-[10px] text-muted uppercase tracking-wider">Unmatched</div>
+              <div className="text-xl font-bold text-red-400">{status.unmatched.toLocaleString()}</div>
+              <div className="text-xs text-muted uppercase tracking-wider">Unmatched</div>
             </div>
             <div className="bg-bg3/50 rounded-lg p-3 text-center">
-              <div className="text-lg font-bold text-slate-400">{status.nonPharma.toLocaleString()}</div>
-              <div className="text-[10px] text-muted uppercase tracking-wider">Non-Pharma</div>
+              <div className="text-xl font-bold text-slate-400">{status.nonPharma.toLocaleString()}</div>
+              <div className="text-xs text-muted uppercase tracking-wider">Non-Pharma</div>
             </div>
             <div className="bg-bg3/50 rounded-lg p-3 text-center">
-              <div className="text-lg font-bold text-sky-400">{status.pending.toLocaleString()}</div>
-              <div className="text-[10px] text-muted uppercase tracking-wider">Pending</div>
+              <div className="text-xl font-bold text-sky-400">{status.pending.toLocaleString()}</div>
+              <div className="text-xs text-muted uppercase tracking-wider">Pending</div>
             </div>
           </div>
         )}
@@ -497,16 +497,16 @@ const CompositionPanel: React.FC = () => {
 
       <div className="glass-panel flex-1 flex flex-col overflow-hidden">
         <div className="p-3 border-b border-glass-border flex items-center gap-2">
-          <span className="text-xs text-muted mr-2">Filter:</span>
+          <span className="text-sm text-muted mr-2">Filter:</span>
           {[
-            { key: 'all', label: 'All', icon: <Beaker size={13} /> },
-            { key: 'needs_review', label: 'Needs Review', icon: <AlertTriangle size={13} /> },
-            { key: 'unmatched', label: 'Unmatched', icon: <XCircle size={13} /> }
+            { key: 'all', label: 'All', icon: <Beaker size={15} /> },
+            { key: 'needs_review', label: 'Needs Review', icon: <AlertTriangle size={15} /> },
+            { key: 'unmatched', label: 'Unmatched', icon: <XCircle size={15} /> }
           ].map(f => (
             <button
               key={f.key}
               onClick={() => { setFilter(f.key); setPage(1); }}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all ${
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium flex items-center gap-1.5 transition-all ${
                 filter === f.key
                   ? 'bg-violet-500/20 text-violet-300 border border-violet-500/30'
                   : 'bg-bg3/50 text-muted hover:text-text border border-transparent'
@@ -515,19 +515,19 @@ const CompositionPanel: React.FC = () => {
               {f.icon} {f.label}
             </button>
           ))}
-          <span className="ml-auto text-xs text-muted">{totalItems.toLocaleString()} items</span>
+          <span className="ml-auto text-sm text-muted">{totalItems.toLocaleString()} items</span>
         </div>
 
         <div className="flex-1 overflow-auto">
           <table className="w-full text-left border-collapse">
             <thead className="sticky top-0 bg-bg/95 backdrop-blur z-10">
               <tr>
-                <th className="p-3 text-[11px] font-bold text-muted uppercase tracking-wider border-b border-glass-border w-16">ID</th>
-                <th className="p-3 text-[11px] font-bold text-muted uppercase tracking-wider border-b border-glass-border">Medicine Name</th>
-                <th className="p-3 text-[11px] font-bold text-muted uppercase tracking-wider border-b border-glass-border">Status</th>
-                <th className="p-3 text-[11px] font-bold text-muted uppercase tracking-wider border-b border-glass-border">Confidence</th>
-                <th className="p-3 text-[11px] font-bold text-muted uppercase tracking-wider border-b border-glass-border min-w-[300px]">Composition</th>
-                <th className="p-3 text-[11px] font-bold text-muted uppercase tracking-wider border-b border-glass-border w-24">Action</th>
+                <th className="p-3 text-xs font-bold text-muted uppercase tracking-wider border-b border-glass-border w-16">ID</th>
+                <th className="p-3 text-xs font-bold text-muted uppercase tracking-wider border-b border-glass-border">Medicine Name</th>
+                <th className="p-3 text-xs font-bold text-muted uppercase tracking-wider border-b border-glass-border">Status</th>
+                <th className="p-3 text-xs font-bold text-muted uppercase tracking-wider border-b border-glass-border">Confidence</th>
+                <th className="p-3 text-xs font-bold text-muted uppercase tracking-wider border-b border-glass-border min-w-[300px]">Composition</th>
+                <th className="p-3 text-xs font-bold text-muted uppercase tracking-wider border-b border-glass-border w-24">Action</th>
               </tr>
             </thead>
             <tbody>

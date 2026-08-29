@@ -198,16 +198,16 @@ export default function AuditCenter() {
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div>
             <div className="flex items-center gap-3 mb-1.5">
-              {report ? (isReady ? <ShieldCheck size={22} className="text-green-400" /> : <ShieldX size={22} className="text-red-400" />)
-                : <ShieldCheck size={22} className="text-muted" />}
-              <h1 className="text-xl font-black tracking-tight text-text">Project Readiness Audit</h1>
+              {report ? (isReady ? <ShieldCheck size={24} className="text-green-400" /> : <ShieldX size={24} className="text-red-400" />)
+                : <ShieldCheck size={24} className="text-muted" />}
+              <h1 className="text-2xl font-black tracking-tight text-text">Project Readiness Audit</h1>
               {report && (
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-white/10 border border-border text-muted">
+                <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-bg3 border border-border text-muted">
                   v{report.appVersion} · {report.buildId}
                 </span>
               )}
             </div>
-            <p className="text-xs text-muted">
+            <p className="text-sm text-muted">
               {report
                 ? `${isViewingHistory ? 'Viewing historical audit' : 'Last run'}: ${fmtTime(report.storedAt || report.timestamp)}`
                 : 'No audit has been run yet.'}
@@ -217,27 +217,27 @@ export default function AuditCenter() {
           <div className="flex items-center gap-2">
             <button
               onClick={() => setShowHistory(s => !s)}
-              className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg border border-border bg-glass-bg hover:bg-white/5 text-text/80 cursor-pointer"
+              className="flex items-center gap-1.5 px-3 py-2 text-sm font-semibold rounded-lg border border-border bg-glass-bg hover:bg-bg3 text-text/80 cursor-pointer"
             >
-              <History size={13} /> History
+              <History size={15} /> History
             </button>
             <button
               onClick={() => runMutation.mutate()}
               disabled={runMutation.isPending}
-              className="flex items-center gap-1.5 px-4 py-2 text-xs font-black rounded-lg bg-primary text-white hover:opacity-90 disabled:opacity-50 cursor-pointer"
+              className="flex items-center gap-1.5 px-4 py-2 text-sm font-black rounded-lg bg-primary text-white hover:opacity-90 disabled:opacity-50 cursor-pointer"
             >
-              {runMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <PlayCircle size={14} />}
+              {runMutation.isPending ? <Loader2 size={16} className="animate-spin" /> : <PlayCircle size={16} />}
               {runMutation.isPending ? 'Running Audit…' : 'Run Audit'}
             </button>
           </div>
         </div>
 
         {report && (
-          <div className={`mt-3 flex items-center gap-3 px-5 py-3 rounded-xl border-2 font-black text-sm ${
+          <div className={`mt-3 flex items-center gap-3 px-5 py-3 rounded-xl border-2 font-black text-base ${
             isReady ? 'bg-green-500/15 border-green-500/50 text-green-300' : 'bg-red-500/15 border-red-500/50 text-red-300'
           }`}>
-            {isReady ? <><CheckCircle2 size={18} /> PROJECT READY</> : <><XCircle size={18} /> PROJECT NOT READY</>}
-            <span className="font-normal text-xs opacity-80">
+            {isReady ? <><CheckCircle2 size={20} /> PROJECT READY</> : <><XCircle size={20} /> PROJECT NOT READY</>}
+            <span className="font-normal text-sm opacity-80">
               {isReady ? 'No critical or high-severity business-data issues remain.' : `${report.blockingCount} blocking issue(s) must be resolved before this project can be finalized.`}
             </span>
           </div>

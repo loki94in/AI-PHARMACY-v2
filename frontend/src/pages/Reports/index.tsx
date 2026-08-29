@@ -649,11 +649,11 @@ const Reports = () => {
           {/* Title */}
           <div className="flex items-center gap-2.5">
             <div className="p-2 rounded-xl bg-primary/10 text-primary border border-primary/20 shadow-sm">
-              <PieChart size={20} />
+              <PieChart size={22} />
             </div>
             <div>
-              <h1 className="text-base font-bold text-text leading-none">Analytics & Reports Hub</h1>
-              <p className="text-[11px] text-muted mt-0.5">
+              <h1 className="text-lg font-bold text-text leading-none">Analytics & Reports Hub</h1>
+              <p className="text-xs text-muted mt-0.5">
                 {activeTab === 'nonMoving' 
                   ? 'Identify dormant stock & valuation loss metrics' 
                   : activeTab === 'trace' 
@@ -673,13 +673,13 @@ const Reports = () => {
                   key={tab.id}
                   type="button"
                   onClick={() => setActiveTab(tab.id)}
-                  className={`flex items-center gap-2 px-3 py-1.5 font-semibold text-xs rounded-lg transition-all whitespace-nowrap cursor-pointer ${
+                  className={`flex items-center gap-2 px-3 py-1.5 font-semibold text-sm rounded-lg transition-all whitespace-nowrap cursor-pointer ${
                     isActive
                       ? 'bg-bg2 text-primary font-bold shadow-sm border border-border'
                       : 'text-muted hover:text-text hover:bg-bg3/80 border border-transparent'
                   }`}
                 >
-                  <Icon size={14} className={isActive ? 'text-primary' : 'text-muted'} />
+                  <Icon size={16} className={isActive ? 'text-primary' : 'text-muted'} />
                   <span>{tab.label}</span>
                 </button>
               );
@@ -690,57 +690,57 @@ const Reports = () => {
         {/* Row 2: Compact Filter Controls & Action Buttons */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pt-2 border-t border-border/50">
           {/* Filter Inputs (Standard Date Range / NonMoving / Trace) */}
-          <div className="flex items-center gap-2 flex-wrap text-xs">
+          <div className="flex items-center gap-2 flex-wrap text-sm">
             {activeTab !== 'nonMoving' && activeTab !== 'trace' && (
               <>
                 <div className="flex items-center gap-1 bg-bg3/50 border border-border p-1 rounded-xl">
                   <button
                     type="button"
                     onClick={() => setPresetRange(activeTab === 'expiry' ? 'expiry365' : '30d')}
-                    className="px-2.5 py-1 text-[11px] font-semibold rounded-lg hover:bg-bg2 text-muted hover:text-text transition-all cursor-pointer"
+                    className="px-2.5 py-1 text-xs font-semibold rounded-lg hover:bg-bg2 text-muted hover:text-text transition-all cursor-pointer"
                   >
                     {activeTab === 'expiry' ? 'Upcoming 1Yr' : '30 Days'}
                   </button>
                   <button
                     type="button"
                     onClick={() => setPresetRange('1y')}
-                    className="px-2.5 py-1 text-[11px] font-semibold rounded-lg hover:bg-bg2 text-muted hover:text-text transition-all cursor-pointer"
+                    className="px-2.5 py-1 text-xs font-semibold rounded-lg hover:bg-bg2 text-muted hover:text-text transition-all cursor-pointer"
                   >
                     1 Year
                   </button>
                   <button
                     type="button"
                     onClick={() => setPresetRange('all')}
-                    className="px-2.5 py-1 text-[11px] font-semibold rounded-lg hover:bg-bg2 text-muted hover:text-text transition-all cursor-pointer"
+                    className="px-2.5 py-1 text-xs font-semibold rounded-lg hover:bg-bg2 text-muted hover:text-text transition-all cursor-pointer"
                   >
                     All Time
                   </button>
                 </div>
 
-                <div className="flex items-center gap-1.5 bg-bg3/50 border border-border px-3 py-1 rounded-xl text-xs">
-                  <span className="text-muted text-[11px] font-medium">From:</span>
+                <div className="flex items-center gap-1.5 bg-bg3/50 border border-border px-3 py-1 rounded-xl text-sm">
+                  <span className="text-muted text-xs font-medium">From:</span>
                   <input
                     type="date"
                     min="2020-01-01"
-                    className="bg-transparent text-text text-xs focus:outline-none font-medium cursor-pointer"
+                    className="bg-transparent text-text text-sm focus:outline-none font-medium cursor-pointer"
                     value={toDateInputValue(fromDate)}
                     onChange={(e) => handleFromDateChange(e.target.value)}
                     aria-label="From Date"
                   />
                 </div>
 
-                <div className="flex items-center gap-1.5 bg-bg3/50 border border-border px-3 py-1 rounded-xl text-xs">
-                  <span className="text-muted text-[11px] font-medium">To:</span>
+                <div className="flex items-center gap-1.5 bg-bg3/50 border border-border px-3 py-1 rounded-xl text-sm">
+                  <span className="text-muted text-xs font-medium">To:</span>
                   <input
                     type="date"
                     min="2020-01-01"
                     disabled={!manualToDate}
-                    className="bg-transparent text-text text-xs focus:outline-none font-medium disabled:opacity-50 cursor-pointer"
+                    className="bg-transparent text-text text-sm focus:outline-none font-medium disabled:opacity-50 cursor-pointer"
                     value={toDateInputValue(toDate)}
                     onChange={(e) => handleToDateChange(e.target.value)}
                     aria-label="To Date"
                   />
-                  <label className="text-[10px] text-muted flex items-center gap-1 cursor-pointer select-none border-l border-border pl-2 ml-1">
+                  <label className="text-xs text-muted flex items-center gap-1 cursor-pointer select-none border-l border-border pl-2 ml-1">
                     <input
                       type="checkbox"
                       checked={manualToDate}

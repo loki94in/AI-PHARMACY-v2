@@ -655,16 +655,16 @@ const Dispatch = () => {
           return (
             <div className="rounded-xl border px-4 py-3 flex items-center gap-3 transition-colors duration-500 bg-bg2/40 border-glass-border/80">
               <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 bg-amber-500/15 text-amber-400 border border-amber-500/30">
-                <Bell size={16} />
+                <Bell size={18} />
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between gap-3">
-                  <span className="text-xs font-semibold text-text">Distributor collection window</span>
-                  <span className="text-xs font-mono font-bold whitespace-nowrap text-amber-400">
+                  <span className="text-sm font-semibold text-text">Distributor collection window</span>
+                  <span className="text-sm font-mono font-bold whitespace-nowrap text-amber-400">
                     ⏸️ Auto-Reminders Disabled in Settings
                   </span>
                 </div>
-                <div className="mt-1 text-[11px] text-muted">
+                <div className="mt-1 text-xs text-muted">
                   Automatic reminder dispatches are paused. Enable "Distributor Dispatch Reminders" in Settings to activate the live auto-send schedule.
                 </div>
               </div>
@@ -682,12 +682,12 @@ const Dispatch = () => {
             <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
               cd.status === 'ACTIVE' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-bg3/80 text-muted'
             }`}>
-              <MessageSquare size={16} className={cd.status === 'ACTIVE' ? 'animate-pulse' : ''} />
+              <MessageSquare size={18} className={cd.status === 'ACTIVE' ? 'animate-pulse' : ''} />
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center justify-between gap-3">
-                <span className="text-xs font-semibold text-text">Distributor collection window</span>
-                <span className={`text-xs font-mono font-bold whitespace-nowrap ${
+                <span className="text-sm font-semibold text-text">Distributor collection window</span>
+                <span className={`text-sm font-mono font-bold whitespace-nowrap ${
                   cd.status === 'ACTIVE' ? 'text-emerald-400' : cd.status === 'BEFORE' ? 'text-amber-400' : 'text-muted'
                 }`}>
                   {cd.status === 'CLOSED' ? 'Closed for today' : cd.countdownText}
@@ -714,11 +714,11 @@ const Dispatch = () => {
               : 'bg-bg2/40 border-glass-border/80 hover:border-primary/25'
           }`}
         >
-          <span className={`flex items-center gap-1.5 text-[11px] font-semibold ${activeTab === 'queue' ? 'text-primary' : 'text-text'}`}>
-            <Package size={14} /> Dispatch Queue
-            <span className="ml-auto text-[10px] font-mono font-bold text-muted">{orders.length}</span>
+          <span className={`flex items-center gap-1.5 text-xs font-semibold ${activeTab === 'queue' ? 'text-primary' : 'text-text'}`}>
+            <Package size={15} /> Dispatch Queue
+            <span className="ml-auto text-xs font-mono font-bold text-muted">{orders.length}</span>
           </span>
-          <span className="mt-1.5 block text-[10px] text-muted truncate">
+          <span className="mt-1.5 block text-xs text-muted truncate">
             {pendingCount} pending &middot; {inTransitCount} in transit &middot; {deliveredTodayCount} delivered today
           </span>
         </button>
@@ -731,13 +731,13 @@ const Dispatch = () => {
               : 'bg-bg2/40 border-glass-border/80 hover:border-amber-500/25'
           }`}
         >
-          <span className={`flex items-center gap-1.5 text-[11px] font-semibold ${activeTab === 'reminders' ? 'text-amber-400' : 'text-text'}`}>
-            <Bell size={14} /> Reminders
+          <span className={`flex items-center gap-1.5 text-xs font-semibold ${activeTab === 'reminders' ? 'text-amber-400' : 'text-text'}`}>
+            <Bell size={15} /> Reminders
             {uncollectedDistributorsCount > 0 && (
-              <span className="ml-auto text-[10px] font-mono font-bold text-rose-400">{uncollectedDistributorsCount}</span>
+              <span className="ml-auto text-xs font-mono font-bold text-rose-400">{uncollectedDistributorsCount}</span>
             )}
           </span>
-          <span className="mt-1.5 block text-[10px] text-muted truncate">distributor collection status</span>
+          <span className="mt-1.5 block text-xs text-muted truncate">distributor collection status</span>
         </button>
 
         <button

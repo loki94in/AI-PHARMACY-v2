@@ -115,10 +115,10 @@ const Migration: React.FC = () => {
 
       {/* Header section */}
       <div className="mb-8">
-        <h1 className="text-3xl font-bold text-text bg-gradient-to-r from-text to-muted bg-clip-text text-transparent">
+        <h1 className="text-4xl font-bold text-text bg-gradient-to-r from-text to-muted bg-clip-text text-transparent">
           Data Migration & Backup Restore
         </h1>
-        <p className="text-muted text-sm mt-1">
+        <p className="text-muted text-base mt-1">
           Import legacy software files (RedBook, Marg, SQL, Excel) or auto-restore local database backup dumps seamlessly.
         </p>
       </div>

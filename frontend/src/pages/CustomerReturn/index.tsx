@@ -180,11 +180,11 @@ export default function CustomerReturn() {
       <div className="premium-card p-6">
         <div className="flex gap-4 items-end">
           <div className="flex-1">
-            <label className="block text-xs font-medium text-muted uppercase tracking-wider mb-2">Original Invoice Number</label>
+            <label className="block text-sm font-medium text-muted uppercase tracking-wider mb-2">Original Invoice Number</label>
             <div className="relative">
               <input
                 type="text"
-                className="premium-input w-full font-mono text-sm"
+                className="premium-input w-full font-mono text-base"
                 placeholder="Scan barcode or type bill no (e.g. S-2026-0001)"
                 value={invoiceNo}
                 onChange={e => {
@@ -201,7 +201,7 @@ export default function CustomerReturn() {
             </div>
           </div>
           <button 
-            className="btn-primary py-2.5 px-6"
+            className="btn-primary py-2.5 px-6 text-base"
             onClick={() => handleSearch()}
             disabled={loading || !invoiceNo}
           >
@@ -212,7 +212,7 @@ export default function CustomerReturn() {
         {error && (
           <div className="mt-4 p-4 bg-red/10 border border-red/20 rounded-xl flex items-start gap-3 text-red">
             <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
-            <p className="text-sm font-medium">{error}</p>
+            <p className="text-base font-medium">{error}</p>
           </div>
         )}
       </div>
@@ -222,15 +222,15 @@ export default function CustomerReturn() {
           <div className="lg:col-span-2 space-y-6">
             <div className="premium-card p-0 overflow-hidden">
               <div className="p-4 border-b border-glass-border bg-bg3/40">
-                <h2 className="font-bold text-text flex items-center gap-2">
-                  <CheckCircle className="w-4 h-4 text-emerald-500" />
+                <h2 className="font-bold text-text flex items-center gap-2 text-base">
+                  <CheckCircle className="w-5 h-5 text-emerald-500" />
                   Invoice Details: <span className="font-mono">{invoice.invoice_no}</span>
                 </h2>
-                <p className="text-xs text-muted font-medium mt-1">Date: {formatDisplayDate(invoice.date)}</p>
+                <p className="text-sm text-muted font-medium mt-1">Date: {formatDisplayDate(invoice.date)}</p>
               </div>
               <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm">
-                  <thead className="bg-bg3/60 border-b border-glass-border text-muted">
+                <table className="w-full text-left text-base">
+                  <thead className="bg-bg3/60 border-b border-glass-border text-muted text-sm">
                     <tr>
                       <th className="p-4 font-semibold">Medicine</th>
                       <th className="p-4 font-semibold">Batch & Exp</th>
@@ -239,14 +239,14 @@ export default function CustomerReturn() {
                       <th className="p-4 font-semibold text-right">Return Qty</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-glass-border/40">
+                  <tbody className="divide-y divide-glass-border/40 text-base">
                     {items.map((item) => {
                       const availableToReturn = item.quantity - item.returned_qty;
                       return (
                         <tr key={item.sale_item_id} className="hover:bg-bg3/40 transition-colors">
                           <td className="p-4 text-text font-bold">{item.medicine_name}</td>
                           <td className="p-4">
-                            <span className="text-xs font-mono px-2 py-1 bg-bg3 border border-glass-border rounded-lg text-text font-bold">
+                            <span className="text-sm font-mono px-2 py-1 bg-bg3 border border-glass-border rounded-lg text-text font-bold">
                               {item.batch_no}
                             </span>
                           </td>
@@ -257,13 +257,13 @@ export default function CustomerReturn() {
                               type="number"
                               min="0"
                               max={availableToReturn}
-                              className="premium-input w-24 text-right py-1.5 font-mono font-bold"
+                              className="premium-input w-24 text-right py-1.5 font-mono font-bold text-base"
                               placeholder="0"
                               disabled={availableToReturn <= 0}
                               value={returnQuantities[item.sale_item_id] || ''}
                               onChange={(e) => handleQtyChange(item.sale_item_id, e.target.value, availableToReturn)}
                             />
-                            {availableToReturn <= 0 && <span className="block text-[10px] text-muted font-semibold mt-1">Max returned</span>}
+                            {availableToReturn <= 0 && <span className="block text-xs text-muted font-semibold mt-1">Max returned</span>}
                           </td>
                         </tr>
                       );
@@ -276,37 +276,37 @@ export default function CustomerReturn() {
           
           <div>
             <div className="premium-card p-6 sticky top-6">
-              <h3 className="font-semibold text-text mb-4 flex items-center gap-2">
-                <RotateCcw className="w-4 h-4 text-sky" />
+              <h3 className="font-semibold text-text mb-4 flex items-center gap-2 text-lg">
+                <RotateCcw className="w-5 h-5 text-sky" />
                 Return Summary
               </h3>
               
               <div className="space-y-4">
                 {barcodeInfo && (
                   <div className="p-3 bg-bg2/70 rounded-xl border border-glass-border space-y-2">
-                    <div className="text-[10px] font-bold text-muted uppercase tracking-wider flex items-center justify-between">
-                      <span className="flex items-center gap-1"><QrCode size={12} className="text-purple-400" /> Invoice Barcode</span>
+                    <div className="text-xs font-bold text-muted uppercase tracking-wider flex items-center justify-between">
+                      <span className="flex items-center gap-1"><QrCode size={14} className="text-purple-400" /> Invoice Barcode</span>
                       <button
                         type="button"
                         onClick={() => window.open(barcodeInfo.pdfUrl, '_blank')}
-                        className="text-[10px] font-bold text-primary hover:underline flex items-center gap-1 cursor-pointer"
+                        className="text-xs font-bold text-primary hover:underline flex items-center gap-1 cursor-pointer"
                       >
-                        <Printer size={11} /> Print Label
+                        <Printer size={13} /> Print Label
                       </button>
                     </div>
                     <div className="flex items-center gap-3">
                       <img src={barcodeInfo.qrDataUrl} alt="QR" className="w-12 h-12 bg-white p-1 rounded shrink-0 shadow-sm" />
                       <div className="overflow-hidden">
                         <img src={barcodeInfo.code128DataUrl} alt="Code128" className="h-7 bg-white p-1 rounded max-w-[150px]" />
-                        <div className="text-[9px] font-mono text-muted mt-0.5 truncate">{barcodeInfo.barcodeText}</div>
+                        <div className="text-[11px] font-mono text-muted mt-0.5 truncate">{barcodeInfo.barcodeText}</div>
                       </div>
                     </div>
                   </div>
                 )}
                 <div>
-                  <label className="block text-xs font-medium text-muted uppercase tracking-wider mb-2">Reason for Return</label>
+                  <label className="block text-sm font-medium text-muted uppercase tracking-wider mb-2">Reason for Return</label>
                   <textarea
-                    className="premium-input w-full min-h-[80px] resize-none"
+                    className="premium-input w-full min-h-[80px] resize-none text-base"
                     placeholder="e.g. Doctor changed prescription..."
                     value={reason}
                     onChange={e => setReason(e.target.value)}
@@ -315,16 +315,16 @@ export default function CustomerReturn() {
                 
                 <div className="pt-4 border-t border-white/10">
                   <div className="flex justify-between items-center mb-2">
-                    <span className="text-muted">Est. Refund (inc. Tax)</span>
-                    <span className="text-xl font-bold text-emerald">₹{(totalRefund * 1.05).toFixed(2)}</span>
+                    <span className="text-muted text-base">Est. Refund (inc. Tax)</span>
+                    <span className="text-2xl font-bold text-emerald">₹{(totalRefund * 1.05).toFixed(2)}</span>
                   </div>
-                  <p className="text-[10px] text-muted leading-relaxed">
+                  <p className="text-xs text-muted leading-relaxed">
                     By confirming this return, the selected quantities will automatically be added back into inventory stock under their respective batches.
                   </p>
                 </div>
                 
                 <button
-                  className="btn-primary w-full py-3 mt-4"
+                  className="btn-primary w-full py-3 mt-4 text-base font-bold"
                   onClick={handleSubmit}
                   disabled={loading || totalRefund <= 0}
                 >

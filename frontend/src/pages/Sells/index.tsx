@@ -500,10 +500,10 @@ const Sells = () => {
     <div className="h-full flex flex-col px-4 py-4 animate-in fade-in duration-500 gap-3 relative">
       
       {/* Streamlined Compact Date Filter Bar */}
-      <div className="bg-bg2/80 border border-glass-border rounded-xl px-3 py-2 flex flex-wrap items-center justify-between gap-2 shrink-0 shadow-sm text-xs">
+      <div className="bg-bg2/80 border border-glass-border rounded-xl px-3 py-2 flex flex-wrap items-center justify-between gap-2 shrink-0 shadow-sm text-sm">
         <div className="flex flex-wrap items-center gap-2 min-w-0">
-          <div className="flex items-center gap-1.5 text-primary font-bold text-xs shrink-0">
-            <Calendar size={14} />
+          <div className="flex items-center gap-1.5 text-primary font-bold text-sm shrink-0">
+            <Calendar size={16} />
             <span>Period:</span>
           </div>
 
@@ -552,7 +552,7 @@ const Sells = () => {
                 key={p.key}
                 type="button"
                 onClick={p.action}
-                className={`px-2.5 py-1 rounded-md text-xs transition-all cursor-pointer ${
+                className={`px-2.5 py-1 rounded-md text-sm transition-all cursor-pointer ${
                   p.active
                     ? 'bg-primary text-white font-bold shadow-sm'
                     : 'text-muted hover:text-text hover:bg-bg2'
@@ -564,20 +564,20 @@ const Sells = () => {
           </div>
 
           {/* Custom Date Inputs */}
-          <div className="flex items-center gap-1.5 bg-bg3 px-2 py-1 rounded-lg border border-glass-border/40 shrink-0 text-xs">
-            <span className="text-[10px] font-bold text-muted uppercase">FROM:</span>
+          <div className="flex items-center gap-1.5 bg-bg3 px-2 py-1 rounded-lg border border-glass-border/40 shrink-0 text-sm">
+            <span className="text-xs font-bold text-muted uppercase">FROM:</span>
             <input
               type="date"
               value={toDateInputValue(dateRangeHelper.dateRange.from)}
               onChange={e => dateRangeHelper.handleFromChange(e.target.value)}
-              className="bg-transparent border-none text-xs text-text focus:outline-none cursor-pointer"
+              className="bg-transparent border-none text-sm text-text focus:outline-none cursor-pointer"
             />
-            <span className="text-[10px] font-bold text-muted uppercase">TO:</span>
+            <span className="text-xs font-bold text-muted uppercase">TO:</span>
             <input
               type="date"
               value={toDateInputValue(dateRangeHelper.dateRange.to)}
               onChange={e => dateRangeHelper.handleToChange(e.target.value)}
-              className="bg-transparent border-none text-xs text-text focus:outline-none cursor-pointer"
+              className="bg-transparent border-none text-sm text-text focus:outline-none cursor-pointer"
             />
             {(dateRangeHelper.dateRange.from || dateRangeHelper.dateRange.to) && (
               <button
@@ -586,7 +586,7 @@ const Sells = () => {
                 className="p-0.5 text-muted hover:text-red transition-colors rounded cursor-pointer"
                 title="Reset date filter (All Time)"
               >
-                <RotateCcw size={12} />
+                <RotateCcw size={14} />
               </button>
             )}
           </div>
@@ -604,18 +604,18 @@ const Sells = () => {
                 setColFilterPayVia('');
                 dateRangeHelper.clearFilters();
               }}
-              className="flex items-center gap-1.5 px-3 py-1 bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/30 rounded-lg text-xs font-bold transition-all cursor-pointer shrink-0"
+              className="flex items-center gap-1.5 px-3 py-1 bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/30 rounded-lg text-sm font-bold transition-all cursor-pointer shrink-0"
               title="Reset all search filters and date ranges"
             >
-              <RotateCcw size={13} />
+              <RotateCcw size={14} />
               <span>Reset All Filters</span>
             </button>
           )}
         </div>
 
         {/* Live Filter Summary Count */}
-        <div className="flex items-center gap-2 text-xs shrink-0 ml-auto">
-          <span className="bg-bg3 px-2.5 py-1 rounded-lg border border-glass-border/50 font-mono text-[11px] text-muted">
+        <div className="flex items-center gap-2 text-sm shrink-0 ml-auto">
+          <span className="bg-bg3 px-2.5 py-1 rounded-lg border border-glass-border/50 font-mono text-xs text-muted">
             {items.length !== totalItems ? (
               <>Filtered: <strong className="text-text font-bold">{items.length}</strong> / <strong className="text-text font-bold">{totalItems}</strong> total</>
             ) : (
@@ -632,7 +632,7 @@ const Sells = () => {
           totalSize={rowVirtualizer.getTotalSize()}
           containerRef={parentRef}
           header={
-            <tr className="flex items-center w-full bg-bg3/95 border-b border-glass-border/40 select-none py-2 text-xs">
+            <tr className="flex items-center w-full bg-bg3/95 border-b border-glass-border/40 select-none py-2 text-sm">
               {/* No. */}
               <th className="px-2 py-1 w-32 shrink-0 flex items-center justify-start">
                 <input
@@ -640,7 +640,7 @@ const Sells = () => {
                   placeholder="Search No..."
                   value={colFilterNo}
                   onChange={e => setColFilterNo(e.target.value)}
-                  className="w-full px-2 py-1 bg-bg2/90 border border-glass-border rounded-md text-xs text-text font-normal placeholder:text-muted/50 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
+                  className="w-full px-2 py-1 bg-bg2/90 border border-glass-border rounded-md text-sm text-text font-normal placeholder:text-muted/50 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
                 />
               </th>
 
@@ -651,13 +651,13 @@ const Sells = () => {
                   placeholder="Search patient/phone/medicine..."
                   value={colFilterName}
                   onChange={e => setColFilterName(e.target.value)}
-                  className="w-full px-2 py-1 bg-bg2/90 border border-glass-border rounded-md text-xs text-text font-normal placeholder:text-muted/50 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
+                  className="w-full px-2 py-1 bg-bg2/90 border border-glass-border rounded-md text-sm text-text font-normal placeholder:text-muted/50 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
                 />
               </th>
 
               {/* Date */}
               <th className="px-2 py-1 w-36 shrink-0 flex items-center justify-center text-center">
-                <div className="w-full py-1 bg-bg2/50 border border-glass-border/40 rounded-md text-[10px] font-semibold text-muted truncate text-center" title="Filtered Date Period">
+                <div className="w-full py-1 bg-bg2/50 border border-glass-border/40 rounded-md text-xs font-semibold text-muted truncate text-center" title="Filtered Date Period">
                   {getDateRangeLabel()}
                 </div>
               </th>
@@ -669,7 +669,7 @@ const Sells = () => {
                   placeholder="Search doctor..."
                   value={colFilterDrName}
                   onChange={e => setColFilterDrName(e.target.value)}
-                  className="w-full px-2 py-1 bg-bg2/90 border border-glass-border rounded-md text-xs text-text font-normal placeholder:text-muted/50 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
+                  className="w-full px-2 py-1 bg-bg2/90 border border-glass-border rounded-md text-sm text-text font-normal placeholder:text-muted/50 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
                 />
               </th>
 
@@ -681,26 +681,26 @@ const Sells = () => {
                     placeholder="Min ₹"
                     value={colFilterMinAmount}
                     onChange={e => setColFilterMinAmount(e.target.value)}
-                    className="w-1/2 px-1 py-1 bg-bg2/90 border border-glass-border rounded-md text-[11px] text-text font-normal placeholder:text-muted/50 focus:outline-none focus:border-primary/50 text-right"
+                    className="w-1/2 px-1 py-1 bg-bg2/90 border border-glass-border rounded-md text-xs text-text font-normal placeholder:text-muted/50 focus:outline-none focus:border-primary/50 text-right"
                   />
                   <input
                     type="number"
                     placeholder="Max ₹"
                     value={colFilterMaxAmount}
                     onChange={e => setColFilterMaxAmount(e.target.value)}
-                    className="w-1/2 px-1 py-1 bg-bg2/90 border border-glass-border rounded-md text-[11px] text-text font-normal placeholder:text-muted/50 focus:outline-none focus:border-primary/50 text-right"
+                    className="w-1/2 px-1 py-1 bg-bg2/90 border border-glass-border rounded-md text-xs text-text font-normal placeholder:text-muted/50 focus:outline-none focus:border-primary/50 text-right"
                   />
                 </div>
               </th>
 
               {/* Final Amount */}
               <th className="px-2 py-1 w-28 shrink-0 flex items-center justify-end text-right">
-                <span className="text-xs font-semibold text-muted/60 px-1">Final Amt</span>
+                <span className="text-sm font-semibold text-muted/60 px-1">Final Amt</span>
               </th>
 
               {/* Discount */}
               <th className="px-2 py-1 w-24 shrink-0 flex items-center justify-end text-right">
-                <span className="text-xs font-semibold text-muted/60 px-1">Discount</span>
+                <span className="text-sm font-semibold text-muted/60 px-1">Discount</span>
               </th>
 
               {/* Pay Via */}
@@ -708,7 +708,7 @@ const Sells = () => {
                 <select
                   value={colFilterPayVia}
                   onChange={e => setColFilterPayVia(e.target.value)}
-                  className="w-full px-1 py-1 bg-bg2/90 border border-glass-border rounded-md text-xs text-text font-normal focus:outline-none focus:border-primary/50"
+                  className="w-full px-1 py-1 bg-bg2/90 border border-glass-border rounded-md text-sm text-text font-normal focus:outline-none focus:border-primary/50"
                 >
                   <option value="">Pay: All</option>
                   <option value="CASH">CASH</option>
@@ -730,19 +730,19 @@ const Sells = () => {
                       setColFilterMaxAmount('');
                       setColFilterPayVia('');
                     }}
-                    className="text-[11px] text-red hover:underline font-bold py-0.5 cursor-pointer"
+                    className="text-xs text-red hover:underline font-bold py-0.5 cursor-pointer"
                   >
                     Clear Filters
                   </button>
                 ) : (
-                  <span className="text-xs font-semibold text-muted/60">Actions</span>
+                  <span className="text-sm font-semibold text-muted/60">Actions</span>
                 )}
               </th>
             </tr>
           }
           body={
             items.length === 0 ? (
-              <tr className="flex items-center justify-center p-8 text-muted text-sm w-full absolute top-0 left-0">
+              <tr className="flex items-center justify-center p-8 text-muted text-base w-full absolute top-0 left-0">
                 <td>No invoices found.</td>
               </tr>
             ) : (
@@ -760,36 +760,36 @@ const Sells = () => {
                   >
                     <td className="px-4 py-3.5 w-32 shrink-0 flex items-center justify-start relative">
                       <div className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-primary to-purple-500 scale-y-0 group-hover:scale-y-100 transition-transform duration-300 origin-center"></div>
-                      <span className="font-mono text-xs font-bold text-primary bg-primary/10 px-2 py-1 rounded-md border border-primary/20 shadow-sm">{inv.invoice_no}</span>
+                      <span className="font-mono text-sm font-bold text-primary bg-primary/10 px-2 py-1 rounded-md border border-primary/20 shadow-sm">{inv.invoice_no}</span>
                     </td>
                     <td className="px-4 py-3.5 flex-1 min-w-[240px] flex items-center">
                       <div className="flex items-center gap-3 w-full">
                         <div className="bg-bg3 p-2 rounded-full border border-glass-border shadow-sm group-hover:bg-primary/10 group-hover:shadow-md transition-all shrink-0">
-                          <User size={14} className="text-muted group-hover:text-primary transition-colors" />
+                          <User size={16} className="text-muted group-hover:text-primary transition-colors" />
                         </div>
                         <div className="min-w-0 flex-1">
-                          <div className="text-xs font-bold text-text group-hover:text-primary transition-colors truncate">{inv.customer_name || 'Walk-in'}</div>
-                          {inv.customer_phone && <div className="text-[10px] text-muted font-medium mt-0.5 font-mono">{inv.customer_phone}</div>}
+                          <div className="text-sm font-bold text-text group-hover:text-primary transition-colors truncate">{inv.customer_name || 'Walk-in'}</div>
+                          {inv.customer_phone && <div className="text-xs text-muted font-medium mt-0.5 font-mono">{inv.customer_phone}</div>}
                         </div>
                       </div>
                     </td>
-                    <td className="px-4 py-3.5 w-36 shrink-0 text-xs text-muted flex items-center justify-center">
+                    <td className="px-4 py-3.5 w-36 shrink-0 text-sm text-muted flex items-center justify-center">
                       {formatDate(inv.date)}
                     </td>
-                    <td className="px-4 py-3.5 w-36 shrink-0 text-xs text-muted truncate flex items-center justify-start">
+                    <td className="px-4 py-3.5 w-36 shrink-0 text-sm text-muted truncate flex items-center justify-start">
                       {inv.doctor_name || '-'}
                     </td>
                     <td className="px-3 py-3.5 w-28 shrink-0 flex items-center justify-end text-right">
-                      <span className="text-xs font-bold text-text">₹{Math.round(Number(inv.subtotal || 0))}</span>
+                      <span className="text-sm font-bold text-text">₹{Math.round(Number(inv.subtotal || 0))}</span>
                     </td>
                     <td className="px-3 py-3.5 w-28 shrink-0 flex items-center justify-end text-right">
-                      <span className="text-xs font-bold text-green">₹{Math.round(Number(inv.total_amount || 0))}</span>
+                      <span className="text-sm font-bold text-green">₹{Math.round(Number(inv.total_amount || 0))}</span>
                     </td>
-                    <td className="px-3 py-3.5 w-24 shrink-0 text-xs text-muted flex items-center justify-end text-right">
+                    <td className="px-3 py-3.5 w-24 shrink-0 text-sm text-muted flex items-center justify-end text-right">
                       ₹{Math.round(Number(inv.discount || 0))}
                     </td>
                     <td className="px-3 py-3.5 w-24 shrink-0 flex items-center justify-center">
-                      <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-bg3 text-muted border border-glass-border">
+                      <span className="text-xs font-bold uppercase px-2 py-0.5 rounded-full bg-bg3 text-muted border border-glass-border">
                         {inv.payment_medium || 'CASH'}
                       </span>
                     </td>

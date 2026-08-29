@@ -148,9 +148,9 @@ const CompliancePanel: React.FC = () => {
         </button>
         <button
           onClick={handlePrintRegister}
-          className="px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl text-xs font-bold transition-all flex items-center gap-2 shadow-lg shadow-primary/20"
+          className="px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl text-sm font-bold transition-all flex items-center gap-2 shadow-lg shadow-primary/20"
         >
-          <Printer size={14} />
+          <Printer size={16} />
           Print Register
         </button>
       </div>
@@ -159,9 +159,9 @@ const CompliancePanel: React.FC = () => {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="p-4 bg-bg2 border border-glass-border rounded-2xl flex items-center justify-between">
           <div>
-            <p className="text-xs font-medium text-muted">Today H1 Sales</p>
-            <h3 className="text-2xl font-black text-text mt-1">{stats.todayH1Sales}</h3>
-            <p className="text-[10px] text-emerald-400 mt-1">● Statutory Dispensed Today</p>
+            <p className="text-sm font-medium text-muted">Today H1 Sales</p>
+            <h3 className="text-3xl font-black text-text mt-1">{stats.todayH1Sales}</h3>
+            <p className="text-xs text-emerald-400 mt-1">● Statutory Dispensed Today</p>
           </div>
           <div className="w-12 h-12 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400">
             <Shield size={24} />
@@ -170,9 +170,9 @@ const CompliancePanel: React.FC = () => {
 
         <div className="p-4 bg-bg2 border border-glass-border rounded-2xl flex items-center justify-between">
           <div>
-            <p className="text-xs font-medium text-muted">Monthly H1 Sales</p>
-            <h3 className="text-2xl font-black text-text mt-1">{stats.monthlyH1Sales}</h3>
-            <p className="text-[10px] text-muted mt-1">Current Billing Month</p>
+            <p className="text-sm font-medium text-muted">Monthly H1 Sales</p>
+            <h3 className="text-3xl font-black text-text mt-1">{stats.monthlyH1Sales}</h3>
+            <p className="text-xs text-muted mt-1">Current Billing Month</p>
           </div>
           <div className="w-12 h-12 rounded-xl bg-primary/15 border border-primary/30 flex items-center justify-center text-primary">
             <Calendar size={24} />
@@ -181,11 +181,11 @@ const CompliancePanel: React.FC = () => {
 
         <div className="p-4 bg-bg2 border border-glass-border rounded-2xl flex items-center justify-between">
           <div>
-            <p className="text-xs font-medium text-muted">Pending Doctor Assignments</p>
-            <h3 className={`text-2xl font-black mt-1 ${stats.pendingDoctorAssignments > 0 ? 'text-amber-400' : 'text-text'}`}>
+            <p className="text-sm font-medium text-muted">Pending Doctor Assignments</p>
+            <h3 className={`text-3xl font-black mt-1 ${stats.pendingDoctorAssignments > 0 ? 'text-amber-400' : 'text-text'}`}>
               {stats.pendingDoctorAssignments}
             </h3>
-            <p className="text-[10px] text-amber-400 mt-1">Requires Prescriber Review</p>
+            <p className="text-xs text-amber-400 mt-1">Requires Prescriber Review</p>
           </div>
           <div className="w-12 h-12 rounded-xl bg-red-500/15 border border-red-500/30 flex items-center justify-center text-red-400">
             <AlertTriangle size={24} />
@@ -194,9 +194,9 @@ const CompliancePanel: React.FC = () => {
 
         <div className="p-4 bg-bg2 border border-glass-border rounded-2xl flex items-center justify-between">
           <div>
-            <p className="text-xs font-medium text-muted">Total Statutory Logs</p>
-            <h3 className="text-2xl font-black text-text mt-1">{stats.totalComplianceLogs}</h3>
-            <p className="text-[10px] text-muted mt-1">All-time Logged Sales</p>
+            <p className="text-sm font-medium text-muted">Total Statutory Logs</p>
+            <h3 className="text-3xl font-black text-text mt-1">{stats.totalComplianceLogs}</h3>
+            <p className="text-xs text-muted mt-1">All-time Logged Sales</p>
           </div>
           <div className="w-12 h-12 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
             <FileText size={24} />
@@ -209,10 +209,10 @@ const CompliancePanel: React.FC = () => {
         <div className="flex items-start gap-3 p-4 bg-amber-500/10 border border-amber-500/40 rounded-2xl">
           <AlertTriangle size={20} className="text-amber-400 mt-0.5 shrink-0" />
           <div>
-            <p className="text-sm font-bold text-amber-400">
+            <p className="text-base font-bold text-amber-400">
               {stats.pendingDoctorAssignments} Compliance Record{stats.pendingDoctorAssignments > 1 ? 's' : ''} Require Prescriber / Registration Review
             </p>
-            <p className="text-xs text-amber-400/80 mt-0.5">
+            <p className="text-sm text-amber-400/80 mt-0.5">
               These Schedule H/H1/X drug sales were dispensed without a verified doctor registration number.
               Under the Drugs &amp; Cosmetics Rules, a valid prescriber registration must be recorded.
               Use the <strong>Assign Doctor</strong> button on each affected row to enter the real information.
@@ -225,26 +225,26 @@ const CompliancePanel: React.FC = () => {
       {/* Filter Bar */}
 
       <form onSubmit={handleFilterSubmit} className="p-4 bg-bg2 border border-glass-border rounded-2xl space-y-3">
-        <div className="flex items-center gap-2 text-xs font-bold text-text uppercase tracking-wider">
-          <Filter size={14} className="text-primary" /> Filter H1 Compliance Register
+        <div className="flex items-center gap-2 text-sm font-bold text-text uppercase tracking-wider">
+          <Filter size={16} className="text-primary" /> Filter H1 Compliance Register
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3">
           <div>
-            <label className="block text-[10px] font-bold text-muted uppercase mb-1">Search Keyword</label>
+            <label className="block text-xs font-bold text-muted uppercase mb-1">Search Keyword</label>
             <div className="relative">
-              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
               <input
                 type="text"
                 placeholder="Drug, Patient or Bill #"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="w-full pl-8 pr-3 py-2 bg-bg3 border border-glass-border rounded-xl text-xs text-text focus:outline-none focus:border-primary font-medium"
+                className="w-full pl-8 pr-3 py-2 bg-bg3 border border-glass-border rounded-xl text-sm text-text focus:outline-none focus:border-primary font-medium"
               />
             </div>
           </div>
 
           <div>
-            <label className="block text-[10px] font-bold text-muted uppercase mb-1">Prescribing Doctor</label>
+            <label className="block text-xs font-bold text-muted uppercase mb-1">Prescribing Doctor</label>
             <input
               type="text"
               placeholder="Doctor Name"

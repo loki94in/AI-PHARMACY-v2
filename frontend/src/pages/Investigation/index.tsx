@@ -775,15 +775,15 @@ const InvestigationCenter = () => {
                       </div>
                     </div>
                     <div>
-                      <h1 className="text-xs font-black text-text tracking-wide leading-none">Investigation Center</h1>
-                      <p className="text-[9px] text-muted font-medium leading-none mt-0.5">Stock Ledger · Audit Trail · Bill Correction</p>
+                      <h1 className="text-sm font-black text-text tracking-wide leading-none">Investigation Center</h1>
+                      <p className="text-[11px] text-muted font-medium leading-none mt-0.5">Stock Ledger · Audit Trail · Bill Correction</p>
                     </div>
                   </div>
 
                   {/* Live count chip */}
-                  <div className="h-5 flex items-center gap-1.5 px-2.5 rounded-full bg-bg3/80 border border-glass-border/50 text-[10px] font-mono font-bold text-muted">
+                  <div className="h-6 flex items-center gap-1.5 px-3 rounded-full bg-bg3/80 border border-glass-border/50 text-xs font-mono font-bold text-muted">
                     {isFetching && items.length === 0
-                      ? <Loader2 size={9} className="animate-spin text-primary" />
+                      ? <Loader2 size={11} className="animate-spin text-primary" />
                       : <span className="text-text font-black">{items.length.toLocaleString()}</span>
                     }
                     {totalItems > 0 && <><span className="text-muted/50">/</span><span>{totalItems.toLocaleString()}</span></>}
@@ -792,13 +792,13 @@ const InvestigationCenter = () => {
 
                   {/* Compact type stat badges */}
                   <div className="hidden lg:flex items-center gap-1.5">
-                    <span className="px-2 py-0.5 rounded-full bg-sky-500/10 border border-sky-500/20 text-sky-400 text-[10px] font-mono font-bold">
+                    <span className="px-2.5 py-0.5 rounded-full bg-sky-500/10 border border-sky-500/20 text-sky-400 text-xs font-mono font-bold">
                       ↓ {salesCount.toLocaleString()} Sales
                     </span>
-                    <span className="px-2 py-0.5 rounded-full bg-green/10 border border-green/20 text-green text-[10px] font-mono font-bold">
+                    <span className="px-2.5 py-0.5 rounded-full bg-green/10 border border-green/20 text-green text-xs font-mono font-bold">
                       ↑ {purchasesCount.toLocaleString()} Purchases
                     </span>
-                    <span className="px-2 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-500 text-[10px] font-mono font-bold">
+                    <span className="px-2.5 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-500 text-xs font-mono font-bold">
                       ⚖ {adjustmentsCount.toLocaleString()} Adj
                     </span>
                   </div>
@@ -807,26 +807,26 @@ const InvestigationCenter = () => {
                 {/* Right: Tools cluster */}
                 <div className="flex items-center gap-2 shrink-0">
                   {/* Date range */}
-                  <div className="flex items-center gap-1.5 bg-bg3/60 border border-glass-border/50 px-2.5 py-1 rounded-xl text-[10px] font-bold text-muted">
-                    <Calendar size={11} className="text-primary shrink-0" />
-                    <span className="text-[9px] text-muted/60 uppercase font-bold">From</span>
+                  <div className="flex items-center gap-1.5 bg-bg3/60 border border-glass-border/50 px-2.5 py-1 rounded-xl text-xs font-bold text-muted">
+                    <Calendar size={13} className="text-primary shrink-0" />
+                    <span className="text-[11px] text-muted/60 uppercase font-bold">From</span>
                     <input
                       type="date"
                       value={toDateInputValue(dateRangeHelper.dateRange.from)}
                       onChange={e => dateRangeHelper.handleFromChange(e.target.value)}
-                      className="px-1.5 py-0.5 bg-bg2 border border-glass-border/50 rounded-lg text-[10px] text-text font-bold focus:outline-none focus:border-primary/50 w-24 cursor-pointer"
+                      className="px-1.5 py-0.5 bg-bg2 border border-glass-border/50 rounded-lg text-xs text-text font-bold focus:outline-none focus:border-primary/50 w-28 cursor-pointer"
                     />
-                    <span className="text-[9px] text-muted/60 uppercase font-bold">To</span>
+                    <span className="text-[11px] text-muted/60 uppercase font-bold">To</span>
                     <input
                       type="date"
                       value={toDateInputValue(dateRangeHelper.dateRange.to)}
                       onChange={e => dateRangeHelper.handleToChange(e.target.value)}
-                      className="px-1.5 py-0.5 bg-bg2 border border-glass-border/50 rounded-lg text-[10px] text-text font-bold focus:outline-none focus:border-primary/50 w-24 cursor-pointer"
+                      className="px-1.5 py-0.5 bg-bg2 border border-glass-border/50 rounded-lg text-xs text-text font-bold focus:outline-none focus:border-primary/50 w-28 cursor-pointer"
                     />
                     {(dateRangeHelper.dateRange.from || dateRangeHelper.dateRange.to) && (
                       <button
                         onClick={() => dateRangeHelper.clearFilters()}
-                        className="text-[9px] font-bold text-red hover:text-red/70 transition-colors cursor-pointer ml-0.5"
+                        className="text-xs font-bold text-red hover:text-red/70 transition-colors cursor-pointer ml-0.5"
                       >
                         ✕
                       </button>
@@ -839,18 +839,18 @@ const InvestigationCenter = () => {
                   {/* Export buttons */}
                   <button
                     onClick={() => handleExport('csv')}
-                    className="flex items-center gap-1 px-2.5 py-1 rounded-xl border bg-bg3/80 border-glass-border/60 text-muted hover:text-text hover:border-primary/30 hover:bg-primary/5 text-[10px] font-bold transition-all cursor-pointer"
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-xl border bg-bg3/80 border-glass-border/60 text-muted hover:text-text hover:border-primary/30 hover:bg-primary/5 text-xs font-bold transition-all cursor-pointer"
                     title="Export to CSV"
                   >
-                    <Download size={11} />
+                    <Download size={13} />
                     CSV
                   </button>
                   <button
                     onClick={() => handleExport('pdf')}
-                    className="flex items-center gap-1 px-2.5 py-1 rounded-xl border bg-bg3/80 border-glass-border/60 text-muted hover:text-text hover:border-primary/30 hover:bg-primary/5 text-[10px] font-bold transition-all cursor-pointer"
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-xl border bg-bg3/80 border-glass-border/60 text-muted hover:text-text hover:border-primary/30 hover:bg-primary/5 text-xs font-bold transition-all cursor-pointer"
                     title="Export to PDF"
                   >
-                    <Download size={11} />
+                    <Download size={13} />
                     PDF
                   </button>
                 </div>

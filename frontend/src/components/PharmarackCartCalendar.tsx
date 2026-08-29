@@ -161,13 +161,13 @@ export const PharmarackCartCalendar: React.FC<PharmarackCartCalendarProps> = ({
   };
 
   return (
-    <div className="w-full bg-bg2 border border-glass-border rounded-2xl p-1.5 shadow-sm mb-1.5 space-y-1.5 shrink-0 transition-all">
+    <div className="w-full bg-transparent border border-glass-border/40 rounded-2xl p-1.5 shadow-sm mb-1.5 space-y-1.5 shrink-0 transition-all">
       
       {/* Top Controls Row: Integrated Navigation Tabs + Timer Pacing Presets */}
       <div className="flex flex-wrap items-center justify-between gap-2 pb-1.5 border-b border-glass-border/30">
         
         {/* Integrated Navigation Tabs */}
-        <div className="flex items-center gap-1.5 bg-bg p-1 rounded-xl border border-glass-border shrink-0 overflow-x-auto">
+        <div className="flex items-center gap-1.5 bg-bg3/30 p-1 rounded-xl border border-glass-border/40 shrink-0 overflow-x-auto">
           {/* Tab 1: Reorder Hub */}
           <button
             type="button"
@@ -196,7 +196,7 @@ export const PharmarackCartCalendar: React.FC<PharmarackCartCalendarProps> = ({
             onClick={() => onTabChange('cart')}
             className={`flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer whitespace-nowrap ${
               currentTab === 'cart' || !currentTab
-                ? 'bg-bg2 text-primary font-black shadow-xs border border-border'
+                ? 'bg-bg3/60 text-primary font-black shadow-xs border border-glass-border'
                 : 'text-muted hover:text-text hover:bg-bg3'
             }`}
             title="Review grouped distributor carts and create Purchase Orders"
@@ -216,7 +216,7 @@ export const PharmarackCartCalendar: React.FC<PharmarackCartCalendarProps> = ({
             onClick={() => onTabChange('sent-history')}
             className={`flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer whitespace-nowrap relative ${
               currentTab === 'sent-history'
-                ? 'bg-bg2 text-primary font-black shadow-xs border border-border'
+                ? 'bg-bg3/60 text-primary font-black shadow-xs border border-glass-border'
                 : 'text-muted hover:text-text hover:bg-bg3'
             }`}
           >

@@ -46,10 +46,10 @@ export const RedBookUploader: React.FC<RedBookUploaderProps> = ({
   return (
     <div className="w-full max-w-2xl mx-auto">
       <div className="text-center mb-6">
-        <h2 className="text-2xl font-bold text-text bg-gradient-to-r from-text to-muted bg-clip-text text-transparent">
+        <h2 className="text-3xl font-bold text-text bg-gradient-to-r from-text to-muted bg-clip-text text-transparent">
           RedBook Data Import
         </h2>
-        <p className="text-muted mt-2 text-sm max-w-md mx-auto">
+        <p className="text-muted mt-2 text-base max-w-md mx-auto">
           Upload inventory, purchases, sales, or returns data files to begin migration.
         </p>
       </div>
@@ -90,8 +90,8 @@ export const RedBookUploader: React.FC<RedBookUploaderProps> = ({
                 <div className="absolute inset-0 bg-sky/10 rounded-full blur-md -z-10" />
               </div>
               <div>
-                <span className="text-text font-semibold block text-base">Uploading and analyzing file...</span>
-                <span className="text-muted text-xs block mt-1">This might take a moment depending on the size</span>
+                <span className="text-text font-semibold block text-lg">Uploading and analyzing file...</span>
+                <span className="text-muted text-sm block mt-1">This might take a moment depending on the size</span>
               </div>
             </motion.div>
           ) : (

@@ -703,7 +703,7 @@ const Mail = () => {
 
 
       {/* Status Legend */}
-      <div className="flex items-center gap-4 px-1 text-[10px] text-muted">
+      <div className="flex items-center gap-4 px-1 text-xs text-muted">
         <div className="flex items-center gap-1.5">
           <span className="h-2 w-2 rounded-full bg-green" />
           New (unread)
@@ -735,7 +735,7 @@ const Mail = () => {
         <div className="glass-panel border-amber-400/40 bg-amber-400/5 shrink-0">
           <button
             onClick={() => setShowReviews(v => !v)}
-            className="w-full p-2.5 flex items-center justify-between text-xs font-bold uppercase tracking-wider text-amber-300"
+            className="w-full p-2.5 flex items-center justify-between text-sm font-bold uppercase tracking-wider text-amber-300"
           >
             <span className="flex items-center gap-2">
               <span className="h-2 w-2 rounded-full bg-amber-400 animate-pulse" />
@@ -749,7 +749,7 @@ const Mail = () => {
                 let meds: Array<{ name: string; quantity: string }> = [];
                 try { meds = review.medicines_json ? JSON.parse(review.medicines_json) : []; } catch { /* ignore malformed */ }
                 return (
-                  <div key={review.id} className="flex items-center justify-between gap-3 bg-bg3 border border-glass-border rounded-lg p-2.5 text-xs">
+                  <div key={review.id} className="flex items-center justify-between gap-3 bg-bg3 border border-glass-border rounded-lg p-2.5 text-sm">
                     <div className="min-w-0">
                       <div className="font-semibold text-text truncate flex items-center gap-1.5">
                         {review.distributor_name && isValidDistributorName(review.distributor_name) ? (
@@ -757,7 +757,7 @@ const Mail = () => {
                             ✓ Distributor verified: {review.distributor_name}
                           </span>
                         ) : (
-                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-500 border border-amber-500/30">
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-bold bg-amber-500/10 text-amber-500 border border-amber-500/30">
                             ⚠️ Distributor unresolved
                           </span>
                         )}
@@ -792,13 +792,13 @@ const Mail = () => {
       {/* Main Two-Panel Layout */}
       <div className="flex-1 grid grid-cols-1 lg:grid-cols-5 gap-4 overflow-hidden">
         {/* LEFT: Email List */}
-        <div className="lg:col-span-3 glass-panel flex flex-col overflow-hidden bg-white/5 border-glass-border relative">
-          <div className="p-3 border-b border-glass-border bg-black/10 text-xs font-bold text-muted uppercase tracking-wider select-none flex items-center justify-between">
+        <div className="lg:col-span-3 glass-panel flex flex-col overflow-hidden bg-bg2/40 border-glass-border relative">
+          <div className="p-3 border-b border-glass-border bg-bg3/60 text-sm font-bold text-muted uppercase tracking-wider select-none flex items-center justify-between">
             <div className="flex items-center gap-2">
               <span>Inbox ({filteredEmails.length !== emails.length ? `${filteredEmails.length}/${emails.length}` : emails.length})</span>
               {(loading || syncing) && emails.length > 0 && (
-                <span className="text-[10px] text-primary font-bold uppercase tracking-widest flex items-center gap-1.5 animate-pulse ml-2">
-                  <Loader size={10} className="animate-spin" />
+                <span className="text-xs text-primary font-bold uppercase tracking-widest flex items-center gap-1.5 animate-pulse ml-2">
+                  <Loader size={12} className="animate-spin" />
                   {syncing ? 'Syncing...' : 'Loading...'}
                 </span>
               )}
@@ -819,7 +819,7 @@ const Mail = () => {
           </div>
 
           {/* Status Category Filter Pills */}
-          <div className="px-3 py-2 border-b border-glass-border bg-black/15 flex items-center gap-1.5 overflow-x-auto shrink-0 custom-scrollbar text-[11px] font-bold">
+          <div className="px-3 py-2 border-b border-glass-border bg-bg3/80 flex items-center gap-1.5 overflow-x-auto shrink-0 custom-scrollbar text-xs font-bold">
             <button
               onClick={() => setStatusTabFilter('all')}
               className={`px-2.5 py-1 rounded-lg border transition-all flex items-center gap-1 cursor-pointer whitespace-nowrap ${
@@ -829,7 +829,7 @@ const Mail = () => {
               }`}
             >
               <span>All Mails</span>
-              <span className="font-mono text-[10px] px-1.5 py-0.2 rounded-full bg-black/30 text-muted font-bold">{emails.length}</span>
+              <span className="font-mono text-xs px-1.5 py-0.2 rounded-full bg-bg3 text-muted font-bold">{emails.length}</span>
             </button>
             <button
               onClick={() => setStatusTabFilter('new')}
@@ -841,7 +841,7 @@ const Mail = () => {
             >
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
               <span>New (Unopened)</span>
-              <span className="font-mono text-[10px] px-1.5 py-0.2 rounded-full bg-emerald-500/20 text-emerald-300 font-bold">
+              <span className="font-mono text-xs px-1.5 py-0.2 rounded-full bg-emerald-500/20 text-emerald-300 font-bold">
                 {emails.filter(e => !e.isSaved && !e.isSeen).length}
               </span>
             </button>

@@ -681,15 +681,15 @@ const Learning: React.FC = () => {
               <button
                 key={t.id}
                 onClick={() => handleTabChange(t.id)}
-                className={`flex items-center gap-2.5 px-4 py-2 font-bold text-xs rounded-xl transition-all whitespace-nowrap cursor-pointer ${
+                className={`flex items-center gap-2.5 px-4 py-2 font-bold text-sm rounded-xl transition-all whitespace-nowrap cursor-pointer ${
                   isActive
                     ? 'bg-glass-bg text-primary shadow-md border border-glass-border'
                     : 'text-muted hover:text-text hover:bg-bg3/60 border border-transparent'
                 }`}
               >
-                <Icon size={16} className={isActive ? 'text-primary' : 'text-muted'} />
+                <Icon size={18} className={isActive ? 'text-primary' : 'text-muted'} />
                 <span>{t.label}</span>
-                <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-extrabold font-mono ${
+                <span className={`text-xs px-1.5 py-0.2 rounded-full font-extrabold font-mono ${
                   isActive ? 'bg-primary/20 text-primary border border-primary/30' : 'bg-bg3 text-muted'
                 }`}>
                   {t.badge}
@@ -702,9 +702,9 @@ const Learning: React.FC = () => {
         <button
           onClick={handleRetrain}
           disabled={retraining}
-          className="px-3.5 py-2 rounded-xl bg-primary text-primary-foreground font-bold text-xs flex items-center justify-center gap-2 hover:bg-primary/90 transition-all shadow-md active:scale-95 disabled:opacity-50 cursor-pointer shrink-0"
+          className="px-3.5 py-2 rounded-xl bg-primary text-primary-foreground font-bold text-sm flex items-center justify-center gap-2 hover:bg-primary/90 transition-all shadow-md active:scale-95 disabled:opacity-50 cursor-pointer shrink-0"
         >
-          <RefreshCw size={14} className={retraining ? 'animate-spin' : ''} />
+          <RefreshCw size={16} className={retraining ? 'animate-spin' : ''} />
           <span>{retraining ? 'Retraining Model...' : 'Retrain Model'}</span>
         </button>
       </div>
@@ -718,11 +718,11 @@ const Learning: React.FC = () => {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="bg-glass-bg border border-glass-border rounded-2xl p-4 flex items-center gap-3.5 shadow-md">
               <div className="p-3 rounded-xl bg-sky/10 text-sky border border-sky/20">
-                <Brain size={22} />
+                <Brain size={24} />
               </div>
               <div>
-                <div className="text-xs text-muted font-bold">Active OCR Rules</div>
-                <div className="text-2xl font-black text-text mt-0.5 font-mono">
+                <div className="text-sm text-muted font-bold">Active OCR Rules</div>
+                <div className="text-3xl font-black text-text mt-0.5 font-mono">
                   {stats?.activeOcrCorrections ?? correctionsArray.length}
                 </div>
               </div>
@@ -730,11 +730,11 @@ const Learning: React.FC = () => {
 
             <div className="bg-glass-bg border border-glass-border rounded-2xl p-4 flex items-center gap-3.5 shadow-md">
               <div className="p-3 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                <Sparkles size={22} />
+                <Sparkles size={24} />
               </div>
               <div>
-                <div className="text-xs text-muted font-bold">Learned Rx Combos</div>
-                <div className="text-2xl font-black text-text mt-0.5 font-mono">
+                <div className="text-sm text-muted font-bold">Learned Rx Combos</div>
+                <div className="text-3xl font-black text-text mt-0.5 font-mono">
                   {stats ? stats.learnedRxCombos : '—'}
                 </div>
               </div>
@@ -742,11 +742,11 @@ const Learning: React.FC = () => {
 
             <div className="bg-glass-bg border border-glass-border rounded-2xl p-4 flex items-center gap-3.5 shadow-md">
               <div className="p-3 rounded-xl bg-primary/10 text-primary border border-primary/20">
-                <ShieldCheck size={22} />
+                <ShieldCheck size={24} />
               </div>
               <div>
-                <div className="text-xs text-muted font-bold">Salt Mappings Baseline</div>
-                <div className="text-2xl font-black text-primary mt-0.5 font-mono">
+                <div className="text-sm text-muted font-bold">Salt Mappings Baseline</div>
+                <div className="text-3xl font-black text-primary mt-0.5 font-mono">
                   —
                 </div>
               </div>

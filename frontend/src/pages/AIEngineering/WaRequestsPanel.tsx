@@ -199,10 +199,10 @@ const WaMatchCard: React.FC<{ row: WaMatchRow }> = ({ row }) => {
             {row.source === 'image' && <span title="Photo request" className="inline-flex"><ImageIcon size={12} className="text-muted" /></span>}
           </div>
           {row.messageBody && (
-            <p className="text-[11px] text-muted mt-1 truncate italic">&ldquo;{row.messageBody}&rdquo;</p>
+            <p className="text-xs text-muted mt-1 truncate italic">&ldquo;{row.messageBody}&rdquo;</p>
           )}
         </div>
-        <span className={`px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-wide border ${avail.cls}`}>
+        <span className={`px-2.5 py-1 rounded-full text-xs font-black uppercase tracking-wide border ${avail.cls}`}>
           {avail.label}
         </span>
       </div>
@@ -212,12 +212,12 @@ const WaMatchCard: React.FC<{ row: WaMatchRow }> = ({ row }) => {
 
       {/* Medicine asked */}
       <div className="flex items-center gap-2 flex-wrap">
-        <PackageCheck size={14} className="text-emerald-400 shrink-0" />
-        <span className="text-sm font-bold text-text">{row.medicineName || '—'}</span>
-        {row.quantity && <span className="text-xs font-bold text-primary">× {row.quantity}</span>}
-        {row.dosageForm && <span className="text-[10px] px-2 py-0.5 rounded-full bg-bg3 text-muted border border-glass-border uppercase">{row.dosageForm}</span>}
+        <PackageCheck size={16} className="text-emerald-400 shrink-0" />
+        <span className="text-base font-bold text-text">{row.medicineName || '—'}</span>
+        {row.quantity && <span className="text-sm font-bold text-primary">× {row.quantity}</span>}
+        {row.dosageForm && <span className="text-xs px-2 py-0.5 rounded-full bg-bg3 text-muted border border-glass-border uppercase">{row.dosageForm}</span>}
         {row.confidence > 0 && (
-          <span className="ml-auto text-[10px] font-mono text-muted">match {row.confidence}%</span>
+          <span className="ml-auto text-xs font-mono text-muted">match {row.confidence}%</span>
         )}
       </div>
 
@@ -225,7 +225,7 @@ const WaMatchCard: React.FC<{ row: WaMatchRow }> = ({ row }) => {
           LOCAL-ONLY by the pipeline, never re-searched from here */}
       {row.relatedMedicines.length > 0 && (
         <div>
-          <p className="text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5">Also on this strip</p>
+          <p className="text-xs font-bold text-muted uppercase tracking-wider mb-1.5">Also on this strip</p>
           <div className="flex flex-wrap gap-1.5">
             {row.relatedMedicines.map((r) => {
               const cls = !r.registered

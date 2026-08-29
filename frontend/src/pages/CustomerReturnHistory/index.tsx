@@ -123,7 +123,7 @@ export default function CustomerReturnHistory() {
       </div>
 
       {/* Top Filter Bar */}
-      <div className="flex flex-col md:flex-row gap-4 items-center bg-white/5 border border-white/10 p-4 rounded-xl shrink-0">
+      <div className="flex flex-col md:flex-row gap-4 items-center bg-bg2/80 border border-border p-4 rounded-xl shrink-0 text-sm">
         <div className="relative flex-1 w-full">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted" />
           <input
@@ -131,34 +131,34 @@ export default function CustomerReturnHistory() {
             placeholder="Search by Invoice No, Return No, Medicine, Reason..."
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            className="w-full pl-9 pr-4 py-2 bg-black/20 border border-glass-border rounded-xl text-sm text-white placeholder:text-muted/40 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
+            className="w-full pl-9 pr-4 py-2 bg-bg3 border border-glass-border rounded-xl text-base text-text placeholder:text-muted/40 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
           />
         </div>
 
         {/* Date Filters */}
         <div className="flex items-center gap-2 border-r border-glass-border/30 pr-4">
           <div className="flex items-center gap-1.5">
-            <span className="text-[10px] text-muted font-black uppercase">From</span>
+            <span className="text-xs text-muted font-black uppercase">From</span>
             <input
               type="date"
               value={toDateInputValue(dateRangeHelper.dateRange.from)}
               onChange={e => dateRangeHelper.handleFromChange(e.target.value)}
-              className="px-2.5 py-1.5 bg-bg3 border border-glass-border rounded-lg text-xs font-semibold text-text focus:outline-none focus:border-primary/50 hover:border-glass-border/60 transition-colors w-32"
+              className="px-2.5 py-1.5 bg-bg3 border border-glass-border rounded-lg text-sm font-semibold text-text focus:outline-none focus:border-primary/50 hover:border-glass-border/60 transition-colors w-36"
             />
           </div>
           <div className="flex items-center gap-1.5">
-            <span className="text-[10px] text-muted font-black uppercase">To</span>
+            <span className="text-xs text-muted font-black uppercase">To</span>
             <input
               type="date"
               value={toDateInputValue(dateRangeHelper.dateRange.to)}
               onChange={e => dateRangeHelper.handleToChange(e.target.value)}
-              className="px-2.5 py-1.5 bg-bg3 border border-glass-border rounded-lg text-xs font-semibold text-text focus:outline-none focus:border-primary/50 hover:border-glass-border/60 transition-colors w-32"
+              className="px-2.5 py-1.5 bg-bg3 border border-glass-border rounded-lg text-sm font-semibold text-text focus:outline-none focus:border-primary/50 hover:border-glass-border/60 transition-colors w-36"
             />
           </div>
           {(dateRangeHelper.dateRange.from || dateRangeHelper.dateRange.to) && (
             <button
               onClick={() => dateRangeHelper.clearFilters()}
-              className="px-2.5 py-1.5 rounded bg-red-500/15 border border-red-500/30 text-red-400 hover:bg-red-500 hover:text-white transition-all text-xs font-bold cursor-pointer"
+              className="px-2.5 py-1.5 rounded bg-red-500/15 border border-red-500/30 text-red-400 hover:bg-red-500 hover:text-white transition-all text-sm font-bold cursor-pointer"
             >
               Clear
             </button>
@@ -169,18 +169,18 @@ export default function CustomerReturnHistory() {
         <div className="flex items-center gap-2">
           <button
             onClick={() => handleExport('csv')}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border bg-bg3 border-glass-border text-muted hover:text-text hover:border-glass-border/60 text-xs font-bold transition-all cursor-pointer"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border bg-bg3 border-glass-border text-muted hover:text-text hover:border-glass-border/60 text-sm font-bold transition-all cursor-pointer"
             title="Export to CSV"
           >
-            <Download size={13} />
+            <Download size={15} />
             CSV
           </button>
           <button
             onClick={() => handleExport('pdf')}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border bg-bg3 border-glass-border text-muted hover:text-text hover:border-glass-border/60 text-xs font-bold transition-all cursor-pointer"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border bg-bg3 border-glass-border text-muted hover:text-text hover:border-glass-border/60 text-sm font-bold transition-all cursor-pointer"
             title="Export to PDF"
           >
-            <Download size={13} />
+            <Download size={15} />
             PDF
           </button>
         </div>
@@ -190,7 +190,7 @@ export default function CustomerReturnHistory() {
         {isFetching && items.length === 0 ? (
           <div className="p-8 text-center text-muted">
             <div className="flex items-center justify-center gap-2">
-              <Loader2 size={16} className="animate-spin text-primary" />
+              <Loader2 size={18} className="animate-spin text-primary" />
               Loading history...
             </div>
           </div>
@@ -199,17 +199,17 @@ export default function CustomerReturnHistory() {
             <div className="w-16 h-16 rounded-full bg-white/5 flex items-center justify-center mb-4">
               <History className="w-8 h-8 text-muted" />
             </div>
-            <h3 className="text-lg font-medium text-text mb-1">No Returns Yet</h3>
-            <p className="text-sm text-muted">Customer returns will appear here.</p>
+            <h3 className="text-xl font-medium text-text mb-1">No Returns Yet</h3>
+            <p className="text-base text-muted">Customer returns will appear here.</p>
           </div>
         ) : (
           <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
             <InfiniteTable
               totalSize={rowVirtualizer.getTotalSize()}
               containerRef={parentRef}
-              className="border-0 bg-transparent text-sm"
+              className="border-0 bg-transparent text-base"
               header={
-                <tr className="flex items-center min-w-[900px] bg-white/5 border-b border-white/10 text-muted font-medium select-none align-top">
+                <tr className="flex items-center min-w-[900px] bg-bg3 border-b border-border text-muted font-medium select-none align-top text-sm">
                   <th className="w-32 shrink-0 p-4">Return No</th>
                   <th className="w-48 shrink-0 p-4">Date</th>
                   <th className="w-36 shrink-0 p-4">Original Invoice</th>
@@ -229,16 +229,16 @@ export default function CustomerReturnHistory() {
                       size={virtualRow.size}
                       className="min-w-[900px] border-b border-white/5 hover:bg-white/5 transition-colors items-center flex"
                     >
-                      <td className="w-32 shrink-0 p-4 font-medium text-text">{row.return_no}</td>
-                      <td className="w-48 shrink-0 p-4 text-muted">
+                      <td className="w-32 shrink-0 p-4 font-medium text-text text-base">{row.return_no}</td>
+                      <td className="w-48 shrink-0 p-4 text-muted text-sm">
                         {formatDisplayDate(row.date)}
                         <div className="text-xs text-muted/50 mt-0.5">
                           {new Date(row.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                         </div>
                       </td>
-                      <td className="w-36 shrink-0 p-4 text-sky">{row.original_invoice_no}</td>
+                      <td className="w-36 shrink-0 p-4 text-sky text-base">{row.original_invoice_no}</td>
                       <td className="flex-1 min-w-[250px] p-4">
-                        <div className="text-xs space-y-1">
+                        <div className="text-sm space-y-1">
                           {row.items?.map((i: LocalReturnItem, idx: number) => (
                             <div key={idx} className="text-muted truncate">
                               {i.quantity}x {i.medicine_name}
@@ -246,7 +246,7 @@ export default function CustomerReturnHistory() {
                           ))}
                         </div>
                       </td>
-                      <td className="w-32 shrink-0 p-4 text-right font-medium text-emerald">
+                      <td className="w-32 shrink-0 p-4 text-right font-medium text-emerald text-base">
                         ₹{row.total_amount?.toFixed(2)}
                       </td>
                     </VirtualRow>

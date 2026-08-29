@@ -49,38 +49,38 @@ const ReviewQueue: React.FC<Props> = ({ active }) => {
       <div className="space-y-4">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <h2 className="text-sm font-black text-text uppercase tracking-wide">Review New Medicines</h2>
-            <p className="text-[11px] text-muted mt-0.5">
+            <h2 className="text-base font-black text-text uppercase tracking-wide">Review New Medicines</h2>
+            <p className="text-xs text-muted mt-0.5">
               Master medicines the offline classifier could not place. Run the ONE-Google-search lookup per medicine,
               read the highlighted screenshot, then confirm its schedule — saved only on your click.
             </p>
           </div>
           <div className="relative w-full max-w-xs">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
             <input
               type="text"
               placeholder="Search new medicines by name"
               value={searchInput}
               onChange={(e) => handleSearchInput(e.target.value)}
-              className="w-full pl-8 pr-3 py-2.5 bg-bg2 border border-glass-border rounded-xl text-xs text-text focus:outline-none focus:border-primary font-medium"
+              className="w-full pl-8 pr-3 py-2.5 bg-bg2 border border-glass-border rounded-xl text-sm text-text focus:outline-none focus:border-primary font-medium"
             />
           </div>
         </div>
 
         <div className="bg-bg2 border border-glass-border rounded-2xl overflow-hidden">
-          <div className="grid grid-cols-[minmax(0,1fr)_150px_110px] gap-2 px-4 py-3 border-b border-glass-border text-[10px] font-bold text-muted uppercase tracking-wider">
+          <div className="grid grid-cols-[minmax(0,1fr)_150px_110px] gap-2 px-4 py-3 border-b border-glass-border text-xs font-bold text-muted uppercase tracking-wider">
             <span>Medicine (newest first)</span>
             <span className="hidden sm:block">Company / Packing</span>
             <span className="text-right">Schedule Lookup</span>
           </div>
 
           {list.isLoading && items.length === 0 && (
-            <div className="py-14 text-center text-xs text-muted font-semibold">Loading review queue…</div>
+            <div className="py-14 text-center text-sm text-muted font-semibold">Loading review queue…</div>
           )}
           {!list.isLoading && items.length === 0 && (
             <div className="py-14 text-center">
               <PackageSearch size={28} className="mx-auto text-muted mb-2" />
-              <p className="text-xs text-muted font-semibold">Nothing pending — every searched medicine is classified.</p>
+              <p className="text-sm text-muted font-semibold">Nothing pending — every searched medicine is classified.</p>
             </div>
           )}
 
@@ -91,10 +91,10 @@ const ReviewQueue: React.FC<Props> = ({ active }) => {
                 className="grid grid-cols-[minmax(0,1fr)_150px_110px] gap-2 px-4 py-2.5 items-center hover:bg-bg3/50 transition-colors"
               >
                 <div className="min-w-0">
-                  <p className="text-xs font-bold text-text truncate">{m.name}</p>
-                  {m.generic_name && <p className="text-[10px] text-muted truncate mt-0.5">{m.generic_name}</p>}
+                  <p className="text-sm font-bold text-text truncate">{m.name}</p>
+                  {m.generic_name && <p className="text-xs text-muted truncate mt-0.5">{m.generic_name}</p>}
                 </div>
-                <span className="hidden sm:block text-[11px] text-muted truncate pr-2">
+                <span className="hidden sm:block text-xs text-muted truncate pr-2">
                   {[m.manufacturer, m.packaging].filter(Boolean).join(' · ') || '—'}
                 </span>
                 <button

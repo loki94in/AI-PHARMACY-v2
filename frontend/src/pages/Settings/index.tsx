@@ -102,11 +102,11 @@ export default function Settings() {
         {/* Title */}
         <div className="flex items-center gap-2.5">
           <div className="p-2 rounded-xl bg-primary/10 text-primary border border-primary/20">
-            <SettingsIcon size={20} />
+            <SettingsIcon size={22} />
           </div>
           <div>
-            <h1 className="text-base font-bold text-text leading-none">Settings & Configuration</h1>
-            <p className="text-[11px] text-muted mt-0.5">Control center for store rules, security & integrations</p>
+            <h1 className="text-lg font-bold text-text leading-none">Settings & Configuration</h1>
+            <p className="text-xs text-muted mt-0.5">Control center for store rules, security & integrations</p>
           </div>
         </div>
 
@@ -119,13 +119,13 @@ export default function Settings() {
               <button
                 key={tab.id}
                 onClick={() => handleTabChange(tab.id)}
-                className={`flex items-center gap-2 px-3 py-1.5 font-semibold text-xs rounded-lg transition-all whitespace-nowrap cursor-pointer ${
+                className={`flex items-center gap-2 px-3 py-1.5 font-semibold text-sm rounded-lg transition-all whitespace-nowrap cursor-pointer ${
                   isActive
                     ? 'bg-bg2 text-primary font-bold shadow-sm border border-border'
                     : 'text-muted hover:text-text hover:bg-bg3/80 border border-transparent'
                 }`}
               >
-                <Icon size={14} className={isActive ? 'text-primary' : 'text-muted'} />
+                <Icon size={16} className={isActive ? 'text-primary' : 'text-muted'} />
                 <span>{tab.label}</span>
               </button>
             );
@@ -139,7 +139,7 @@ export default function Settings() {
         {loadingSettings && (!rawSettings || Object.keys(rawSettings).length === 0) ? (
           <div className="flex items-center justify-center py-12">
             <RefreshCw size={24} className="animate-spin text-primary mr-2" />
-            <span className="text-xs font-semibold text-muted">Hydrating pharmacy configuration settings...</span>
+            <span className="text-sm font-semibold text-muted">Hydrating pharmacy configuration settings...</span>
           </div>
         ) : (
           <>

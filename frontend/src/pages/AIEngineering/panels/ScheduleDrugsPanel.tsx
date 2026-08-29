@@ -97,8 +97,8 @@ const SummaryChip = memo(({
   >
     <span className="shrink-0">{icon}</span>
     <span className="text-left">
-      <span className="block text-[10px] font-bold uppercase tracking-wider opacity-80">{label}</span>
-      <span className="block text-lg font-black leading-none mt-0.5">
+      <span className="block text-xs font-bold uppercase tracking-wider opacity-80">{label}</span>
+      <span className="block text-xl font-black leading-none mt-0.5">
         {count === null ? '—' : formatCount(count)}
       </span>
     </span>
@@ -145,7 +145,7 @@ const ScheduleDrugsPanel: React.FC = () => {
           <button
             key={id}
             onClick={() => setTab(id)}
-            className={`px-4 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+            className={`px-4 py-2 rounded-xl text-sm font-bold border transition-all cursor-pointer ${
               tab === id
                 ? 'bg-primary/15 border-primary/40 text-text'
                 : 'bg-bg2 border-glass-border text-muted hover:text-text'

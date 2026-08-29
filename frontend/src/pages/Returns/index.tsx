@@ -1209,16 +1209,16 @@ const Returns: React.FC = () => {
               <button
                 key={t.id}
                 onClick={() => setSearchParams({ tab: t.id })}
-                className={`flex items-center gap-2 px-3.5 py-1.5 font-bold text-xs rounded-lg transition-all duration-200 whitespace-nowrap cursor-pointer ${
+                className={`flex items-center gap-2 px-3.5 py-1.5 font-bold text-sm rounded-lg transition-all duration-200 whitespace-nowrap cursor-pointer ${
                   isActive
                     ? 'bg-bg2 text-primary font-black shadow-md border border-border ring-1 ring-primary/20'
                     : 'text-muted hover:text-text hover:bg-bg3/90 border border-transparent'
                 }`}
               >
-                <Icon size={14} className={isActive ? 'text-primary animate-pulse' : 'text-muted'} />
+                <Icon size={16} className={isActive ? 'text-primary animate-pulse' : 'text-muted'} />
                 <span>{t.label}</span>
                 {t.count !== undefined && (
-                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-extrabold ${
+                  <span className={`text-xs px-1.5 py-0.2 rounded-full font-mono font-extrabold ${
                     isActive ? 'bg-primary/20 text-primary' : 'bg-bg/50 text-muted'
                   }`}>
                     {t.count}

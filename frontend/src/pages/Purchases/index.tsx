@@ -4086,37 +4086,37 @@ const Purchases: React.FC = () => {
       <div className="border-t border-glass-border bg-white/[0.02] overflow-hidden shrink-0 mt-0">
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 divide-x divide-white/10">
           <div className="flex flex-col items-center justify-center py-2 px-3 gap-0.5">
-            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Gross Amt</span>
-            <span className="text-base font-bold text-white">₹{totals.grossAmount.toFixed(2)}</span>
+            <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Gross Amt</span>
+            <span className="text-lg font-bold text-text">₹{totals.grossAmount.toFixed(2)}</span>
           </div>
           <div className="flex flex-col items-center justify-center py-2 px-3 gap-0.5">
-            <span className="text-[10px] font-bold text-yellow-400 uppercase tracking-widest">
+            <span className="text-xs font-bold text-yellow-400 uppercase tracking-widest">
               Discount (CD)
             </span>
-            <span className="text-base font-bold text-red-400">-₹{totals.totalCd.toFixed(2)}</span>
+            <span className="text-lg font-bold text-red-400">-₹{totals.totalCd.toFixed(2)}</span>
           </div>
           <div className="flex flex-col items-center justify-center py-2 px-3 gap-0.5">
-            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Taxable Value</span>
-            <span className="text-base font-bold text-white">₹{totals.subtotal.toFixed(2)}</span>
+            <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Taxable Value</span>
+            <span className="text-lg font-bold text-text">₹{totals.subtotal.toFixed(2)}</span>
           </div>
           <div className="flex flex-col items-center justify-center py-2 px-3 gap-0.5">
-            <span className="text-[10px] font-bold text-orange-400 uppercase tracking-widest">CGST</span>
-            <span className="text-base font-bold text-white">₹{totals.totalCgst.toFixed(2)}</span>
+            <span className="text-xs font-bold text-orange-400 uppercase tracking-widest">CGST</span>
+            <span className="text-lg font-bold text-text">₹{totals.totalCgst.toFixed(2)}</span>
           </div>
           <div className="flex flex-col items-center justify-center py-2 px-3 gap-0.5">
-            <span className="text-[10px] font-bold text-orange-400 uppercase tracking-widest">SGST</span>
-            <span className="text-base font-bold text-white">₹{totals.totalSgst.toFixed(2)}</span>
+            <span className="text-xs font-bold text-orange-400 uppercase tracking-widest">SGST</span>
+            <span className="text-lg font-bold text-text">₹{totals.totalSgst.toFixed(2)}</span>
           </div>
           <div className="flex flex-col items-center justify-center py-2 px-3 gap-0.5">
-            <span className="text-[10px] font-bold text-purple-400 uppercase tracking-widest">CN Applied</span>
-            <span className="text-base font-bold text-red-400" title={cnNumber ? `CN Ref: ${cnNumber}` : undefined}>
+            <span className="text-xs font-bold text-purple-400 uppercase tracking-widest">CN Applied</span>
+            <span className="text-lg font-bold text-red-400" title={cnNumber ? `CN Ref: ${cnNumber}` : undefined}>
               -₹{(parseFloat(String(cnAmount)) || 0).toFixed(2)}
             </span>
           </div>
           {(parseFloat(String(extraCredit)) || 0) > 0 && (
             <div className="flex flex-col items-center justify-center py-2 px-3 gap-0.5">
-              <span className="text-[10px] font-bold text-amber-400 uppercase tracking-widest">Add. Disc</span>
-              <span className="text-base font-bold text-red-400">
+              <span className="text-xs font-bold text-amber-400 uppercase tracking-widest">Add. Disc</span>
+              <span className="text-lg font-bold text-red-400">
                 -₹{(parseFloat(String(extraCredit)) || 0).toFixed(2)}
               </span>
             </div>
@@ -4125,25 +4125,25 @@ const Purchases: React.FC = () => {
 
         <div className="flex items-center justify-between px-6 py-4 border-t border-white/20 bg-white/5">
           <div>
-            <p className="text-xs text-gray-400 mb-0.5">Grand Total (incl. GST)</p>
-            <p className="text-3xl font-extrabold text-white tracking-tight">
+            <p className="text-sm text-gray-400 mb-0.5">Grand Total (incl. GST)</p>
+            <p className="text-4xl font-extrabold text-text tracking-tight">
               ₹{Math.round(totals.grandTotal)}
             </p>
           </div>
           <div className="flex items-center gap-3">
             {(!selectedDistributor && (!distributorSearch.trim() || !isValidDistributorName(distributorSearch))) && (
-              <div className="flex items-center gap-1.5 text-xs font-semibold text-rose-400 bg-rose-500/10 px-3 py-2 rounded-xl border border-rose-500/20 shadow-sm">
+              <div className="flex items-center gap-1.5 text-sm font-semibold text-rose-400 bg-rose-500/10 px-3 py-2 rounded-xl border border-rose-500/20 shadow-sm">
                 <span>⚠️ Distributor required before purchase can be finalized.</span>
               </div>
             )}
             <button
               onClick={savePurchase}
-              className="bg-green-600 hover:bg-green-500 active:scale-95 text-white px-10 py-3 rounded-xl font-bold text-base shadow-lg shadow-green-900/30 transition-all flex items-center gap-2"
+              className="bg-green-600 hover:bg-green-500 active:scale-95 text-white px-10 py-3 rounded-xl font-bold text-lg shadow-lg shadow-green-900/30 transition-all flex items-center gap-2"
               title={saving ? 'Click again to retry if stuck' : 'Save Purchase Bill (Ctrl+S)'}
             >
               {saving
-                ? <><RefreshCw size={16} className="animate-spin" /> Saving...</>
-                : <><CheckCircle size={16} /> Save Purchase</>}
+                ? <><RefreshCw size={18} className="animate-spin" /> Saving...</>
+                : <><CheckCircle size={18} /> Save Purchase</>}
             </button>
           </div>
         </div>

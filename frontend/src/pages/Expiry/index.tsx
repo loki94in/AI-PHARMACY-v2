@@ -372,25 +372,25 @@ const Expiry = () => {
 
           {/* Table Container */}
           <div className="flex-1 overflow-auto bg-bg/40">
-            <table className="w-full text-left border-collapse text-xs">
+            <table className="w-full text-left border-collapse text-sm">
               <thead className="sticky top-0 bg-bg2/95 backdrop-blur-md z-10 select-none border-b border-glass-border">
                 <tr>
-                  <th className="p-4 text-xs font-bold text-muted uppercase tracking-wider border-b border-glass-border/60 w-8">
+                  <th className="p-4 text-sm font-bold text-muted uppercase tracking-wider border-b border-glass-border/60 w-8">
                     <input type="checkbox" className="rounded" onChange={e => {
                       if (e.target.checked) setSelectedIds(new Set(filteredItems.filter(i => i.purchase_invoice_no).map(i => i.id)));
                       else setSelectedIds(new Set());
                     }} checked={selectedIds.size === filteredItems.filter(i => i.purchase_invoice_no).length && filteredItems.length > 0} readOnly />
                   </th>
-                  <th className="p-4 text-xs font-bold text-muted uppercase tracking-wider border-b border-glass-border/60">ID</th>
-                  <th className="p-4 text-xs font-bold text-muted uppercase tracking-wider border-b border-glass-border/60">Medicine Name</th>
-                  <th className="p-4 text-xs font-bold text-muted uppercase tracking-wider border-b border-glass-border/60">Batch Number</th>
-                  <th className="p-4 text-xs font-bold text-muted uppercase tracking-wider border-b border-glass-border/60 text-center">Expiry Date</th>
-                  <th className="p-4 text-xs font-bold text-muted uppercase tracking-wider border-b border-glass-border/60 text-center">Remaining Time</th>
-                  <th className="p-4 text-xs font-bold text-muted uppercase tracking-wider border-b border-glass-border/60 text-center">Stock Qty</th>
-                  <th className="p-4 text-xs font-bold text-muted uppercase tracking-wider border-b border-glass-border/60 text-right">MRP Price</th>
-                  <th className="p-4 text-xs font-bold text-muted uppercase tracking-wider border-b border-glass-border/60">Invoice Ref / Supplier</th>
-                  <th className="p-4 text-xs font-bold text-muted uppercase tracking-wider border-b border-glass-border/60">Rack Location</th>
-                  <th className="p-4 text-xs font-bold text-muted uppercase tracking-wider border-b border-glass-border/60 text-center">Actions</th>
+                  <th className="p-4 text-sm font-bold text-muted uppercase tracking-wider border-b border-glass-border/60">ID</th>
+                  <th className="p-4 text-sm font-bold text-muted uppercase tracking-wider border-b border-glass-border/60">Medicine Name</th>
+                  <th className="p-4 text-sm font-bold text-muted uppercase tracking-wider border-b border-glass-border/60">Batch Number</th>
+                  <th className="p-4 text-sm font-bold text-muted uppercase tracking-wider border-b border-glass-border/60 text-center">Expiry Date</th>
+                  <th className="p-4 text-sm font-bold text-muted uppercase tracking-wider border-b border-glass-border/60 text-center">Remaining Time</th>
+                  <th className="p-4 text-sm font-bold text-muted uppercase tracking-wider border-b border-glass-border/60 text-center">Stock Qty</th>
+                  <th className="p-4 text-sm font-bold text-muted uppercase tracking-wider border-b border-glass-border/60 text-right">MRP Price</th>
+                  <th className="p-4 text-sm font-bold text-muted uppercase tracking-wider border-b border-glass-border/60">Invoice Ref / Supplier</th>
+                  <th className="p-4 text-sm font-bold text-muted uppercase tracking-wider border-b border-glass-border/60">Rack Location</th>
+                  <th className="p-4 text-sm font-bold text-muted uppercase tracking-wider border-b border-glass-border/60 text-center">Actions</th>
                 </tr>
                 <tr className="bg-bg2 border-b border-glass-border/30">
                   <td className="p-2"></td>
@@ -400,7 +400,7 @@ const Expiry = () => {
                       placeholder="Search ID..."
                       value={colFilterId}
                       onChange={e => setColFilterId(e.target.value)}
-                      className="w-full px-2 py-1 bg-bg3 border border-glass-border rounded-lg text-xs text-text placeholder:text-muted/40 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 animate-in fade-in"
+                      className="w-full px-2.5 py-1.5 bg-bg3 border border-glass-border rounded-lg text-sm text-text placeholder:text-muted/40 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 animate-in fade-in"
                     />
                   </td>
                   <td className="p-2">
@@ -409,7 +409,7 @@ const Expiry = () => {
                       placeholder="Search name..."
                       value={colFilterMedName}
                       onChange={e => setColFilterMedName(e.target.value)}
-                      className="w-full px-2 py-1 bg-bg3 border border-glass-border rounded-lg text-xs text-text placeholder:text-muted/40 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 animate-in fade-in"
+                      className="w-full px-2.5 py-1.5 bg-bg3 border border-glass-border rounded-lg text-sm text-text placeholder:text-muted/40 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 animate-in fade-in"
                     />
                   </td>
                   <td className="p-2">
@@ -418,7 +418,7 @@ const Expiry = () => {
                       placeholder="Search batch..."
                       value={colFilterBatchNo}
                       onChange={e => setColFilterBatchNo(e.target.value)}
-                      className="w-full px-2 py-1 bg-bg3 border border-glass-border rounded-lg text-xs text-text placeholder:text-muted/40 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 animate-in fade-in"
+                      className="w-full px-2.5 py-1.5 bg-bg3 border border-glass-border rounded-lg text-sm text-text placeholder:text-muted/40 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 animate-in fade-in"
                     />
                   </td>
                   <td className="p-2">
@@ -426,7 +426,7 @@ const Expiry = () => {
                       type="date"
                       value={toDateInputValue(colFilterDate)}
                       onChange={e => setColFilterDate(e.target.value)}
-                      className="w-full px-2 py-1 bg-bg3 border border-glass-border rounded-lg text-xs text-text focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 animate-in fade-in"
+                      className="w-full px-2.5 py-1.5 bg-bg3 border border-glass-border rounded-lg text-sm text-text focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 animate-in fade-in"
                     />
                   </td>
                   <td className="p-2"></td>
@@ -436,14 +436,14 @@ const Expiry = () => {
                       placeholder="Min"
                       value={colFilterMinQty}
                       onChange={e => setColFilterMinQty(e.target.value)}
-                      className="w-1/2 px-1 py-1 bg-bg3 border border-glass-border rounded-lg text-xs text-text placeholder:text-muted/40 focus:outline-none focus:border-primary/50"
+                      className="w-1/2 px-1.5 py-1.5 bg-bg3 border border-glass-border rounded-lg text-sm text-text placeholder:text-muted/40 focus:outline-none focus:border-primary/50"
                     />
                     <input
                       type="number"
                       placeholder="Max"
                       value={colFilterMaxQty}
                       onChange={e => setColFilterMaxQty(e.target.value)}
-                      className="w-1/2 px-1 py-1 bg-bg3 border border-glass-border rounded-lg text-xs text-text placeholder:text-muted/40 focus:outline-none focus:border-primary/50"
+                      className="w-1/2 px-1.5 py-1.5 bg-bg3 border border-glass-border rounded-lg text-sm text-text placeholder:text-muted/40 focus:outline-none focus:border-primary/50"
                     />
                   </td>
                   <td className="p-2">
@@ -453,14 +453,14 @@ const Expiry = () => {
                         placeholder="Min"
                         value={colFilterMinMrp}
                         onChange={e => setColFilterMinMrp(e.target.value)}
-                        className="w-1/2 px-1 py-1 bg-bg3 border border-glass-border rounded-lg text-xs text-text placeholder:text-muted/40 focus:outline-none focus:border-primary/50"
+                        className="w-1/2 px-1.5 py-1.5 bg-bg3 border border-glass-border rounded-lg text-sm text-text placeholder:text-muted/40 focus:outline-none focus:border-primary/50"
                       />
                       <input
                         type="number"
                         placeholder="Max"
                         value={colFilterMaxMrp}
                         onChange={e => setColFilterMaxMrp(e.target.value)}
-                        className="w-1/2 px-1 py-1 bg-bg3 border border-glass-border rounded-lg text-xs text-text placeholder:text-muted/40 focus:outline-none focus:border-primary/50"
+                        className="w-1/2 px-1.5 py-1.5 bg-bg3 border border-glass-border rounded-lg text-sm text-text placeholder:text-muted/40 focus:outline-none focus:border-primary/50"
                       />
                     </div>
                   </td>
@@ -474,7 +474,7 @@ const Expiry = () => {
                         placeholder="Search location..."
                         value={colFilterLocation}
                         onChange={e => setColFilterLocation(e.target.value)}
-                        className="flex-1 px-2 py-1 bg-bg3 border border-glass-border rounded-lg text-xs text-text placeholder:text-muted/40 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 animate-in fade-in"
+                        className="flex-1 px-2.5 py-1.5 bg-bg3 border border-glass-border rounded-lg text-sm text-text placeholder:text-muted/40 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 animate-in fade-in"
                       />
                       {(colFilterId || colFilterMedName || colFilterBatchNo || colFilterDate || colFilterMinQty || colFilterMaxQty || colFilterMinMrp || colFilterMaxMrp || colFilterLocation) && (
                         <button
@@ -489,7 +489,7 @@ const Expiry = () => {
                             setColFilterMaxMrp('');
                             setColFilterLocation('');
                           }}
-                          className="text-[10px] text-red hover:underline font-bold px-1"
+                          className="text-xs text-red hover:underline font-bold px-1"
                         >
                           Clear
                         </button>
@@ -504,18 +504,18 @@ const Expiry = () => {
               <tbody>
                 {loading ? (
                   <tr>
-                    <td colSpan={11} className="p-12 text-center text-muted font-semibold">
+                    <td colSpan={11} className="p-12 text-center text-muted font-semibold text-sm">
                       <RefreshCw size={24} className="animate-spin mx-auto mb-3 text-primary opacity-60" />
                       Loading expiry register...
                     </td>
                   </tr>
                 ) : filteredItems.length === 0 ? (
                   <tr>
-                    <td colSpan={11} className="p-16 text-center text-muted font-semibold">
-                      <CheckCircle2 size={36} className="mx-auto mb-3 text-muted/30" />
+                    <td colSpan={11} className="p-16 text-center text-muted font-semibold text-base">
+                      <CheckCircle2 size={40} className="mx-auto mb-3 text-muted/30" />
                       <span>No items matching expiry thresholds in inventory.</span>
                       {colFilterMedName && colFilterMedName.trim().length >= 2 && (
-                        <div className="mt-2 text-[12px] text-amber-500 font-medium">
+                        <div className="mt-2 text-sm text-amber-500 font-medium">
                           🔍 No expiring items match "{colFilterMedName}". Please check spelling or clear medicine filter.
                         </div>
                       )}
@@ -545,55 +545,55 @@ const Expiry = () => {
                               disabled={!item.purchase_invoice_no}
                             />
                             {isSelected && (
-                              <span className="px-1.5 py-0.5 rounded bg-primary text-white text-[9px] font-black uppercase tracking-wider shadow-sm animate-in fade-in">
+                              <span className="px-1.5 py-0.5 rounded bg-primary text-white text-[11px] font-black uppercase tracking-wider shadow-sm animate-in fade-in">
                                 Selected
                               </span>
                             )}
                           </div>
                         </td>
-                        <td className="p-4 text-muted font-mono select-none">
+                        <td className="p-4 text-muted font-mono select-none text-sm">
                           {item.id}
                         </td>
-                        <td className="p-4 font-bold text-text">
+                        <td className="p-4 font-bold text-text text-base">
                           {item.medicine_name}
                         </td>
                         <td className="p-4 select-none">
-                          <span className="font-mono bg-bg3/60 border border-glass-border/40 rounded-lg px-2.5 py-1 font-bold text-text">
+                          <span className="font-mono bg-bg3/60 border border-glass-border/40 rounded-lg px-2.5 py-1 font-bold text-text text-sm">
                             {item.batch_no}
                           </span>
                         </td>
-                        <td className="p-4 text-center font-mono select-none text-muted font-semibold">
+                        <td className="p-4 text-center font-mono select-none text-muted font-semibold text-sm">
                           {new Date(item.expiry_date).toLocaleDateString([], { month: '2-digit', year: '2-digit' })}
                         </td>
                         <td className="p-4 text-center font-semibold select-none">
                           <div className="flex flex-col items-center gap-1">
-                            <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-extrabold border ${details.colorClass}`}>
+                            <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-extrabold border ${details.colorClass}`}>
                               {details.label}
                             </span>
-                            <span className="text-[10px] text-muted font-medium">{details.daysText}</span>
+                            <span className="text-xs text-muted font-medium">{details.daysText}</span>
                           </div>
                         </td>
-                        <td className="p-4 text-center font-extrabold font-mono text-text">
+                        <td className="p-4 text-center font-extrabold font-mono text-text text-base">
                           {item.quantity}
                         </td>
-                        <td className="p-4 text-right font-mono font-extrabold text-sky">
+                        <td className="p-4 text-right font-mono font-extrabold text-sky text-base">
                           ₹{item.mrp?.toFixed(2) || '0.00'}
                         </td>
                         <td className="p-4 select-none">
                           {item.purchase_invoice_no ? (
                             <div className="flex flex-col gap-0.5">
-                              <span className="px-2 py-0.5 bg-blue-500/10 text-blue-500 border border-blue-500/20 rounded-lg text-[9px] font-bold font-mono w-max">
+                              <span className="px-2 py-0.5 bg-blue-500/10 text-blue-500 border border-blue-500/20 rounded-lg text-[11px] font-bold font-mono w-max">
                                 {item.purchase_invoice_no}
                               </span>
-                              <span className="text-[10px] text-muted truncate max-w-[130px] font-semibold" title={item.distributor_name}>
+                              <span className="text-xs text-muted truncate max-w-[130px] font-semibold" title={item.distributor_name}>
                                 {item.distributor_name}
                               </span>
                             </div>
                           ) : (
-                            <span className="text-[10px] text-muted/65 italic font-medium">Unmatched (match manually)</span>
+                            <span className="text-xs text-muted/65 italic font-medium">Unmatched (match manually)</span>
                           )}
                         </td>
-                        <td className="p-4 text-muted font-medium select-none">
+                        <td className="p-4 text-muted font-medium select-none text-sm">
                           {item.rack_location || '-'}
                         </td>
                         <td className="p-4 text-center select-none">
@@ -604,14 +604,14 @@ const Expiry = () => {
                               }
                             }}
                             disabled={!item.purchase_invoice_no}
-                            className={`flex items-center gap-1.5 mx-auto px-3 py-1.5 rounded-xl text-[10px] font-bold border transition-all cursor-pointer ${
+                            className={`flex items-center gap-1.5 mx-auto px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
                               item.purchase_invoice_no
                                 ? 'bg-red-500/15 border-red-500/30 text-red hover:bg-red-500/25 active:scale-95'
                                 : 'opacity-40 bg-bg3 border-glass-border text-muted cursor-not-allowed'
                             }`}
                             title={item.purchase_invoice_no ? 'Create Return' : 'Cannot return: no purchase invoice found, match manually'}
                           >
-                            <RotateCcw size={11} />
+                            <RotateCcw size={13} />
                             Return
                           </button>
                         </td>

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { RotateCw, RotateCcw, ExternalLink, ShoppingCart, Package, AlertCircle, Truck, Clock, Send, Building2, MessageSquare, Phone, Search, Edit2, X, Plus, Check, Calendar, TrendingUp, Layers, Trash2, ArrowLeftRight, ArrowRight } from 'lucide-react';
+import { RotateCw, RotateCcw, ExternalLink, ShoppingCart, Package, AlertCircle, Truck, Clock, Send, Building2, MessageSquare, Phone, Search, Edit2, X, Plus, Check, Calendar, TrendingUp, TrendingDown, ArrowDown, Layers, Trash2, ArrowLeftRight, ArrowRight } from 'lucide-react';
 import { formatDisplayDate } from '../../utils/date';
 import { api, apiClient, type SpecialOrder, type Refill, type ReorderSuggestion, type BatchLastPurchaseResult } from '../../services/api';
 import { toastEvent, liveCartAddEvent, specialOrdersEvent, whatsappQueueEvent, messageSendEvent } from '../../services/events';
@@ -399,8 +399,8 @@ export default function PharmarackCart() {
   const [priceHistoryCache, setPriceHistoryCache] = useState<Record<string, LocalPriceHistoryRow[]>>(() => cachedPriceHistory);
   const [sendingNotifId, setSendingNotifId] = useState<number | null>(null);
   const [pendingOrders, setPendingOrders] = useState<SpecialOrder[]>(() => cachedPendingOrders);
-const [pendingRefills, setPendingRefills] = useState<Refill[]>(() => cachedPendingRefills);
-const [showAddedItems] = useState<boolean>(false);
+  const [pendingRefills, setPendingRefills] = useState<Refill[]>(() => cachedPendingRefills);
+  const [showAddedItems] = useState<boolean>(false);
   const [reorderBannerCollapsed, setReorderBannerCollapsed] = useState<boolean>(false);
 
   const [reorderSuggestions, setReorderSuggestions] = useState<ReorderSuggestion[]>([]);
@@ -531,14 +531,14 @@ const [showAddedItems] = useState<boolean>(false);
     const now = new Date();
 
     const isToday = placedDate.getFullYear() === now.getFullYear() &&
-                    placedDate.getMonth() === now.getMonth() &&
-                    placedDate.getDate() === now.getDate();
+      placedDate.getMonth() === now.getMonth() &&
+      placedDate.getDate() === now.getDate();
 
     const yesterday = new Date(now);
     yesterday.setDate(now.getDate() - 1);
     const isYesterday = placedDate.getFullYear() === yesterday.getFullYear() &&
-                        placedDate.getMonth() === yesterday.getMonth() &&
-                        placedDate.getDate() === yesterday.getDate();
+      placedDate.getMonth() === yesterday.getMonth() &&
+      placedDate.getDate() === yesterday.getDate();
 
     const placedDateStr = placedDate.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
 
@@ -812,11 +812,11 @@ const [showAddedItems] = useState<boolean>(false);
         if (Object.keys(updatedTimes).length > 0 && isMounted) {
           setLastSentWaTimeMap(prev => {
             const next = { ...prev, ...updatedTimes };
-            try { localStorage.setItem('pharmarack_last_sent_wa_time_map', JSON.stringify(next)); } catch (_) {}
+            try { localStorage.setItem('pharmarack_last_sent_wa_time_map', JSON.stringify(next)); } catch (_) { }
             return next;
           });
         }
-      } catch (_) {}
+      } catch (_) { }
     };
 
     syncQueueStatus();
@@ -986,7 +986,7 @@ const [showAddedItems] = useState<boolean>(false);
         localStorage.removeItem('pharmarack_last_batch_sent_time');
         localStorage.removeItem('pharmarack_sent_history');
         localStorage.removeItem('pharmarack_latest_sent_map');
-      } catch (_) {}
+      } catch (_) { }
     };
 
     window.addEventListener('phone-numbers-updated', handlePhoneUpdate);
@@ -1235,8 +1235,8 @@ const [showAddedItems] = useState<boolean>(false);
   }, [distributors]);
 
   const readyToSendDistributors = React.useMemo(() => {
-    return distributors.filter(d => 
-      isDistributorMapped(d) && 
+    return distributors.filter(d =>
+      isDistributorMapped(d) &&
       (d.items || []).some(i => isItemIncludedInDispatch(i, d)) &&
       sentWaStatusMap[d.storeId] !== 'success'
     );
@@ -1586,7 +1586,7 @@ const [showAddedItems] = useState<boolean>(false);
         setSentWaStatusMap(prev => ({ ...prev, [dist.storeId]: 'success' }));
         setLastSentWaTimeMap(prev => {
           const next = { ...prev, [dist.storeId]: timeNow };
-          try { localStorage.setItem('pharmarack_last_sent_wa_time_map', JSON.stringify(next)); } catch (_) {}
+          try { localStorage.setItem('pharmarack_last_sent_wa_time_map', JSON.stringify(next)); } catch (_) { }
           return next;
         });
         toastEvent.trigger(
@@ -1637,18 +1637,18 @@ const [showAddedItems] = useState<boolean>(false);
       // Copy order message to clipboard for instant manual paste if needed
       try {
         await navigator.clipboard.writeText(msg);
-      } catch (_) {}
+      } catch (_) { }
 
       // Fallback: open/reuse WhatsApp Web tab with pre-filled order message
       const encodedMsg = encodeURIComponent(msg);
       const waWebUrl = `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodedMsg}`;
       openOrReuseWhatsappTab(waWebUrl, cleanPhone, msg);
-      
+
       const timeNow = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       setSentWaStatusMap(prev => ({ ...prev, [dist.storeId]: 'success' }));
       setLastSentWaTimeMap(prev => {
         const next = { ...prev, [dist.storeId]: timeNow };
-        try { localStorage.setItem('pharmarack_last_sent_wa_time_map', JSON.stringify(next)); } catch (_) {}
+        try { localStorage.setItem('pharmarack_last_sent_wa_time_map', JSON.stringify(next)); } catch (_) { }
         return next;
       });
 
@@ -1723,7 +1723,7 @@ const [showAddedItems] = useState<boolean>(false);
             liveBoys = freshRes.data.filter((b: LocalDeliveryBoyRow) => b.is_active !== 0);
             setDeliveryBoysList(liveBoys);
           }
-        } catch (_) {}
+        } catch (_) { }
       }
       const primaryBoy = liveBoys.find(b => b.name && b.whatsapp_number && b.whatsapp_number.trim().length > 0);
       const deliveryBoyPhone = primaryBoy?.whatsapp_number || storeInfo.deliveryBoyPhone || storeInfo.adminPhone || '';
@@ -1773,7 +1773,7 @@ const [showAddedItems] = useState<boolean>(false);
       if (res && res.success) {
         const batchTimeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         setLastBatchSentTime(batchTimeStr);
-        try { localStorage.setItem('pharmarack_last_batch_sent_time', batchTimeStr); } catch (_) {}
+        try { localStorage.setItem('pharmarack_last_batch_sent_time', batchTimeStr); } catch (_) { }
 
         // Mark all mapped distributors as queued in local status map
         const statusUpdates: Record<number, 'queued'> = {};
@@ -1948,7 +1948,7 @@ const [showAddedItems] = useState<boolean>(false);
           type: 'distributor',
           phone: cleanPhone
         });
-      } catch (_) {}
+      } catch (_) { }
 
       await broadcastContactDataChanged();
 
@@ -2259,11 +2259,11 @@ const [showAddedItems] = useState<boolean>(false);
     setDistributors(prev => {
       const updated = prev.map(dist => {
         if (dist.storeId !== item.storeId) return dist;
-        const remainingItems = dist.items.filter(i => 
-          (item.productCode && i.productCode === item.productCode) 
-            ? false 
+        const remainingItems = dist.items.filter(i =>
+          (item.productCode && i.productCode === item.productCode)
+            ? false
             : (item.productId && i.productId === item.productId)
-              ? false 
+              ? false
               : i.productName !== item.productName
         );
         const newLineTotal = remainingItems.reduce((sum, it) => sum + it.amount, 0);
@@ -2371,7 +2371,7 @@ const [showAddedItems] = useState<boolean>(false);
         scheduleCartSync(1500);
 
         toastEvent.trigger(`✅ Transferred "${medName}" (x${qty}) to Unsent Cart Orders!`, 'success');
-        
+
         // Auto-switch to Pharmarack Cart tab and 'unsent' filter
         setDistributorFilterTab('unsent');
         setSearchParams({ tab: 'cart' });
@@ -2455,7 +2455,7 @@ const [showAddedItems] = useState<boolean>(false);
         if (currentDist.storeId !== targetSupplier.storeId) {
           try {
             await handleDeleteItem(item);
-          } catch (_) {}
+          } catch (_) { }
         }
         setDistributors(prev => {
           const updated = mergeItemIntoDistributors(prev, {
@@ -2542,7 +2542,7 @@ const [showAddedItems] = useState<boolean>(false);
     apiClient.get('/settings').then(res => {
       const val = parseInt(res.data?.pharmarack_reorder_window_months || '2', 10);
       if ([2, 4, 6, 8].includes(val)) setReorderWindowMonths(val);
-    }).catch(() => {});
+    }).catch(() => { });
   }, [showSuggestionsTier]);
 
   // Card quantity overrides
@@ -2721,11 +2721,11 @@ const [showAddedItems] = useState<boolean>(false);
 
       {currentTab === 'sent-history' ? (
         /* ── Split-Pane Sent Orders History Master-Detail View ── */
-        <div className="flex-1 flex overflow-hidden bg-glass-bg border border-glass-border rounded-3xl min-h-0">
-          
+        <div className="flex-1 flex overflow-hidden bg-transparent border border-glass-border/40 rounded-3xl min-h-0">
+
           {/* Left Master Sidebar: Historical Order Dates */}
-          <div className="w-72 md:w-80 shrink-0 border-r border-glass-border/40 flex flex-col bg-bg2/30 overflow-hidden">
-            <div className="p-4 border-b border-glass-border/40 flex items-center justify-between shrink-0 bg-bg2/50">
+          <div className="w-72 md:w-80 shrink-0 border-r border-glass-border/40 flex flex-col bg-bg3/20 overflow-hidden">
+            <div className="p-4 border-b border-glass-border/40 flex items-center justify-between shrink-0 bg-transparent">
               <div className="flex items-center gap-2">
                 <Calendar size={16} className="text-primary" />
                 <h4 className="text-xs font-bold uppercase tracking-wider text-text">History Dates</h4>
@@ -2754,11 +2754,10 @@ const [showAddedItems] = useState<boolean>(false);
                     <button
                       key={d}
                       onClick={() => handleSelectSentDate(d)}
-                      className={`w-full text-left p-3 rounded-xl transition-all cursor-pointer flex items-center justify-between gap-2 border ${
-                        isSelected
+                      className={`w-full text-left p-3 rounded-xl transition-all cursor-pointer flex items-center justify-between gap-2 border ${isSelected
                           ? 'bg-primary/15 border-primary/40 text-text shadow-md shadow-primary/5'
                           : 'bg-white/[0.02] border-glass-border/30 text-muted hover:text-text hover:bg-white/[0.05]'
-                      }`}
+                        }`}
                     >
                       <div className="flex items-center gap-2.5 min-w-0">
                         <Clock size={14} className={isSelected ? "text-primary shrink-0" : "text-muted/60 shrink-0"} />
@@ -2911,11 +2910,10 @@ const [showAddedItems] = useState<boolean>(false);
               <button
                 type="button"
                 onClick={() => setShortagesSubTab('requests')}
-                className={`flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer ${
-                  shortagesSubTab === 'requests'
+                className={`flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer ${shortagesSubTab === 'requests'
                     ? 'bg-bg2 text-primary font-black shadow-xs border border-border'
                     : 'text-muted hover:text-text hover:bg-bg3'
-                }`}
+                  }`}
               >
                 <Clock size={12} />
                 <span>Special Requests ({visiblePendingOrders.length})</span>
@@ -2924,11 +2922,10 @@ const [showAddedItems] = useState<boolean>(false);
               <button
                 type="button"
                 onClick={() => setShortagesSubTab('refills')}
-                className={`flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer ${
-                  shortagesSubTab === 'refills'
+                className={`flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer ${shortagesSubTab === 'refills'
                     ? 'bg-bg2 text-primary font-black shadow-xs border border-border'
                     : 'text-muted hover:text-text hover:bg-bg3'
-                }`}
+                  }`}
               >
                 <ShoppingCart size={12} />
                 <span>Refills Due ({visiblePendingRefills.length})</span>
@@ -2937,11 +2934,10 @@ const [showAddedItems] = useState<boolean>(false);
               <button
                 type="button"
                 onClick={() => setShortagesSubTab('sales_suggestions')}
-                className={`flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer ${
-                  shortagesSubTab === 'sales_suggestions'
+                className={`flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer ${shortagesSubTab === 'sales_suggestions'
                     ? 'bg-emerald-500/20 text-emerald-400 font-black shadow-xs border border-emerald-500/30'
                     : 'text-muted hover:text-text hover:bg-bg3'
-                }`}
+                  }`}
               >
                 <TrendingUp size={12} />
                 <span>Sales Restock ({reorderSuggestions.length})</span>
@@ -2950,11 +2946,10 @@ const [showAddedItems] = useState<boolean>(false);
               <button
                 type="button"
                 onClick={() => setShortagesSubTab('ordered_recently')}
-                className={`flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer ${
-                  shortagesSubTab === 'ordered_recently'
+                className={`flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer ${shortagesSubTab === 'ordered_recently'
                     ? 'bg-violet-500/20 text-violet-400 font-black shadow-xs border border-violet-500/30'
                     : 'text-muted hover:text-text hover:bg-bg3'
-                }`}
+                  }`}
               >
                 <RotateCw size={12} />
                 <span>Ordered Recently ({reorderRecentItems.length})</span>
@@ -2979,9 +2974,8 @@ const [showAddedItems] = useState<boolean>(false);
                         <div className="space-y-2">
                           <div className="flex items-center justify-between">
                             <span className="font-extrabold text-xs text-text">{order.product}</span>
-                            <span className={`text-[9px] font-extrabold px-2 py-0.5 rounded-full ${
-                              order.priority === 'Urgent' ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30' : 'bg-bg3 text-muted border border-glass-border'
-                            }`}>
+                            <span className={`text-[9px] font-extrabold px-2 py-0.5 rounded-full ${order.priority === 'Urgent' ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30' : 'bg-bg3 text-muted border border-glass-border'
+                              }`}>
                               {order.priority || 'Normal'}
                             </span>
                           </div>
@@ -2998,11 +2992,10 @@ const [showAddedItems] = useState<boolean>(false);
                           <button
                             type="button"
                             onClick={() => liveCartAddEvent.triggerOpen(order.product, order.qty, order.id)}
-                            className={`flex-1 py-1.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all active:scale-95 cursor-pointer ${
-                              inCart ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-primary text-white hover:bg-primary/80'
-                            }`}
+                            className={`flex-1 py-1.5 px-3 rounded-xl text-sm font-bold flex items-center justify-center gap-1.5 transition-all active:scale-95 cursor-pointer ${inCart ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-primary text-white hover:bg-primary/80'
+                              }`}
                           >
-                            <ShoppingCart size={12} />
+                            <ShoppingCart size={14} />
                             <span>{inCart ? 'In Cart' : 'Add to Cart'}</span>
                           </button>
                         </div>
@@ -3016,7 +3009,7 @@ const [showAddedItems] = useState<boolean>(false);
             {/* Refills Due */}
             {shortagesSubTab === 'refills' && (
               visiblePendingRefills.length === 0 ? (
-                <div className="text-center py-16 text-xs text-muted italic">
+                <div className="text-center py-16 text-sm text-muted italic">
                   No patient refills due within the next 7 days.
                 </div>
               ) : (
@@ -3027,13 +3020,13 @@ const [showAddedItems] = useState<boolean>(false);
                       <div key={refill.id} className="p-4 rounded-2xl border border-glass-border/70 bg-bg2/40 flex flex-col justify-between gap-3 shadow-sm hover:border-glass-border transition-all">
                         <div className="space-y-2">
                           <div className="flex items-center justify-between">
-                            <span className="font-extrabold text-xs text-text">{refill.medicine_name}</span>
-                            <span className="text-[9px] font-mono font-bold text-sky-400 bg-sky-500/10 px-2 py-0.5 rounded-full border border-sky-500/20">
+                            <span className="font-extrabold text-sm text-text">{refill.medicine_name}</span>
+                            <span className="text-[11px] font-mono font-bold text-sky-400 bg-sky-500/10 px-2 py-0.5 rounded-full border border-sky-500/20">
                               Due: {refill.next_refill_date ? new Date(refill.next_refill_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : 'Soon'}
                             </span>
                           </div>
 
-                          <div className="text-xs text-muted space-y-1">
+                          <div className="text-sm text-muted space-y-1">
                             <div>Patient: <strong className="text-text">{refill.patient_name}</strong> ({refill.patient_phone})</div>
                             <div>Needed: <strong className="text-primary font-mono">{refill.quantity_needed || 1}</strong> | In Stock: <strong className="text-text font-mono">{refill.in_stock_qty || 0}</strong></div>
                           </div>
@@ -3043,11 +3036,10 @@ const [showAddedItems] = useState<boolean>(false);
                           <button
                             type="button"
                             onClick={() => liveCartAddEvent.triggerOpen(refill.medicine_name, refill.quantity_needed || 1)}
-                            className={`flex-1 py-1.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all active:scale-95 cursor-pointer ${
-                              inCart ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-primary text-white hover:bg-primary/80'
-                            }`}
+                            className={`flex-1 py-1.5 px-3 rounded-xl text-sm font-bold flex items-center justify-center gap-1.5 transition-all active:scale-95 cursor-pointer ${inCart ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-primary text-white hover:bg-primary/80'
+                              }`}
                           >
-                            <ShoppingCart size={12} />
+                            <ShoppingCart size={14} />
                             <span>{inCart ? 'In Cart' : 'Add to Cart'}</span>
                           </button>
                         </div>
@@ -3164,9 +3156,9 @@ const [showAddedItems] = useState<boolean>(false);
           </div>
         </div>
       ) : (
-        <div className="flex-1 flex flex-col overflow-hidden bg-glass-bg border border-glass-border rounded-3xl min-h-0">
+        <div className="flex-1 flex flex-col overflow-hidden bg-transparent border border-glass-border/40 rounded-3xl min-h-0">
           {/* ── Top Header ── */}
-          <div className="h-16 border-b border-glass-border/40 px-6 flex items-center justify-between shrink-0 bg-glass-bg/10 backdrop-blur-md">
+          <div className="h-16 border-b border-glass-border/40 px-6 flex items-center justify-between shrink-0 bg-transparent backdrop-blur-md">
             <div className="flex items-center gap-3">
               <div className="w-9 h-9 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary">
                 <ShoppingCart size={16} />
@@ -3201,7 +3193,7 @@ const [showAddedItems] = useState<boolean>(false);
               <button
                 onClick={handleManualRefresh}
                 disabled={loading || isRefreshing}
-                className="group p-2 rounded-lg bg-bg2 border border-glass-border hover:border-emerald-500/40 hover:bg-emerald-500/10 text-muted hover:text-emerald-400 transition-all active:scale-90 flex items-center justify-center disabled:opacity-50 hover:shadow-[0_0_12px_rgba(16,185,129,0.2)] cursor-pointer"
+                className="group p-2 rounded-lg bg-bg3/30 border border-glass-border hover:border-emerald-500/40 hover:bg-emerald-500/10 text-muted hover:text-emerald-400 transition-all active:scale-90 flex items-center justify-center disabled:opacity-50 hover:shadow-[0_0_12px_rgba(16,185,129,0.2)] cursor-pointer"
                 title="Refresh Cart Contents"
               >
                 <RotateCcw
@@ -3239,7 +3231,7 @@ const [showAddedItems] = useState<boolean>(false);
                 href="https://retailers.pharmarack.com/cart"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-bg2 border border-glass-border text-muted hover:text-text hover:bg-bg3 transition-all text-xs font-bold active:scale-95"
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-bg3/30 border border-glass-border text-muted hover:text-text hover:bg-bg3 transition-all text-xs font-bold active:scale-95"
                 title="Open Cart on retailers.pharmarack.com"
               >
                 <ExternalLink size={13} />
@@ -3252,7 +3244,7 @@ const [showAddedItems] = useState<boolean>(false);
           <div className="flex-1 flex overflow-hidden min-h-0">
 
             {/* Main live cart contents */}
-            <div className="flex-1 flex flex-col min-h-0 overflow-hidden bg-glass-bg/20">
+            <div className="flex-1 flex flex-col min-h-0 overflow-hidden bg-transparent">
               {loading ? (
                 <div className="flex flex-col items-center justify-center h-full gap-3 py-12">
                   <div className="w-10 h-10 border-4 border-emerald-500/20 border-t-emerald-400 rounded-full animate-spin" />
@@ -3310,15 +3302,14 @@ const [showAddedItems] = useState<boolean>(false);
               ) : (
                 <>
                   {/* ── Sticky Sub-Filter Toggle Bar (Unsent Cart Orders / Sent Orders / All / Failed / Missing Phone) ── */}
-                  <div className="sticky top-0 z-10 bg-bg2/80 backdrop-blur-md px-6 py-3 border-b border-glass-border/40 shrink-0 flex items-center justify-between gap-4">
-                    <div className="flex items-center gap-1.5 bg-bg2/60 p-1 rounded-xl border border-glass-border/40 text-xs font-bold select-none overflow-x-auto">
+                  <div className="sticky top-0 z-10 bg-bg/40 backdrop-blur-md px-6 py-3 border-b border-glass-border/30 shrink-0 flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-1.5 bg-bg3/30 p-1 rounded-xl border border-glass-border/30 text-xs font-bold select-none overflow-x-auto">
                       <button
                         onClick={() => setDistributorFilterTab('active')}
-                        className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
-                          distributorFilterTab === 'active' || distributorFilterTab === 'unsent'
+                        className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${distributorFilterTab === 'active' || distributorFilterTab === 'unsent'
                             ? 'bg-primary/20 text-primary border border-primary/30 shadow-sm font-extrabold'
                             : 'text-muted hover:text-text hover:bg-bg3/50 border border-transparent'
-                        }`}
+                          }`}
                       >
                         <ShoppingCart size={13} />
                         <span>Unsent Cart Orders</span>
@@ -3329,11 +3320,10 @@ const [showAddedItems] = useState<boolean>(false);
 
                       <button
                         onClick={() => setDistributorFilterTab('success')}
-                        className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
-                          distributorFilterTab === 'success' || distributorFilterTab === 'sent'
+                        className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${distributorFilterTab === 'success' || distributorFilterTab === 'sent'
                             ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shadow-sm font-extrabold'
                             : 'text-muted hover:text-text hover:bg-bg3/50 border border-transparent'
-                        }`}
+                          }`}
                       >
                         <Check size={13} className="text-emerald-400" />
                         <span>Sent Orders</span>
@@ -3344,11 +3334,10 @@ const [showAddedItems] = useState<boolean>(false);
 
                       <button
                         onClick={() => setDistributorFilterTab('all')}
-                        className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
-                          distributorFilterTab === 'all'
+                        className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${distributorFilterTab === 'all'
                             ? 'bg-primary/20 text-primary border border-primary/30 shadow-sm font-extrabold'
                             : 'text-muted hover:text-text hover:bg-bg3/50 border border-transparent'
-                        }`}
+                          }`}
                       >
                         <Building2 size={13} />
                         <span>All Items ({distributors.length})</span>
@@ -3356,11 +3345,10 @@ const [showAddedItems] = useState<boolean>(false);
 
                       <button
                         onClick={() => setDistributorFilterTab('failed')}
-                        className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
-                          distributorFilterTab === 'failed'
+                        className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${distributorFilterTab === 'failed'
                             ? 'bg-red/20 text-red border border-red/30 shadow-sm font-extrabold'
                             : 'text-muted hover:text-text hover:bg-bg3/50 border border-transparent'
-                        }`}
+                          }`}
                       >
                         <AlertCircle size={13} className="text-red" />
                         <span>Failed</span>
@@ -3371,11 +3359,10 @@ const [showAddedItems] = useState<boolean>(false);
 
                       <button
                         onClick={() => setDistributorFilterTab('unmapped')}
-                        className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
-                          distributorFilterTab === 'unmapped'
+                        className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${distributorFilterTab === 'unmapped'
                             ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30 shadow-sm font-extrabold'
                             : 'text-muted hover:text-text hover:bg-bg3/50 border border-transparent'
-                        }`}
+                          }`}
                       >
                         <Phone size={13} className="text-amber-400" />
                         <span>Missing Phone</span>
@@ -3389,663 +3376,661 @@ const [showAddedItems] = useState<boolean>(false);
                   {/* ── Scrollable Distributor Cards Panel ── */}
                   <div className="flex-1 overflow-y-auto p-6 space-y-5 min-h-0 custom-scrollbar">
 
-                  {/* ── Top KPI Stat Cards ── */}
-                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-2 shrink-0">
-                    <div className="p-3 rounded-2xl bg-bg2/40 border border-glass-border/60 shadow-xs flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary shrink-0">
-                        <ShoppingCart size={15} />
+                    {/* ── Top KPI Stat Cards ── */}
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-2 shrink-0">
+                      <div className="p-3 rounded-2xl bg-bg2/40 border border-glass-border/60 shadow-xs flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary shrink-0">
+                          <ShoppingCart size={15} />
+                        </div>
+                        <div className="min-w-0">
+                          <span className="text-[10px] text-muted font-bold uppercase tracking-wider block">Ready to Send</span>
+                          <span className="text-sm font-black text-text font-mono leading-none">
+                            {distributors.reduce((acc, d) => acc + (d.items || []).filter(i => isItemIncludedInDispatch(i, d)).length, 0)} Items
+                          </span>
+                        </div>
                       </div>
-                      <div className="min-w-0">
-                        <span className="text-[10px] text-muted font-bold uppercase tracking-wider block">Ready to Send</span>
-                        <span className="text-sm font-black text-text font-mono leading-none">
-                          {distributors.reduce((acc, d) => acc + (d.items || []).filter(i => isItemIncludedInDispatch(i, d)).length, 0)} Items
-                        </span>
+
+                      <div
+                        onClick={() => setSearchParams({ tab: 'reorder' })}
+                        className="p-3 rounded-2xl bg-amber-500/[0.07] border border-amber-500/30 shadow-xs flex items-center gap-3 cursor-pointer hover:bg-amber-500/[0.12] transition-all"
+                      >
+                        <div className="w-8 h-8 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
+                          <Clock size={15} />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <span className="text-[10px] text-amber-400 font-bold uppercase tracking-wider block">Previous Orders</span>
+                          <span className="text-sm font-black text-text font-mono leading-none flex items-center justify-between">
+                            <span>{previousOrderItemsInfo.length} Items</span>
+                            <span className="text-[10px] text-amber-400 font-bold">Review Hub ➔</span>
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="p-3 rounded-2xl bg-bg2/40 border border-glass-border/60 shadow-xs flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0">
+                          <Building2 size={15} />
+                        </div>
+                        <div className="min-w-0">
+                          <span className="text-[10px] text-muted font-bold uppercase tracking-wider block">Suppliers</span>
+                          <span className="text-sm font-black text-emerald-400 font-mono leading-none">
+                            {distributors.length} Mapped
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="p-3 rounded-2xl bg-bg2/40 border border-glass-border/60 shadow-xs flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center text-sky-400 shrink-0">
+                          <Truck size={15} />
+                        </div>
+                        <div className="min-w-0">
+                          <span className="text-[10px] text-muted font-bold uppercase tracking-wider block">Live Orders</span>
+                          <span className="text-xs font-bold text-text truncate block leading-none">
+                            Auto-Sync Active
+                          </span>
+                        </div>
                       </div>
                     </div>
 
-                    <div
-                      onClick={() => setSearchParams({ tab: 'reorder' })}
-                      className="p-3 rounded-2xl bg-amber-500/[0.07] border border-amber-500/30 shadow-xs flex items-center gap-3 cursor-pointer hover:bg-amber-500/[0.12] transition-all"
-                    >
-                      <div className="w-8 h-8 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
-                        <Clock size={15} />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <span className="text-[10px] text-amber-400 font-bold uppercase tracking-wider block">Previous Orders</span>
-                        <span className="text-sm font-black text-text font-mono leading-none flex items-center justify-between">
-                          <span>{previousOrderItemsInfo.length} Items</span>
-                          <span className="text-[10px] text-amber-400 font-bold">Review Hub ➔</span>
-                        </span>
-                      </div>
-                    </div>
+                    {/* ── Previous Orders Reorder Banner ── */}
+                    {previousOrderItemsInfo.length > 0 && (distributorFilterTab === 'active' || distributorFilterTab === 'unsent' || distributorFilterTab === 'all') && (() => {
+                      const checkedCount = previousOrderItemsInfo.filter(x => x.isChecked).length;
+                      const totalCount = previousOrderItemsInfo.length;
+                      const allChecked = checkedCount === totalCount;
+                      const noneChecked = checkedCount === 0;
 
-                    <div className="p-3 rounded-2xl bg-bg2/40 border border-glass-border/60 shadow-xs flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0">
-                        <Building2 size={15} />
-                      </div>
-                      <div className="min-w-0">
-                        <span className="text-[10px] text-muted font-bold uppercase tracking-wider block">Suppliers</span>
-                        <span className="text-sm font-black text-emerald-400 font-mono leading-none">
-                          {distributors.length} Mapped
-                        </span>
-                      </div>
-                    </div>
+                      // Group by distributor for expanded view
+                      const byDist = new Map<number, { distName: string; items: typeof previousOrderItemsInfo }>();
+                      for (const entry of previousOrderItemsInfo) {
+                        const existing = byDist.get(entry.dist.storeId);
+                        if (existing) existing.items.push(entry);
+                        else byDist.set(entry.dist.storeId, { distName: entry.dist.storeName, items: [entry] });
+                      }
 
-                    <div className="p-3 rounded-2xl bg-bg2/40 border border-glass-border/60 shadow-xs flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center text-sky-400 shrink-0">
-                        <Truck size={15} />
-                      </div>
-                      <div className="min-w-0">
-                        <span className="text-[10px] text-muted font-bold uppercase tracking-wider block">Live Orders</span>
-                        <span className="text-xs font-bold text-text truncate block leading-none">
-                          Auto-Sync Active
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* ── Previous Orders Reorder Banner ── */}
-                  {previousOrderItemsInfo.length > 0 && (distributorFilterTab === 'active' || distributorFilterTab === 'unsent' || distributorFilterTab === 'all') && (() => {
-                    const checkedCount = previousOrderItemsInfo.filter(x => x.isChecked).length;
-                    const totalCount = previousOrderItemsInfo.length;
-                    const allChecked = checkedCount === totalCount;
-                    const noneChecked = checkedCount === 0;
-
-                    // Group by distributor for expanded view
-                    const byDist = new Map<number, { distName: string; items: typeof previousOrderItemsInfo }>();
-                    for (const entry of previousOrderItemsInfo) {
-                      const existing = byDist.get(entry.dist.storeId);
-                      if (existing) existing.items.push(entry);
-                      else byDist.set(entry.dist.storeId, { distName: entry.dist.storeName, items: [entry] });
-                    }
-
-                    return (
-                      <div className={`rounded-xl border transition-all mb-1 ${noneChecked ? 'border-amber-500/40 bg-amber-500/[0.06]' : checkedCount > 0 ? 'border-amber-500/60 bg-amber-500/[0.10]' : 'border-amber-500/30 bg-amber-500/[0.04]'}`}>
-                        {/* Header row */}
-                        <div className="flex items-center justify-between px-4 py-3 gap-3">
-                          <div className="flex items-center gap-2 min-w-0 flex-1">
-                            <Clock size={14} className="text-amber-400 shrink-0" />
-                            <div className="flex flex-col min-w-0">
-                              <span className="text-[11px] font-extrabold text-amber-400 leading-tight">
-                                Previous Order — {totalCount} {totalCount === 1 ? 'Medicine' : 'Medicines'} to Reorder
-                              </span>
-                              <span className="text-[10px] text-muted">
-                                {noneChecked
-                                  ? 'None selected — tick checkboxes to include in today\'s order'
-                                  : `${checkedCount} of ${totalCount} selected for reorder`}
-                              </span>
+                      return (
+                        <div className={`rounded-xl border transition-all mb-1 ${noneChecked ? 'border-amber-500/40 bg-amber-500/[0.06]' : checkedCount > 0 ? 'border-amber-500/60 bg-amber-500/[0.10]' : 'border-amber-500/30 bg-amber-500/[0.04]'}`}>
+                          {/* Header row */}
+                          <div className="flex items-center justify-between px-4 py-3 gap-3">
+                            <div className="flex items-center gap-2 min-w-0 flex-1">
+                              <Clock size={14} className="text-amber-400 shrink-0" />
+                              <div className="flex flex-col min-w-0">
+                                <span className="text-[11px] font-extrabold text-amber-400 leading-tight">
+                                  Previous Order — {totalCount} {totalCount === 1 ? 'Medicine' : 'Medicines'} to Reorder
+                                </span>
+                                <span className="text-[10px] text-muted">
+                                  {noneChecked
+                                    ? 'None selected — tick checkboxes to include in today\'s order'
+                                    : `${checkedCount} of ${totalCount} selected for reorder`}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              {/* Open Reorder Hub Button */}
+                              <button
+                                onClick={() => setSearchParams({ tab: 'reorder' })}
+                                className="text-[10px] font-bold px-2.5 py-1 rounded-lg bg-amber-500/30 text-amber-300 border border-amber-500/50 hover:bg-amber-500/40 transition-all active:scale-95 cursor-pointer flex items-center gap-1"
+                                title="Open dedicated Reorder Hub"
+                              >
+                                <span>Reorder Hub</span>
+                                <ArrowRight size={10} />
+                              </button>
+                              {/* Select All */}
+                              <button
+                                onClick={() => handleToggleAllPreviousItems(true)}
+                                disabled={allChecked}
+                                className="text-[10px] font-bold px-2.5 py-1 rounded-lg bg-amber-500/20 text-amber-400 border border-amber-500/40 hover:bg-amber-500/30 disabled:opacity-40 transition-all active:scale-95 cursor-pointer"
+                                title="Select all previous order medicines for reorder"
+                              >
+                                Select All
+                              </button>
+                              {/* Deselect All */}
+                              <button
+                                onClick={() => handleToggleAllPreviousItems(false)}
+                                disabled={noneChecked}
+                                className="text-[10px] font-bold px-2.5 py-1 rounded-lg bg-bg2 text-muted border border-border hover:bg-bg3 disabled:opacity-40 transition-all active:scale-95 cursor-pointer"
+                                title="Deselect all — exclude previous order medicines from today's order"
+                              >
+                                Deselect All
+                              </button>
+                              {/* Expand / Collapse */}
+                              <button
+                                onClick={() => setReorderBannerCollapsed(v => !v)}
+                                className="text-[10px] font-bold px-2 py-1 rounded-lg bg-bg2 text-muted border border-border hover:bg-bg3 transition-all active:scale-95 cursor-pointer"
+                                title={reorderBannerCollapsed ? 'Show medicine list' : 'Collapse'}
+                              >
+                                {reorderBannerCollapsed ? '▸ Show' : '▾ Hide'}
+                              </button>
                             </div>
                           </div>
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            {/* Open Reorder Hub Button */}
-                            <button
-                              onClick={() => setSearchParams({ tab: 'reorder' })}
-                              className="text-[10px] font-bold px-2.5 py-1 rounded-lg bg-amber-500/30 text-amber-300 border border-amber-500/50 hover:bg-amber-500/40 transition-all active:scale-95 cursor-pointer flex items-center gap-1"
-                              title="Open dedicated Reorder Hub"
-                            >
-                              <span>Reorder Hub</span>
-                              <ArrowRight size={10} />
-                            </button>
-                            {/* Select All */}
-                            <button
-                              onClick={() => handleToggleAllPreviousItems(true)}
-                              disabled={allChecked}
-                              className="text-[10px] font-bold px-2.5 py-1 rounded-lg bg-amber-500/20 text-amber-400 border border-amber-500/40 hover:bg-amber-500/30 disabled:opacity-40 transition-all active:scale-95 cursor-pointer"
-                              title="Select all previous order medicines for reorder"
-                            >
-                              Select All
-                            </button>
-                            {/* Deselect All */}
-                            <button
-                              onClick={() => handleToggleAllPreviousItems(false)}
-                              disabled={noneChecked}
-                              className="text-[10px] font-bold px-2.5 py-1 rounded-lg bg-bg2 text-muted border border-border hover:bg-bg3 disabled:opacity-40 transition-all active:scale-95 cursor-pointer"
-                              title="Deselect all — exclude previous order medicines from today's order"
-                            >
-                              Deselect All
-                            </button>
-                            {/* Expand / Collapse */}
-                            <button
-                              onClick={() => setReorderBannerCollapsed(v => !v)}
-                              className="text-[10px] font-bold px-2 py-1 rounded-lg bg-bg2 text-muted border border-border hover:bg-bg3 transition-all active:scale-95 cursor-pointer"
-                              title={reorderBannerCollapsed ? 'Show medicine list' : 'Collapse'}
-                            >
-                              {reorderBannerCollapsed ? '▸ Show' : '▾ Hide'}
-                            </button>
-                          </div>
-                        </div>
 
-                        {/* Expandable medicine list grouped by distributor */}
-                        {!reorderBannerCollapsed && (
-                          <div className="border-t border-amber-500/20 px-4 py-3 space-y-3">
-                            {Array.from(byDist.entries()).map(([storeId, group]) => (
-                              <div key={storeId}>
-                                <div className="text-[10px] font-extrabold text-amber-400/80 uppercase tracking-wider mb-1.5 flex items-center gap-1">
-                                  <Building2 size={10} />
-                                  {group.distName}
-                                </div>
-                                <div className="space-y-1">
-                                  {group.items.map(({ item, isChecked, placedDateStr }) => (
-                                    <div
-                                      key={item.productCode || item.productName}
-                                      className={`flex items-center gap-2 px-2 py-1.5 rounded-lg transition-all cursor-pointer hover:bg-amber-500/10 ${isChecked ? 'bg-amber-500/10' : 'bg-bg2/30'}`}
-                                      onClick={() => handleToggleItemCheck(storeId, item, !isChecked)}
-                                      title={isChecked ? 'Click to exclude from today\'s order' : 'Click to include in today\'s order'}
-                                    >
-                                      <input
-                                        type="checkbox"
-                                        checked={isChecked}
-                                        onChange={e => handleToggleItemCheck(storeId, item, e.target.checked)}
-                                        onClick={e => e.stopPropagation()}
-                                        className="w-3.5 h-3.5 rounded text-amber-500 focus:ring-amber-500 cursor-pointer accent-amber-500 shrink-0"
-                                      />
-                                      <span className={`text-[11px] font-semibold flex-1 truncate ${isChecked ? 'text-text' : 'text-muted line-through opacity-70'}`}>
-                                        {item.productName}
-                                      </span>
-                                      <span className="text-[10px] font-mono text-muted shrink-0">×{item.qty}</span>
-                                      {isChecked ? (
-                                        <span className="text-[8px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shrink-0 flex items-center gap-0.5">
-                                          <Check size={8} />
-                                          Reordering
-                                        </span>
-                                      ) : (
-                                        <span className="text-[8px] font-bold px-1.5 py-0.5 rounded bg-bg3/70 text-muted/70 border border-border/30 shrink-0">
-                                          {placedDateStr}
-                                        </span>
-                                      )}
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })()}
-
-                  {filteredDistributorList.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center py-12 text-center gap-2">
-                      {distributorFilterTab === 'active' ? (
-                        <>
-                          <Check size={36} className="text-emerald-400/50" />
-                          <p className="text-sm font-bold text-emerald-400">All Cart Orders Sent! 🎉</p>
-                          <p className="text-xs text-muted max-w-sm">All items in your cart have been sent to distributors and saved in Sent Orders History.</p>
-                          <button
-                            onClick={() => setSearchParams({ tab: 'sent-history' })}
-                            className="mt-2 px-4 py-2 rounded-xl bg-primary/20 hover:bg-primary/30 border border-primary/30 text-primary text-xs font-bold transition-all active:scale-95 flex items-center gap-1.5"
-                          >
-                            <Send size={13} />
-                            <span>View Sent Orders History</span>
-                          </button>
-                        </>
-                      ) : distributorFilterTab === 'success' ? (
-                        <>
-                          <MessageSquare size={36} className="text-muted/30" />
-                          <p className="text-xs font-bold text-text">No Messages Sent Yet</p>
-                          <p className="text-[11px] text-muted">Click "Send All via WhatsApp" to share orders automatically!</p>
-                        </>
-                      ) : distributorFilterTab === 'failed' ? (
-                        <>
-                          <Check size={36} className="text-emerald-400/40" />
-                          <p className="text-xs font-bold text-emerald-400">No Failed Messages! 🎉</p>
-                          <p className="text-[11px] text-muted">All sent WhatsApp messages completed without errors.</p>
-                        </>
-                      ) : distributorFilterTab === 'unmapped' ? (
-                        <>
-                          <Check size={36} className="text-emerald-400/40" />
-                          <p className="text-xs font-bold text-emerald-400">All Distributors Have Linked Numbers! 🎉</p>
-                          <p className="text-[11px] text-muted">Every store in your cart is linked with a confirmed WhatsApp number.</p>
-                        </>
-                      ) : (
-                        <>
-                          <Building2 size={36} className="text-muted/30" />
-                          <p className="text-xs font-bold text-text">No Distributors Found</p>
-                        </>
-                      )}
-                    </div>
-                  ) : (
-                    filteredDistributorList.map((dist) => (
-                      <div key={dist.storeId} className="bg-bg2/30 border border-glass-border rounded-xl overflow-hidden shadow-sm">
-                        {/* Distributor header */}
-                        <div className="bg-bg3/60 px-4 py-2.5 border-b border-glass-border flex items-center justify-between">
-                          <div className="flex items-center gap-2.5 flex-wrap">
-                            <h4 className="text-xs font-extrabold text-text tracking-wide uppercase flex items-center gap-2">
-                              <Package size={14} className="text-sky" />
-                              {dist.storeName}
-                            </h4>
-
-                            {/* Status Badge (Sent Successfully vs Failed) */}
-                            {sentWaStatusMap[dist.storeId] === 'success' && (
-                              <span className="text-[9px] font-extrabold px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 flex items-center gap-1">
-                                <Check size={11} />
-                                <span>WhatsApp Sent</span>
-                              </span>
-                            )}
-                            {sentWaStatusMap[dist.storeId] === 'error' && (
-                              <span className="text-[9px] font-extrabold px-2 py-0.5 rounded-md bg-red/20 text-red border border-red/40 flex items-center gap-1">
-                                <AlertCircle size={11} />
-                                <span>Send Failed</span>
-                              </span>
-                            )}
-
-                            {/* Phone Badge & Contact Search/Edit trigger */}
-                            {(() => {
-                              const activePhone = getDistributorPhoneNumber(dist);
-
-                              return (
-                                <button
-                                  type="button"
-                                  onClick={() => handleOpenEditModal(dist)}
-                                  className={`flex items-center gap-1.5 text-[10px] font-bold px-2 py-0.5 rounded-md border transition-all active:scale-95 cursor-pointer ${activePhone
-                                    ? 'bg-bg2 text-text border-border hover:bg-bg3'
-                                    : 'bg-amber-500/20 text-amber-400 border-amber-500/40 hover:bg-amber-500/30 font-extrabold shadow-sm'
-                                    }`}
-                                  title={activePhone ? 'Edit WhatsApp phone number' : 'Missing WhatsApp number — click to enter and auto-send'}
-                                >
-                                  <Phone size={10} className={activePhone ? '' : 'text-amber-400'} />
-                                  <span>{activePhone || '⚠️ Missing Phone — Click to Add'}</span>
-                                  <Edit2 size={9} className="opacity-70" />
-                                </button>
-                              );
-                            })()}
-                          </div>
-                          <div className="flex items-center gap-2 flex-wrap">
-                            {dist.deliveryPersons.length > 0 && (
-                              <span className="text-[10px] text-muted flex items-center gap-1">
-                                <Truck size={11} />
-                                {dist.deliveryPersons[0].name}
-                              </span>
-                            )}
-                            {(() => {
-                              const totalCount = dist.items.length;
-                              const includedCount = dist.items.filter(i => isItemIncludedInDispatch(i, dist)).length;
-                              const yesterdayItems = dist.items.filter(i => {
-                                const p = getPastOrderedInfo(i, dist);
-                                return p.isPastOrdered && !p.isToday;
-                              });
-                              const yesterdayCount = yesterdayItems.length;
-                              const checkedYesterdayCount = yesterdayItems.filter(i => isItemIncludedInDispatch(i, dist)).length;
-                              const checkedTotal = getDistributorCheckedTotal(dist);
-
-                              return (
-                                <span className="text-[10px] font-bold px-2.5 py-0.5 bg-bg/60 rounded-full border border-glass-border/40 flex items-center gap-1.5 shrink-0">
-                                  <span className="text-text font-mono font-black">
-                                    ₹{checkedTotal.toFixed(2)}
-                                  </span>
-                                  <span className="text-muted/40">•</span>
-                                  <span className={includedCount > 0 ? "text-primary font-bold" : "text-muted"}>
-                                    {includedCount}/{totalCount} to send
-                                  </span>
-                                  {yesterdayCount > 0 && (
-                                    <>
-                                      <span className="text-muted/40">•</span>
-                                      <span className="text-amber-400 font-extrabold flex items-center gap-0.5" title={`${checkedYesterdayCount} of ${yesterdayCount} past items reordered`}>
-                                        <Clock size={10} />
-                                        {checkedYesterdayCount > 0 ? `${checkedYesterdayCount}/${yesterdayCount} reordered` : `${yesterdayCount} past (tick to reorder)`}
-                                      </span>
-                                    </>
-                                  )}
-                                </span>
-                              );
-                            })()}
-
-                            {/* Button 1: Send to Delivery Boy via WhatsApp */}
-                            <button
-                              onClick={() => handleSendDeliveryBoyNotification(dist)}
-                              disabled={sendingDeliveryBoyNotifId === dist.storeId}
-                              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-bg2 text-text border border-border hover:bg-bg3 disabled:opacity-50 text-[10px] font-bold transition-all active:scale-95 shadow-sm cursor-pointer"
-                              title="Manually trigger and send WhatsApp order notification to assigned Delivery Boy anytime"
-                            >
-                              {sendingDeliveryBoyNotifId === dist.storeId ? (
-                                <span className="w-2.5 h-2.5 border border-muted/30 border-t-text rounded-full animate-spin" />
-                              ) : (
-                                <Truck size={11} className="text-muted" />
-                              )}
-                              <span>Send to Delivery Boy</span>
-                            </button>
-
-                            {/* Button 2: Send to Pharmarack Order */}
-                            <button
-                              onClick={() => handleSendManualNotification(dist)}
-                              disabled={sendingNotifId === dist.storeId}
-                              className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-bg2 text-text border border-border hover:bg-bg3 disabled:opacity-50 text-[10px] font-bold transition-all active:scale-95 shadow-sm cursor-pointer"
-                              title="Send notification / place order in Pharmarack"
-                            >
-                              {sendingNotifId === dist.storeId ? (
-                                <span className="w-2.5 h-2.5 border border-muted/30 border-t-text rounded-full animate-spin" />
-                              ) : (
-                                <Send size={10} />
-                              )}
-                              <span>Send to Pharmarack</span>
-                            </button>
-
-                            {/* Button 2: WhatsApp Send & Resend Controls */}
-                            {(() => {
-                              const isSending = sendingWaDistributorId === dist.storeId;
-                              const status = sentWaStatusMap[dist.storeId];
-                              const hasUnsentItems = dist.items.some(i => !isItemAlreadySent(i, dist));
-                              const isAlreadySent = !hasUnsentItems && (status === 'success' || (dist.items.length > 0 && dist.items.every(i => isItemAlreadySent(i, dist))));
-
-                              // Button styling: transparent background with emerald text & border for clear readability
-                              const whiteGreenBtnClass = "bg-transparent text-emerald-400 border border-emerald-500/40 hover:bg-emerald-500/10 font-extrabold shadow-xs";
-
-                              if (isAlreadySent) {
-                                return (
-                                  <div className="flex items-center gap-1.5 flex-wrap">
-                                    {/* Resend to Distributor Only Button */}
-                                    <button
-                                      type="button"
-                                      onClick={() => handleSendWhatsAppOrder(dist, false, true, 'distributor_only')}
-                                      disabled={isSending}
-                                      className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] transition-all active:scale-95 cursor-pointer disabled:opacity-50 ${whiteGreenBtnClass}`}
-                                      title="Resend WhatsApp order message to Distributor Only"
-                                    >
-                                      {isSending ? (
-                                        <span className="w-2.5 h-2.5 border border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin" />
-                                      ) : (
-                                        <RotateCcw size={11} className="text-emerald-400" />
-                                      )}
-                                      <span>Resend (Distributor Only)</span>
-                                    </button>
-
-                                    {/* Resend to Both (Distributor & Delivery Boy) Button */}
-                                    <button
-                                      type="button"
-                                      onClick={() => handleSendWhatsAppOrder(dist, false, true, 'both')}
-                                      disabled={isSending}
-                                      className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] transition-all active:scale-95 cursor-pointer disabled:opacity-50 ${whiteGreenBtnClass}`}
-                                      title="Resend WhatsApp order message to BOTH Distributor and Delivery Boy"
-                                    >
-                                      <Send size={10} className="text-emerald-400" />
-                                      <span>Resend Both</span>
-                                    </button>
+                          {/* Expandable medicine list grouped by distributor */}
+                          {!reorderBannerCollapsed && (
+                            <div className="border-t border-amber-500/20 px-4 py-3 space-y-3">
+                              {Array.from(byDist.entries()).map(([storeId, group]) => (
+                                <div key={storeId}>
+                                  <div className="text-[10px] font-extrabold text-amber-400/80 uppercase tracking-wider mb-1.5 flex items-center gap-1">
+                                    <Building2 size={10} />
+                                    {group.distName}
                                   </div>
-                                );
-                              }
-
-                              let btnClass = "bg-transparent text-emerald-400 border border-emerald-500/40 hover:bg-emerald-500/10 font-bold";
-                              if (status === 'queued') btnClass = "bg-transparent text-amber-400 border border-amber-500/40 hover:bg-amber-500/10 font-bold";
-                              if (status === 'error') btnClass = "bg-transparent text-rose-400 border border-rose-500/40 hover:bg-rose-500/10 font-bold";
-
-                              return (
-                                <button
-                                  type="button"
-                                  onClick={() => handleSendWhatsAppOrder(dist, false, false, 'both')}
-                                  disabled={isSending}
-                                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[10px] font-bold transition-all active:scale-95 shadow-sm disabled:opacity-50 ${btnClass}`}
-                                  title="Send formatted order message directly to Distributor via WhatsApp"
-                                >
-                                  {isSending ? (
-                                    <span className="w-2.5 h-2.5 border border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin" />
-                                  ) : status === 'queued' ? (
-                                    <Clock size={11} className="text-amber-500" />
-                                  ) : status === 'error' ? (
-                                    <AlertCircle size={11} className="text-rose-500" />
-                                  ) : (
-                                    <MessageSquare size={10} className="text-emerald-500" />
-                                  )}
-                                  <span>
-                                    {isSending
-                                      ? 'Sending...'
-                                      : status === 'queued'
-                                        ? 'Queued'
-                                        : status === 'error'
-                                          ? 'Retry WhatsApp'
-                                          : 'Send via WhatsApp'}
-                                  </span>
-                                </button>
-                              );
-                            })()}
-
-                            {lastSentWaTimeMap[dist.storeId] && (
-                              <span className="text-[9px] text-emerald-400 font-mono font-extrabold flex items-center gap-1 shrink-0 px-2 py-0.5 bg-emerald-500/10 border border-emerald-500/20 rounded">
-                                <Clock size={10} />
-                                Sent at {lastSentWaTimeMap[dist.storeId]}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Line items table */}
-                        <div className="overflow-x-auto">
-                          <table className="w-full text-xs">
-                            <thead>
-                              <tr className="border-b border-glass-border/30 text-muted font-bold uppercase tracking-wider text-[10px]">
-                                <th className="text-center px-2 py-2 w-12 text-[9px] font-extrabold text-muted" title="Select / Deselect all items for this distributor">
-                                  <div className="flex items-center justify-center gap-1">
-                                    <input
-                                      type="checkbox"
-                                      checked={dist.items.length > 0 && dist.items.every(i => isItemIncludedInDispatch(i, dist))}
-                                      onChange={(e) => handleToggleSelectAllInDist(dist.storeId, e.target.checked)}
-                                      className="w-3.5 h-3.5 rounded text-emerald-500 focus:ring-emerald-500 cursor-pointer accent-emerald-500"
-                                      title={dist.items.length > 0 && dist.items.every(i => isItemIncludedInDispatch(i, dist)) ? "Deselect all items (none will send)" : "Select all items (all will send)"}
-                                    />
-                                  </div>
-                                </th>
-                                <th className="text-left px-3 py-2">Product</th>
-                                <th className="text-left px-3 py-2">Company</th>
-                                <th className="text-center px-3 py-2">Pack</th>
-                                <th className="text-center px-3 py-2">Qty</th>
-                                <th className="text-right px-3 py-2">PTR</th>
-                                <th className="text-right px-3 py-2">MRP</th>
-                                <th className="text-center px-3 py-2">Scheme</th>
-                                <th className="text-center px-3 py-2">Stock</th>
-                                <th className="text-right px-4 py-2">Amount</th>
-                                <th className="text-center px-3 py-2">Action</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-glass-border/15">
-                              {dist.items.map((item, idx) => {
-                                const isSent = isItemAlreadySent(item, dist);
-                                const pastInfo = getPastOrderedInfo(item, dist);
-                                const isYesterdayOrPast = pastInfo.isPastOrdered && !pastInfo.isToday;
-                                const isIncluded = isItemIncludedInDispatch(item, dist);
-                                const isDeleting = updatingItemId === (item.productCode || String(item.productId || item.productName));
-
-                                return (
-                                  <tr
-                                    key={`${item.productCode}-${idx}`}
-                                    className={`transition-colors ${
-                                      !isIncluded
-                                        ? 'bg-bg3/20 opacity-60 hover:opacity-90 text-muted'
-                                        : isYesterdayOrPast
-                                          ? 'bg-amber-500/[0.08] hover:bg-amber-500/[0.14] border-l-2 border-l-amber-500'
-                                          : isSent
-                                            ? 'bg-bg3/20 opacity-75 hover:opacity-100 text-muted'
-                                            : 'bg-emerald-500/[0.04] hover:bg-emerald-500/[0.09]'
-                                    }`}
-                                  >
-                                    <td className="px-2 py-2.5 text-center w-12">
-                                      <input
-                                        type="checkbox"
-                                        checked={isIncluded}
-                                        onChange={(e) => handleToggleItemCheck(dist.storeId, item, e.target.checked)}
-                                        className={`w-4 h-4 rounded cursor-pointer shadow-sm ${
-                                          isYesterdayOrPast
-                                            ? 'text-amber-500 focus:ring-amber-500 accent-amber-500'
-                                            : 'text-emerald-500 focus:ring-emerald-500 accent-emerald-500'
-                                        }`}
-                                        title={isIncluded ? "Checked: Included in WhatsApp order. Click to exclude." : "Unchecked: Excluded from WhatsApp order. Click to include."}
-                                      />
-                                    </td>
-                                    <td className="px-3 py-2.5">
-                                      <div className="flex flex-col gap-1">
-                                        <div className="flex items-center gap-1.5 flex-wrap">
-                                          <span className={`font-bold text-[11px] ${!isIncluded ? 'text-muted line-through opacity-80' : isSent ? 'text-muted' : 'text-text'}`}>
-                                            {item.productName}
+                                  <div className="space-y-1">
+                                    {group.items.map(({ item, isChecked, placedDateStr }) => (
+                                      <div
+                                        key={item.productCode || item.productName}
+                                        className={`flex items-center gap-2 px-2 py-1.5 rounded-lg transition-all cursor-pointer hover:bg-amber-500/10 ${isChecked ? 'bg-amber-500/10' : 'bg-bg2/30'}`}
+                                        onClick={() => handleToggleItemCheck(storeId, item, !isChecked)}
+                                        title={isChecked ? 'Click to exclude from today\'s order' : 'Click to include in today\'s order'}
+                                      >
+                                        <input
+                                          type="checkbox"
+                                          checked={isChecked}
+                                          onChange={e => handleToggleItemCheck(storeId, item, e.target.checked)}
+                                          onClick={e => e.stopPropagation()}
+                                          className="w-3.5 h-3.5 rounded text-amber-500 focus:ring-amber-500 cursor-pointer accent-amber-500 shrink-0"
+                                        />
+                                        <span className={`text-[11px] font-semibold flex-1 truncate ${isChecked ? 'text-text' : 'text-muted line-through opacity-70'}`}>
+                                          {item.productName}
+                                        </span>
+                                        <span className="text-[10px] font-mono text-muted shrink-0">×{item.qty}</span>
+                                        {isChecked ? (
+                                          <span className="text-[8px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shrink-0 flex items-center gap-0.5">
+                                            <Check size={8} />
+                                            Reordering
                                           </span>
-                                          {isYesterdayOrPast && (
-                                            <span className="text-[8px] font-black uppercase px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/40 shrink-0 select-none flex items-center gap-1" title={`Ordered previously on ${pastInfo.placedDateStr}. Check box to include in today's order.`}>
-                                              <Clock size={9} />
-                                              <span>⚡ {pastInfo.isYesterday ? 'ORDERED YESTERDAY' : `ORDERED ON ${pastInfo.placedDateStr.toUpperCase()}`}</span>
-                                            </span>
-                                          )}
-                                          {!isIncluded && (
-                                            <span className="text-[8px] font-bold px-1.5 py-0.5 rounded bg-bg3/70 text-muted border border-border/40 shrink-0 select-none">
-                                              Excluded (Won't Send)
-                                            </span>
-                                          )}
-                                          {isIncluded && isYesterdayOrPast && (
-                                            <span className="text-[8px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shrink-0 select-none flex items-center gap-0.5">
-                                              <Check size={8} />
-                                              <span>REORDERING</span>
-                                            </span>
-                                          )}
-                                          {isIncluded && !isYesterdayOrPast && isSent && (
-                                            <span className="text-[8px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-bg3 text-muted border border-border/40 shrink-0 select-none flex items-center gap-0.5">
-                                              <Check size={8} />
-                                              <span>SENT TODAY</span>
-                                            </span>
-                                          )}
-                                          {isIncluded && !isYesterdayOrPast && !isSent && (
-                                            <span className="text-[8px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shrink-0 select-none flex items-center gap-0.5">
-                                              <span>✨ TO SEND</span>
-                                            </span>
-                                          )}
-                                        </div>
-
-                                      {/* Duplicate Distributor Warning */}
-                                      {(() => {
-                                        const dup = getDuplicateItemInCart(item);
-                                        if (dup) {
-                                          return (
-                                            <div className="flex items-center gap-1 text-[9px] font-extrabold text-amber-400 bg-amber-400/10 px-1.5 py-0.5 rounded border border-amber-400/20 w-fit">
-                                              <AlertCircle size={10} className="shrink-0" />
-                                              <span>Also in cart under {dup.storeName} ({dup.qty} qty)</span>
-                                            </div>
-                                          );
-                                        }
-                                        return null;
-                                      })()}
-
-                                      {/* Alternative Distributor Suggestion */}
-                                      {(() => {
-                                        const history = priceHistoryCache[item.productName] || [];
-                                        const matchingMrpHistory = history.filter(h => Math.abs(h.mrp - item.mrp) < 0.1);
-                                        if (matchingMrpHistory.length > 0) {
-                                          const best = matchingMrpHistory.reduce((prev, curr) => (curr.net_rate < prev.net_rate) ? curr : prev, matchingMrpHistory[0]);
-                                          if (best.net_rate < item.ptr) {
-                                            return (
-                                              <div className="flex items-center gap-1 text-[9px] font-bold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20 w-fit mt-0.5" title={`Rate: ₹${best.rate.toFixed(2)}, Free: ${best.free_qty}, Disc: ₹${best.cd_rs.toFixed(2)}`}>
-                                                <Clock size={10} className="shrink-0" />
-                                                <span>Cheapest historic: ₹{best.net_rate.toFixed(2)} from {best.distributor_name}</span>
-                                              </div>
-                                            );
-                                          }
-                                        }
-                                        return null;
-                                      })()}
-                                    </div>
-                                  </td>
-                                  <td className="px-3 py-2.5 text-muted text-[10px] max-w-[120px] truncate">{item.company}</td>
-                                  <td className="px-3 py-2.5 text-center">
-                                    {item.packaging && (
-                                      <span className="text-[9px] text-muted bg-bg3/50 px-1.5 py-0.5 rounded border border-glass-border/40 font-mono">
-                                        {item.packaging}
-                                      </span>
-                                    )}
-                                  </td>
-                                  <td className="px-3 py-2.5 text-center min-w-[110px] whitespace-nowrap">
-                                    <div className="flex items-center justify-center gap-1 flex-nowrap shrink-0">
-                                      <button
-                                        type="button"
-                                        onClick={() => handleUpdateQty(item, item.qty - 1)}
-                                        disabled={updatingItemId === item.productCode || item.qty <= 1}
-                                        className="w-5 h-5 rounded bg-bg3 border border-glass-border hover:bg-bg2 hover:text-text text-muted flex items-center justify-center font-bold text-xs disabled:opacity-40 transition-all shrink-0"
-                                      >
-                                        -
-                                      </button>
-                                      <input
-                                        type="text"
-                                        pattern="[0-9]*"
-                                        value={item.qty}
-                                        onChange={(e) => {
-                                          const val = parseInt(e.target.value.replace(/\D/g, ''), 10);
-                                          if (!isNaN(val) && val >= 1) {
-                                            handleUpdateQty(item, val);
-                                          }
-                                        }}
-                                        disabled={updatingItemId === item.productCode}
-                                        className="w-10 text-center font-black text-text font-mono bg-bg border border-glass-border rounded py-0.5 text-xs focus:outline-none focus:border-primary disabled:opacity-50 shrink-0"
-                                      />
-                                      <button
-                                        type="button"
-                                        onClick={() => handleUpdateQty(item, item.qty + 1)}
-                                        disabled={updatingItemId === item.productCode}
-                                        className="w-5 h-5 rounded bg-bg3 border border-glass-border hover:bg-bg2 hover:text-text text-muted flex items-center justify-center font-bold text-xs disabled:opacity-40 transition-all shrink-0"
-                                      >
-                                        +
-                                      </button>
-                                    </div>
-                                  </td>
-                                  <td className="px-3 py-2.5 text-right font-mono text-text text-[11px]">
-                                    {item.ptr > 0 ? `₹${item.ptr.toFixed(2)}` : '—'}
-                                  </td>
-                                  <td className="px-3 py-2.5 text-right font-mono text-muted text-[11px]">
-                                    {item.mrp > 0 ? `₹${item.mrp.toFixed(2)}` : '—'}
-                                  </td>
-                                  <td className="px-3 py-2.5 text-center">
-                                    {item.scheme ? (
-                                      <span className="text-[9px] font-bold text-green bg-green/10 px-1.5 py-0.5 rounded border border-green/20">
-                                        {item.scheme}
-                                      </span>
-                                    ) : (
-                                      <span className="text-muted/40">—</span>
-                                    )}
-                                  </td>
-                                  <td className="px-3 py-2.5 text-center font-mono text-[10px]">
-                                    {item.stock !== null ? (
-                                      <span className={item.stock > 10 ? 'text-emerald-400' : item.stock > 0 ? 'text-amber-400' : 'text-red'}>
-                                        {item.stock}
-                                      </span>
-                                    ) : '—'}
-                                  </td>
-                                  <td className="px-4 py-2.5 text-right font-mono font-black text-emerald-400 text-[11px]">
-                                    ₹{getCartItemAmount(item).toFixed(2)}
-                                  </td>
-                                  <td className="px-3 py-2.5 text-center">
-                                    <div className="flex items-center justify-center gap-1.5">
-                                      <button
-                                        type="button"
-                                        onClick={() => handleOpenSwitchModal(item, dist)}
-                                        className="px-2 py-1 rounded-lg bg-sky-500/10 hover:bg-sky-500/25 border border-sky-500/30 text-sky-400 hover:text-sky-300 transition-all active:scale-95 flex items-center gap-1 font-bold text-[10px] cursor-pointer"
-                                        title={`Compare prices and switch supplier for ${item.productName}`}
-                                      >
-                                        <ArrowLeftRight size={11} />
-                                        <span>Switch</span>
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => handleDeleteItem(item)}
-                                        disabled={isDeleting}
-                                        className="px-2 py-1 rounded-lg bg-rose-500/10 hover:bg-rose-500/25 border border-rose-500/30 text-rose-400 hover:text-rose-300 transition-all active:scale-95 disabled:opacity-40 flex items-center gap-1 font-bold text-[10px] cursor-pointer"
-                                        title={`Delete ${item.productName} from Pharmarack live cart`}
-                                      >
-                                        {isDeleting ? (
-                                          <span className="w-2.5 h-2.5 border border-rose-400/30 border-t-rose-400 rounded-full animate-spin" />
                                         ) : (
-                                          <Trash2 size={12} />
+                                          <span className="text-[8px] font-bold px-1.5 py-0.5 rounded bg-bg3/70 text-muted/70 border border-border/30 shrink-0">
+                                            {placedDateStr}
+                                          </span>
                                         )}
-                                        <span>Delete</span>
-                                      </button>
-                                    </div>
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
-                        {dist.lineTotal > 0 && (
-                          <div className="border-t border-glass-border/30 px-4 py-2 bg-bg3/30 flex justify-end">
-                            <span className="text-[10px] text-muted font-bold uppercase tracking-wider mr-3">Subtotal</span>
-                            <span className="text-xs font-black text-emerald-400 font-mono">₹{dist.lineTotal.toFixed(2)}</span>
-                          </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+
+                    {filteredDistributorList.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center py-12 text-center gap-2">
+                        {distributorFilterTab === 'active' ? (
+                          <>
+                            <Check size={36} className="text-emerald-400/50" />
+                            <p className="text-sm font-bold text-emerald-400">All Cart Orders Sent! 🎉</p>
+                            <p className="text-xs text-muted max-w-sm">All items in your cart have been sent to distributors and saved in Sent Orders History.</p>
+                            <button
+                              onClick={() => setSearchParams({ tab: 'sent-history' })}
+                              className="mt-2 px-4 py-2 rounded-xl bg-primary/20 hover:bg-primary/30 border border-primary/30 text-primary text-xs font-bold transition-all active:scale-95 flex items-center gap-1.5"
+                            >
+                              <Send size={13} />
+                              <span>View Sent Orders History</span>
+                            </button>
+                          </>
+                        ) : distributorFilterTab === 'success' ? (
+                          <>
+                            <MessageSquare size={36} className="text-muted/30" />
+                            <p className="text-xs font-bold text-text">No Messages Sent Yet</p>
+                            <p className="text-[11px] text-muted">Click "Send All via WhatsApp" to share orders automatically!</p>
+                          </>
+                        ) : distributorFilterTab === 'failed' ? (
+                          <>
+                            <Check size={36} className="text-emerald-400/40" />
+                            <p className="text-xs font-bold text-emerald-400">No Failed Messages! 🎉</p>
+                            <p className="text-[11px] text-muted">All sent WhatsApp messages completed without errors.</p>
+                          </>
+                        ) : distributorFilterTab === 'unmapped' ? (
+                          <>
+                            <Check size={36} className="text-emerald-400/40" />
+                            <p className="text-xs font-bold text-emerald-400">All Distributors Have Linked Numbers! 🎉</p>
+                            <p className="text-[11px] text-muted">Every store in your cart is linked with a confirmed WhatsApp number.</p>
+                          </>
+                        ) : (
+                          <>
+                            <Building2 size={36} className="text-muted/30" />
+                            <p className="text-xs font-bold text-text">No Distributors Found</p>
+                          </>
                         )}
                       </div>
-                    ))
-                  )}
+                    ) : (
+                      filteredDistributorList.map((dist) => (
+                        <div key={dist.storeId} className="bg-transparent border border-glass-border/60 rounded-xl overflow-hidden shadow-sm">
+                          {/* Distributor header */}
+                          <div className="bg-bg3/30 px-4 py-2.5 border-b border-glass-border flex items-center justify-between">
+                            <div className="flex items-center gap-2.5 flex-wrap">
+                              <h4 className="text-sm font-extrabold text-text tracking-wide uppercase flex items-center gap-2">
+                                <Package size={16} className="text-sky" />
+                                {dist.storeName}
+                              </h4>
+
+                              {/* Status Badge (Sent Successfully vs Failed) */}
+                              {sentWaStatusMap[dist.storeId] === 'success' && (
+                                <span className="text-[11px] font-extrabold px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 flex items-center gap-1">
+                                  <Check size={13} />
+                                  <span>WhatsApp Sent</span>
+                                </span>
+                              )}
+                              {sentWaStatusMap[dist.storeId] === 'error' && (
+                                <span className="text-[11px] font-extrabold px-2 py-0.5 rounded-md bg-red/20 text-red border border-red/40 flex items-center gap-1">
+                                  <AlertCircle size={13} />
+                                  <span>Send Failed</span>
+                                </span>
+                              )}
+
+                              {/* Phone Badge & Contact Search/Edit trigger */}
+                              {(() => {
+                                const activePhone = getDistributorPhoneNumber(dist);
+
+                                return (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenEditModal(dist)}
+                                    className={`flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-md border transition-all active:scale-95 cursor-pointer ${activePhone
+                                      ? 'bg-bg2 text-text border-border hover:bg-bg3'
+                                      : 'bg-amber-500/20 text-amber-400 border-amber-500/40 hover:bg-amber-500/30 font-extrabold shadow-sm'
+                                      }`}
+                                    title={activePhone ? 'Edit WhatsApp phone number' : 'Missing WhatsApp number — click to enter and auto-send'}
+                                  >
+                                    <Phone size={12} className={activePhone ? '' : 'text-amber-400'} />
+                                    <span>{activePhone || '⚠️ Missing Phone — Click to Add'}</span>
+                                    <Edit2 size={11} className="opacity-70" />
+                                  </button>
+                                );
+                              })()}
+                            </div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              {dist.deliveryPersons.length > 0 && (
+                                <span className="text-[10px] text-muted flex items-center gap-1">
+                                  <Truck size={11} />
+                                  {dist.deliveryPersons[0].name}
+                                </span>
+                              )}
+                              {(() => {
+                                const totalCount = dist.items.length;
+                                const includedCount = dist.items.filter(i => isItemIncludedInDispatch(i, dist)).length;
+                                const yesterdayItems = dist.items.filter(i => {
+                                  const p = getPastOrderedInfo(i, dist);
+                                  return p.isPastOrdered && !p.isToday;
+                                });
+                                const yesterdayCount = yesterdayItems.length;
+                                const checkedYesterdayCount = yesterdayItems.filter(i => isItemIncludedInDispatch(i, dist)).length;
+                                const checkedTotal = getDistributorCheckedTotal(dist);
+
+                                return (
+                                  <span className="text-[10px] font-bold px-2.5 py-0.5 bg-bg/60 rounded-full border border-glass-border/40 flex items-center gap-1.5 shrink-0">
+                                    <span className="text-text font-mono font-black">
+                                      ₹{checkedTotal.toFixed(2)}
+                                    </span>
+                                    <span className="text-muted/40">•</span>
+                                    <span className={includedCount > 0 ? "text-primary font-bold" : "text-muted"}>
+                                      {includedCount}/{totalCount} to send
+                                    </span>
+                                    {yesterdayCount > 0 && (
+                                      <>
+                                        <span className="text-muted/40">•</span>
+                                        <span className="text-amber-400 font-extrabold flex items-center gap-0.5" title={`${checkedYesterdayCount} of ${yesterdayCount} past items reordered`}>
+                                          <Clock size={10} />
+                                          {checkedYesterdayCount > 0 ? `${checkedYesterdayCount}/${yesterdayCount} reordered` : `${yesterdayCount} past (tick to reorder)`}
+                                        </span>
+                                      </>
+                                    )}
+                                  </span>
+                                );
+                              })()}
+
+                              {/* Button 1: Send to Delivery Boy via WhatsApp */}
+                              <button
+                                onClick={() => handleSendDeliveryBoyNotification(dist)}
+                                disabled={sendingDeliveryBoyNotifId === dist.storeId}
+                                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-bg2 text-text border border-border hover:bg-bg3 disabled:opacity-50 text-[10px] font-bold transition-all active:scale-95 shadow-sm cursor-pointer"
+                                title="Manually trigger and send WhatsApp order notification to assigned Delivery Boy anytime"
+                              >
+                                {sendingDeliveryBoyNotifId === dist.storeId ? (
+                                  <span className="w-2.5 h-2.5 border border-muted/30 border-t-text rounded-full animate-spin" />
+                                ) : (
+                                  <Truck size={11} className="text-muted" />
+                                )}
+                                <span>Send to Delivery Boy</span>
+                              </button>
+
+                              {/* Button 2: Send to Pharmarack Order */}
+                              <button
+                                onClick={() => handleSendManualNotification(dist)}
+                                disabled={sendingNotifId === dist.storeId}
+                                className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-bg2 text-text border border-border hover:bg-bg3 disabled:opacity-50 text-[10px] font-bold transition-all active:scale-95 shadow-sm cursor-pointer"
+                                title="Send notification / place order in Pharmarack"
+                              >
+                                {sendingNotifId === dist.storeId ? (
+                                  <span className="w-2.5 h-2.5 border border-muted/30 border-t-text rounded-full animate-spin" />
+                                ) : (
+                                  <Send size={10} />
+                                )}
+                                <span>Send to Pharmarack</span>
+                              </button>
+
+                              {/* Button 2: WhatsApp Send & Resend Controls */}
+                              {(() => {
+                                const isSending = sendingWaDistributorId === dist.storeId;
+                                const status = sentWaStatusMap[dist.storeId];
+                                const hasUnsentItems = dist.items.some(i => !isItemAlreadySent(i, dist));
+                                const isAlreadySent = !hasUnsentItems && (status === 'success' || (dist.items.length > 0 && dist.items.every(i => isItemAlreadySent(i, dist))));
+
+                                // Button styling: transparent background with emerald text & border for clear readability
+                                const whiteGreenBtnClass = "bg-transparent text-emerald-400 border border-emerald-500/40 hover:bg-emerald-500/10 font-extrabold shadow-xs";
+
+                                if (isAlreadySent) {
+                                  return (
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      {/* Resend to Distributor Only Button */}
+                                      <button
+                                        type="button"
+                                        onClick={() => handleSendWhatsAppOrder(dist, false, true, 'distributor_only')}
+                                        disabled={isSending}
+                                        className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] transition-all active:scale-95 cursor-pointer disabled:opacity-50 ${whiteGreenBtnClass}`}
+                                        title="Resend WhatsApp order message to Distributor Only"
+                                      >
+                                        {isSending ? (
+                                          <span className="w-2.5 h-2.5 border border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin" />
+                                        ) : (
+                                          <RotateCcw size={11} className="text-emerald-400" />
+                                        )}
+                                        <span>Resend (Distributor Only)</span>
+                                      </button>
+
+                                      {/* Resend to Both (Distributor & Delivery Boy) Button */}
+                                      <button
+                                        type="button"
+                                        onClick={() => handleSendWhatsAppOrder(dist, false, true, 'both')}
+                                        disabled={isSending}
+                                        className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] transition-all active:scale-95 cursor-pointer disabled:opacity-50 ${whiteGreenBtnClass}`}
+                                        title="Resend WhatsApp order message to BOTH Distributor and Delivery Boy"
+                                      >
+                                        <Send size={10} className="text-emerald-400" />
+                                        <span>Resend Both</span>
+                                      </button>
+                                    </div>
+                                  );
+                                }
+
+                                let btnClass = "bg-transparent text-emerald-400 border border-emerald-500/40 hover:bg-emerald-500/10 font-bold";
+                                if (status === 'queued') btnClass = "bg-transparent text-amber-400 border border-amber-500/40 hover:bg-amber-500/10 font-bold";
+                                if (status === 'error') btnClass = "bg-transparent text-rose-400 border border-rose-500/40 hover:bg-rose-500/10 font-bold";
+
+                                return (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSendWhatsAppOrder(dist, false, false, 'both')}
+                                    disabled={isSending}
+                                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[10px] font-bold transition-all active:scale-95 shadow-sm disabled:opacity-50 ${btnClass}`}
+                                    title="Send formatted order message directly to Distributor via WhatsApp"
+                                  >
+                                    {isSending ? (
+                                      <span className="w-2.5 h-2.5 border border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin" />
+                                    ) : status === 'queued' ? (
+                                      <Clock size={11} className="text-amber-500" />
+                                    ) : status === 'error' ? (
+                                      <AlertCircle size={11} className="text-rose-500" />
+                                    ) : (
+                                      <MessageSquare size={10} className="text-emerald-500" />
+                                    )}
+                                    <span>
+                                      {isSending
+                                        ? 'Sending...'
+                                        : status === 'queued'
+                                          ? 'Queued'
+                                          : status === 'error'
+                                            ? 'Retry WhatsApp'
+                                            : 'Send via WhatsApp'}
+                                    </span>
+                                  </button>
+                                );
+                              })()}
+
+                              {lastSentWaTimeMap[dist.storeId] && (
+                                <span className="text-[9px] text-emerald-400 font-mono font-extrabold flex items-center gap-1 shrink-0 px-2 py-0.5 bg-emerald-500/10 border border-emerald-500/20 rounded">
+                                  <Clock size={10} />
+                                  Sent at {lastSentWaTimeMap[dist.storeId]}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Line items table */}
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-xs">
+                              <thead>
+                                <tr className="border-b border-glass-border/30 text-muted font-bold uppercase tracking-wider text-[10px]">
+                                  <th className="text-center px-2 py-2 w-12 text-[9px] font-extrabold text-muted" title="Select / Deselect all items for this distributor">
+                                    <div className="flex items-center justify-center gap-1">
+                                      <input
+                                        type="checkbox"
+                                        checked={dist.items.length > 0 && dist.items.every(i => isItemIncludedInDispatch(i, dist))}
+                                        onChange={(e) => handleToggleSelectAllInDist(dist.storeId, e.target.checked)}
+                                        className="w-3.5 h-3.5 rounded text-emerald-500 focus:ring-emerald-500 cursor-pointer accent-emerald-500"
+                                        title={dist.items.length > 0 && dist.items.every(i => isItemIncludedInDispatch(i, dist)) ? "Deselect all items (none will send)" : "Select all items (all will send)"}
+                                      />
+                                    </div>
+                                  </th>
+                                  <th className="text-left px-3 py-2">Product</th>
+                                  <th className="text-left px-3 py-2">Company</th>
+                                  <th className="text-center px-3 py-2">Pack</th>
+                                  <th className="text-center px-3 py-2">Qty</th>
+                                  <th className="text-right px-3 py-2">PTR</th>
+                                  <th className="text-right px-3 py-2">MRP</th>
+                                  <th className="text-center px-3 py-2">Scheme</th>
+                                  <th className="text-center px-3 py-2">Stock</th>
+                                  <th className="text-right px-4 py-2">Amount</th>
+                                  <th className="text-center px-3 py-2">Action</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-glass-border/15">
+                                {dist.items.map((item, idx) => {
+                                  const isSent = isItemAlreadySent(item, dist);
+                                  const pastInfo = getPastOrderedInfo(item, dist);
+                                  const isYesterdayOrPast = pastInfo.isPastOrdered && !pastInfo.isToday;
+                                  const isIncluded = isItemIncludedInDispatch(item, dist);
+                                  const isDeleting = updatingItemId === (item.productCode || String(item.productId || item.productName));
+
+                                  return (
+                                    <tr
+                                      key={`${item.productCode}-${idx}`}
+                                      className={`transition-colors ${!isIncluded
+                                          ? 'opacity-60 hover:opacity-90 text-muted'
+                                          : isYesterdayOrPast
+                                            ? 'bg-amber-500/[0.06] hover:bg-amber-500/[0.12] border-l-2 border-l-amber-500'
+                                            : isSent
+                                              ? 'opacity-75 hover:opacity-100 text-muted'
+                                              : 'hover:bg-bg3/40'
+                                        }`}
+                                    >
+                                      <td className="px-2 py-2.5 text-center w-12">
+                                        <input
+                                          type="checkbox"
+                                          checked={isIncluded}
+                                          onChange={(e) => handleToggleItemCheck(dist.storeId, item, e.target.checked)}
+                                          className={`w-4 h-4 rounded cursor-pointer shadow-sm ${isYesterdayOrPast
+                                              ? 'text-amber-500 focus:ring-amber-500 accent-amber-500'
+                                              : 'text-emerald-500 focus:ring-emerald-500 accent-emerald-500'
+                                            }`}
+                                          title={isIncluded ? "Checked: Included in WhatsApp order. Click to exclude." : "Unchecked: Excluded from WhatsApp order. Click to include."}
+                                        />
+                                      </td>
+                                      <td className="px-3 py-2.5">
+                                        <div className="flex flex-col gap-1">
+                                          <div className="flex items-center gap-1.5 flex-wrap">
+                                            <span className={`font-bold text-[11px] ${!isIncluded ? 'text-muted line-through opacity-80' : isSent ? 'text-muted' : 'text-text'}`}>
+                                              {item.productName}
+                                            </span>
+                                            {isYesterdayOrPast && (
+                                              <span className="text-[8px] font-black uppercase px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/40 shrink-0 select-none flex items-center gap-1" title={`Ordered previously on ${pastInfo.placedDateStr}. Check box to include in today's order.`}>
+                                                <Clock size={9} />
+                                                <span>⚡ {pastInfo.isYesterday ? 'ORDERED YESTERDAY' : `ORDERED ON ${pastInfo.placedDateStr.toUpperCase()}`}</span>
+                                              </span>
+                                            )}
+                                            {!isIncluded && (
+                                              <span className="text-[8px] font-bold px-1.5 py-0.5 rounded bg-bg3/70 text-muted border border-border/40 shrink-0 select-none">
+                                                Excluded (Won't Send)
+                                              </span>
+                                            )}
+                                            {isIncluded && isYesterdayOrPast && (
+                                              <span className="text-[8px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shrink-0 select-none flex items-center gap-0.5">
+                                                <Check size={8} />
+                                                <span>REORDERING</span>
+                                              </span>
+                                            )}
+                                            {isIncluded && !isYesterdayOrPast && isSent && (
+                                              <span className="text-[8px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-bg3 text-muted border border-border/40 shrink-0 select-none flex items-center gap-0.5">
+                                                <Check size={8} />
+                                                <span>SENT TODAY</span>
+                                              </span>
+                                            )}
+                                            {isIncluded && !isYesterdayOrPast && !isSent && (
+                                              <span className="text-[8px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shrink-0 select-none flex items-center gap-0.5">
+                                                <span>✨ TO SEND</span>
+                                              </span>
+                                            )}
+                                          </div>
+
+                                          {/* Duplicate Distributor Warning */}
+                                          {(() => {
+                                            const dup = getDuplicateItemInCart(item);
+                                            if (dup) {
+                                              return (
+                                                <div className="flex items-center gap-1 text-[9px] font-extrabold text-amber-400 bg-amber-400/10 px-1.5 py-0.5 rounded border border-amber-400/20 w-fit">
+                                                  <AlertCircle size={10} className="shrink-0" />
+                                                  <span>Also in cart under {dup.storeName} ({dup.qty} qty)</span>
+                                                </div>
+                                              );
+                                            }
+                                            return null;
+                                          })()}
+
+                                          {/* Alternative Distributor Suggestion */}
+                                          {(() => {
+                                            const history = priceHistoryCache[item.productName] || [];
+                                            const matchingMrpHistory = history.filter(h => Math.abs(h.mrp - item.mrp) < 0.1);
+                                            if (matchingMrpHistory.length > 0) {
+                                              const best = matchingMrpHistory.reduce((prev, curr) => (curr.net_rate < prev.net_rate) ? curr : prev, matchingMrpHistory[0]);
+                                              if (best.net_rate < item.ptr) {
+                                                return (
+                                                  <div className="flex items-center gap-1.5 text-xs font-medium text-muted bg-bg3/50 px-2 py-0.5 rounded-md border border-glass-border/40 w-fit mt-0.5" title={`Rate: ₹${best.rate.toFixed(2)}, Free: ${best.free_qty}, Disc: ₹${best.cd_rs.toFixed(2)}`}>
+                                                    <ArrowDown size={13} className="shrink-0 text-emerald-400 animate-bounce" />
+                                                    <span>Cheapest historic: <strong className="text-emerald-400 font-mono font-bold text-xs inline-flex items-center gap-0.5 animate-pulse">₹{best.net_rate.toFixed(2)}</strong> from <strong className="text-emerald-400 font-bold text-[12.5px] inline-flex items-center animate-pulse">{best.distributor_name}</strong></span>
+                                                  </div>
+                                                );
+                                              }
+                                            }
+                                            return null;
+                                          })()}
+                                        </div>
+                                      </td>
+                                      <td className="px-3 py-2.5 text-muted text-[10px] max-w-[120px] truncate">{item.company}</td>
+                                      <td className="px-3 py-2.5 text-center">
+                                        {item.packaging && (
+                                          <span className="text-[9px] text-muted bg-bg3/50 px-1.5 py-0.5 rounded border border-glass-border/40 font-mono">
+                                            {item.packaging}
+                                          </span>
+                                        )}
+                                      </td>
+                                      <td className="px-3 py-2.5 text-center min-w-[110px] whitespace-nowrap">
+                                        <div className="flex items-center justify-center gap-1 flex-nowrap shrink-0">
+                                          <button
+                                            type="button"
+                                            onClick={() => handleUpdateQty(item, item.qty - 1)}
+                                            disabled={updatingItemId === item.productCode || item.qty <= 1}
+                                            className="w-5 h-5 rounded bg-bg3 border border-glass-border hover:bg-bg2 hover:text-text text-muted flex items-center justify-center font-bold text-xs disabled:opacity-40 transition-all shrink-0"
+                                          >
+                                            -
+                                          </button>
+                                          <input
+                                            type="text"
+                                            pattern="[0-9]*"
+                                            value={item.qty}
+                                            onChange={(e) => {
+                                              const val = parseInt(e.target.value.replace(/\D/g, ''), 10);
+                                              if (!isNaN(val) && val >= 1) {
+                                                handleUpdateQty(item, val);
+                                              }
+                                            }}
+                                            disabled={updatingItemId === item.productCode}
+                                            className="w-10 text-center font-black text-text font-mono bg-bg border border-glass-border rounded py-0.5 text-xs focus:outline-none focus:border-primary disabled:opacity-50 shrink-0"
+                                          />
+                                          <button
+                                            type="button"
+                                            onClick={() => handleUpdateQty(item, item.qty + 1)}
+                                            disabled={updatingItemId === item.productCode}
+                                            className="w-5 h-5 rounded bg-bg3 border border-glass-border hover:bg-bg2 hover:text-text text-muted flex items-center justify-center font-bold text-xs disabled:opacity-40 transition-all shrink-0"
+                                          >
+                                            +
+                                          </button>
+                                        </div>
+                                      </td>
+                                      <td className="px-3 py-2.5 text-right font-mono text-text text-[11px]">
+                                        {item.ptr > 0 ? `₹${item.ptr.toFixed(2)}` : '—'}
+                                      </td>
+                                      <td className="px-3 py-2.5 text-right font-mono text-muted text-[11px]">
+                                        {item.mrp > 0 ? `₹${item.mrp.toFixed(2)}` : '—'}
+                                      </td>
+                                      <td className="px-3 py-2.5 text-center">
+                                        {item.scheme ? (
+                                          <span className="text-[9px] font-bold text-green bg-green/10 px-1.5 py-0.5 rounded border border-green/20">
+                                            {item.scheme}
+                                          </span>
+                                        ) : (
+                                          <span className="text-muted/40">—</span>
+                                        )}
+                                      </td>
+                                      <td className="px-3 py-2.5 text-center font-mono text-[10px]">
+                                        {item.stock !== null ? (
+                                          <span className={item.stock > 10 ? 'text-emerald-400' : item.stock > 0 ? 'text-amber-400' : 'text-red'}>
+                                            {item.stock}
+                                          </span>
+                                        ) : '—'}
+                                      </td>
+                                      <td className="px-4 py-2.5 text-right font-mono font-black text-text text-[11px]">
+                                        ₹{getCartItemAmount(item).toFixed(2)}
+                                      </td>
+                                      <td className="px-3 py-2.5 text-center">
+                                        <div className="flex items-center justify-center gap-1.5">
+                                          <button
+                                            type="button"
+                                            onClick={() => handleOpenSwitchModal(item, dist)}
+                                            className="px-2 py-1 rounded-lg bg-sky-500/10 hover:bg-sky-500/25 border border-sky-500/30 text-sky-400 hover:text-sky-300 transition-all active:scale-95 flex items-center gap-1 font-bold text-[10px] cursor-pointer"
+                                            title={`Compare prices and switch supplier for ${item.productName}`}
+                                          >
+                                            <ArrowLeftRight size={11} />
+                                            <span>Switch</span>
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => handleDeleteItem(item)}
+                                            disabled={isDeleting}
+                                            className="px-2 py-1 rounded-lg bg-rose-500/10 hover:bg-rose-500/25 border border-rose-500/30 text-rose-400 hover:text-rose-300 transition-all active:scale-95 disabled:opacity-40 flex items-center gap-1 font-bold text-[10px] cursor-pointer"
+                                            title={`Delete ${item.productName} from Pharmarack live cart`}
+                                          >
+                                            {isDeleting ? (
+                                              <span className="w-2.5 h-2.5 border border-rose-400/30 border-t-rose-400 rounded-full animate-spin" />
+                                            ) : (
+                                              <Trash2 size={12} />
+                                            )}
+                                            <span>Delete</span>
+                                          </button>
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                          {dist.lineTotal > 0 && (
+                            <div className="border-t border-glass-border/30 px-4 py-2 bg-bg3/30 flex justify-end">
+                              <span className="text-[10px] text-muted font-bold uppercase tracking-wider mr-3">Subtotal</span>
+                              <span className="text-xs font-black text-emerald-400 font-mono">₹{dist.lineTotal.toFixed(2)}</span>
+                            </div>
+                          )}
+                        </div>
+                      ))
+                    )}
                   </div>
                 </>
               )}
@@ -4317,11 +4302,10 @@ const [showAddedItems] = useState<boolean>(false);
                       return (
                         <div
                           key={idx}
-                          className={`p-3 rounded-xl border flex items-center justify-between gap-3 transition-all ${
-                            isCurrentDist
+                          className={`p-3 rounded-xl border flex items-center justify-between gap-3 transition-all ${isCurrentDist
                               ? 'border-primary/40 bg-primary/5'
                               : 'border-glass-border/50 bg-bg/40 hover:border-sky-500/40 hover:bg-bg/70'
-                          }`}
+                            }`}
                         >
                           <div className="min-w-0 flex-1 space-y-0.5">
                             <div className="flex items-center gap-2 flex-wrap">
@@ -4609,7 +4593,7 @@ const [showAddedItems] = useState<boolean>(false);
                 <div className="space-y-2">
                   <div className="text-xs text-muted flex items-center justify-between">
                     <span>Found <strong className="text-text font-bold">{purchaseHistoryModalTarget.history.length}</strong> previous invoice records</span>
-                    <span className="text-[10px] text-emerald-400 font-bold">Sorted by most recent</span>
+                    <span className="text-[10px] text-muted font-bold">Sorted by most recent</span>
                   </div>
                   <div className="divide-y divide-glass-border/30 border border-glass-border rounded-xl overflow-hidden bg-bg/30">
                     {purchaseHistoryModalTarget.history.map((h, i) => (
@@ -4633,7 +4617,7 @@ const [showAddedItems] = useState<boolean>(false);
 
                         <div className="text-right sm:text-right shrink-0">
                           <div className="text-[10px] text-muted">Net Rate / Unit</div>
-                          <div className="text-sm font-black font-mono text-emerald-400">
+                          <div className="text-sm font-black font-mono text-text">
                             ₹{h.net_rate?.toFixed(2) || h.rate?.toFixed(2)}
                           </div>
                           {h.mrp > 0 && <div className="text-[10px] text-muted font-mono">MRP: ₹{h.mrp.toFixed(2)}</div>}
