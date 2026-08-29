@@ -36,7 +36,8 @@ export class PdfInvoiceService {
 
     // Fetch line items
     const items = await db.all(
-      `SELECT si.quantity, si.unit_price, si.loose_qty, si.discount_per, m.name as medicine_name, COALESCE(m.pack_size, 1) as pack_size
+      `SELECT si.quantity, si.unit_price, si.loose_qty, si.discount_per, m.name as medicine_name, COALESCE(m.pack_size, 1) as pack_size,
+              im.batch_no
        FROM sale_items si
        JOIN inventory_master im ON si.inventory_id = im.id
        JOIN medicines m ON im.medicine_id = m.id
@@ -101,10 +102,11 @@ export class PdfInvoiceService {
         // Table Header
         const tableTop = doc.y;
         doc.fontSize(9).fillColor('#64748b');
-        doc.text('Medicine / Product Name', 40, tableTop, { width: 250 });
-        doc.text('Qty', 300, tableTop, { width: 50, align: 'right' });
-        doc.text('Unit Price', 380, tableTop, { width: 80, align: 'right' });
-        doc.text('Total', 480, tableTop, { width: 70, align: 'right' });
+        doc.text('Medicine / Product Name', 40, tableTop, { width: 190 });
+        doc.text('Batch No.', 235, tableTop, { width: 75 });
+        doc.text('Qty', 315, tableTop, { width: 50, align: 'right' });
+        doc.text('Unit Price', 375, tableTop, { width: 80, align: 'right' });
+        doc.text('Total', 465, tableTop, { width: 85, align: 'right' });
         
         doc.moveTo(40, tableTop + 12).lineTo(550, tableTop + 12).strokeColor('#cbd5e1').lineWidth(1).stroke();
         doc.moveDown(1);
@@ -124,15 +126,16 @@ export class PdfInvoiceService {
             ? `${item.medicine_name} (${discPer}% Off)` 
             : item.medicine_name;
             
-          doc.text(nameText, 40, itemY, { width: 250 });
+          doc.text(nameText, 40, itemY, { width: 190 });
+          doc.text(item.batch_no ? String(item.batch_no) : '-', 235, itemY, { width: 75 });
           
           const qtyText = looseQty > 0 
             ? `${item.quantity} S + ${looseQty} L` 
             : String(item.quantity);
-          doc.text(qtyText, 300, itemY, { width: 50, align: 'right' });
+          doc.text(qtyText, 315, itemY, { width: 50, align: 'right' });
           
-          doc.text(`₹${discountedPrice.toFixed(2)}`, 380, itemY, { width: 80, align: 'right' });
-          doc.text(`₹${itemTotal.toFixed(2)}`, 480, itemY, { width: 70, align: 'right' });
+          doc.text(`₹${discountedPrice.toFixed(2)}`, 375, itemY, { width: 80, align: 'right' });
+          doc.text(`₹${itemTotal.toFixed(2)}`, 465, itemY, { width: 85, align: 'right' });
           doc.moveDown(1.2);
         });
 

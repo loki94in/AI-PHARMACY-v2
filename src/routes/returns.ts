@@ -359,6 +359,22 @@ router.post('/process-returns', async (req, res) => {
     }
 
     db = await dbManager.getConnection();
+
+    // Validate quantities against physical stock before beginning transaction
+    for (const item of items) {
+      const invItem = await db.get(
+        `SELECT im.id, im.quantity, m.name as medicine_name
+         FROM inventory_master im JOIN medicines m ON m.id = im.medicine_id
+         WHERE im.medicine_id = ? AND im.batch_no = ?`,
+        [item.medicine_id, item.batch_no]
+      );
+      if (invItem && Number(item.quantity) > Number(invItem.quantity)) {
+        return res.status(400).json({
+          error: `Cannot return ${item.quantity} units of ${invItem.medicine_name} (Batch: ${item.batch_no}): only ${invItem.quantity} units currently available in inventory.`
+        });
+      }
+    }
+
     await db.run('BEGIN TRANSACTION');
 
     const lastRet = await db.get("SELECT return_no FROM returns WHERE return_no LIKE 'PR-%' ORDER BY id DESC LIMIT 1");
@@ -457,7 +473,7 @@ router.post('/process-returns', async (req, res) => {
   } catch (err: any) {
     if (db) {
       await db.run('ROLLBACK');
-          }
+    }
     console.error('Error processing returns:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
@@ -477,11 +493,6 @@ router.post('/export-pdf-report', async (req, res) => {
     const doc = new PDFDocument({ margin: 40 });
     doc.pipe(res);
 
-    // Header
-    doc.fontSize(22).text('Consolidated Claims Report', { align: 'center' });
-    doc.fontSize(10).text('Generated on: ' + new Date().toLocaleString(), { align: 'center' });
-    doc.moveDown(1.5);
-
     // Group items by distributor
     const grouped: { [key: string]: any[] } = {};
     items.forEach(item => {
@@ -489,6 +500,19 @@ router.post('/export-pdf-report', async (req, res) => {
       if (!grouped[dist]) grouped[dist] = [];
       grouped[dist].push(item);
     });
+
+    const distKeys = Object.keys(grouped);
+    const isSingleDistributor = distKeys.length === 1 && distKeys[0] !== 'Unassigned Distributor';
+
+    // Header
+    if (isSingleDistributor) {
+      doc.fontSize(20).text(`Supplier Debit Note / Return Claim`, { align: 'center' });
+      doc.fontSize(12).fillColor('#0284c7').text(`${distKeys[0]}`, { align: 'center' });
+    } else {
+      doc.fontSize(22).text('Consolidated Claims Report', { align: 'center' });
+    }
+    doc.fontSize(9).fillColor('#64748b').text('Generated on: ' + new Date().toLocaleString(), { align: 'center' });
+    doc.moveDown(1.5);
 
     let overallTotal = 0;
 

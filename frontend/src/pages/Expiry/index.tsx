@@ -100,6 +100,59 @@ const Expiry = () => {
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+
+  // Staged return drafts tracker across all active return draft tabs
+  const getStagedDraftQuantities = (): Map<string, number> => {
+    const map = new Map<string, number>();
+    try {
+      const saved = localStorage.getItem('returns_draft_tabs');
+      if (saved) {
+        const parsedTabs = JSON.parse(saved);
+        if (Array.isArray(parsedTabs)) {
+          parsedTabs.forEach((t: any) => {
+            if (Array.isArray(t.items)) {
+              t.items.forEach((it: any) => {
+                const qty = parseFloat(String(it.quantity || 0)) || 0;
+                if (qty > 0 && it.batch_no) {
+                  const key = `${it.medicine_id || ''}_${String(it.batch_no).trim().toLowerCase()}`;
+                  map.set(key, (map.get(key) || 0) + qty);
+                }
+              });
+            }
+          });
+        }
+      }
+    } catch (e) {
+      console.error('Failed to parse staged draft quantities:', e);
+    }
+    return map;
+  };
+
+  const [stagedMap, setStagedMap] = useState<Map<string, number>>(getStagedDraftQuantities);
+
+  useEffect(() => {
+    const updateStaged = () => {
+      setStagedMap(getStagedDraftQuantities());
+    };
+    window.addEventListener('returns-draft-changed', updateStaged);
+    window.addEventListener('storage', updateStaged);
+    window.addEventListener('stock-write-completed', updateStaged);
+    return () => {
+      window.removeEventListener('returns-draft-changed', updateStaged);
+      window.removeEventListener('storage', updateStaged);
+      window.removeEventListener('stock-write-completed', updateStaged);
+    };
+  }, []);
+
+  const getItemStagedInfo = (item: ExpiryItem) => {
+    const key = `${item.medicine_id || item.id}_${String(item.batch_no || '').trim().toLowerCase()}`;
+    const stagedQty = stagedMap.get(key) || 0;
+    const physicalStock = item.quantity || 0;
+    const actionableQty = Math.max(0, physicalStock - stagedQty);
+    const isFullyStaged = stagedQty >= physicalStock && physicalStock > 0;
+    const isPartiallyStaged = stagedQty > 0 && stagedQty < physicalStock;
+    return { stagedQty, physicalStock, actionableQty, isFullyStaged, isPartiallyStaged };
+  };
   
   // Custom Filters
   const [minQty, setMinQty] = useState('');
@@ -114,13 +167,16 @@ const Expiry = () => {
   const [colFilterMaxMrp, setColFilterMaxMrp] = useState('');
   const [colFilterLocation, setColFilterLocation] = useState('');
 
-
-
   const showNotification = (message: string, type: 'success' | 'error' | 'info') => {
     toastEvent.trigger(message, type, '/expiry');
   };
 
   const toggleSelect = (id: number) => {
+    const targetItem = items.find(i => i.id === id);
+    if (targetItem) {
+      const { isFullyStaged } = getItemStagedInfo(targetItem);
+      if (isFullyStaged) return;
+    }
     setSelectedIds(prev => {
       const next = new Set(prev);
       if (next.has(id)) {
@@ -133,7 +189,17 @@ const Expiry = () => {
   };
 
   const handleSendToReturns = () => {
-    const selected = filteredItems.filter(item => selectedIds.has(item.id));
+    const selected = filteredItems
+      .filter(item => selectedIds.has(item.id))
+      .map(item => {
+        const { actionableQty } = getItemStagedInfo(item);
+        return {
+          ...item,
+          quantity: actionableQty > 0 ? actionableQty : item.quantity
+        };
+      })
+      .filter(item => (item.quantity || 0) > 0);
+
     if (selected.length === 0) return;
     navigate('/returns', { state: { prefilledReturnItems: selected } });
   };
@@ -506,10 +572,19 @@ const Expiry = () => {
                       type="checkbox" 
                       className="w-4 h-4 rounded accent-primary cursor-pointer" 
                       onChange={e => {
-                        if (e.target.checked) setSelectedIds(new Set(filteredItems.filter(i => i.purchase_invoice_no).map(i => i.id)));
-                        else setSelectedIds(new Set());
+                        if (e.target.checked) {
+                          const selectable = filteredItems
+                            .filter(i => i.purchase_invoice_no && !getItemStagedInfo(i).isFullyStaged)
+                            .map(i => i.id);
+                          setSelectedIds(new Set(selectable));
+                        } else {
+                          setSelectedIds(new Set());
+                        }
                       }} 
-                      checked={selectedIds.size === filteredItems.filter(i => i.purchase_invoice_no).length && filteredItems.length > 0} 
+                      checked={
+                        filteredItems.filter(i => i.purchase_invoice_no && !getItemStagedInfo(i).isFullyStaged).length > 0 &&
+                        selectedIds.size === filteredItems.filter(i => i.purchase_invoice_no && !getItemStagedInfo(i).isFullyStaged).length
+                      } 
                       readOnly 
                     />
                   </th>
@@ -517,7 +592,7 @@ const Expiry = () => {
                   <th className="p-3 text-left text-xs font-bold text-muted uppercase tracking-wider">Batch Number</th>
                   <th className="p-3 text-center text-xs font-bold text-muted uppercase tracking-wider">Expiry Date</th>
                   <th className="p-3 text-center text-xs font-bold text-muted uppercase tracking-wider">Remaining Time</th>
-                  <th className="p-3 text-center text-xs font-bold text-muted uppercase tracking-wider">Stock Qty</th>
+                  <th className="p-3 text-center text-xs font-bold text-muted uppercase tracking-wider">Stock / Actionable Qty</th>
                   <th className="p-3 text-right text-xs font-bold text-muted uppercase tracking-wider">MRP Price</th>
                   <th className="p-3 text-left text-xs font-bold text-muted uppercase tracking-wider">Invoice Ref / Supplier</th>
                   <th className="p-3 text-left text-xs font-bold text-muted uppercase tracking-wider">Rack Location</th>
@@ -548,6 +623,7 @@ const Expiry = () => {
                   filteredItems.map(item => {
                     const daysDiff = getExpiryDaysDiff(item.expiry_date);
                     const details = getExpiryStatusDetails(daysDiff);
+                    const { stagedQty, physicalStock, actionableQty, isFullyStaged, isPartiallyStaged } = getItemStagedInfo(item);
                     const isSelected = selectedIds.has(item.id);
                     return (
                       <tr 
@@ -555,7 +631,9 @@ const Expiry = () => {
                         className={`transition-all border-b border-glass-border/30 ${
                           isSelected 
                             ? 'bg-primary/15 border-l-4 border-l-primary text-text font-bold shadow-sm' 
-                            : `hover:bg-bg3/40 ${details.rowClass}`
+                            : isFullyStaged
+                              ? 'opacity-65 bg-bg3/20'
+                              : `hover:bg-bg3/40 ${details.rowClass}`
                         }`}
                       >
                         <td className="p-3">
@@ -565,7 +643,8 @@ const Expiry = () => {
                               className="w-4 h-4 rounded accent-primary cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
                               checked={isSelected}
                               onChange={() => toggleSelect(item.id)}
-                              disabled={!item.purchase_invoice_no}
+                              disabled={!item.purchase_invoice_no || isFullyStaged}
+                              title={isFullyStaged ? 'Already fully staged in return draft' : (!item.purchase_invoice_no ? 'No invoice found' : '')}
                             />
                             {isSelected && (
                               <span className="px-1.5 py-0.5 rounded bg-primary text-white text-[11px] font-black uppercase tracking-wider shadow-sm animate-in fade-in">
@@ -593,8 +672,26 @@ const Expiry = () => {
                             <span className="text-xs text-muted font-medium">{details.daysText}</span>
                           </div>
                         </td>
-                        <td className="p-3 text-center font-extrabold font-mono text-text text-base">
-                          {item.quantity}
+                        <td className="p-3 text-center select-none">
+                          {isFullyStaged ? (
+                            <div className="flex flex-col items-center gap-0.5">
+                              <span className="font-mono text-muted/60 line-through text-xs font-bold">{physicalStock}</span>
+                              <span className="px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/30 text-amber-500 font-bold text-[9px] font-mono">
+                                STAGED IN DRAFT ({stagedQty})
+                              </span>
+                            </div>
+                          ) : isPartiallyStaged ? (
+                            <div className="flex flex-col items-center gap-0.5">
+                              <span className="font-extrabold font-mono text-emerald-500 text-base">{actionableQty}</span>
+                              <span className="text-[10px] text-amber-500 font-semibold font-mono">
+                                ({stagedQty} in draft / {physicalStock} total)
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="font-extrabold font-mono text-text text-base">
+                              {item.quantity}
+                            </span>
+                          )}
                         </td>
                         <td className="p-3 text-right font-mono font-extrabold text-sky text-base">
                           ₹{item.mrp?.toFixed(2) || '0.00'}
@@ -617,23 +714,34 @@ const Expiry = () => {
                           {item.rack_location || '-'}
                         </td>
                         <td className="p-3 text-center select-none">
-                          <button
-                            onClick={() => {
-                              if (item.purchase_invoice_no) {
-                                navigate('/returns', { state: { prefilledReturnItems: [item] } });
-                              }
-                            }}
-                            disabled={!item.purchase_invoice_no}
-                            className={`flex items-center gap-1.5 mx-auto px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
-                              item.purchase_invoice_no
-                                ? 'bg-red-500/15 border-red-500/30 text-red hover:bg-red-500/25 active:scale-95'
-                                : 'opacity-40 bg-bg3 border-glass-border text-muted cursor-not-allowed'
-                            }`}
-                            title={item.purchase_invoice_no ? 'Create Return' : 'Cannot return: no purchase invoice found, match manually'}
-                          >
-                            <RotateCcw size={13} />
-                            Return
-                          </button>
+                          {isFullyStaged ? (
+                            <button
+                              disabled
+                              className="flex items-center gap-1.5 mx-auto px-3 py-1.5 rounded-xl text-xs font-bold border opacity-60 bg-bg3 border-glass-border text-amber-500 cursor-not-allowed"
+                              title={`All ${physicalStock} unit(s) are already staged in active return draft`}
+                            >
+                              <RotateCcw size={13} />
+                              In Draft
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => {
+                                if (item.purchase_invoice_no) {
+                                  navigate('/returns', { state: { prefilledReturnItems: [{ ...item, quantity: actionableQty }] } });
+                                }
+                              }}
+                              disabled={!item.purchase_invoice_no || actionableQty === 0}
+                              className={`flex items-center gap-1.5 mx-auto px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                                item.purchase_invoice_no && actionableQty > 0
+                                  ? 'bg-red-500/15 border-red-500/30 text-red hover:bg-red-500/25 active:scale-95'
+                                  : 'opacity-40 bg-bg3 border-glass-border text-muted cursor-not-allowed'
+                              }`}
+                              title={item.purchase_invoice_no ? `Create Return for ${actionableQty} actionable unit(s)` : 'Cannot return: no purchase invoice found, match manually'}
+                            >
+                              <RotateCcw size={13} />
+                              Return {isPartiallyStaged ? `(${actionableQty})` : ''}
+                            </button>
+                          )}
                         </td>
                       </tr>
                     );
@@ -645,7 +753,15 @@ const Expiry = () => {
 
           {/* Live Multi-Distributor Selection Summary Bar */}
           {selectedIds.size > 0 && (() => {
-            const selectedList = filteredItems.filter(i => selectedIds.has(i.id));
+            const selectedList = filteredItems
+              .filter(i => selectedIds.has(i.id))
+              .map(item => {
+                const { actionableQty } = getItemStagedInfo(item);
+                return {
+                  ...item,
+                  quantity: actionableQty > 0 ? actionableQty : item.quantity
+                };
+              });
             const totalVal = selectedList.reduce((sum, item) => sum + (item.mrp || 0) * (item.quantity || 1), 0);
             
             const distCounts: Record<string, number> = {};

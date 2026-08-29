@@ -83,4 +83,41 @@ describe('PDF Invoice Discount & Loose Qty rendering', () => {
     expect(fs.existsSync(pdfPath)).toBe(true);
     expect(fs.statSync(pdfPath).size).toBeGreaterThan(0);
   });
+
+  test('should generate PDF invoice with multiple medicines and distinct batch numbers', async () => {
+    const db = await open({ filename: dbPath, driver: sqlite3.Database });
+    
+    // Seed medicines and inventory
+    await db.run('INSERT INTO medicines (id, name, pack_size) VALUES (502, "Amoxicillin", 10)');
+    await db.run('INSERT INTO inventory_master (id, medicine_id, quantity, loose_quantity, batch_no, expiry_date, mrp, unit_price) VALUES (502, 502, 50, 0, "AMX-8899", "08/2028", 120, 120)');
+
+    await db.run('INSERT INTO medicines (id, name, pack_size) VALUES (503, "Cetirizine", 10)');
+    await db.run('INSERT INTO inventory_master (id, medicine_id, quantity, loose_quantity, batch_no, expiry_date, mrp, unit_price) VALUES (503, 503, 30, 0, "CTZ-4411", "11/2027", 45, 45)');
+
+    // Create sales_invoices record
+    await db.run(`
+      INSERT INTO sales_invoices (id, invoice_no, customer_id, total_amount, tax_amount, payment_medium, payment_status, date, discount, subtotal)
+      VALUES (502, "S-2026-0002", 501, 165, 7.85, "CASH", "PAID", "2026-07-14T00:00:00.000Z", 0, 165)
+    `);
+
+    // Create sale_items records
+    await db.run(`
+      INSERT INTO sale_items (invoice_id, inventory_id, quantity, unit_price, loose_qty, discount_per)
+      VALUES (502, 502, 1, 120, 0, 0)
+    `);
+    await db.run(`
+      INSERT INTO sale_items (invoice_id, inventory_id, quantity, unit_price, loose_qty, discount_per)
+      VALUES (502, 503, 1, 45, 0, 0)
+    `);
+
+    await db.close();
+
+    const { pdfInvoiceService } = await import('../src/services/pdfInvoiceService.js');
+    const multiBatchPdfPath = path.join(tmpDir, 'multi-batch-invoice.pdf');
+
+    await expect(pdfInvoiceService.generateInvoicePdf(502, multiBatchPdfPath, false)).resolves.not.toThrow();
+
+    expect(fs.existsSync(multiBatchPdfPath)).toBe(true);
+    expect(fs.statSync(multiBatchPdfPath).size).toBeGreaterThan(0);
+  });
 });

@@ -260,6 +260,7 @@ const Returns: React.FC = () => {
 
   const [tabs, setTabs] = useState<LocalReturnsTab[]>(initialTabs);
   const [activeTabId, setActiveTabId] = useState<string>(initialActiveTabId);
+  const [historySubTab, setHistorySubTab] = useState<'supplier' | 'customer'>('supplier');
 
   const [items, setItems] = useState<ReturnItem[]>(initialActiveTab.items || []);
   const [saving, setSaving] = useState(false);
@@ -432,9 +433,10 @@ const Returns: React.FC = () => {
     });
   }, [items, activeTabId]);
 
-  // Persist to localStorage
+  // Persist to localStorage & dispatch real-time event for Expiry synchronization
   useEffect(() => {
     localStorage.setItem('returns_draft_tabs', JSON.stringify(tabs));
+    window.dispatchEvent(new CustomEvent('returns-draft-changed'));
   }, [tabs]);
 
   // Clean up any potential legacy conflicting local storage keys to ensure robust cache
@@ -1243,194 +1245,141 @@ const Returns: React.FC = () => {
           <CustomerReturn />
         </div>
       ) : currentTab === 'customer-history' ? (
-        <div className="flex-1 flex flex-col overflow-hidden relative min-h-0 bg-bg2/50 border border-border/60 rounded-2xl p-5">
-          <CustomerReturnHistory />
-        </div>
-      ) : (
-        <div className="flex-1 flex gap-4 min-h-0 overflow-hidden text-text relative">
-          {/* Left Sidebar Panel: w-96 */}
-          <div className="w-96 flex-shrink-0 flex flex-col gap-3 min-h-0 overflow-hidden bg-bg2/90 backdrop-blur-md border border-border/80 rounded-2xl p-4 shadow-sm">
-            
-            {/* Header & New Return button */}
-            <div className="flex items-center justify-between border-b border-border/60 pb-3 flex-shrink-0">
-              <div className="flex items-center gap-2">
-                <h2 className="text-xs font-black uppercase tracking-wider text-text">Returns & Drafts Hub</h2>
-                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-bg3 text-muted border border-border/40 font-mono">
-                  {tabs.length + returnHistory.length}
-                </span>
-              </div>
+        <div className="flex-1 flex flex-col overflow-hidden relative min-h-0 bg-bg2/50 border border-border/60 rounded-2xl p-4 gap-3">
+          {/* Subtabs for Return History: Supplier Returns vs Customer Returns */}
+          <div className="flex items-center justify-between pb-2 border-b border-border/60 shrink-0">
+            <div className="flex items-center gap-2">
+              <History className="w-5 h-5 text-primary" />
+              <h2 className="text-sm font-extrabold text-text uppercase tracking-wider">Return History Center</h2>
+            </div>
+            <div className="flex items-center gap-1 bg-bg3/80 p-1 rounded-xl border border-border/60">
               <button
-                onClick={addNewTab}
-                className="flex items-center justify-center px-2.5 py-1.5 rounded-xl border border-dashed border-primary/40 text-primary hover:bg-primary/10 transition-all bg-primary/5 active:scale-95 shadow-sm cursor-pointer"
-                title="Add New Supplier Return Draft"
+                onClick={() => setHistorySubTab('supplier')}
+                className={`flex items-center gap-2 px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  historySubTab === 'supplier'
+                    ? 'bg-primary text-white shadow-sm'
+                    : 'text-muted hover:text-text'
+                }`}
               >
-                <Plus size={14} className="mr-1" />
-                <span className="text-[11px] font-bold">New Draft</span>
+                <RotateCcw size={13} />
+                <span>Supplier Returns ({returnHistory.length})</span>
+              </button>
+              <button
+                onClick={() => setHistorySubTab('customer')}
+                className={`flex items-center gap-2 px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  historySubTab === 'customer'
+                    ? 'bg-primary text-white shadow-sm'
+                    : 'text-muted hover:text-text'
+                }`}
+              >
+                <Users size={13} />
+                <span>Customer Returns</span>
               </button>
             </div>
+          </div>
 
-            {/* Unified Quick Search Input */}
-            <div className="relative flex-shrink-0">
-              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
-              <input
-                type="text"
-                placeholder="Search medicine, supplier or bill..."
-                value={searchFilterText}
-                onChange={e => setSearchFilterText(e.target.value)}
-                className="w-full pl-8 pr-7 py-2 bg-bg3/80 border border-border/70 rounded-xl text-xs text-text placeholder:text-muted/60 focus:outline-none focus:border-primary/60 font-medium transition-all shadow-inner"
-              />
-              {searchFilterText && (
-                <button
-                  onClick={() => setSearchFilterText('')}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted hover:text-text p-0.5 rounded-full"
-                >
-                  <X size={12} />
-                </button>
-              )}
+          {historySubTab === 'customer' ? (
+            <div className="flex-1 flex flex-col overflow-hidden min-h-0">
+              <CustomerReturnHistory />
             </div>
-
-            {/* Filter Bar (Date, Distributor & Amount) */}
-            <div className="p-2.5 bg-bg3/50 rounded-xl border border-border/60 space-y-2 text-[10px] flex-shrink-0 shadow-inner">
-              <div className="flex items-center gap-1.5">
-                <label className="text-muted font-semibold w-7">From</label>
-                <input
-                  type="date"
-                  value={toDateInputValue(dateFrom)}
-                  min="2020-01-01"
-                  max={getTodayString()}
-                  onChange={e => handleDateFromChange(e.target.value)}
-                  className="flex-1 px-2 py-1 bg-bg border border-border/60 rounded-lg text-[10px] text-text font-mono focus:outline-none focus:border-primary/60"
-                />
-                <label className="text-muted font-semibold w-4 text-center">To</label>
-                <input
-                  type="date"
-                  value={toDateInputValue(dateTo)}
-                  min="2020-01-01"
-                  max={getTodayString()}
-                  onChange={e => { setManualToDate(true); handleDateToChange(e.target.value); }}
-                  className="flex-1 px-2 py-1 bg-bg border border-border/60 rounded-lg text-[10px] text-text font-mono focus:outline-none focus:border-primary/60"
-                />
-              </div>
-              <div className="flex items-center gap-1.5">
-                <label className="text-muted font-semibold w-7">Min ₹</label>
-                <input
-                  type="number"
-                  inputMode="decimal"
-                  min="0"
-                  placeholder="0"
-                  value={minAmount}
-                  onChange={e => setMinAmount(e.target.value)}
-                  className="flex-1 px-2 py-1 bg-bg border border-border/60 rounded-lg text-[10px] text-text font-mono focus:outline-none focus:border-primary/60"
-                />
-                <label className="text-muted font-semibold w-4 text-center">Max</label>
-                <input
-                  type="number"
-                  inputMode="decimal"
-                  min="0"
-                  placeholder="∞"
-                  value={maxAmount}
-                  onChange={e => setMaxAmount(e.target.value)}
-                  className="flex-1 px-2 py-1 bg-bg border border-border/60 rounded-lg text-[10px] text-text font-mono focus:outline-none focus:border-primary/60"
-                />
-              </div>
-              <div className="flex gap-1.5">
-                <select
-                  value={distributorFilter}
-                  onChange={e => setDistributorFilter(e.target.value)}
-                  className="flex-1 px-2 py-1 bg-bg border border-border/60 rounded-lg text-[10px] text-text font-semibold focus:outline-none focus:border-primary/60"
-                >
-                  <option value="">All Distributors</option>
-                  {[...new Set(returnHistory.map(r => r.distributor_name).filter(Boolean))].map(d => (
-                    <option key={String(d)} value={String(d)}>{String(d)}</option>
-                  ))}
-                </select>
-                {(distributorFilter || minAmount || maxAmount || searchFilterText) && (
-                  <button
-                    onClick={() => { setDistributorFilter(''); setMinAmount(''); setMaxAmount(''); setSearchFilterText(''); }}
-                    className="text-[9px] text-red hover:underline font-bold px-2 bg-red-500/10 border border-red-500/20 rounded-lg flex-shrink-0"
-                  >✕ Clear</button>
-                )}
-              </div>
-            </div>
-
-            {/* Scrollable Lists Area (Active Drafts + Finalized History) */}
-            <div className="flex-1 flex flex-col gap-3 min-h-0 overflow-y-auto pr-1 scrollbar-thin">
-              
-              {/* Section A: Active Drafts */}
-              <div className="flex-shrink-0 flex flex-col min-h-0">
-                <h3 className="text-[10px] font-extrabold uppercase tracking-widest text-muted mb-2 flex items-center justify-between">
-                  <span>Active Drafts</span>
-                  <span className="text-[9px] font-bold text-primary font-mono">{tabs.length}</span>
-                </h3>
-                <div className="space-y-2">
-                  {tabs.filter(t => {
-                    if (!searchFilterText) return true;
-                    const q = searchFilterText.toLowerCase();
-                    const nameMatch = t.name.toLowerCase().includes(q);
-                    const itemMatch = (t.items || []).some(i => 
-                      (i.medicine_name || '').toLowerCase().includes(q) ||
-                      (i.distributor_name || '').toLowerCase().includes(q) ||
-                      (i.invoice_no || '').toLowerCase().includes(q)
-                    );
-                    return nameMatch || itemMatch;
-                  }).map((t) => {
-                    const isActive = t.id === activeTabId && !selectedHistoryReturn;
-                    const count = t.items ? t.items.length : 0;
-                    const firstDistributor = t.items ? t.items.find(item => item.distributor_name)?.distributor_name : null;
-                    const displayName = firstDistributor ? `Ret: ${firstDistributor}` : t.name;
-                    
-                    const tabTotal = (t.items || []).reduce((sum, item) => {
-                      const qty = numOr0(item.quantity);
-                      const costPrice = numOr0(item.cost_price);
-                      return sum + (costPrice * qty);
-                    }, 0);
-
-                    return (
-                      <div
-                        key={t.id}
-                        onClick={() => switchTab(t.id)}
-                        className={`flex flex-col gap-1.5 p-3 rounded-xl border transition-all duration-200 select-none cursor-pointer relative shadow-sm ${
-                          isActive 
-                            ? 'bg-primary/10 border-primary text-text font-bold ring-1 ring-primary/30' 
-                            : 'bg-bg3/40 border-border/50 text-muted hover:text-text hover:bg-bg3/80 hover:border-border'
-                        }`}
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="flex items-center gap-2 min-w-0">
-                            <div className={`p-1 rounded-md ${isActive ? 'bg-primary/20 text-primary' : 'bg-bg/60 text-muted'}`}>
-                              <RotateCcw size={12} />
-                            </div>
-                            <span className="truncate text-xs font-bold text-text">{displayName}</span>
-                          </div>
-                          {tabs.length > 1 && (
-                            <button 
-                              onClick={(e) => closeTab(t.id, e)}
-                              className="hover:bg-red/10 rounded-lg p-1 transition-all text-muted hover:text-red flex-shrink-0"
-                              title="Close Tab"
-                            >
-                              <X size={12} />
-                            </button>
-                          )}
-                        </div>
-                        <div className="flex justify-between items-center text-[10px] font-semibold mt-0.5">
-                          <span className="px-2 py-0.5 rounded-full bg-bg3/80 border border-border/40 text-muted font-mono">
-                            {count} {count === 1 ? 'item' : 'items'}
-                          </span>
-                          <span className="text-emerald-500 font-extrabold text-xs font-mono">₹{tabTotal.toFixed(2)}</span>
-                        </div>
-                      </div>
-                    );
-                  })}
+          ) : (
+            <div className="flex-1 flex gap-4 min-h-0 overflow-hidden text-text relative">
+              {/* Left Column: Supplier Return History List & Filters */}
+              <div className="w-96 flex-shrink-0 flex flex-col gap-3 min-h-0 overflow-hidden bg-bg2/90 backdrop-blur-md border border-border/80 rounded-2xl p-4 shadow-sm">
+                <div className="flex items-center justify-between border-b border-border/60 pb-2.5 flex-shrink-0">
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-xs font-black uppercase tracking-wider text-text">Finalized Supplier Returns</h3>
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-bg3 text-primary border border-border/40 font-mono">
+                      {returnHistory.length}
+                    </span>
+                  </div>
                 </div>
-              </div>
 
-              {/* Section B: Finalized Return History */}
-              <div className="flex-1 flex flex-col min-h-0 border-t border-border/60 pt-3">
-                <h3 className="text-[10px] font-extrabold uppercase tracking-widest text-muted mb-2 flex items-center justify-between">
-                  <span>Return History</span>
-                  <span className="text-[9px] font-bold text-primary font-mono">{returnHistory.length}</span>
-                </h3>
+                {/* Quick Search */}
+                <div className="relative flex-shrink-0">
+                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+                  <input
+                    type="text"
+                    placeholder="Search return no, supplier..."
+                    value={searchFilterText}
+                    onChange={e => setSearchFilterText(e.target.value)}
+                    className="w-full pl-8 pr-7 py-2 bg-bg3/80 border border-border/70 rounded-xl text-xs text-text placeholder:text-muted/60 focus:outline-none focus:border-primary/60 font-medium transition-all shadow-inner"
+                  />
+                  {searchFilterText && (
+                    <button
+                      onClick={() => setSearchFilterText('')}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted hover:text-text p-0.5 rounded-full"
+                    >
+                      <X size={12} />
+                    </button>
+                  )}
+                </div>
 
+                {/* Filter Bar (Date, Distributor & Amount) */}
+                <div className="p-2.5 bg-bg3/50 rounded-xl border border-border/60 space-y-2 text-[10px] flex-shrink-0 shadow-inner">
+                  <div className="flex items-center gap-1.5">
+                    <label className="text-muted font-semibold w-7">From</label>
+                    <input
+                      type="date"
+                      value={toDateInputValue(dateFrom)}
+                      min="2020-01-01"
+                      max={getTodayString()}
+                      onChange={e => handleDateFromChange(e.target.value)}
+                      className="flex-1 px-2 py-1 bg-bg border border-border/60 rounded-lg text-[10px] text-text font-mono focus:outline-none focus:border-primary/60"
+                    />
+                    <label className="text-muted font-semibold w-4 text-center">To</label>
+                    <input
+                      type="date"
+                      value={toDateInputValue(dateTo)}
+                      min="2020-01-01"
+                      max={getTodayString()}
+                      onChange={e => { setManualToDate(true); handleDateToChange(e.target.value); }}
+                      className="flex-1 px-2 py-1 bg-bg border border-border/60 rounded-lg text-[10px] text-text font-mono focus:outline-none focus:border-primary/60"
+                    />
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <label className="text-muted font-semibold w-7">Min ₹</label>
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      min="0"
+                      placeholder="0"
+                      value={minAmount}
+                      onChange={e => setMinAmount(e.target.value)}
+                      className="flex-1 px-2 py-1 bg-bg border border-border/60 rounded-lg text-[10px] text-text font-mono focus:outline-none focus:border-primary/60"
+                    />
+                    <label className="text-muted font-semibold w-4 text-center">Max</label>
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      min="0"
+                      placeholder="∞"
+                      value={maxAmount}
+                      onChange={e => setMaxAmount(e.target.value)}
+                      className="flex-1 px-2 py-1 bg-bg border border-border/60 rounded-lg text-[10px] text-text font-mono focus:outline-none focus:border-primary/60"
+                    />
+                  </div>
+                  <div className="flex gap-1.5">
+                    <select
+                      value={distributorFilter}
+                      onChange={e => setDistributorFilter(e.target.value)}
+                      className="flex-1 px-2 py-1 bg-bg border border-border/60 rounded-lg text-[10px] text-text font-semibold focus:outline-none focus:border-primary/60"
+                    >
+                      <option value="">All Distributors</option>
+                      {[...new Set(returnHistory.map(r => r.distributor_name).filter(Boolean))].map(d => (
+                        <option key={String(d)} value={String(d)}>{String(d)}</option>
+                      ))}
+                    </select>
+                    {(distributorFilter || minAmount || maxAmount || searchFilterText) && (
+                      <button
+                        onClick={() => { setDistributorFilter(''); setMinAmount(''); setMaxAmount(''); setSearchFilterText(''); }}
+                        className="text-[9px] text-red hover:underline font-bold px-2 bg-red-500/10 border border-red-500/20 rounded-lg flex-shrink-0"
+                      >✕ Clear</button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Returns List */}
                 <div className="space-y-1.5 flex-1 overflow-y-auto scrollbar-thin pr-0.5">
                   {loading ? (
                     <div className="flex items-center justify-center py-6 text-xs text-muted font-semibold gap-2">
@@ -1454,8 +1403,8 @@ const Returns: React.FC = () => {
 
                       return matchesDate && matchesMin && matchesMax && matchesDist && matchesText;
                     }).length === 0 ? (
-                    <div className="text-center py-6 text-xs text-muted/70 italic font-medium bg-bg3/20 rounded-xl border border-border/30 p-3">
-                      No matching return entries found.
+                    <div className="text-center py-8 text-xs text-muted/70 italic font-medium bg-bg3/20 rounded-xl border border-border/30 p-4">
+                      No matching finalized supplier return entries found.
                     </div>
                   ) : (
                     returnHistory.filter(ret => {
@@ -1526,241 +1475,382 @@ const Returns: React.FC = () => {
                   )}
                 </div>
               </div>
+
+              {/* Right Column: Historical Return Inspector & Editor */}
+              <div className="flex-1 flex flex-col gap-0 min-h-0 overflow-hidden bg-bg2/90 backdrop-blur-md border border-border/80 rounded-2xl shadow-sm">
+                {selectedHistoryReturn !== null ? (
+                  <div className="flex-1 flex flex-col gap-4 min-h-0 overflow-hidden p-5">
+                    {/* History Header */}
+                    <div className="flex justify-between items-center border-b border-border/60 pb-3">
+                      <div>
+                        <h2 className="text-base font-bold text-text flex items-center gap-2">
+                          {isEditingHistory && <span className="text-xs px-2 py-0.5 bg-amber-500/20 text-amber-500 border border-amber-500/30 rounded-lg font-bold">Editing</span>}
+                          <span className="font-mono">{isEditingHistory ? 'Edit Return: ' : 'Finalized Return: '}{selectedHistoryReturn.return_no}</span>
+                        </h2>
+                        <p className="text-xs text-muted font-medium mt-0.5">
+                          {isEditingHistory
+                            ? 'Modify return quantities or purchase cost prices below, then click Save.'
+                            : `Read-only return statement for ${selectedHistoryReturn.distributor_name || 'supplier'}.`}
+                        </p>
+                      </div>
+                      <div className="flex gap-2">
+                        {isEditingHistory ? (
+                          <>
+                            <button
+                              onClick={handleSaveHistoryEdit}
+                              disabled={saving}
+                              className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all disabled:opacity-50 shadow-sm cursor-pointer"
+                            >
+                              {saving ? 'Saving…' : 'Save Changes'}
+                            </button>
+                            <button
+                              onClick={() => setIsEditingHistory(false)}
+                              className="bg-bg3 border border-border/60 hover:bg-bg3/80 text-text font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                            >
+                              Cancel
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            {hasMissingData && !isEditingHistory && (
+                              <button
+                                onClick={handleResolveMissing}
+                                disabled={isResolving}
+                                className="bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 border border-amber-500/30 font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all disabled:opacity-60 cursor-pointer"
+                                title="Auto-fill missing batch, expiry, cost from purchase history"
+                              >
+                                {isResolving
+                                  ? <><Loader2 size={13} className="animate-spin" /> Resolving…</>
+                                  : <><Wand2 size={13} /> Auto-fill Missing</>}
+                              </button>
+                            )}
+                            <button
+                              onClick={async () => {
+                                try {
+                                  const blob = await api.exportReturnsPDF(historyReturnItems as unknown as ReadonlyArray<Record<string, unknown>>);
+                                  const url = window.URL.createObjectURL(blob);
+                                  const a = document.createElement('a');
+                                  a.href = url;
+                                  a.download = `return-${selectedHistoryReturn.return_no}-${Date.now()}.pdf`;
+                                  document.body.appendChild(a);
+                                  a.click();
+                                  window.URL.revokeObjectURL(url);
+                                  document.body.removeChild(a);
+                                } catch (error) {
+                                  console.error('Error exporting PDF:', error);
+                                  toastEvent.trigger('Failed to export PDF.', 'error', '/returns');
+                                }
+                              }}
+                              className="bg-purple-600 hover:bg-purple-500 text-white font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all shadow-sm cursor-pointer"
+                            >
+                              <FileText size={13} /> Export PDF
+                            </button>
+                            <button
+                              onClick={() => { setEditingItems(historyReturnItems.map(i => ({ ...i, quantity: i.quantity ?? '', cost_price: i.cost_price ?? '', mrp: i.mrp ?? 0 }))); setIsEditingHistory(true); }}
+                              className="bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                            >
+                              <Edit size={13} /> Edit
+                            </button>
+                            <button
+                              onClick={handleClearHistorySelection}
+                              className="bg-bg3 border border-border/60 hover:bg-bg3/80 text-text font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                            >
+                              <span>Back</span>
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Table Viewer / Editor */}
+                    <div className="flex-1 overflow-auto bg-bg/40 rounded-2xl border border-border/60">
+                      {loadingHistoryItems ? (
+                        <div className="flex flex-col items-center justify-center h-full py-12 gap-3 text-muted">
+                          <Loader2 className="animate-spin text-primary" size={32} />
+                          <span className="text-xs font-bold">Loading finalized items...</span>
+                        </div>
+                      ) : isEditingHistory ? (
+                        <table className="w-full text-left border-collapse">
+                          <thead className="sticky top-0 z-20 bg-bg2 border-b border-border/60 shadow-sm">
+                            <tr className="text-left text-muted border-b border-border/60">
+                              <th className="p-3 text-xs font-bold w-10">#</th>
+                              <th className="p-3 text-xs font-bold min-w-[260px]">Medicine</th>
+                              <th className="p-3 text-xs font-bold w-32">Batch</th>
+                              <th className="p-3 text-xs font-bold w-32">Expiry</th>
+                              <th className="p-3 text-xs font-bold w-24 text-center">Qty</th>
+                              <th className="p-3 text-xs font-bold w-28 text-right">Cost Price</th>
+                              <th className="p-3 text-xs font-bold w-28 text-right">Total</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {editingItems.map((item, idx) => {
+                              const rf: string[] = item._resolved_fields || [];
+                              const hi = (f: string) => rf.includes(f)
+                                ? 'ring-1 ring-amber-400 bg-amber-400/10'
+                                : '';
+                              return (
+                                <tr key={item.id} className="border-b border-border/40 hover:bg-bg3/30 transition-colors">
+                                  <td className="p-3 text-xs text-muted font-mono">{idx + 1}</td>
+                                  <td className="p-3 text-xs font-bold text-text">{item.medicine_name}</td>
+                                  <td className="p-2">
+                                    <input
+                                      type="text"
+                                      value={item.batch_no}
+                                      onChange={e => setEditingItems(prev => prev.map((it, i) => i === idx ? { ...it, batch_no: e.target.value } : it))}
+                                      className={`w-full bg-bg3 border border-border/60 rounded-lg px-2.5 py-1 text-xs text-text font-mono focus:outline-none focus:ring-1 focus:ring-primary ${hi('batch_no')}`}
+                                      placeholder="—"
+                                    />
+                                  </td>
+                                  <td className="p-2">
+                                    <input
+                                      type="text"
+                                      value={item.expiry_date}
+                                      onChange={e => setEditingItems(prev => prev.map((it, i) => i === idx ? { ...it, expiry_date: e.target.value } : it))}
+                                      className={`w-full bg-bg3 border border-border/60 rounded-lg px-2.5 py-1 text-xs text-text font-mono focus:outline-none focus:ring-1 focus:ring-primary ${hi('expiry_date')}`}
+                                      placeholder="MM/YY"
+                                    />
+                                  </td>
+                                  <td className="p-2 text-center">
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      value={item.quantity}
+                                      onChange={e => setEditingItems(prev => prev.map((it, i) => i === idx ? { ...it, quantity: parseFloat(e.target.value) || 0 } : it))}
+                                      className="w-20 bg-bg3 border border-border/60 rounded-lg px-2 py-1 text-xs text-text text-center font-mono focus:outline-none focus:ring-1 focus:ring-primary"
+                                    />
+                                  </td>
+                                  <td className="p-2 text-right">
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      step="0.01"
+                                      value={item.cost_price}
+                                      onChange={e => setEditingItems(prev => prev.map((it, i) => i === idx ? { ...it, cost_price: parseFloat(e.target.value) || 0 } : it))}
+                                      className={`w-24 bg-bg3 border border-border/60 rounded-lg px-2 py-1 text-xs text-text font-mono text-right focus:outline-none focus:ring-1 focus:ring-primary ${hi('cost_price')}`}
+                                    />
+                                  </td>
+                                  <td className="p-3 text-xs text-text font-bold font-mono text-right">
+                                    ₹{(Number(item.cost_price || 0) * Number(item.quantity || 0)).toFixed(2)}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                          <tfoot className="sticky bottom-0 bg-bg2 border-t border-border/60">
+                            <tr>
+                              <td colSpan={6} className="p-3 text-xs font-bold text-text text-right">Updated Claim Total:</td>
+                              <td className="p-3 text-sm font-black text-emerald-500 font-mono text-right">
+                                ₹{editingItems.reduce((s, i) => s + Number(i.cost_price || 0) * Number(i.quantity || 0), 0).toFixed(2)}
+                              </td>
+                            </tr>
+                            {editingItems.some(i => (i._resolved_fields || []).length > 0) && (
+                              <tr>
+                                <td colSpan={7} className="px-3 py-1.5 bg-amber-500/10 border-t border-amber-500/20">
+                                  <div className="flex items-center gap-2 text-[10px] text-amber-500 font-bold">
+                                    <span className="inline-block w-3 h-3 rounded bg-amber-400/40 ring-1 ring-amber-400 flex-shrink-0" />
+                                    Highlighted cells were auto-resolved from purchase history. Please verify before saving.
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </tfoot>
+                        </table>
+                      ) : historyReturnItems.length === 0 ? (
+                        <div className="text-center py-12 text-muted text-xs italic font-medium">No items recorded for this return claim.</div>
+                      ) : (
+                        <table className="w-full text-left border-collapse">
+                          <thead className="sticky top-0 z-20 bg-bg2 border-b border-border/60 shadow-sm">
+                            <tr className="text-left text-muted border-b border-border/60">
+                              <th className="p-3.5 text-xs font-bold w-12">#</th>
+                              <th className="p-3.5 text-xs font-bold min-w-[240px]">Medicine Name</th>
+                              <th className="p-3.5 text-xs font-bold w-32">Batch</th>
+                              <th className="p-3.5 text-xs font-bold w-28">Expiry</th>
+                              <th className="p-3.5 text-xs font-bold w-20 text-center">Qty</th>
+                              <th className="p-3.5 text-xs font-bold w-28 text-right">Cost Price</th>
+                              <th className="p-3.5 text-xs font-bold w-28 text-right">Total</th>
+                              <th className="p-3.5 text-xs font-bold w-36 text-center">Invoice Ref</th>
+                              <th className="p-3.5 text-xs font-bold min-w-[160px]">Distributor</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {historyReturnItems.map((item, index) => (
+                              <tr key={item.id} className="border-b border-border/40 hover:bg-bg3/30 transition-colors">
+                                <td className="p-3.5 text-xs text-muted font-mono">{index + 1}</td>
+                                <td className="p-3.5 text-xs font-bold text-text">{item.medicine_name}</td>
+                                <td className="p-3.5 text-xs font-mono text-muted font-semibold">{item.batch_no || '—'}</td>
+                                <td className="p-3.5 text-xs font-mono text-muted">{item.expiry_date || '—'}</td>
+                                <td className="p-3.5 text-xs font-bold text-text text-center font-mono">{item.quantity ?? '—'}</td>
+                                <td className="p-3.5 text-xs text-text font-mono text-right">
+                                  {item.cost_price != null ? `₹${Number(item.cost_price || 0).toFixed(2)}` : '—'}
+                                </td>
+                                <td className="p-3.5 text-xs text-text font-extrabold font-mono text-right">
+                                  {item.cost_price != null && item.quantity != null
+                                    ? `₹${(Number(item.cost_price || 0) * Number(item.quantity || 0)).toFixed(2)}`
+                                    : '—'}
+                                </td>
+                                <td className="p-3.5 text-center">
+                                  <span className="px-2.5 py-1 bg-blue-500/10 text-blue-500 border border-blue-500/20 rounded-lg text-[10px] font-bold font-mono">
+                                    {item.invoice_no || 'N/A'}
+                                  </span>
+                                </td>
+                                <td className="p-3.5 text-xs text-muted font-semibold truncate max-w-[180px]">
+                                  {item.distributor_name || '—'}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex-1 flex flex-col items-center justify-center p-12 text-center text-muted gap-3">
+                    <div className="w-14 h-14 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary">
+                      <History size={28} />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-bold text-text">Select a Return Claim</h3>
+                      <p className="text-xs text-muted mt-1 max-w-sm">
+                        Choose any finalized supplier return from the left list to review returned medicines, batches, quantities, reprint debit notes, or edit.
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="flex-1 flex gap-4 min-h-0 overflow-hidden text-text relative">
+          {/* Left Sidebar Panel: Returns & Drafts Hub (Focused purely on active return creation) */}
+          <div className="w-80 flex-shrink-0 flex flex-col gap-3 min-h-0 overflow-hidden bg-bg2/90 backdrop-blur-md border border-border/80 rounded-2xl p-4 shadow-sm">
+            
+            {/* Header & New Return button */}
+            <div className="flex items-center justify-between border-b border-border/60 pb-3 flex-shrink-0">
+              <div className="flex items-center gap-2">
+                <h2 className="text-xs font-black uppercase tracking-wider text-text">Returns & Drafts Hub</h2>
+                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-bg3 text-primary border border-border/40 font-mono">
+                  {tabs.length}
+                </span>
+              </div>
+              <button
+                onClick={addNewTab}
+                className="flex items-center justify-center px-2.5 py-1.5 rounded-xl border border-dashed border-primary/40 text-primary hover:bg-primary/10 transition-all bg-primary/5 active:scale-95 shadow-sm cursor-pointer"
+                title="Add New Supplier Return Draft"
+              >
+                <Plus size={14} className="mr-1" />
+                <span className="text-[11px] font-bold">New Draft</span>
+              </button>
+            </div>
+
+            {/* Quick Search Input for Draft Items */}
+            <div className="relative flex-shrink-0">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+              <input
+                type="text"
+                placeholder="Filter draft items..."
+                value={searchFilterText}
+                onChange={e => setSearchFilterText(e.target.value)}
+                className="w-full pl-8 pr-7 py-2 bg-bg3/80 border border-border/70 rounded-xl text-xs text-text placeholder:text-muted/60 focus:outline-none focus:border-primary/60 font-medium transition-all shadow-inner"
+              />
+              {searchFilterText && (
+                <button
+                  onClick={() => setSearchFilterText('')}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted hover:text-text p-0.5 rounded-full"
+                >
+                  <X size={12} />
+                </button>
+              )}
+            </div>
+
+            {/* Active Drafts Tabs List */}
+            <div className="flex-1 flex flex-col min-h-0 overflow-y-auto pr-1 scrollbar-thin space-y-2">
+              {tabs.filter(t => {
+                if (!searchFilterText) return true;
+                const q = searchFilterText.toLowerCase();
+                const nameMatch = t.name.toLowerCase().includes(q);
+                const itemMatch = (t.items || []).some(i => 
+                  (i.medicine_name || '').toLowerCase().includes(q) ||
+                  (i.distributor_name || '').toLowerCase().includes(q) ||
+                  (i.invoice_no || '').toLowerCase().includes(q)
+                );
+                return nameMatch || itemMatch;
+              }).map((t) => {
+                const isActive = t.id === activeTabId;
+                const count = t.items ? t.items.length : 0;
+                const firstDistributor = t.items ? t.items.find(item => item.distributor_name)?.distributor_name : null;
+                const displayName = firstDistributor ? `Ret: ${firstDistributor}` : t.name;
+                
+                const tabTotal = (t.items || []).reduce((sum, item) => {
+                  const qty = numOr0(item.quantity);
+                  const costPrice = numOr0(item.cost_price);
+                  return sum + (costPrice * qty);
+                }, 0);
+
+                return (
+                  <div
+                    key={t.id}
+                    onClick={() => switchTab(t.id)}
+                    className={`flex flex-col gap-1.5 p-3 rounded-xl border transition-all duration-200 select-none cursor-pointer relative shadow-sm ${
+                      isActive 
+                        ? 'bg-primary/10 border-primary text-text font-bold ring-1 ring-primary/30' 
+                        : 'bg-bg3/40 border-border/50 text-muted hover:text-text hover:bg-bg3/80 hover:border-border'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div className={`p-1 rounded-md ${isActive ? 'bg-primary/20 text-primary' : 'bg-bg/60 text-muted'}`}>
+                          <RotateCcw size={12} />
+                        </div>
+                        <span className="truncate text-xs font-bold text-text">{displayName}</span>
+                      </div>
+                      {tabs.length > 1 && (
+                        <button 
+                          onClick={(e) => closeTab(t.id, e)}
+                          className="hover:bg-red/10 rounded-lg p-1 transition-all text-muted hover:text-red flex-shrink-0"
+                          title="Close Tab"
+                        >
+                          <X size={12} />
+                        </button>
+                      )}
+                    </div>
+                    <div className="flex justify-between items-center text-[10px] font-semibold mt-0.5">
+                      <span className="px-2 py-0.5 rounded-full bg-bg3/80 border border-border/40 text-muted font-mono">
+                        {count} {count === 1 ? 'item' : 'items'}
+                      </span>
+                      <span className="text-emerald-500 font-extrabold text-xs font-mono">₹{tabTotal.toFixed(2)}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Quick Link to Return History */}
+            <div className="border-t border-border/60 pt-2.5 mt-auto">
+              <button
+                onClick={() => {
+                  setSearchParams({ tab: 'customer-history' });
+                  setHistorySubTab('supplier');
+                }}
+                className="w-full flex items-center justify-between p-2.5 rounded-xl bg-bg3/60 hover:bg-bg3 border border-border/70 text-text transition-all text-xs font-bold cursor-pointer group shadow-sm"
+                title="Open Return History Center"
+              >
+                <div className="flex items-center gap-2">
+                  <History size={14} className="text-primary group-hover:scale-110 transition-transform" />
+                  <span>Supplier Return History</span>
+                </div>
+                <span className="text-[10px] text-primary font-mono font-bold bg-primary/10 px-1.5 py-0.5 rounded border border-primary/20">
+                  {returnHistory.length}
+                </span>
+              </button>
             </div>
           </div>
 
-          {/* Column 2: Full-Width Right Content Workspace */}
-          <div className="flex-1 flex flex-col gap-0 min-h-0 overflow-hidden bg-bg2/90 backdrop-blur-md border border-border/80 rounded-2xl shadow-sm">
-            {selectedHistoryReturn !== null ? (
-              <div className="flex-1 flex flex-col gap-4 min-h-0 overflow-hidden p-5">
-                {/* History Header */}
-                <div className="flex justify-between items-center border-b border-border/60 pb-3">
-                  <div>
-                    <h2 className="text-base font-bold text-text flex items-center gap-2">
-                      {isEditingHistory && <span className="text-xs px-2 py-0.5 bg-amber-500/20 text-amber-500 border border-amber-500/30 rounded-lg font-bold">Editing</span>}
-                      <span className="font-mono">{isEditingHistory ? 'Edit Return: ' : 'Finalized Return: '}{selectedHistoryReturn.return_no}</span>
-                    </h2>
-                    <p className="text-xs text-muted font-medium mt-0.5">
-                      {isEditingHistory
-                        ? 'Modify return quantities or purchase cost prices below, then click Save.'
-                        : `Read-only return statement for ${selectedHistoryReturn.distributor_name || 'supplier'}.`}
-                    </p>
-                  </div>
-                  <div className="flex gap-2">
-                    {isEditingHistory ? (
-                      <>
-                        <button
-                          onClick={handleSaveHistoryEdit}
-                          disabled={saving}
-                          className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all disabled:opacity-50 shadow-sm cursor-pointer"
-                        >
-                          {saving ? 'Saving…' : 'Save Changes'}
-                        </button>
-                        <button
-                          onClick={() => setIsEditingHistory(false)}
-                          className="bg-bg3 border border-border/60 hover:bg-bg3/80 text-text font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer"
-                        >
-                          Cancel
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        {hasMissingData && !isEditingHistory && (
-                          <button
-                            onClick={handleResolveMissing}
-                            disabled={isResolving}
-                            className="bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 border border-amber-500/30 font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all disabled:opacity-60 cursor-pointer"
-                            title="Auto-fill missing batch, expiry, cost from purchase history"
-                          >
-                            {isResolving
-                              ? <><Loader2 size={13} className="animate-spin" /> Resolving…</>
-                              : <><Wand2 size={13} /> Auto-fill Missing</>}
-                          </button>
-                        )}
-                        <button
-                          onClick={async () => {
-                            try {
-                              const blob = await api.exportReturnsPDF(historyReturnItems as unknown as ReadonlyArray<Record<string, unknown>>);
-                              const url = window.URL.createObjectURL(blob);
-                              const a = document.createElement('a');
-                              a.href = url;
-                              a.download = `return-${selectedHistoryReturn.return_no}-${Date.now()}.pdf`;
-                              document.body.appendChild(a);
-                              a.click();
-                              window.URL.revokeObjectURL(url);
-                              document.body.removeChild(a);
-                            } catch (error) {
-                              console.error('Error exporting PDF:', error);
-                              alert('Failed to export PDF');
-                            }
-                          }}
-                          className="bg-purple-600 hover:bg-purple-500 text-white font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all shadow-sm cursor-pointer"
-                        >
-                          <FileText size={13} /> Export PDF
-                        </button>
-                        <button
-                          onClick={() => { setEditingItems(historyReturnItems.map(i => ({ ...i, quantity: i.quantity ?? '', cost_price: i.cost_price ?? '', mrp: i.mrp ?? 0 }))); setIsEditingHistory(true); }}
-                          className="bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer"
-                        >
-                          <Edit size={13} /> Edit
-                        </button>
-                        <button
-                          onClick={handleClearHistorySelection}
-                          className="bg-bg3 border border-border/60 hover:bg-bg3/80 text-text font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer"
-                        >
-                          <span>Back</span>
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </div>
-
-                {/* Table Viewer / Editor */}
-                <div className="flex-1 overflow-auto bg-bg/40 rounded-2xl border border-border/60">
-                  {loadingHistoryItems ? (
-                    <div className="flex flex-col items-center justify-center h-full py-12 gap-3 text-muted">
-                      <Loader2 className="animate-spin text-primary" size={32} />
-                      <span className="text-xs font-bold">Loading finalized items...</span>
-                    </div>
-                  ) : isEditingHistory ? (
-                    <table className="w-full text-left border-collapse">
-                      <thead className="sticky top-0 z-20 bg-bg2 border-b border-border/60 shadow-sm">
-                        <tr className="text-left text-muted border-b border-border/60">
-                          <th className="p-3 text-xs font-bold w-10">#</th>
-                          <th className="p-3 text-xs font-bold min-w-[260px]">Medicine</th>
-                          <th className="p-3 text-xs font-bold w-32">Batch</th>
-                          <th className="p-3 text-xs font-bold w-32">Expiry</th>
-                          <th className="p-3 text-xs font-bold w-24 text-center">Qty</th>
-                          <th className="p-3 text-xs font-bold w-28 text-right">Cost Price</th>
-                          <th className="p-3 text-xs font-bold w-28 text-right">Total</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {editingItems.map((item, idx) => {
-                          const rf: string[] = item._resolved_fields || [];
-                          const hi = (f: string) => rf.includes(f)
-                            ? 'ring-1 ring-amber-400 bg-amber-400/10'
-                            : '';
-                          return (
-                            <tr key={item.id} className="border-b border-border/40 hover:bg-bg3/30 transition-colors">
-                              <td className="p-3 text-xs text-muted font-mono">{idx + 1}</td>
-                              <td className="p-3 text-xs font-bold text-text">{item.medicine_name}</td>
-                              <td className="p-2">
-                                <input
-                                  type="text"
-                                  value={item.batch_no}
-                                  onChange={e => setEditingItems(prev => prev.map((it, i) => i === idx ? { ...it, batch_no: e.target.value } : it))}
-                                  className={`w-full bg-bg3 border border-border/60 rounded-lg px-2.5 py-1 text-xs text-text font-mono focus:outline-none focus:ring-1 focus:ring-primary ${hi('batch_no')}`}
-                                  placeholder="—"
-                                />
-                              </td>
-                              <td className="p-2">
-                                <input
-                                  type="text"
-                                  value={item.expiry_date}
-                                  onChange={e => setEditingItems(prev => prev.map((it, i) => i === idx ? { ...it, expiry_date: e.target.value } : it))}
-                                  className={`w-full bg-bg3 border border-border/60 rounded-lg px-2.5 py-1 text-xs text-text font-mono focus:outline-none focus:ring-1 focus:ring-primary ${hi('expiry_date')}`}
-                                  placeholder="MM/YY"
-                                />
-                              </td>
-                              <td className="p-2 text-center">
-                                <input
-                                  type="number"
-                                  min="0"
-                                  value={item.quantity}
-                                  onChange={e => setEditingItems(prev => prev.map((it, i) => i === idx ? { ...it, quantity: parseFloat(e.target.value) || 0 } : it))}
-                                  className="w-20 bg-bg3 border border-border/60 rounded-lg px-2 py-1 text-xs text-text text-center font-mono focus:outline-none focus:ring-1 focus:ring-primary"
-                                />
-                              </td>
-                              <td className="p-2 text-right">
-                                <input
-                                  type="number"
-                                  min="0"
-                                  step="0.01"
-                                  value={item.cost_price}
-                                  onChange={e => setEditingItems(prev => prev.map((it, i) => i === idx ? { ...it, cost_price: parseFloat(e.target.value) || 0 } : it))}
-                                  className={`w-24 bg-bg3 border border-border/60 rounded-lg px-2 py-1 text-xs text-text font-mono text-right focus:outline-none focus:ring-1 focus:ring-primary ${hi('cost_price')}`}
-                                />
-                              </td>
-                              <td className="p-3 text-xs text-text font-bold font-mono text-right">
-                                ₹{(Number(item.cost_price || 0) * Number(item.quantity || 0)).toFixed(2)}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                      <tfoot className="sticky bottom-0 bg-bg2 border-t border-border/60">
-                        <tr>
-                          <td colSpan={6} className="p-3 text-xs font-bold text-text text-right">Updated Claim Total:</td>
-                          <td className="p-3 text-sm font-black text-emerald-500 font-mono text-right">
-                            ₹{editingItems.reduce((s, i) => s + Number(i.cost_price || 0) * Number(i.quantity || 0), 0).toFixed(2)}
-                          </td>
-                        </tr>
-                        {editingItems.some(i => (i._resolved_fields || []).length > 0) && (
-                          <tr>
-                            <td colSpan={7} className="px-3 py-1.5 bg-amber-500/10 border-t border-amber-500/20">
-                              <div className="flex items-center gap-2 text-[10px] text-amber-500 font-bold">
-                                <span className="inline-block w-3 h-3 rounded bg-amber-400/40 ring-1 ring-amber-400 flex-shrink-0" />
-                                Highlighted cells were auto-resolved from purchase history. Please verify before saving.
-                              </div>
-                            </td>
-                          </tr>
-                        )}
-                      </tfoot>
-                    </table>
-                  ) : historyReturnItems.length === 0 ? (
-                    <div className="text-center py-12 text-muted text-xs italic font-medium">No items recorded for this return claim.</div>
-                  ) : (
-                    <table className="w-full text-left border-collapse">
-                      <thead className="sticky top-0 z-20 bg-bg2 border-b border-border/60 shadow-sm">
-                        <tr className="text-left text-muted border-b border-border/60">
-                          <th className="p-3.5 text-xs font-bold w-12">#</th>
-                          <th className="p-3.5 text-xs font-bold min-w-[240px]">Medicine Name</th>
-                          <th className="p-3.5 text-xs font-bold w-32">Batch</th>
-                          <th className="p-3.5 text-xs font-bold w-28">Expiry</th>
-                          <th className="p-3.5 text-xs font-bold w-20 text-center">Qty</th>
-                          <th className="p-3.5 text-xs font-bold w-28 text-right">Cost Price</th>
-                          <th className="p-3.5 text-xs font-bold w-28 text-right">Total</th>
-                          <th className="p-3.5 text-xs font-bold w-36 text-center">Invoice Ref</th>
-                          <th className="p-3.5 text-xs font-bold min-w-[160px]">Distributor</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {historyReturnItems.map((item, index) => (
-                          <tr key={item.id} className="border-b border-border/40 hover:bg-bg3/30 transition-colors">
-                            <td className="p-3.5 text-xs text-muted font-mono">{index + 1}</td>
-                            <td className="p-3.5 text-xs font-bold text-text">{item.medicine_name}</td>
-                            <td className="p-3.5 text-xs font-mono text-muted font-semibold">{item.batch_no || '—'}</td>
-                            <td className="p-3.5 text-xs font-mono text-muted">{item.expiry_date || '—'}</td>
-                            <td className="p-3.5 text-xs font-bold text-text text-center font-mono">{item.quantity ?? '—'}</td>
-                            <td className="p-3.5 text-xs text-text font-mono text-right">
-                              {item.cost_price != null ? `₹${Number(item.cost_price || 0).toFixed(2)}` : '—'}
-                            </td>
-                            <td className="p-3.5 text-xs text-text font-extrabold font-mono text-right">
-                              {item.cost_price != null && item.quantity != null
-                                ? `₹${(Number(item.cost_price || 0) * Number(item.quantity || 0)).toFixed(2)}`
-                                : '—'}
-                            </td>
-                            <td className="p-3.5 text-center">
-                              <span className="px-2.5 py-1 bg-blue-500/10 text-blue-500 border border-blue-500/20 rounded-lg text-[10px] font-bold font-mono">
-                                {item.invoice_no || 'N/A'}
-                              </span>
-                            </td>
-                            <td className="p-3.5 text-xs text-muted font-semibold truncate max-w-[180px]">
-                              {item.distributor_name || '—'}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  )}
-                </div>
-              </div>
-            ) : (
-              /* Draft Editor Workspace — Multi-Distributor Auto-Cards + Right Sidebar Navigation */
-              <div className="flex-1 flex gap-4 min-h-0 overflow-hidden text-text p-4">
-                {/* Center / Left: Cards List Workspace */}
-                <div className="flex-1 flex flex-col gap-4 min-h-0 overflow-y-auto pr-1 custom-scrollbar">
+          {/* Right Content Workspace: Active Draft Editor — Multi-Distributor Auto-Cards + Right Sidebar Navigation */}
+          <div className="flex-1 flex gap-0 min-h-0 overflow-hidden bg-bg2/90 backdrop-blur-md border border-border/80 rounded-2xl shadow-sm">
+            <div className="flex-1 flex gap-4 min-h-0 overflow-hidden text-text p-4">
+              {/* Center / Left: Cards List Workspace */}
+              <div className="flex-1 flex flex-col gap-4 min-h-0 overflow-y-auto pr-1 custom-scrollbar">
                   
                   {/* Workspace Header */}
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-bg3/40 p-4 rounded-2xl border border-border/70 shrink-0">
@@ -2307,7 +2397,6 @@ const Returns: React.FC = () => {
 
                 </div>
               </div>
-            )}
           </div>
         </div>
       )}
