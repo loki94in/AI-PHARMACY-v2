@@ -627,7 +627,13 @@ router.post('/', async (req, res) => {
 
     // Trigger WhatsApp notification — ONLY IF user explicitly enabled sendWhatsApp
     if (Boolean(sendWhatsApp)) {
-      const rawDigits = (patient_phone || '').replace(/\D/g, '');
+      let rawDigits = (patient_phone || '').replace(/\D/g, '');
+      if ((!rawDigits || rawDigits.length < 10) && customerId) {
+        try {
+          const cust = await db.get('SELECT phone FROM customers WHERE id = ?', [customerId]);
+          if (cust?.phone) rawDigits = cust.phone.replace(/\D/g, '');
+        } catch (_) {}
+      }
       const phoneForWA = rawDigits.length === 12 && rawDigits.startsWith('91')
         ? rawDigits.slice(2)
         : (rawDigits.length > 10 ? rawDigits.slice(-10) : rawDigits);
@@ -2300,6 +2306,17 @@ router.put('/:id', async (req, res) => {
       eventService.broadcast('inventory_sync', { success: true });
     } catch (sseErr) {
       console.warn('Could not broadcast sale update:', sseErr);
+    }
+
+    if (Boolean(req.body?.sendWhatsApp)) {
+      try {
+        const { whatsappInvoiceService } = await import('../services/whatsappInvoiceService.js');
+        whatsappInvoiceService.sendInvoiceViaWhatsApp(Number(id)).catch(waErr => {
+          console.error('[WhatsApp] Failed to send invoice PDF for updated sale:', waErr);
+        });
+      } catch (importErr) {
+        console.error('[WhatsApp] Failed to import whatsappInvoiceService on sale update:', importErr);
+      }
     }
 
     res.json({ success: true, message: 'Invoice updated', invoice_no: existing.invoice_no, id: Number(id) });

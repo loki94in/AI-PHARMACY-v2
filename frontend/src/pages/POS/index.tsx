@@ -982,7 +982,7 @@ const POS = () => {
     }
     return [makeEmptyCartRow()];
   });
-  const [sendWhatsApp, setSendWhatsApp] = useState(initialActiveTab.sendWhatsApp || false); // DEFAULT: OFF
+  const [sendWhatsApp, setSendWhatsApp] = useState(initialActiveTab.sendWhatsApp !== undefined ? initialActiveTab.sendWhatsApp : true); // DEFAULT: ON (auto-dispatches when phone is present)
   const [paymentMedium, setPaymentMedium] = useState<string>(() => editSaleFromState?.payment_medium || initialActiveTab.paymentMedium || 'CASH'); // DEFAULT: CASH
   const queryClient = useQueryClient();
 
@@ -1467,7 +1467,7 @@ const POS = () => {
       setDoctorSuggestions([]);
       setDoctorComboSuggestions([]);
       setDiscount(target.discount || 0);
-      setSendWhatsApp(target.sendWhatsApp || false);
+      setSendWhatsApp(target.sendWhatsApp !== undefined ? target.sendWhatsApp : true);
       setPaymentMedium(target.paymentMedium || 'CASH');
       setActiveTabId(newTabId);
     }
@@ -1487,7 +1487,7 @@ const POS = () => {
       doctor: '',
       isManualDoctor: false,
       discount: 0,
-      sendWhatsApp: false,
+      sendWhatsApp: true,
       paymentMedium: 'CASH',
       selectedDoctorId: null
     };
@@ -1503,7 +1503,7 @@ const POS = () => {
     setDoctorSuggestions([]);
     setDoctorComboSuggestions([]);
     setDiscount(0);
-    setSendWhatsApp(false);
+    setSendWhatsApp(true);
     setPaymentMedium('CASH');
     setTabs(prev => [...prev, newTab]);
     setActiveTabId(newId);
@@ -1527,7 +1527,7 @@ const POS = () => {
       setDoctorSuggestions([]);
       setDoctorComboSuggestions([]);
       setDiscount(fallback.discount || 0);
-      setSendWhatsApp(fallback.sendWhatsApp || false);
+      setSendWhatsApp(fallback.sendWhatsApp !== undefined ? fallback.sendWhatsApp : true);
       setPaymentMedium(fallback.paymentMedium || 'CASH');
       setActiveTabId(fallback.id);
     }
@@ -3027,8 +3027,13 @@ const POS = () => {
       return;
     }
 
-    const isPhoneRequired = paymentMedium === 'CREDIT' || sendWhatsApp;
-    if (isPhoneRequired && !isValid10DigitPhone(phoneToUse)) {
+    const isCreditSale = paymentMedium === 'CREDIT';
+    if (isCreditSale && !isValid10DigitPhone(phoneToUse)) {
+      setPromptPhoneValue(phoneToUse);
+      pendingDirectSaveRef.current = isDirectSave;
+      setShowPhonePromptModal(true);
+      return;
+    } else if (phoneToUse.trim() && !isValid10DigitPhone(phoneToUse)) {
       setPromptPhoneValue(phoneToUse);
       pendingDirectSaveRef.current = isDirectSave;
       setShowPhonePromptModal(true);
@@ -3146,7 +3151,7 @@ const POS = () => {
         })(),
         paymentMedium: paymentMedium,
         paymentStatus: paymentMedium === 'CREDIT' ? 'UNPAID' : 'PAID',
-        sendWhatsApp: Boolean(sendWhatsApp),
+        sendWhatsApp: Boolean((sendWhatsApp !== false && finalPhone) || sendWhatsApp),
         refillEnabled: refillEnabled,
         refillDays: refillDays,
         refillId: activeRefillId || undefined,
@@ -3225,7 +3230,7 @@ const POS = () => {
           .catch(() => {});
       }
       
-      const isWaSent = Boolean(sendWhatsApp) && !!phoneToUse.trim();
+      const isWaSent = Boolean(sendWhatsApp !== false) && !!phoneToUse.trim();
 
       setLastSavedInvoiceNo(invoiceNo);
       setLastSavedPatientName(patientName || 'Walk-in Customer');
@@ -3286,7 +3291,7 @@ const POS = () => {
             refillDays: 30,
             doctor: '',
             discount: 0,
-            sendWhatsApp: false,
+            sendWhatsApp: true,
             paymentMedium: 'CASH',
             selectedDoctorId: null
           };

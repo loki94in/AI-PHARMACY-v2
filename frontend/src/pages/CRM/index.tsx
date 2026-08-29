@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { apiClient, api } from '../../services/api';
+import { apiClient, api, type CompactInventoryItem } from '../../services/api';
 import {
   RefreshCw, Send, Users, MessageSquare, Phone, Calendar,
   CheckCircle2, AlertCircle, Clock, Search, Repeat2, Bell,
@@ -732,8 +732,8 @@ const RefillsSection: React.FC = () => {
         }));
       } else {
         const lower = clean.toLowerCase();
-        const prefixMatched: typeof compactCache = [];
-        const infixMatched: typeof compactCache = [];
+        const prefixMatched: CompactInventoryItem[] = [];
+        const infixMatched: CompactInventoryItem[] = [];
         for (const c of compactCache) {
           const mName = (c.name || c.medicine_name || '').toLowerCase();
           if (mName.startsWith(lower)) {

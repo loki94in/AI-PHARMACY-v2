@@ -44,6 +44,7 @@ import {
   BrainCircuit,
   MessageCircle,
   MessageSquareText,
+  Zap,
 } from 'lucide-react';
 import { shortcutEvent, SHORTCUT_DIRECTORY } from '../services/keyboardShortcuts';
 import {
@@ -978,7 +979,7 @@ const Topbar = memo(({
       setIsCarouselHovered(false);
       setIsHoverExpanded(false);
       hubHoverTimerRef.current = null;
-    }, 1500);
+    }, 1580);
   };
 
   useEffect(() => {
@@ -1588,54 +1589,240 @@ const Topbar = memo(({
           )}
         </div>
 
-        {/* CENTER SECTION: Auto-Hides in Idle state */}
+        {/* CENTER SECTION: Multi-Segment Storage Progress Bar & Smart Contextual Auto-Focus Hub */}
         <div
           className="flex-1 flex justify-center items-center px-2 sm:px-4 max-w-[460px] mx-auto min-w-0 h-full relative"
+          onMouseEnter={handleHubMouseEnter}
+          onMouseLeave={handleHubMouseLeave}
         >
-          {activeHeaderItems.length > 0 && currentHeaderItem && (
-            <div className="w-full flex flex-col justify-center gap-0.5 h-full relative cursor-pointer group/progress origin-center transition-all duration-300 animate-in fade-in zoom-in-95">
-              {/* Default Minimized Sleek Inline Header Row */}
-              <div className="flex items-center justify-between gap-2 text-xs font-semibold">
-                <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                  {currentHeaderItem.icon}
-                  <span className="truncate text-text font-bold text-xs tracking-tight">
-                    {currentHeaderItem.title}
-                  </span>
-                </div>
+          {(() => {
+            // Metrics for Storage-Style Progress Bar
+            const waSent = waQueueDetail?.counts?.sent || 0;
+            const waSending = (waQueueDetail?.counts?.sending || 0) + (activeMsgProgress && !activeMsgProgress.completed ? 1 : 0);
+            const waPending = waQueueDetail?.counts?.pending || 0;
+            const waFailed = (waQueueDetail?.counts?.failed_offline || 0) + (waQueueDetail?.counts?.failed_perm || 0);
+            const waTotal = waSent + waSending + waPending + waFailed;
 
-                <div className="flex items-center gap-1.5 shrink-0">
-                  {currentHeaderItem && currentHeaderItem.action && (
-                    <button
-                      type="button"
-                      onClick={currentHeaderItem.action}
-                      className="text-[10px] font-bold text-sky-400 hover:text-sky-300 hover:underline cursor-pointer uppercase tracking-wider pl-1"
-                    >
-                      {currentHeaderItem.actionLabel || 'View'}
-                    </button>
-                  )}
-                </div>
-              </div>
+            const sentPct = waTotal > 0 ? (waSent / waTotal) * 100 : 0;
+            const sendingPct = waTotal > 0 ? (waSending / waTotal) * 100 : 0;
+            const pendingPct = waTotal > 0 ? (waPending / waTotal) * 100 : 0;
+            const failedPct = waTotal > 0 ? (waFailed / waTotal) * 100 : 0;
 
-              {/* Direct Inline Line Filling Progress Bar Track inside header bar */}
-              {currentHeaderItem && currentHeaderItem.progress !== undefined && (
-                <div className="w-full h-1 bg-bg border-t border-glass-border/40 rounded-full overflow-hidden relative shadow-inner">
-                  <div
-                    className={`h-full rounded-full transition-all duration-500 relative bg-gradient-to-r ${currentHeaderItem.color === 'purple'
-                        ? 'from-purple-500 via-indigo-500 to-sky-400'
-                        : currentHeaderItem.color === 'sky'
-                          ? 'from-sky-500 via-blue-500 to-cyan-400'
-                          : currentHeaderItem.color === 'amber'
-                            ? 'from-amber-500 to-orange-400'
-                            : 'from-emerald-500 via-teal-400 to-emerald-400'
-                      }`}
-                    style={{ width: `${Math.min(100, Math.max(0, currentHeaderItem.progress))}%` }}
-                  >
-                    <div className="absolute right-0 top-0 bottom-0 w-2 bg-white/80 rounded-full shadow-[0_0_8px_rgba(255,255,255,0.9)]" />
+            // 1. EXPANDED HUB VIEW (On Hover - 1580ms grace delay buffer)
+            if (isHoverExpanded) {
+              return (
+                <div
+                  onClick={() => {
+                    if (onOpenAutomationHub) onOpenAutomationHub();
+                    else if (onOpenWaQueue) onOpenWaQueue();
+                  }}
+                  className="w-full flex flex-col justify-center gap-1 h-full relative cursor-pointer group/progress origin-center transition-all duration-300 animate-in fade-in zoom-in-95"
+                  title="Click to open Dispatch & WhatsApp Automation Hub"
+                >
+                  {/* Top Stats Breakdown */}
+                  <div className="flex items-center justify-between gap-2 text-xs font-semibold">
+                    <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                      <Zap size={12} className="text-primary animate-pulse shrink-0" />
+                      <span className="truncate text-text font-bold text-xs tracking-tight">
+                        Dispatch & Messaging Hub
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 shrink-0 text-[10px] font-bold">
+                      {waSent > 0 && <span className="text-emerald-400">✓ {waSent}</span>}
+                      {waSending > 0 && <span className="text-sky-400 animate-pulse">▶ {waSending}</span>}
+                      {waPending > 0 && <span className="text-amber-400">⏰ {waPending}</span>}
+                      {waFailed > 0 && <span className="text-rose-400 animate-bounce">⚠️ {waFailed}</span>}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (onOpenAutomationHub) onOpenAutomationHub();
+                          else if (onOpenWaQueue) onOpenWaQueue();
+                        }}
+                        className="text-[9px] font-black text-sky-400 hover:text-sky-300 hover:underline uppercase tracking-wider pl-1"
+                      >
+                        Open Hub
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Multi-Segment Storage-Style Progress Bar */}
+                  <div className="w-full h-1.5 bg-bg border border-glass-border/60 rounded-full overflow-hidden flex shadow-inner">
+                    {sentPct > 0 && (
+                      <div
+                        className="h-full bg-gradient-to-r from-emerald-500 to-teal-400 transition-all duration-500"
+                        style={{ width: `${sentPct}%` }}
+                        title={`${waSent} Sent (${Math.round(sentPct)}%)`}
+                      />
+                    )}
+                    {sendingPct > 0 && (
+                      <div
+                        className="h-full bg-gradient-to-r from-sky-500 to-blue-400 animate-pulse transition-all duration-500"
+                        style={{ width: `${sendingPct}%` }}
+                        title={`${waSending} Sending (${Math.round(sendingPct)}%)`}
+                      />
+                    )}
+                    {pendingPct > 0 && (
+                      <div
+                        className="h-full bg-gradient-to-r from-amber-500 to-orange-400 transition-all duration-500"
+                        style={{ width: `${pendingPct}%` }}
+                        title={`${waPending} Pending / Retrying (${Math.round(pendingPct)}%)`}
+                      />
+                    )}
+                    {failedPct > 0 && (
+                      <div
+                        className="h-full bg-gradient-to-r from-rose-500 to-red-500 animate-pulse transition-all duration-500"
+                        style={{ width: `${failedPct}%` }}
+                        title={`${waFailed} Failed (${Math.round(failedPct)}%)`}
+                      />
+                    )}
+                    {waTotal === 0 && (
+                      <div className="h-full bg-emerald-500/60 w-full" title="All Clean" />
+                    )}
                   </div>
                 </div>
-              )}
-            </div>
-          )}
+              );
+            }
+
+            // 2. CONTEXTUAL AUTO-FOCUS MODES (When NOT Hovered)
+
+            // (A) Active Live Send in Progress
+            if (activeMsgProgress && !activeMsgProgress.completed) {
+              return (
+                <div
+                  onClick={onOpenWaQueue}
+                  className="w-full flex flex-col justify-center gap-0.5 h-full relative cursor-pointer group/progress origin-center transition-all duration-300 animate-in fade-in"
+                >
+                  <div className="flex items-center justify-between gap-2 text-xs font-semibold">
+                    <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                      <SendIcon size={12} className="text-emerald-400 animate-pulse shrink-0" />
+                      <span className="truncate text-text font-bold text-xs tracking-tight">
+                        Sending to {activeMsgProgress.recipient}...
+                      </span>
+                    </div>
+                    <span className="text-[10px] font-mono font-bold text-emerald-400 shrink-0">
+                      {activeMsgProgress.progress}% ({activeMsgProgress.secondsLeft}s)
+                    </span>
+                  </div>
+                  <div className="w-full h-1 bg-bg border-t border-glass-border/40 rounded-full overflow-hidden relative shadow-inner">
+                    <div
+                      className="h-full rounded-full transition-all duration-300 bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-400"
+                      style={{ width: `${activeMsgProgress.progress}%` }}
+                    />
+                  </div>
+                </div>
+              );
+            }
+
+            // (B) Failed Messages Alert Mode (Blinks gently to notify user)
+            if (waFailed > 0) {
+              return (
+                <div
+                  onClick={() => {
+                    if (onOpenAutomationHub) onOpenAutomationHub();
+                    else if (onOpenWaQueue) onOpenWaQueue();
+                  }}
+                  className="w-full flex flex-col justify-center gap-0.5 h-full relative cursor-pointer group/progress origin-center transition-all duration-300 animate-in fade-in"
+                >
+                  <div className="flex items-center justify-between gap-2 text-xs font-semibold">
+                    <div className="flex items-center gap-1.5 min-w-0 flex-1 text-rose-400">
+                      <AlertTriangle size={12} className="animate-bounce shrink-0" />
+                      <span className="truncate font-bold text-xs tracking-tight">
+                        ⚠️ {waFailed} Message{waFailed > 1 ? 's' : ''} Failed / Retrying
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      className="text-[10px] font-bold text-rose-400 hover:text-rose-300 hover:underline uppercase tracking-wider shrink-0"
+                    >
+                      Fix Now
+                    </button>
+                  </div>
+                  <div className="w-full h-1 bg-bg border-t border-rose-500/40 rounded-full overflow-hidden relative shadow-inner">
+                    <div className="h-full rounded-full bg-rose-500 animate-pulse w-full" />
+                  </div>
+                </div>
+              );
+            }
+
+            // (C) Pending Messages / Silent Retries Heartbeat Mode
+            if (waPending > 0 || waQueueDetail?.isPaused) {
+              return (
+                <div
+                  onClick={onOpenWaQueue}
+                  className="w-full flex flex-col justify-center gap-0.5 h-full relative cursor-pointer group/progress origin-center transition-all duration-300 animate-in fade-in"
+                >
+                  <div className="flex items-center justify-between gap-2 text-xs font-semibold">
+                    <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                      <ClockIcon size={12} className="text-amber-400 animate-pulse shrink-0" />
+                      <span className="truncate text-text font-bold text-xs tracking-tight">
+                        {waQueueDetail?.isPaused ? `Scheduled: ${waPending} Messages Paused` : `${waPending} Scheduled / Pending Retries`}
+                      </span>
+                    </div>
+                    <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider shrink-0">
+                      {waQueueDetail?.isPaused ? 'Paused' : 'Queue'}
+                    </span>
+                  </div>
+                  <div className="w-full h-1 bg-bg border-t border-amber-500/40 rounded-full overflow-hidden relative shadow-inner">
+                    <div className="h-full rounded-full bg-amber-400/80 animate-pulse w-full" />
+                  </div>
+                </div>
+              );
+            }
+
+            // (D) Other Global Tasks Carousel (Catalog Sync / Backup / OCR)
+            if (activeHeaderItems.length > 0 && currentHeaderItem) {
+              return (
+                <div className="w-full flex flex-col justify-center gap-0.5 h-full relative cursor-pointer group/progress origin-center transition-all duration-300 animate-in fade-in zoom-in-95">
+                  <div className="flex items-center justify-between gap-2 text-xs font-semibold">
+                    <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                      {currentHeaderItem.icon}
+                      <span className="truncate text-text font-bold text-xs tracking-tight">
+                        {currentHeaderItem.title}
+                      </span>
+                    </div>
+                    {currentHeaderItem.action && (
+                      <button
+                        type="button"
+                        onClick={currentHeaderItem.action}
+                        className="text-[10px] font-bold text-sky-400 hover:text-sky-300 hover:underline cursor-pointer uppercase tracking-wider pl-1"
+                      >
+                        {currentHeaderItem.actionLabel || 'View'}
+                      </button>
+                    )}
+                  </div>
+                  {currentHeaderItem.progress !== undefined && (
+                    <div className="w-full h-1 bg-bg border-t border-glass-border/40 rounded-full overflow-hidden relative shadow-inner">
+                      <div
+                        className={`h-full rounded-full transition-all duration-500 relative bg-gradient-to-r ${currentHeaderItem.color === 'purple'
+                            ? 'from-purple-500 via-indigo-500 to-sky-400'
+                            : currentHeaderItem.color === 'sky'
+                              ? 'from-sky-500 via-blue-500 to-cyan-400'
+                              : currentHeaderItem.color === 'amber'
+                                ? 'from-amber-500 to-orange-400'
+                                : 'from-emerald-500 via-teal-400 to-emerald-400'
+                          }`}
+                        style={{ width: `${Math.min(100, Math.max(0, currentHeaderItem.progress))}%` }}
+                      >
+                        <div className="absolute right-0 top-0 bottom-0 w-2 bg-text/80 rounded-full shadow-sm" />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            }
+
+            // (E) Completely Idle / All Done (Auto-Hides cleanly; reveals on hover)
+            return (
+              <div
+                className="w-full h-full flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity duration-300 cursor-pointer"
+                title="Hover to inspect Dispatch & Messaging Hub"
+              >
+                <div className="w-16 h-0.5 bg-glass-border rounded-full" />
+              </div>
+            );
+          })()}
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
