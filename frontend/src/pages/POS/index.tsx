@@ -673,11 +673,19 @@ export function allocateMedicineBatches(params: {
   const pSize = Math.max(1, params.packSize || params.fallbackItem?.packSize || params.fallbackItem?.pack_size || 1);
   const totalRequestedTablets = (requestedQty * pSize) + (requestedLooseQty || 0);
 
+  const normKey = (n: unknown) => String(n || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+  const targetNormName = normKey(medicineName);
+
   // 1. Find all active unexpired batches for this medicine
   const activeBatches = (compactInventory || [])
     .filter(item => {
-      const idMatch = medicineId > 0 && (item.medicine_id === medicineId || item.id === medicineId);
-      const nameMatch = Boolean(medicineName && (item.name || item.medicine_name) && (item.name || item.medicine_name).toLowerCase().trim() === medicineName.toLowerCase().trim());
+      const itemNorm = normKey(item.medicine_name || item.name);
+      const idMatch = medicineId > 0 && (
+        Number(item.medicine_id) === Number(medicineId) ||
+        Number(item.id) === Number(medicineId) ||
+        Number(item.inventory_id) === Number(medicineId)
+      );
+      const nameMatch = Boolean(targetNormName && itemNorm && itemNorm === targetNormName);
       const hasStock = ((item.stock_qty !== undefined ? item.stock_qty : item.quantity) || 0) > 0 || (item.loose_quantity || 0) > 0;
       return (idMatch || nameMatch) && hasStock;
     })
@@ -786,14 +794,15 @@ export function allocateMedicineBatches(params: {
           discount = parseFloat((((mrp - Number(sellPrice)) / mrp) * 100).toFixed(2));
         }
         const unitPrice = Number(params.fallbackItem?.unitPrice || batch.unit_price || sellPrice || mrp || 0);
+        const invId = Number(batch.inventory_id || batch.id);
 
         allocations.push({
           ...(params.fallbackItem || {}),
-          id: batch.inventory_id || batch.id,
-          inventory_id: batch.inventory_id || batch.id,
-          medicine_id: batch.medicine_id || medicineId,
-          name: batch.name || medicineName,
-          medicine_name: batch.name || medicineName,
+          id: invId,
+          inventory_id: invId,
+          medicine_id: Number(batch.medicine_id || medicineId),
+          name: batch.name || batch.medicine_name || medicineName,
+          medicine_name: batch.name || batch.medicine_name || medicineName,
           batch: batch.batch_no,
           batch_no: batch.batch_no,
           expiry: batch.expiry_date || '',
@@ -817,9 +826,14 @@ export function allocateMedicineBatches(params: {
     }
   }
 
-  // If requested exceeds available stock, cap to maximum
+  // If requested exceeds available stock, cap to maximum and inform user
   if (!editingInvoiceId && totalRequestedTablets > totalAvailableTablets && totalAvailableTablets > 0) {
-    toastEvent.trigger(`Only ${totalAvailableTablets} units available in stock for "${medicineName}". Capped to available stock.`, "info");
+    const availStrips = Math.floor(totalAvailableTablets / pSize);
+    const availLoose = totalAvailableTablets % pSize;
+    toastEvent.trigger(
+      `Only ${availStrips} strips${availLoose > 0 ? ` & ${availLoose} loose` : ''} available for "${medicineName}". Allocated across ${allocations.length} batch(es).`,
+      "info"
+    );
   }
 
   // If nothing allocated (e.g. 0 requested or 0 stock), return the first batch with 0 qty
@@ -827,13 +841,14 @@ export function allocateMedicineBatches(params: {
     const firstB = activeBatches[0];
     const sellPrice = firstB.sell_price !== undefined && firstB.sell_price !== null ? firstB.sell_price : (params.fallbackItem?.sell_price || null);
     const mrp = Number(firstB.mrp || params.fallbackItem?.mrp || 0);
+    const invId = Number(firstB.inventory_id || firstB.id);
     allocations.push({
       ...(params.fallbackItem || {}),
-      id: firstB.inventory_id || firstB.id,
-      inventory_id: firstB.inventory_id || firstB.id,
-      medicine_id: firstB.medicine_id || medicineId,
-      name: firstB.name || medicineName,
-      medicine_name: firstB.name || medicineName,
+      id: invId,
+      inventory_id: invId,
+      medicine_id: Number(firstB.medicine_id || medicineId),
+      name: firstB.name || firstB.medicine_name || medicineName,
+      medicine_name: firstB.name || firstB.medicine_name || medicineName,
       batch: firstB.batch_no,
       batch_no: firstB.batch_no,
       expiry: firstB.expiry_date || '',
@@ -843,8 +858,8 @@ export function allocateMedicineBatches(params: {
       qty: 0,
       quantity: 0,
       looseQty: 0,
-      unitPrice: Number(params.fallbackItem?.unitPrice || firstB.unit_price || sellPrice || mrp || 0),
-      discount: params.fallbackItem?.discount || 0,
+      unitPrice: Number(firstB.unit_price || mrp),
+      discount: 0,
       packSize: pSize,
       costPrice: firstB.cost_price != null ? firstB.cost_price : (params.fallbackItem?.costPrice || null),
       availableStock: firstB.stock_qty,
@@ -855,7 +870,7 @@ export function allocateMedicineBatches(params: {
   }
 
   return allocations;
-};
+}
 
 const POS = () => {
   const navigate = useNavigate();
@@ -2298,21 +2313,22 @@ const POS = () => {
 
   const rebalanceCartMedicine = (prevCart: CartRow[], medicineId: number | string, targetItemId: number | string, updatedFields: { qty?: number; looseQty?: number }) => {
     const targetItem = prevCart.find(i => i.id === targetItemId);
-    const targetMedId = medicineId || targetItem?.medicine_id;
-    const targetMedName = (targetItem?.name || targetItem?.medicine_name || '').toLowerCase().trim();
+    const targetMedId = targetItem?.medicine_id || (typeof medicineId === 'number' && medicineId < 1000000 ? medicineId : 0);
+    const normKey = (n: unknown) => String(n || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+    const targetMedName = normKey(targetItem?.name || targetItem?.medicine_name);
 
     // 1. Find all cart items of this medicine
     const medicineItems = prevCart.filter(item => {
       if (item.isEmptyRow) return false;
-      const idMatch = targetMedId && item.medicine_id === targetMedId;
-      const nameMatch = Boolean(targetMedName && (item.name || item.medicine_name || '').toLowerCase().trim() === targetMedName);
+      const idMatch = Boolean(targetMedId && Number(item.medicine_id) === Number(targetMedId));
+      const nameMatch = Boolean(targetMedName && normKey(item.name || item.medicine_name) === targetMedName);
       return idMatch || nameMatch;
     });
     if (medicineItems.length === 0) return prevCart;
 
     // 2. Determine the new total requested quantity for this medicine.
     let totalRequestedTablets = 0;
-    const packSize = medicineItems[0].packSize || 1;
+    const packSize = Number(medicineItems[0].packSize || medicineItems[0].pack_size || 1) || 1;
 
     for (const item of medicineItems) {
       let itemQty = item.qty ?? item.quantity ?? 0;
@@ -2346,15 +2362,15 @@ const POS = () => {
           return { ...item, qty: 0, looseQty: 0 };
         }
         return item;
-      }).filter(item => item.id === targetItemId || (targetMedId ? item.medicine_id !== targetMedId : (item.name || item.medicine_name || '').toLowerCase().trim() !== targetMedName));
+      }).filter(item => item.id === targetItemId || (targetMedId ? Number(item.medicine_id) !== Number(targetMedId) : normKey(item.name || item.medicine_name) !== targetMedName));
     }
 
     // Replace all old rows of this medicine in the cart with the new allocated rows
     const newCart: CartRow[] = [];
     let inserted = false;
     for (const item of prevCart) {
-      const isThisMed = (targetMedId && item.medicine_id === targetMedId) ||
-        Boolean(targetMedName && (item.name || item.medicine_name || '').toLowerCase().trim() === targetMedName);
+      const isThisMed = (Boolean(targetMedId && Number(item.medicine_id) === Number(targetMedId))) ||
+        Boolean(targetMedName && normKey(item.name || item.medicine_name) === targetMedName);
       if (isThisMed && !item.isEmptyRow) {
         if (!inserted) {
           newCart.push(...newMedRows);
@@ -3096,9 +3112,9 @@ const POS = () => {
       if (!name.trim()) continue;
       const batch = item.batch || item.batch_no || '';
       const unitPrice = Number(item.unitPrice || item.unit_price || item.mrp || 0);
-      const inventoryId = item.inventory_id || (typeof item.id === 'number' && item.id < 1000000 ? item.id : undefined);
+      const invId = Number(item.inventory_id || (typeof item.id === 'number' && item.id < 1000000 ? item.id : (typeof item.id === 'string' && /^\d+$/.test(item.id) && Number(item.id) < 1000000 ? Number(item.id) : undefined)));
 
-      if (!inventoryId || !batch.trim()) {
+      if (!invId || !batch.trim()) {
         alert(`❌ Missing Inventory Batch:\n\n"${name}" is not linked to verified inventory stock. Please select an in-stock batch or record a purchase first.`);
         return;
       }
@@ -3117,8 +3133,9 @@ const POS = () => {
         const itemDiscount = item.discount || item.discountPer || 0;
         const resolvedUnitPrice = Number(item.unitPrice || item.mrp || item.unit_price || 0);
         const name = item.name || item.medicine_name || 'Medicine';
+        const invId = Number(item.inventory_id || (typeof item.id === 'number' && item.id < 1000000 ? item.id : (typeof item.id === 'string' && /^\d+$/.test(item.id) && Number(item.id) < 1000000 ? Number(item.id) : undefined)));
         return {
-          inventory_id: item.inventory_id || (typeof item.id === 'number' && item.id < 1000000 ? item.id : undefined),
+          inventory_id: invId || undefined,
           medicine_name: name,
           batch_no: item.batch || item.batch_no || '',
           expiry_date: item.expiry || item.expiry_date || '',
@@ -4801,24 +4818,30 @@ const POS = () => {
                                       onMouseDown={() => {
                                         updateCart(prev => prev.map((cItem): CartRow => {
                                           if (cItem.id !== item.id) return cItem;
+                                          const invId = Number(b.inventory_id || (b as any).id);
                                           const newSellPrice = b.sell_price || cItem.sell_price || null;
                                           const newMrp = Number(b.mrp || cItem.mrp || 0);
                                           const numSellPrice = Number(newSellPrice || 0);
                                           const autoDiscount = (numSellPrice > 0 && newMrp > 0 && numSellPrice < newMrp)
                                             ? parseFloat((((newMrp - numSellPrice) / newMrp) * 100).toFixed(2))
                                             : cItem.discount;
+                                          const batchQty = Number(b.quantity !== undefined ? b.quantity : ((b as any).stock_qty !== undefined ? (b as any).stock_qty : 0));
+                                          const batchLoose = Number(b.loose_quantity !== undefined ? b.loose_quantity : ((b as any).loose_qty !== undefined ? (b as any).loose_qty : 0));
                                           return {
                                             ...cItem,
-                                            id: b.inventory_id ? String(b.inventory_id) : cItem.id,
+                                            id: invId || cItem.id,
+                                            inventory_id: invId || cItem.inventory_id,
                                             batch: b.batch_no,
+                                            batch_no: b.batch_no,
                                             expiry: b.expiry_date,
+                                            expiry_date: b.expiry_date,
                                             mrp: b.mrp,
                                             sell_price: newSellPrice,
                                             discount: autoDiscount,
                                             costPrice: b.cost_price,
                                             packSize: b.pack_size || cItem.packSize,
-                                            availableStock: b.quantity !== undefined ? b.quantity : 0,
-                                            availableLooseStock: b.loose_quantity !== undefined ? b.loose_quantity : 0
+                                            availableStock: batchQty,
+                                            availableLooseStock: batchLoose
                                           };
                                         }));
                                         setActiveBatchRowId(null);
@@ -5003,38 +5026,36 @@ const POS = () => {
                               return <div className="font-mono text-xs font-bold text-muted">-</div>;
                             }
                             const compactInventory = getCompactInventoryCache();
-                            const medicineBatches = compactInventory.filter(inv => inv.medicine_id === item.medicine_id);
+                            const batchMatch = compactInventory.find(b => 
+                              (item.inventory_id && (b.inventory_id === item.inventory_id || b.id === item.inventory_id)) ||
+                              (item.batch && b.batch_no === item.batch && (b.medicine_id === item.medicine_id || !item.medicine_id))
+                            );
+                            const packSize = Number(item.packSize || 1);
                             
                             let remainingStock: number | string = 'N/A';
                             let remainingLoose = 0;
-                            const packSize = item.packSize || 1;
-                            
-                            if (medicineBatches.length > 0) {
-                              const totalAvailableStock = medicineBatches.reduce((sum, b) => sum + (b.stock_qty || 0), 0);
-                              const totalAvailableLooseStock = medicineBatches.reduce((sum, b) => sum + (b.loose_quantity || 0), 0);
+                            let hasBatchOrMed = false;
+
+                            if (batchMatch) {
+                              hasBatchOrMed = true;
+                              const batchStock = batchMatch.stock_qty !== undefined ? batchMatch.stock_qty : (batchMatch.quantity || 0);
+                              const batchLoose = batchMatch.loose_quantity || 0;
+                              const batchTotalUnits = (batchStock * packSize) + batchLoose;
                               
-                              const totalCartQty = cart.reduce((sum, c) => {
-                                if (!c.isEmptyRow && c.medicine_id === item.medicine_id) {
-                                  return sum + (c.qty ?? c.quantity ?? 0);
-                                }
-                                return sum;
-                              }, 0);
-                              const totalCartLoose = cart.reduce((sum, c) => {
-                                if (!c.isEmptyRow && c.medicine_id === item.medicine_id) {
-                                  return sum + (c.looseQty ?? c.loose_qty ?? 0);
+                              const cartUnitsForBatch = cart.reduce((sum, c) => {
+                                if (!c.isEmptyRow && (c.inventory_id === item.inventory_id || (c.batch === item.batch && c.medicine_id === item.medicine_id))) {
+                                  return sum + ((c.qty ?? c.quantity ?? 0) * packSize) + (c.looseQty ?? c.loose_qty ?? 0);
                                 }
                                 return sum;
                               }, 0);
 
-                              const totalUnits = (totalAvailableStock * packSize) + totalAvailableLooseStock;
-                              const cartUnits = (totalCartQty * packSize) + totalCartLoose;
-                              const remainingUnits = Math.max(0, totalUnits - cartUnits);
-
+                              const remainingUnits = Math.max(0, batchTotalUnits - cartUnitsForBatch);
                               remainingStock = Math.floor(remainingUnits / packSize);
                               remainingLoose = remainingUnits % packSize;
                             } else if (item.availableStock !== undefined) {
-                              const totalAvailableStock = item.availableStock;
-                              const totalAvailableLooseStock = item.availableLooseStock || 0;
+                              hasBatchOrMed = true;
+                              const totalAvailableStock = Number(item.availableStock || 0);
+                              const totalAvailableLooseStock = Number(item.availableLooseStock || 0);
 
                               const totalUnits = (totalAvailableStock * packSize) + totalAvailableLooseStock;
                               const cartUnits = ((item.qty || 0) * packSize) + (item.looseQty || 0);
@@ -5043,8 +5064,9 @@ const POS = () => {
                               remainingStock = Math.floor(remainingUnits / packSize);
                               remainingLoose = remainingUnits % packSize;
                             }
-                            const isFullStockInCart = typeof remainingStock === 'number' && remainingStock <= 0 && remainingLoose <= 0 && (medicineBatches.length > 0 || (item.availableStock || 0) > 0);
-                            const isTrueOutOfStock = typeof remainingStock === 'number' && remainingStock <= 0 && remainingLoose <= 0 && medicineBatches.length === 0 && (item.availableStock || 0) === 0;
+
+                            const isFullStockInCart = typeof remainingStock === 'number' && remainingStock <= 0 && remainingLoose <= 0 && hasBatchOrMed;
+                            const isTrueOutOfStock = typeof remainingStock === 'number' && remainingStock <= 0 && remainingLoose <= 0 && !hasBatchOrMed;
 
                             return (
                               <div 
@@ -5052,8 +5074,8 @@ const POS = () => {
                                   isTrueOutOfStock
                                     ? 'Out of stock in pharmacy'
                                     : isFullStockInCart
-                                    ? '100% of pharmacy stock allocated to this bill (0 remaining on shelf)'
-                                    : `Remaining stock on shelf after this sale: ${remainingStock} strip(s), ${remainingLoose} loose`
+                                    ? '100% of batch stock allocated to this bill (0 remaining on shelf)'
+                                    : `Remaining batch stock on shelf after this sale: ${remainingStock} strip(s), ${remainingLoose} loose`
                                 }
                                 className={`text-xs select-none font-bold font-mono px-2 py-0.5 rounded-md border inline-flex items-center gap-1 ${
                                   isTrueOutOfStock
@@ -5066,7 +5088,7 @@ const POS = () => {
                                 }`}>
                                 <span>{remainingStock} / {remainingLoose}</span>
                                 {isFullStockInCart && (
-                                  <span className="text-[10px] uppercase font-bold text-amber-400 ml-0.5" title="100% of pharmacy stock allocated to this bill">(All In Cart)</span>
+                                  <span className="text-[10px] uppercase font-bold text-amber-400 ml-0.5" title="100% of batch stock allocated to this bill">(All In Cart)</span>
                                 )}
                               </div>
                             );
