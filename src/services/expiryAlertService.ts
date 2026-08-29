@@ -22,7 +22,7 @@ export async function runExpiryScanAndAlert(days = 90): Promise<boolean> {
       JOIN medicines m ON im.medicine_id = m.id
       WHERE date(im.expiry_date) <= date('now', '+' || ? || ' days')
       AND ${INVENTORY_ACTIVE_WHERE}
-      ORDER BY im.expiry_date ASC
+      ORDER BY im.expiry_date ASC, m.name COLLATE NOCASE ASC
       LIMIT 10
     `, [days]);
 
@@ -205,7 +205,7 @@ export async function rebuildAllExpiryCaches(): Promise<void> {
         LEFT JOIN purchases p ON pi.purchase_id = p.id
         LEFT JOIN distributors d ON p.distributor_id = d.id
         WHERE ${INVENTORY_ACTIVE_WHERE}
-        ORDER BY im.expiry_date ASC
+        ORDER BY im.expiry_date ASC, m.name COLLATE NOCASE ASC
       `);
 
       const cacheDir = path.resolve(getAppDataDir(), 'data', 'cache', 'expiry');
@@ -225,6 +225,7 @@ export async function rebuildAllExpiryCaches(): Promise<void> {
       let written = 0;
       for (const [ym, items] of Object.entries(groups)) {
         if (ym === 'unknown') continue; // skip bad expiry dates
+        items.sort((a, b) => (a.medicine_name || '').localeCompare(b.medicine_name || '', undefined, { sensitivity: 'base', numeric: true }));
         const fileName = `expiry_${ym}.json`;
         validMonthFiles.add(fileName);
         const filePath = path.join(cacheDir, fileName);

@@ -6,7 +6,9 @@ import {
   RefreshCw, 
   CheckCircle2,
   RotateCcw,
-  FileText
+  FileText,
+  Sliders,
+  X
 } from 'lucide-react';
 import { api } from '../../services/api';
 import { toastEvent } from '../../services/events';
@@ -35,7 +37,7 @@ interface ExpiryItem {
 
 
 
-let cachedExpiryItems: ExpiryItem[] | null = null;
+const cachedExpiryMap: Record<string, ExpiryItem[]> = {};
 
 const Expiry = () => {
   const navigate = useNavigate();
@@ -57,6 +59,7 @@ const Expiry = () => {
   });
   
   const queryClient = useQueryClient();
+  const cacheKey = `${dateRangeHelper.dateRange.from}_${dateRangeHelper.dateRange.to}`;
   const expiryKey = ['expiry', dateRangeHelper.dateRange.from, dateRangeHelper.dateRange.to] as const;
   const { data: items = [], isLoading: loading, isFetching: refreshing, refetch: refetchExpiry } = useApiQuery<ExpiryItem[]>(
     expiryKey,
@@ -66,11 +69,11 @@ const Expiry = () => {
         date_to: dateRangeHelper.dateRange.to,
       });
       const list = Array.isArray(res) ? res : (res?.data || []);
-      cachedExpiryItems = list;
+      cachedExpiryMap[cacheKey] = list;
       return list;
     },
     {
-      initialData: cachedExpiryItems || undefined,
+      initialData: cachedExpiryMap[cacheKey] || undefined,
       staleTime: 10000,
     }
   );
@@ -101,7 +104,7 @@ const Expiry = () => {
   // Custom Filters
   const [minQty, setMinQty] = useState('');
   const [maxQty, setMaxQty] = useState('');
-  const [colFilterId, setColFilterId] = useState('');
+  const [colFilterStatus, setColFilterStatus] = useState('All');
   const [colFilterMedName, setColFilterMedName] = useState('');
   const [colFilterBatchNo, setColFilterBatchNo] = useState('');
   const [colFilterDate, setColFilterDate] = useState('');
@@ -211,10 +214,16 @@ const Expiry = () => {
       return false;
     }
 
-    // Column-specific header filters
-    if (colFilterId && !item.id.toString().includes(colFilterId)) {
-      return false;
+    // Status segmented tab filter
+    if (colFilterStatus !== 'All') {
+      const daysDiff = getExpiryDaysDiff(item.expiry_date);
+      const details = getExpiryStatusDetails(daysDiff);
+      if (details.label !== colFilterStatus) {
+        return false;
+      }
     }
+
+    // Column-specific header filters
     if (colFilterMedName && !item.medicine_name.toLowerCase().includes(colFilterMedName.toLowerCase())) {
       return false;
     }
@@ -222,8 +231,20 @@ const Expiry = () => {
       return false;
     }
     if (colFilterDate) {
-      const itemDate = item.expiry_date ? item.expiry_date.substring(0, 10) : '';
-      if (itemDate !== colFilterDate) return false;
+      const itemRaw = item.expiry_date ? item.expiry_date.trim() : '';
+      let match = false;
+      if (itemRaw.startsWith(colFilterDate)) {
+        match = true;
+      } else if (itemRaw.includes('/')) {
+        const parts = itemRaw.split('/');
+        const m = parts[0].padStart(2, '0');
+        let y = parts[1];
+        if (y.length === 2) y = '20' + y;
+        if (`${y}-${m}` === colFilterDate.substring(0, 7)) match = true;
+      } else if (itemRaw.substring(0, 7) === colFilterDate.substring(0, 7)) {
+        match = true;
+      }
+      if (!match) return false;
     }
     const qtyVal = item.quantity || 0;
     const minQ = colFilterMinQty ? Number(colFilterMinQty) : 0;
@@ -370,148 +391,150 @@ const Expiry = () => {
             <span className="text-[11px] text-muted font-bold shrink-0">{filteredItems.length} items</span>
           </div>
 
+          {/* ── FILTER BAR (Investigation Style) ── */}
+          <div className="px-3 py-2 bg-bg2/40 border-b border-glass-border/40 flex flex-wrap items-center gap-2 shrink-0 select-none">
+            {/* Label */}
+            <div className="flex items-center gap-1 text-[9px] text-muted/70 font-black uppercase tracking-widest shrink-0">
+              <Sliders size={11} className="text-primary" />
+              Filter
+            </div>
+
+            {/* Medicine Filter */}
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-green/50" size={12} />
+              <input
+                type="text"
+                placeholder="Medicine..."
+                value={colFilterMedName}
+                onChange={e => setColFilterMedName(e.target.value)}
+                className="w-40 bg-bg3/70 border border-glass-border/50 rounded-xl pl-7 pr-6 py-1 text-xs text-text placeholder:text-muted/40 focus:outline-none focus:border-green/40 focus:bg-green/5 transition-all"
+              />
+              {colFilterMedName && (
+                <button onClick={() => setColFilterMedName('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted hover:text-text cursor-pointer">
+                  <X size={10} />
+                </button>
+              )}
+            </div>
+
+            {/* Batch Filter */}
+            <div className="relative">
+              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[10px] text-sky-400/60 font-black">#</span>
+              <input
+                type="text"
+                placeholder="Batch..."
+                value={colFilterBatchNo}
+                onChange={e => setColFilterBatchNo(e.target.value)}
+                className="w-28 bg-bg3/70 border border-glass-border/50 rounded-xl pl-6 pr-6 py-1 text-xs text-text placeholder:text-muted/40 focus:outline-none focus:border-sky-400/40 focus:bg-sky-500/5 transition-all"
+              />
+              {colFilterBatchNo && (
+                <button onClick={() => setColFilterBatchNo('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted hover:text-text cursor-pointer">
+                  <X size={10} />
+                </button>
+              )}
+            </div>
+
+            {/* Status Segmented Tabs */}
+            <div className="flex items-center bg-bg3/60 border border-glass-border/40 rounded-xl overflow-hidden text-[10px] font-bold h-[26px] shrink-0">
+              {[
+                { v: 'All', label: 'All' },
+                { v: 'EXPIRED', label: 'Expired', color: 'text-red' },
+                { v: 'CRITICAL', label: 'Critical (≤30d)', color: 'text-orange-500' },
+                { v: 'WARNING', label: 'Warning (≤60d)', color: 'text-amber-500' },
+                { v: 'NEAR EXPIRY', label: 'Near Expiry', color: 'text-indigo-400' },
+              ].map(({ v, label, color }) => (
+                <button
+                  key={v}
+                  onClick={() => setColFilterStatus(v)}
+                  className={`px-2.5 h-full flex items-center transition-all cursor-pointer border-r border-glass-border/30 last:border-r-0 ${
+                    colFilterStatus === v
+                      ? 'bg-primary/15 text-primary shadow-inner'
+                      : `text-muted hover:text-text hover:bg-bg2/50 ${color || ''}`
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {/* Location Filter */}
+            <div className="relative">
+              <input
+                type="text"
+                placeholder="Rack Location..."
+                value={colFilterLocation}
+                onChange={e => setColFilterLocation(e.target.value)}
+                className="w-32 bg-bg3/70 border border-glass-border/50 rounded-xl px-3 py-1 text-xs text-text placeholder:text-muted/40 focus:outline-none focus:border-primary/40 transition-all"
+              />
+              {colFilterLocation && (
+                <button onClick={() => setColFilterLocation('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted hover:text-text cursor-pointer">
+                  <X size={10} />
+                </button>
+              )}
+            </div>
+
+            {/* Right: Reset Button */}
+            {(colFilterMedName || colFilterBatchNo || colFilterDate || colFilterLocation || colFilterStatus !== 'All' || minQty || maxQty || colFilterMinMrp || colFilterMaxMrp) && (
+              <div className="ml-auto flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    setColFilterMedName('');
+                    setColFilterBatchNo('');
+                    setColFilterDate('');
+                    setColFilterLocation('');
+                    setColFilterStatus('All');
+                    setMinQty('');
+                    setMaxQty('');
+                    setColFilterMinMrp('');
+                    setColFilterMaxMrp('');
+                  }}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-red/10 border border-red/20 text-red hover:bg-red hover:text-white transition-all text-[10px] font-bold cursor-pointer"
+                >
+                  <RotateCcw size={10} />
+                  Reset
+                </button>
+              </div>
+            )}
+          </div>
+
           {/* Table Container */}
           <div className="flex-1 overflow-auto bg-bg/40">
             <table className="w-full text-left border-collapse text-sm">
               <thead className="sticky top-0 bg-bg2/95 backdrop-blur-md z-10 select-none border-b border-glass-border">
-                <tr>
-                  <th className="p-4 text-sm font-bold text-muted uppercase tracking-wider border-b border-glass-border/60 w-8">
-                    <input type="checkbox" className="rounded" onChange={e => {
-                      if (e.target.checked) setSelectedIds(new Set(filteredItems.filter(i => i.purchase_invoice_no).map(i => i.id)));
-                      else setSelectedIds(new Set());
-                    }} checked={selectedIds.size === filteredItems.filter(i => i.purchase_invoice_no).length && filteredItems.length > 0} readOnly />
+                <tr className="border-b border-glass-border/60">
+                  <th className="p-3 text-left w-10">
+                    <input 
+                      type="checkbox" 
+                      className="w-4 h-4 rounded accent-primary cursor-pointer" 
+                      onChange={e => {
+                        if (e.target.checked) setSelectedIds(new Set(filteredItems.filter(i => i.purchase_invoice_no).map(i => i.id)));
+                        else setSelectedIds(new Set());
+                      }} 
+                      checked={selectedIds.size === filteredItems.filter(i => i.purchase_invoice_no).length && filteredItems.length > 0} 
+                      readOnly 
+                    />
                   </th>
-                  <th className="p-4 text-sm font-bold text-muted uppercase tracking-wider border-b border-glass-border/60">ID</th>
-                  <th className="p-4 text-sm font-bold text-muted uppercase tracking-wider border-b border-glass-border/60">Medicine Name</th>
-                  <th className="p-4 text-sm font-bold text-muted uppercase tracking-wider border-b border-glass-border/60">Batch Number</th>
-                  <th className="p-4 text-sm font-bold text-muted uppercase tracking-wider border-b border-glass-border/60 text-center">Expiry Date</th>
-                  <th className="p-4 text-sm font-bold text-muted uppercase tracking-wider border-b border-glass-border/60 text-center">Remaining Time</th>
-                  <th className="p-4 text-sm font-bold text-muted uppercase tracking-wider border-b border-glass-border/60 text-center">Stock Qty</th>
-                  <th className="p-4 text-sm font-bold text-muted uppercase tracking-wider border-b border-glass-border/60 text-right">MRP Price</th>
-                  <th className="p-4 text-sm font-bold text-muted uppercase tracking-wider border-b border-glass-border/60">Invoice Ref / Supplier</th>
-                  <th className="p-4 text-sm font-bold text-muted uppercase tracking-wider border-b border-glass-border/60">Rack Location</th>
-                  <th className="p-4 text-sm font-bold text-muted uppercase tracking-wider border-b border-glass-border/60 text-center">Actions</th>
-                </tr>
-                <tr className="bg-bg2 border-b border-glass-border/30">
-                  <td className="p-2"></td>
-                  <td className="p-2">
-                    <input
-                      type="text"
-                      placeholder="Search ID..."
-                      value={colFilterId}
-                      onChange={e => setColFilterId(e.target.value)}
-                      className="w-full px-2.5 py-1.5 bg-bg3 border border-glass-border rounded-lg text-sm text-text placeholder:text-muted/40 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 animate-in fade-in"
-                    />
-                  </td>
-                  <td className="p-2">
-                    <input
-                      type="text"
-                      placeholder="Search name..."
-                      value={colFilterMedName}
-                      onChange={e => setColFilterMedName(e.target.value)}
-                      className="w-full px-2.5 py-1.5 bg-bg3 border border-glass-border rounded-lg text-sm text-text placeholder:text-muted/40 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 animate-in fade-in"
-                    />
-                  </td>
-                  <td className="p-2">
-                    <input
-                      type="text"
-                      placeholder="Search batch..."
-                      value={colFilterBatchNo}
-                      onChange={e => setColFilterBatchNo(e.target.value)}
-                      className="w-full px-2.5 py-1.5 bg-bg3 border border-glass-border rounded-lg text-sm text-text placeholder:text-muted/40 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 animate-in fade-in"
-                    />
-                  </td>
-                  <td className="p-2">
-                    <input
-                      type="date"
-                      value={toDateInputValue(colFilterDate)}
-                      onChange={e => setColFilterDate(e.target.value)}
-                      className="w-full px-2.5 py-1.5 bg-bg3 border border-glass-border rounded-lg text-sm text-text focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 animate-in fade-in"
-                    />
-                  </td>
-                  <td className="p-2"></td>
-                  <td className="p-2 flex gap-1">
-                    <input
-                      type="number"
-                      placeholder="Min"
-                      value={colFilterMinQty}
-                      onChange={e => setColFilterMinQty(e.target.value)}
-                      className="w-1/2 px-1.5 py-1.5 bg-bg3 border border-glass-border rounded-lg text-sm text-text placeholder:text-muted/40 focus:outline-none focus:border-primary/50"
-                    />
-                    <input
-                      type="number"
-                      placeholder="Max"
-                      value={colFilterMaxQty}
-                      onChange={e => setColFilterMaxQty(e.target.value)}
-                      className="w-1/2 px-1.5 py-1.5 bg-bg3 border border-glass-border rounded-lg text-sm text-text placeholder:text-muted/40 focus:outline-none focus:border-primary/50"
-                    />
-                  </td>
-                  <td className="p-2">
-                    <div className="flex gap-1">
-                      <input
-                        type="number"
-                        placeholder="Min"
-                        value={colFilterMinMrp}
-                        onChange={e => setColFilterMinMrp(e.target.value)}
-                        className="w-1/2 px-1.5 py-1.5 bg-bg3 border border-glass-border rounded-lg text-sm text-text placeholder:text-muted/40 focus:outline-none focus:border-primary/50"
-                      />
-                      <input
-                        type="number"
-                        placeholder="Max"
-                        value={colFilterMaxMrp}
-                        onChange={e => setColFilterMaxMrp(e.target.value)}
-                        className="w-1/2 px-1.5 py-1.5 bg-bg3 border border-glass-border rounded-lg text-sm text-text placeholder:text-muted/40 focus:outline-none focus:border-primary/50"
-                      />
-                    </div>
-                  </td>
-                  <td className="p-2">
-                    {/* Invoice Ref / Supplier empty filter cell */}
-                  </td>
-                  <td className="p-2">
-                    <div className="flex items-center justify-between gap-1">
-                      <input
-                        type="text"
-                        placeholder="Search location..."
-                        value={colFilterLocation}
-                        onChange={e => setColFilterLocation(e.target.value)}
-                        className="flex-1 px-2.5 py-1.5 bg-bg3 border border-glass-border rounded-lg text-sm text-text placeholder:text-muted/40 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 animate-in fade-in"
-                      />
-                      {(colFilterId || colFilterMedName || colFilterBatchNo || colFilterDate || colFilterMinQty || colFilterMaxQty || colFilterMinMrp || colFilterMaxMrp || colFilterLocation) && (
-                        <button
-                          onClick={() => {
-                            setColFilterId('');
-                            setColFilterMedName('');
-                            setColFilterBatchNo('');
-                            setColFilterDate('');
-                            setColFilterMinQty('');
-                            setColFilterMaxQty('');
-                            setColFilterMinMrp('');
-                            setColFilterMaxMrp('');
-                            setColFilterLocation('');
-                          }}
-                          className="text-xs text-red hover:underline font-bold px-1"
-                        >
-                          Clear
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                  <td className="p-2">
-                    {/* Actions empty filter cell */}
-                  </td>
+                  <th className="p-3 text-left text-xs font-bold text-muted uppercase tracking-wider">Medicine Name</th>
+                  <th className="p-3 text-left text-xs font-bold text-muted uppercase tracking-wider">Batch Number</th>
+                  <th className="p-3 text-center text-xs font-bold text-muted uppercase tracking-wider">Expiry Date</th>
+                  <th className="p-3 text-center text-xs font-bold text-muted uppercase tracking-wider">Remaining Time</th>
+                  <th className="p-3 text-center text-xs font-bold text-muted uppercase tracking-wider">Stock Qty</th>
+                  <th className="p-3 text-right text-xs font-bold text-muted uppercase tracking-wider">MRP Price</th>
+                  <th className="p-3 text-left text-xs font-bold text-muted uppercase tracking-wider">Invoice Ref / Supplier</th>
+                  <th className="p-3 text-left text-xs font-bold text-muted uppercase tracking-wider">Rack Location</th>
+                  <th className="p-3 text-center text-xs font-bold text-muted uppercase tracking-wider">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
                   <tr>
-                    <td colSpan={11} className="p-12 text-center text-muted font-semibold text-sm">
+                    <td colSpan={10} className="p-12 text-center text-muted font-semibold text-sm">
                       <RefreshCw size={24} className="animate-spin mx-auto mb-3 text-primary opacity-60" />
                       Loading expiry register...
                     </td>
                   </tr>
                 ) : filteredItems.length === 0 ? (
                   <tr>
-                    <td colSpan={11} className="p-16 text-center text-muted font-semibold text-base">
+                    <td colSpan={10} className="p-16 text-center text-muted font-semibold text-base">
                       <CheckCircle2 size={40} className="mx-auto mb-3 text-muted/30" />
                       <span>No items matching expiry thresholds in inventory.</span>
                       {colFilterMedName && colFilterMedName.trim().length >= 2 && (
@@ -535,7 +558,7 @@ const Expiry = () => {
                             : `hover:bg-bg3/40 ${details.rowClass}`
                         }`}
                       >
-                        <td className="p-4">
+                        <td className="p-3">
                           <div className="flex items-center gap-2">
                             <input
                               type="checkbox"
@@ -551,21 +574,18 @@ const Expiry = () => {
                             )}
                           </div>
                         </td>
-                        <td className="p-4 text-muted font-mono select-none text-sm">
-                          {item.id}
-                        </td>
-                        <td className="p-4 font-bold text-text text-base">
+                        <td className="p-3 font-bold text-text text-base">
                           {item.medicine_name}
                         </td>
-                        <td className="p-4 select-none">
+                        <td className="p-3 select-none">
                           <span className="font-mono bg-bg3/60 border border-glass-border/40 rounded-lg px-2.5 py-1 font-bold text-text text-sm">
                             {item.batch_no}
                           </span>
                         </td>
-                        <td className="p-4 text-center font-mono select-none text-muted font-semibold text-sm">
+                        <td className="p-3 text-center font-mono select-none text-muted font-semibold text-sm">
                           {new Date(item.expiry_date).toLocaleDateString([], { month: '2-digit', year: '2-digit' })}
                         </td>
-                        <td className="p-4 text-center font-semibold select-none">
+                        <td className="p-3 text-center font-semibold select-none">
                           <div className="flex flex-col items-center gap-1">
                             <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-extrabold border ${details.colorClass}`}>
                               {details.label}
@@ -573,13 +593,13 @@ const Expiry = () => {
                             <span className="text-xs text-muted font-medium">{details.daysText}</span>
                           </div>
                         </td>
-                        <td className="p-4 text-center font-extrabold font-mono text-text text-base">
+                        <td className="p-3 text-center font-extrabold font-mono text-text text-base">
                           {item.quantity}
                         </td>
-                        <td className="p-4 text-right font-mono font-extrabold text-sky text-base">
+                        <td className="p-3 text-right font-mono font-extrabold text-sky text-base">
                           ₹{item.mrp?.toFixed(2) || '0.00'}
                         </td>
-                        <td className="p-4 select-none">
+                        <td className="p-3 select-none">
                           {item.purchase_invoice_no ? (
                             <div className="flex flex-col gap-0.5">
                               <span className="px-2 py-0.5 bg-blue-500/10 text-blue-500 border border-blue-500/20 rounded-lg text-[11px] font-bold font-mono w-max">
@@ -593,10 +613,10 @@ const Expiry = () => {
                             <span className="text-xs text-muted/65 italic font-medium">Unmatched (match manually)</span>
                           )}
                         </td>
-                        <td className="p-4 text-muted font-medium select-none text-sm">
+                        <td className="p-3 text-muted font-medium select-none text-sm">
                           {item.rack_location || '-'}
                         </td>
-                        <td className="p-4 text-center select-none">
+                        <td className="p-3 text-center select-none">
                           <button
                             onClick={() => {
                               if (item.purchase_invoice_no) {

@@ -45,17 +45,37 @@ function getMonthsInRange(dateFromStr: string, dateToStr: string): string[] {
   return months;
 }
 
-function isDateInRange(dateStr: string, startStr: string, endStr: string): boolean {
+function isDateInRange(dateStr: string | null | undefined, startStr: string, endStr: string): boolean {
+  if (!dateStr) return false;
   let itemDate: Date;
-  if (dateStr.includes('/')) {
-    const parts = dateStr.split('/');
+  const trimmed = dateStr.trim();
+  if (trimmed.includes('/')) {
+    const parts = trimmed.split('/');
     let month = parseInt(parts[0], 10) - 1; // 0-indexed
     let year = parseInt(parts[1], 10);
     if (year < 100) year += 2000;
-    itemDate = new Date(year, month + 1, 0); // Last day of that month
+    itemDate = new Date(year, month + 1, 0, 23, 59, 59, 999); // Last day of that month
+  } else if (trimmed.includes('-')) {
+    const parts = trimmed.split('-');
+    if (parts.length === 3) {
+      // YYYY-MM-DD
+      const year = parseInt(parts[0], 10);
+      const month = parseInt(parts[1], 10) - 1;
+      const day = parseInt(parts[2], 10);
+      itemDate = new Date(year, month, day, 12, 0, 0);
+    } else if (parts.length === 2) {
+      // YYYY-MM
+      const year = parseInt(parts[0], 10);
+      const month = parseInt(parts[1], 10) - 1;
+      itemDate = new Date(year, month + 1, 0, 23, 59, 59, 999);
+    } else {
+      itemDate = new Date(trimmed);
+    }
   } else {
-    itemDate = new Date(dateStr);
+    itemDate = new Date(trimmed);
   }
+  
+  if (isNaN(itemDate.getTime())) return false;
   
   const start = new Date(startStr);
   const end = new Date(endStr);
@@ -106,7 +126,7 @@ router.get('/', async (req, res) => {
         LEFT JOIN purchases p ON pi.purchase_id = p.id
         LEFT JOIN distributors d ON p.distributor_id = d.id
         WHERE COALESCE(im.is_active, 1) = 1 AND im.quantity > 0
-        ORDER BY im.expiry_date ASC
+        ORDER BY im.expiry_date ASC, m.name COLLATE NOCASE ASC
       `);
       // expiry_date is stored as MM/YY text, which SQLite's date() can't parse (always NULL) —
       // filter in JS with the same helper the cache-backed path below uses.
@@ -181,7 +201,7 @@ router.get('/export', async (req, res) => {
         LEFT JOIN purchases p ON pi.purchase_id = p.id
         LEFT JOIN distributors d ON p.distributor_id = d.id
         WHERE COALESCE(im.is_active, 1) = 1 AND im.quantity > 0
-        ORDER BY im.expiry_date ASC
+        ORDER BY im.expiry_date ASC, m.name COLLATE NOCASE ASC
       `);
       // expiry_date is stored as MM/YY text, which SQLite's date() can't parse (always NULL) —
       // filter in JS with the same helper the cache-backed path below uses.
