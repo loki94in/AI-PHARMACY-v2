@@ -391,8 +391,11 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
   const todayPurchaseCount = todayRawItems.filter(i => isPurchase(i.type)).length;
   const todaySpecialCount = todayRawItems.filter(i => isSpecialOrder(i.type)).length;
   const todayPendingCount = todayRawItems.filter(i => i.status === 'pending' || i.status === 'sending').length;
+  const todaySendingCount = todayRawItems.filter(i => i.status === 'sending').length;
   const todaySentCount = todayRawItems.filter(i => i.status === 'sent').length;
   const todayFailedCount = todayRawItems.filter(i => isFailedStatus(i.status)).length;
+  const todayRemainingCount = todayPendingCount;
+  const todayProgressPercent = todayAllCount > 0 ? Math.min(100, Math.round((todaySentCount / todayAllCount) * 100)) : 100;
 
   const counts = queueState?.counts || { pending: 0, sending: 0, sent: 0, failed_offline: 0, failed_perm: 0 };
   const pendingTotal = todayPendingCount > 0 ? todayPendingCount : ((counts.pending || 0) + (counts.sending || 0));
@@ -661,8 +664,8 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
                     ? `${pendingTotal} message(s) queued for paced dispatch`
                     : failedTotal > 0
                       ? `${failedTotal} message(s) failed delivery — see details below or retry`
-                      : (counts.sent || 0) > 0
-                        ? `All ${counts.sent} queued message(s) delivered successfully`
+                      : todaySentCount > 0
+                        ? `All ${todaySentCount} queued message(s) delivered successfully today`
                         : 'Queue is empty'}
               </p>
             </div>
@@ -684,11 +687,11 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
               <div className="flex items-center gap-2">
                 <span className="text-text">Queue Dispatch Progress:</span>
                 <span className="text-sky font-mono">
-                  {(queueState?.counts?.total as number) > 0 ? `${queueState!.counts.sent} / ${queueState!.counts.total}` : `${todaySentCount} / ${todayAllCount}`}
+                  {todaySentCount} / {todayAllCount}
                 </span>
               </div>
               <span className="text-sky font-mono font-extrabold text-sm">
-                {queueState?.progressPercent !== undefined ? `${queueState.progressPercent}%` : `${todayAllCount > 0 ? Math.round((todaySentCount / todayAllCount) * 100) : 100}%`}
+                {todayProgressPercent}%
               </span>
             </div>
 
@@ -697,7 +700,7 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
               <div 
                 className="h-full bg-gradient-to-r from-sky-500 via-emerald-400 to-emerald-500 transition-all duration-500 rounded-full"
                 style={{ 
-                  width: `${queueState?.progressPercent !== undefined ? queueState.progressPercent : (todayAllCount > 0 ? (todaySentCount / todayAllCount) * 100 : 100)}%` 
+                  width: `${todayProgressPercent}%` 
                 }}
               />
             </div>
@@ -705,14 +708,14 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
             {/* Status Metric Chips */}
             <div className="flex items-center gap-1.5 flex-wrap pt-1 text-[11px]">
               <span className="px-2 py-0.5 rounded-lg bg-bg border border-glass-border font-bold text-text">
-                Total: {queueState?.counts?.total || todayAllCount}
+                Total: {todayAllCount}
               </span>
               <span className="px-2 py-0.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-bold">
-                ✓ Sent: {queueState?.counts?.sent || todaySentCount}
+                ✓ Sent: {todaySentCount}
               </span>
-              {(queueState?.counts?.sending || 0) > 0 && (
+              {((queueState?.counts?.sending || 0) > 0 || todaySendingCount > 0) && (
                 <span className="px-2 py-0.5 rounded-lg bg-sky-500/15 border border-sky-500/30 text-sky font-bold flex items-center gap-1 animate-pulse">
-                  <RefreshCw size={10} className="animate-spin" /> Sending: {queueState!.counts.sending}
+                  <RefreshCw size={10} className="animate-spin" /> Sending: {queueState?.counts?.sending || todaySendingCount}
                 </span>
               )}
               {((queueState?.nextDispatchCountdownSeconds || 0) > 0 && queueState?.isProcessing) && (
@@ -720,14 +723,14 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
                   <Clock size={10} /> Waiting Delay: {queueState.nextDispatchCountdownSeconds}s
                 </span>
               )}
-              {(queueState?.counts?.remaining || 0) > 0 && (
+              {todayRemainingCount > 0 && (
                 <span className="px-2 py-0.5 rounded-lg bg-sky-500/10 border border-sky-500/20 text-sky font-semibold">
-                  Remaining: {queueState?.counts?.remaining}
+                  Remaining: {todayRemainingCount}
                 </span>
               )}
-              {((queueState?.counts?.failed || 0) > 0 || todayFailedCount > 0) && (
+              {todayFailedCount > 0 && (
                 <span className="px-2 py-0.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-400 font-bold flex items-center gap-1">
-                  <AlertTriangle size={11} /> Failed: {queueState?.counts?.failed || todayFailedCount}
+                  <AlertTriangle size={11} /> Failed: {todayFailedCount}
                 </span>
               )}
               {(queueState?.stalePendingCount || 0) > 0 && (
@@ -796,12 +799,12 @@ export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onCl
           )}
 
           {/* Completed State Banner */}
-          {queueState?.isCompleted && (queueState?.counts?.sent || todaySentCount) > 0 && (
+          {(queueState?.isCompleted || (todayRemainingCount === 0 && todayAllCount > 0)) && todaySentCount > 0 && (
             <div className="p-2.5 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-between text-xs text-emerald-300 animate-fadeIn">
               <div className="flex items-center gap-2">
                 <CheckCircle2 size={16} className="text-emerald-400 shrink-0" />
                 <div>
-                  <span className="font-bold">BULK DISPATCH COMPLETED:</span> All {queueState?.counts?.sent || todaySentCount} queued messages delivered successfully.
+                  <span className="font-bold">BULK DISPATCH COMPLETED:</span> All {todaySentCount} queued messages delivered successfully today.
                 </div>
               </div>
               <span className="text-[10px] font-mono font-bold bg-emerald-500/20 px-2 py-0.5 rounded-full border border-emerald-500/30">100% COMPLETE</span>

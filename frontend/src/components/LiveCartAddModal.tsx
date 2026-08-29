@@ -1770,6 +1770,24 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
                 <span className="text-xs font-bold uppercase tracking-widest text-muted">
                   Pending ({activeAllCount})
                 </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!showNewRequestForm && product.trim()) {
+                      setNewReqProduct(product.replace(/\s*\([^)]*\)$/, '').trim());
+                      setNewReqQty(qty || 1);
+                    }
+                    setShowNewRequestForm(prev => !prev);
+                  }}
+                  className={`px-1.5 py-0.5 rounded border text-[9px] font-bold transition-all flex items-center gap-1 cursor-pointer ${
+                    showNewRequestForm
+                      ? 'bg-primary/20 text-primary border-primary/40'
+                      : 'bg-bg2 text-muted border-border hover:text-text hover:bg-bg3'
+                  }`}
+                  title="Create New Special Request"
+                >
+                  <Plus size={10} /> Request
+                </button>
               </div>
               <div className="flex gap-1 text-[8.5px] font-bold uppercase select-none flex-wrap">
                 <button
@@ -2136,6 +2154,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
                       value={product}
                       onChange={(e) => handleProductChange(e.target.value)}
                       onKeyDown={handleProductKeyDown}
+                      onFocus={() => api.warmupPharmarackSession()}
                       className="w-full premium-input pl-9 pr-4 py-2 text-sm font-medium"
                       placeholder="Search Pharmarack catalog..."
                       autoComplete="off"
@@ -2205,6 +2224,28 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
                                     <Package size={10} /> {med.stock}
                                   </span>
                                 )}
+                              </div>
+                            )}
+
+                            {/* Special Order Action when no distributor matches are available */}
+                            {med.isErrorMessage && product.trim().length >= 2 && (
+                              <div className="mt-2 pt-1.5 border-t border-red-500/20">
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    const cleanName = product.replace(/\s*\([^)]*\)$/, '').trim();
+                                    setNewReqProduct(cleanName);
+                                    setNewReqQty(qty || 1);
+                                    setShowNewRequestForm(true);
+                                    setShowSuggestions(false);
+                                    toastEvent.trigger(`Pre-filled "${cleanName}" in Special Request form`, 'info');
+                                  }}
+                                  className="w-full py-1 px-2 rounded-lg bg-bg2 hover:bg-bg3 text-text border border-border text-[11px] font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-sm active:scale-95"
+                                >
+                                  <Sparkles size={11} className="text-muted" />
+                                  <span>✨ Create Special Request for &quot;{product.replace(/\s*\([^)]*\)$/, '').trim()}&quot;</span>
+                                </button>
                               </div>
                             )}
                           </div>

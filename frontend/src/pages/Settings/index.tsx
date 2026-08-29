@@ -62,14 +62,14 @@ interface RegisteredDevice {
 
 // Map legacy tab search params to the 4 store infrastructure tabs
 function normalizeSettingsTab(tabParam: string | null): string {
-  if (!tabParam) return 'backups';
+  if (!tabParam) return 'profile';
   const lower = tabParam.toLowerCase();
   if (lower === 'profile' || lower === 'store') return 'profile';
   if (lower === 'staff' || lower === 'security') return 'staff';
   if (lower === 'integrations' || lower === 'credentials') return 'integrations';
   if (lower === 'triggers' || lower === 'schedules' || lower === 'cron' || lower === 'automation') return 'triggers';
   if (lower === 'backups' || lower === 'data' || lower === 'maintenance') return 'backups';
-  return 'backups';
+  return 'profile';
 }
 
 // ==========================================

@@ -845,100 +845,49 @@ class WhatsAppQueueWorker {
       SELECT 
         SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
         SUM(CASE WHEN status = 'sending' THEN 1 ELSE 0 END) as sending,
-        SUM(CASE WHEN status = 'sent' THEN 1 ELSE 0 END) as sent,
+        SUM(CASE WHEN status = 'sent' AND created_at >= ? THEN 1 ELSE 0 END) as sent,
         SUM(CASE WHEN status = 'failed_offline' THEN 1 ELSE 0 END) as failed_offline,
         SUM(CASE WHEN status = 'failed_perm' OR status = 'review_required' THEN 1 ELSE 0 END) as failed_perm
       FROM whatsapp_send_queue
-    `);
+    `, [startOfTodayMs]);
 
-    // Fetch ALL saved WhatsApp queue items (up to 300 recent items)
+    // Fetch saved WhatsApp queue items (up to 300 recent items)
     const queueItems: QueueItem[] = await db.all(
       `SELECT * FROM whatsapp_send_queue ORDER BY created_at DESC LIMIT 300`
     );
 
-    // Also fetch saved notifications from automation_notifications where type relates to WhatsApp / message delivery
-    let automationNotifs: any[] = [];
+    // Also fetch only genuine failure records from automation_notifications for the review card
+    let automationFailures: any[] = [];
     try {
-      automationNotifs = await db.all(
+      automationFailures = await db.all(
         `SELECT id, recipient_phone as number, message, type, status, 
                 created_at, recipient_name as target_name, error_message
          FROM automation_notifications 
-         WHERE type LIKE '%whatsapp%' OR type LIKE '%refill%' OR type LIKE '%delivery%' OR type LIKE '%special%' OR type LIKE '%distributor%'
-         ORDER BY id DESC LIMIT 200`
+         WHERE (status = 'failed' OR status = 'error' OR error_message IS NOT NULL)
+           AND created_at >= datetime('now', '-2 days')
+         ORDER BY id DESC LIMIT 50`
       );
     } catch (_) {
-      automationNotifs = [];
+      automationFailures = [];
     }
 
-    // Merge & deduplicate saved notifications
-    const existingQueueIds = new Set(queueItems.map(i => `${i.number}-${i.created_at}`));
-    const mappedAutoNotifs: QueueItem[] = automationNotifs
-      .filter(n => !existingQueueIds.has(`${n.number}-${new Date(n.created_at).getTime()}`))
-      .map(n => {
-        let mappedStatus: 'pending' | 'sending' | 'waiting' | 'sent' | 'failed_offline' | 'failed_perm' | 'cancelled' | 'review_required' = 'sent';
-        if (n.status === 'pending' || n.status === 'queued') {
-          mappedStatus = 'pending';
-        } else if (n.status === 'failed' || n.status === 'error') {
-          mappedStatus = 'failed_perm';
-        } else if (n.status === 'sent' || n.status === 'sent_manually' || n.status === 'delivered') {
-          mappedStatus = 'sent';
-        } else {
-          mappedStatus = n.error_message ? 'failed_perm' : 'pending';
-        }
+    const existingQueueNumbers = new Set(queueItems.map(i => `${i.number}-${(i.message || '').slice(0, 30)}`));
+    const mappedFailures: QueueItem[] = automationFailures
+      .filter(n => !existingQueueNumbers.has(`${n.number}-${(n.message || '').slice(0, 30)}`))
+      .map(n => ({
+        id: 900000 + n.id,
+        number: n.number || '',
+        message: n.message || '',
+        type: n.type || 'whatsapp_saved',
+        status: 'failed_perm' as const,
+        retry_count: 0,
+        created_at: new Date(n.created_at).getTime() || Date.now(),
+        sent_at: null,
+        error_message: n.error_message || 'Delivery failed',
+        target_name: n.target_name || undefined
+      }));
 
-        return {
-          id: 900000 + n.id,
-          number: n.number || '',
-          message: n.message || '',
-          type: n.type || 'whatsapp_saved',
-          status: mappedStatus,
-          retry_count: 0,
-          created_at: new Date(n.created_at).getTime() || Date.now(),
-          sent_at: mappedStatus === 'sent' ? (new Date(n.created_at).getTime() || Date.now()) : null,
-          error_message: n.error_message || undefined,
-          target_name: n.target_name || undefined
-        };
-      });
-
-    // Also fetch direct outbound messages from whatsapp_messages table (chats, forwards, POS shares)
-    let directSentMessages: any[] = [];
-    try {
-      directSentMessages = await db.all(
-        `SELECT m.id, m.chat_id, m.body, m.timestamp, m.type, c.name as chat_name
-         FROM whatsapp_messages m
-         LEFT JOIN whatsapp_chats c ON m.chat_id = c.id
-         WHERE m.from_me = 1 AND m.id NOT LIKE 'msg_out_%'
-         ORDER BY m.timestamp DESC LIMIT 150`
-      );
-    } catch (_) {
-      directSentMessages = [];
-    }
-
-    const mappedDirectMsgs: QueueItem[] = [];
-    for (const dm of directSentMessages) {
-      const cleanPhone = normalizeWhatsAppPhone(dm.chat_id);
-      const createdAtMs = (dm.timestamp || Math.floor(Date.now() / 1000)) * 1000;
-      const key1 = `${cleanPhone}-${createdAtMs}`;
-      const msgHash = hashMessageBody(dm.body || '');
-      const key2 = `${cleanPhone}-${msgHash}`;
-      if (!existingQueueIds.has(key1) && !existingQueueIds.has(key2)) {
-        existingQueueIds.add(key1);
-        existingQueueIds.add(key2);
-        mappedDirectMsgs.push({
-          id: 800000 + Math.abs(hashMessageBody(dm.id || String(createdAtMs))),
-          number: cleanPhone,
-          message: dm.body || '',
-          type: dm.type === 'document' ? 'document_dispatch' : 'whatsapp_direct',
-          status: 'sent',
-          retry_count: 0,
-          created_at: createdAtMs,
-          sent_at: createdAtMs,
-          target_name: dm.chat_name || (cleanPhone ? `+${cleanPhone}` : 'WhatsApp Contact')
-        });
-      }
-    }
-
-    const recentItems: QueueItem[] = [...queueItems, ...mappedAutoNotifs, ...mappedDirectMsgs].sort((a, b) => b.created_at - a.created_at);
+    const recentItems: QueueItem[] = [...queueItems, ...mappedFailures].sort((a, b) => b.created_at - a.created_at);
 
     // Identify currently sending item and next waiting item
     let currentItem: QueueItem | null = null;

@@ -164,6 +164,8 @@ async function searchOfflineCatalogFallback(q: string, storeId?: number | null, 
   }
 }
 
+import { activityTracker } from '../utils/activityTracker.js';
+
 type PharmarackSearchOutcome =
   | { status: 'ok'; items: any[] }
   | { status: 'need_login' }
@@ -174,11 +176,25 @@ type PharmarackSearchOutcome =
 async function performPharmarackSearch(qRaw: string, storeId: number | null, isMapped: boolean): Promise<PharmarackSearchOutcome> {
   const hasStoreFilter = storeId !== null && !isNaN(storeId);
   try {
+    activityTracker.recordActivity();
     const settings = await getPharmarackSettings();
-    const token = settings['pharmarack_session_token'] || '';
+    let token = settings['pharmarack_session_token'] || '';
+
+    // If token is missing, attempt silent restore from browser profile if available
+    if (!token) {
+      const mainProfilePath = path.resolve(getAppDataDir(), 'data', 'pharmarack_profile');
+      const hasStoredProfile = fs.existsSync(mainProfilePath) && fs.readdirSync(mainProfilePath).length > 0;
+      if (hasStoredProfile) {
+        console.log('[Pharmarack Search] No token stored but browser profile found. Attempting silent token restore...');
+        const freshToken = await tokenRefreshScheduler.executeRefresh().catch(() => null);
+        if (freshToken) {
+          token = freshToken;
+        }
+      }
+    }
 
     if (!token) {
-      // If token is missing, attempt offline catalog search before returning NEED_LOGIN
+      // If token is still missing, attempt offline catalog search before returning NEED_LOGIN
       const offline = await searchOfflineCatalogFallback(qRaw, storeId, isMapped);
       if (offline.length > 0) {
         searchCache.set(qRaw, storeId, isMapped, offline);
@@ -204,8 +220,7 @@ async function performPharmarackSearch(qRaw: string, storeId: number | null, isM
     let response = await fetchPharmarack('https://pharmretail-elasticsearch.pharmarack.com/open-search/api/v2/search', {
       method: 'POST',
       body: JSON.stringify(buildPayload(qRaw)),
-      signal: AbortSignal.timeout(3500),
-      nonBlockingOn401: true
+      signal: AbortSignal.timeout(5000)
     });
 
     let data: any = response.ok ? await response.json().catch(() => null) : null;
@@ -216,8 +231,7 @@ async function performPharmarackSearch(qRaw: string, storeId: number | null, isM
       response = await fetchPharmarack('https://pharmretail-elasticsearch.pharmarack.com/open-search/api/v2/search', {
         method: 'POST',
         body: JSON.stringify(buildPayload(cleanedTerm)),
-        signal: AbortSignal.timeout(3000),
-        nonBlockingOn401: true
+        signal: AbortSignal.timeout(4000)
       });
       if (response.ok) {
         data = await response.json().catch(() => null);
