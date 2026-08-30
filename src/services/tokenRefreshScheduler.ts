@@ -180,7 +180,7 @@ export class TokenRefreshScheduler {
 
   public getStatus() {
     return {
-      isRefreshing: this.isRefreshing,
+      isRefreshing: this.isRefreshing || Boolean(this.refreshPromise),
       isLoginWindowActive: this.isLoginWindowActive,
       lastCapturedAt: this.lastCapturedAt,
       lastError: this.lastError,

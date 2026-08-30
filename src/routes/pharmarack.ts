@@ -1993,11 +1993,12 @@ router.get('/auto-verify', async (req, res) => {
 // Check Pharmarack session status
 router.get('/session-status', async (req, res) => {
   try {
+    const isRefreshing = tokenRefreshScheduler.getStatus().isRefreshing;
     const settings = await getPharmarackSettings();
     const token = settings['pharmarack_session_token'] || '';
 
     if (!token) {
-      return res.json({ healthy: false, mode: 'Live', reason: 'NO_TOKEN', message: 'Session not linked' });
+      return res.json({ healthy: false, mode: 'Live', isRefreshing, reason: 'NO_TOKEN', message: 'Session not linked' });
     }
 
     let healthy = false;
@@ -2021,7 +2022,7 @@ router.get('/session-status', async (req, res) => {
       message = err.message || 'Network timeout/connection error';
     }
 
-    return res.json({ healthy, mode: 'Live', reason: healthy ? undefined : reason, message: healthy ? 'Session active' : message });
+    return res.json({ healthy, mode: 'Live', isRefreshing, reason: healthy ? undefined : reason, message: healthy ? 'Session active' : message });
   } catch (err: any) {
     console.error('Session status check error:', err);
     return res.status(500).json({ error: 'Internal server error' });

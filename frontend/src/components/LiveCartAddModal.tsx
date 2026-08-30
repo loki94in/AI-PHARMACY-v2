@@ -277,6 +277,8 @@ const makeLocalIgnoredEntry = (word: string) => ({ id: Date.now(), word, source:
 const setIgnoreNextSearchRef = (ref: { current: boolean }, value: boolean) => { ref.current = value; };
 let cachedSkippedItemKeys: Set<string> = loadInitialSkippedKeys();
 let cachedPrMode: 'Live' | 'Unknown' = 'Live';
+type SessionState = 'active' | 'restoring' | 'disconnected';
+let cachedSessionStatus: SessionState = 'active';
 const clientSearchCache = new Map<string, SuggestionMedicine[]>();
 const MAX_CLIENT_SEARCH_CACHE = 100;
 
@@ -466,6 +468,8 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
   
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [prMode, setPrMode] = useState<'Live' | 'Unknown'>(cachedPrMode);
+  const [sessionStatus, setSessionStatus] = useState<SessionState>(cachedSessionStatus);
+  const [reconnecting, setReconnecting] = useState(false);
 
   // Cart Preview States (Hydrated instantly from module cache)
   const [cartDistributors, setCartDistributors] = useState<Distributor[]>(cachedCartDistributors);
@@ -858,6 +862,43 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
     }
   };
 
+  const checkSession = useCallback(async () => {
+    try {
+      const data = await api.checkPharmarackSession();
+      cachedPrMode = data.mode || 'Live';
+      setPrMode(cachedPrMode);
+      if (data.healthy) {
+        cachedSessionStatus = 'active';
+        setSessionStatus('active');
+      } else if (data.isRefreshing) {
+        cachedSessionStatus = 'restoring';
+        setSessionStatus('restoring');
+      } else {
+        cachedSessionStatus = 'disconnected';
+        setSessionStatus('disconnected');
+      }
+    } catch {
+      setPrMode('Live');
+      cachedSessionStatus = 'disconnected';
+      setSessionStatus('disconnected');
+    }
+  }, []);
+
+  const handleReconnect = useCallback(async () => {
+    try {
+      setReconnecting(true);
+      await api.launchPharmarackLoginWindow();
+      toastEvent.trigger('Opened Pharmarack login window', 'info', '/purchases');
+      cachedSessionStatus = 'restoring';
+      setSessionStatus('restoring');
+    } catch (err: unknown) {
+      const apiErr = err as LocalApiError;
+      toastEvent.trigger(apiErr?.response?.data?.error || 'Failed to open login window', 'error', '/purchases');
+    } finally {
+      setReconnecting(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (isOpen) {
       const freshSkipped = loadInitialSkippedKeys();
@@ -868,10 +909,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
       const hasCache = cachedCartDistributors.length > 0;
       // Fetch consolidated live cart summary immediately without 350ms delay
       fetchLiveCartSummary(hasCache);
-      api.checkPharmarackSession().then(data => {
-        cachedPrMode = data.mode || 'Live';
-        setPrMode(cachedPrMode);
-      }).catch(() => setPrMode('Live'));
+      checkSession();
 
       // Also run secondary background refills & recon concurrently immediately
       Promise.allSettled([
@@ -880,7 +918,16 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
         fetchIgnoredWords()
       ]);
     }
-  }, [isOpen]);
+  }, [isOpen, checkSession]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleAuthChange = () => {
+      checkSession();
+    };
+    window.addEventListener('pharmarack-auth-changed', handleAuthChange);
+    return () => window.removeEventListener('pharmarack-auth-changed', handleAuthChange);
+  }, [isOpen, checkSession]);
 
   useEffect(() => {
     const handleRefresh = () => {
@@ -951,6 +998,8 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
       setSuggestions(cachedResults);
       setShowSuggestions(true);
       setActiveSuggestionIndex(-1);
+      cachedSessionStatus = 'active';
+      setSessionStatus('active');
     }
 
     const delayDebounce = setTimeout(async () => {
@@ -1045,11 +1094,16 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
 
         // Cache valid response in client-side memory
         if (mergedList.length > 0 && !mergedList[0].isErrorMessage) {
+          cachedSessionStatus = 'active';
+          setSessionStatus('active');
           if (clientSearchCache.size >= MAX_CLIENT_SEARCH_CACHE) {
             const firstKey = clientSearchCache.keys().next().value;
             if (firstKey) clientSearchCache.delete(firstKey);
           }
           clientSearchCache.set(cacheKey, mergedList);
+        } else if (mergedList.length > 0 && mergedList[0].isErrorMessage) {
+          cachedSessionStatus = 'disconnected';
+          setSessionStatus('disconnected');
         }
 
         if (isSelectingRef.current) return;
@@ -2097,10 +2151,31 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
                   <h3 className="text-base font-bold text-text flex items-center gap-1.5">
                     Live Cart
                     <span className="text-[10px] bg-bg3 border border-border text-muted px-1.5 py-0.5 rounded font-mono">Alt + L</span>
-                    {prMode !== 'Unknown' && (
-                      <span className="text-[9px] font-bold px-2 py-0.5 rounded-full border leading-none bg-emerald-500/10 text-emerald-400 border-emerald-500/30">
-                        ● LIVE
+                    {sessionStatus === 'active' && (
+                      <span className="text-[9px] font-bold px-2 py-0.5 rounded-full border leading-none bg-emerald-500/10 text-emerald-400 border-emerald-500/30 flex items-center gap-1.5 shadow-sm">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" /> LIVE READY
                       </span>
+                    )}
+                    {sessionStatus === 'restoring' && (
+                      <span className="text-[9px] font-bold px-2 py-0.5 rounded-full border leading-none bg-amber-500/10 text-amber-400 border-amber-500/30 flex items-center gap-1.5 shadow-sm" title="Silent background Chrome session restore in progress">
+                        <Loader2 size={10} className="animate-spin text-amber-400" /> RESTORING SESSION…
+                      </span>
+                    )}
+                    {sessionStatus === 'disconnected' && (
+                      <div className="flex items-center gap-1">
+                        <span className="text-[9px] font-bold px-2 py-0.5 rounded-full border leading-none bg-red-500/10 text-red border-red-500/30 flex items-center gap-1 shadow-sm">
+                          <span className="w-1.5 h-1.5 rounded-full bg-red" /> OFFLINE
+                        </span>
+                        <button
+                          type="button"
+                          onClick={handleReconnect}
+                          disabled={reconnecting}
+                          className="text-[9px] px-1.5 py-0.5 rounded bg-primary/20 hover:bg-primary/30 text-primary border border-primary/30 font-bold transition-all flex items-center gap-1 cursor-pointer"
+                          title="Open browser to reconnect Pharmarack"
+                        >
+                          {reconnecting ? <Loader2 size={9} className="animate-spin" /> : <RotateCcw size={9} />} Reconnect
+                        </button>
+                      </div>
                     )}
                   </h3>
 
@@ -2179,6 +2254,13 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
                       autoComplete="off"
                     />
                   </div>
+
+                  {sessionStatus === 'restoring' && !showSuggestions && (
+                    <div className="mt-1.5 flex items-center gap-1.5 text-[11px] font-medium text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2.5 py-1 rounded-xl animate-in fade-in">
+                      <Loader2 size={12} className="animate-spin shrink-0 text-amber-400" />
+                      <span>Reconnecting live Pharmarack session in background… suggestions will appear automatically once ready.</span>
+                    </div>
+                  )}
                   
                   {showSuggestions && suggestions.length > 0 && (
                     <ul className="absolute z-[9999] left-0 right-0 mt-1.5 max-h-[380px] overflow-y-auto bg-bg2 border-2 border-primary/40 backdrop-blur-2xl rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.8)] divide-y divide-border/30 py-1 scrollbar-thin">

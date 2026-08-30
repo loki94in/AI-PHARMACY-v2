@@ -153,6 +153,9 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
   
   const [isSubmitting] = useState(false);
   const [prMode, setPrMode] = useState<'Live' | 'Unknown'>('Live');
+  type SessionState = 'active' | 'restoring' | 'disconnected';
+  const [sessionStatus, setSessionStatus] = useState<SessionState>('active');
+  const [reconnecting, setReconnecting] = useState(false);
 
   // Duplicate check states
   const [duplicateMatch, setDuplicateMatch] = useState<LocalStagedOrderItem | null>(null);
@@ -296,16 +299,56 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
     return min;
   }, [suggestions, qty]);
 
-  // Autofocus and check session mode on mount
-  useEffect(() => {
-    api.checkPharmarackSession().then(data => {
+  const checkSession = useCallback(async () => {
+    try {
+      const data = await api.checkPharmarackSession();
       setPrMode(data.mode || 'Live');
-    }).catch(() => setPrMode('Live'));
-
-    setTimeout(() => {
-      productInputRef.current?.focus();
-    }, 100);
+      if (data.healthy) {
+        setSessionStatus('active');
+      } else if (data.isRefreshing) {
+        setSessionStatus('restoring');
+      } else {
+        setSessionStatus('disconnected');
+      }
+    } catch {
+      setPrMode('Live');
+      setSessionStatus('disconnected');
+    }
   }, []);
+
+  const handleReconnect = useCallback(async () => {
+    try {
+      setReconnecting(true);
+      await api.launchPharmarackLoginWindow();
+      toastEvent.trigger('Opened Pharmarack login window', 'info', '/orders');
+      setSessionStatus('restoring');
+    } catch (err: unknown) {
+      const apiErr = err as LocalApiError;
+      toastEvent.trigger(apiErr?.response?.data?.error || 'Failed to open login window', 'error', '/orders');
+    } finally {
+      setReconnecting(false);
+    }
+  }, []);
+
+  // Proactively warm up session & check status on open
+  useEffect(() => {
+    if (isOpen) {
+      api.warmupPharmarackSession();
+      checkSession();
+      setTimeout(() => {
+        productInputRef.current?.focus();
+      }, 50);
+    }
+  }, [isOpen, checkSession]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleAuthChange = () => {
+      checkSession();
+    };
+    window.addEventListener('pharmarack-auth-changed', handleAuthChange);
+    return () => window.removeEventListener('pharmarack-auth-changed', handleAuthChange);
+  }, [isOpen, checkSession]);
 
   // Listen to Escape key to close
   useEffect(() => {
@@ -390,6 +433,11 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
         }
 
         if (isSelectingRef.current) return;
+        if (prSuggestions.length > 0 && !prSuggestions[0].isErrorMessage) {
+          setSessionStatus('active');
+        } else if (prSuggestions.length > 0 && prSuggestions[0].isErrorMessage) {
+          setSessionStatus('disconnected');
+        }
         setSuggestions(prSuggestions);
         setShowSuggestions(true);
       } catch (err) {
@@ -631,10 +679,31 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
             <h3 className="text-lg font-bold text-text flex items-center gap-2">
               Quick Special Request
               <span className="text-[10px] bg-bg3 border border-glass-border text-muted px-2 py-0.5 rounded-md font-mono font-semibold">Alt + O</span>
-              {prMode !== 'Unknown' && (
-                <span className="text-[9px] font-extrabold px-2.5 py-0.5 rounded-full border leading-none bg-emerald-500/10 text-emerald-400 border-emerald-500/30 flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse inline-block"></span> LIVE
+              {sessionStatus === 'active' && (
+                <span className="text-[9px] font-extrabold px-2.5 py-0.5 rounded-full border leading-none bg-emerald-500/10 text-emerald-400 border-emerald-500/30 flex items-center gap-1 shadow-sm">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse inline-block"></span> LIVE READY
                 </span>
+              )}
+              {sessionStatus === 'restoring' && (
+                <span className="text-[9px] font-extrabold px-2.5 py-0.5 rounded-full border leading-none bg-amber-500/10 text-amber-400 border-amber-500/30 flex items-center gap-1 shadow-sm" title="Silent background session restore in progress">
+                  <Loader2 size={10} className="animate-spin text-amber-400" /> RESTORING SESSION…
+                </span>
+              )}
+              {sessionStatus === 'disconnected' && (
+                <div className="flex items-center gap-1">
+                  <span className="text-[9px] font-extrabold px-2.5 py-0.5 rounded-full border leading-none bg-red-500/10 text-red border-red-500/30 flex items-center gap-1 shadow-sm">
+                    <span className="w-1.5 h-1.5 rounded-full bg-red" /> OFFLINE
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleReconnect}
+                    disabled={reconnecting}
+                    className="text-[9px] px-2 py-0.5 rounded bg-primary/20 hover:bg-primary/30 text-primary border border-primary/30 font-bold transition-all flex items-center gap-1 cursor-pointer"
+                    title="Open browser to reconnect Pharmarack"
+                  >
+                    {reconnecting ? <Loader2 size={9} className="animate-spin" /> : null} Reconnect
+                  </button>
+                </div>
               )}
             </h3>
             <p className="text-xs text-muted">Instantly log out-of-stock demands & shortage requests</p>
@@ -663,11 +732,19 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
                       value={product}
                       onChange={(e) => handleProductChange(e.target.value)}
                       onKeyDown={handleProductKeyDown}
+                      onFocus={() => api.warmupPharmarackSession()}
                       className="w-full premium-input pl-11 pr-5 py-3 text-sm font-semibold rounded-2xl"
                       placeholder="Search or enter medicine name..."
                       autoComplete="off"
                     />
                   </div>
+
+                  {sessionStatus === 'restoring' && !showSuggestions && (
+                    <div className="mt-1.5 flex items-center gap-1.5 text-[11px] font-medium text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2.5 py-1 rounded-xl animate-in fade-in">
+                      <Loader2 size={12} className="animate-spin shrink-0 text-amber-400" />
+                      <span>Reconnecting live Pharmarack session in background… suggestions will appear automatically once ready.</span>
+                    </div>
+                  )}
                   
                   {showSuggestions && suggestions.length > 0 && (
                     <ul className="absolute z-[9999] left-0 right-0 mt-1.5 max-h-[380px] overflow-y-auto bg-bg2 border-2 border-primary/40 backdrop-blur-2xl rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.8)] divide-y divide-border/30 py-1 scrollbar-thin">
