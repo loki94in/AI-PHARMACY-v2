@@ -1000,15 +1000,24 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
             });
           });
 
-          // Sort suggestions placing last added medicine distributor on top of the list
+          // Sort suggestions: Mapped (Blue) distributors on TOP, Unmapped (Purple) at the BOTTOM
           const lastDist = (lastAddedDistributor || localStorage.getItem('pharmarack_last_added_distributor') || '').toLowerCase().trim();
-          if (lastDist && mergedList.length > 1) {
+          if (mergedList.length > 1) {
             mergedList.sort((a, b) => {
               if (a.isErrorMessage || b.isErrorMessage) return 0;
-              const aMatch = (a.distributor || '').toLowerCase().includes(lastDist);
-              const bMatch = (b.distributor || '').toLowerCase().includes(lastDist);
-              if (aMatch && !bMatch) return -1;
-              if (!aMatch && bMatch) return 1;
+              // 1. Mapped (Blue text-sky-400) first, Unmapped (Purple text-purple-400) at bottom
+              const aMapped = Boolean(a.mapped);
+              const bMapped = Boolean(b.mapped);
+              if (aMapped && !bMapped) return -1;
+              if (!aMapped && bMapped) return 1;
+
+              // 2. Recent distributor boost within the same mapping tier
+              if (lastDist) {
+                const aMatch = (a.distributor || '').toLowerCase().includes(lastDist);
+                const bMatch = (b.distributor || '').toLowerCase().includes(lastDist);
+                if (aMatch && !bMatch) return -1;
+                if (!aMatch && bMatch) return 1;
+              }
               return 0;
             });
           }
