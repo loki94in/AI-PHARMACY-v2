@@ -1,525 +1,992 @@
 IMPLEMENTATION PLAN
-TITLE: Inactive Page Suspension + Targeted Data Refresh + UI Performance Optimization
+TITLE: Final Inactive Page Suspension + Targeted Data Refresh + UI Performance Optimization
 
 OBJECTIVE
-Improve application responsiveness and reduce CPU/RAM usage by preventing inactive pages from continuing to perform unnecessary React rendering, listeners, timers, and data work.
 
-IMPORTANT SCOPE RULE
-- DO NOT modify the frontend UI design, layout, styling, colors, components, navigation appearance, or user-facing behavior.
-- DO NOT modify unrelated features.
-- DO NOT create unnecessary new files.
-- DO NOT modify files outside the specific files directly responsible for page lifecycle/Keep-Alive behavior, React Query data lifecycle, SSE invalidation, and related page refresh handling.
-- Before changing any file, verify that the file is directly involved in this feature.
-- If a file is not required for this feature, DO NOT TOUCH IT.
-- Preserve all existing functionality.
-- Do not change database schemas, API contracts, WhatsApp automation logic, POS billing behavior, CRM behavior, inventory calculations, reports calculations, or business logic unless absolutely required for lifecycle handling.
-- Do not change the frontend UI.
-- The final implementation must behave visually exactly as it does now.
+Implement and verify the page-lifecycle performance optimization in AI-PHARMACY-v2 so that inactive pages do not continue consuming unnecessary browser resources, while cached data, SSE updates, POS, Inventory, Reports, Purchase History, CRM, WhatsApp automation, and all existing workflows continue working exactly as before.
+
+The application UI must remain visually and functionally unchanged.
+
+The objective is:
+
+ACTIVE PAGE
+→ fully responsive
+
+INACTIVE PAGE
+→ no unnecessary UI/runtime work
+
+DATA CACHE
+→ retained
+
+SSE
+→ remains global
+
+BACKGROUND AUTOMATION
+→ continues independently
+
+DATA
+→ remains accurate
+
+CPU/RAM
+→ unnecessary workload reduced
 
 ==================================================
-1. CURRENT BEHAVIOR
+1. ABSOLUTE FILE-SCOPE RULE
 ==================================================
 
-The application currently uses a Keep-Alive style architecture where previously visited pages can remain mounted after the user navigates away.
+THIS IS THE MOST IMPORTANT RULE.
 
-This can cause inactive pages to continue holding:
-- React component state
-- React effects
+DO NOT MODIFY ANY FILE BEFORE INSPECTING THE PROJECT AND PROVING THAT THE FILE IS DIRECTLY RELATED TO THIS FEATURE.
+
+Only modify files directly responsible for:
+
+- page lifecycle
+- Keep-Alive behavior
+- page activation/deactivation
+- React Query page tracking
+- React Query cache behavior
+- global SSE invalidation
+- lifecycle-related performance handling
+
+The currently identified core files are:
+
+1. frontend/src/lib/keepAlive/KeepAliveOutlet.tsx
+2. frontend/src/lib/keepAlive/PageQueryTracker.tsx
+3. frontend/src/hooks/useGlobalSseInvalidation.ts
+4. frontend/src/lib/queryClient.ts
+
+BUT:
+
+DO NOT blindly assume these are the only files that may be required.
+
+Inspect the repository first.
+
+If another existing file is proven to be directly required, it may be modified.
+
+If a file is not proven necessary:
+
+DO NOT TOUCH IT.
+
+==================================================
+2. NO UNNECESSARY NEW FILES
+==================================================
+
+Do NOT create new files unless absolutely required.
+
+Before creating any file:
+
+- verify whether an existing related file can safely contain the required logic
+- verify that the new file is genuinely necessary
+- verify that it does not duplicate existing functionality
+
+If no new file is required:
+
+CREATE NONE.
+
+Do not create:
+
+- duplicate hooks
+- duplicate query managers
+- duplicate SSE systems
+- duplicate Keep-Alive systems
+- duplicate cache systems
+- unnecessary utilities
+
+==================================================
+3. NO UI CHANGES
+==================================================
+
+The frontend UI must remain EXACTLY as it currently appears.
+
+DO NOT change:
+
+- layout
+- sidebar
+- navigation design
+- buttons
+- cards
+- colors
+- typography
+- spacing
+- icons
+- animations
+- modals
+- tables
+- forms
+- page structure
+- theme
+- CSS
+- Tailwind classes
+
+This task is strictly an internal lifecycle/performance optimization.
+
+The user should not visually notice a redesign.
+
+==================================================
+4. CURRENT BEHAVIOR
+==================================================
+
+Previously visited pages may remain mounted through the Keep-Alive architecture.
+
+Inactive pages can therefore retain:
+
+- React component trees
+- DOM nodes
+- React state
+- useEffect execution
 - event listeners
-- SSE-related listeners
-- timers
 - subscriptions
-- React Query observers
-- background data processing
+- timers
+- query observers
+- background rendering
+- page-specific processing
 
-The global SSE system also receives backend events and invalidates/refetches related queries.
+At the same time, the application receives global SSE events.
 
 Examples:
-- POS creates/saves a bill.
-- Inventory changes.
-- Purchase is created.
-- CRM/refill data changes.
-- WhatsApp queue/status changes.
-- Reports-related data becomes stale.
 
-The current architecture already attempts to reduce unnecessary refetching by using SSE and deferred invalidation, but inactive mounted pages can still consume browser resources.
+POS saves a bill
+→ sale/inventory event
+
+Purchase created
+→ purchase/inventory event
+
+Inventory changed
+→ inventory event
+
+CRM/refill updated
+→ refill event
+
+WhatsApp queue/status changed
+→ WhatsApp event
+
+These events can cause React Query invalidation or page-related updates.
 
 The result can be:
-- UI temporarily slow
+
+- temporary UI lag
 - delayed clicks
-- delayed page switching
-- occasional freezing sensation
+- slow navigation
+- intermittent freezing sensation
 - increased CPU usage
 - increased RAM usage
-- unnecessary background React work
+- unnecessary background rendering
 
-The application does NOT necessarily crash. The problem is primarily responsiveness and unnecessary background workload.
+The application may still continue working and loading data, which is why this is a responsiveness problem rather than necessarily a crash.
 
 ==================================================
-2. EXPECTED BEHAVIOR
+5. EXPECTED BEHAVIOR
 ==================================================
 
-Only the currently visible/active page should remain fully active.
+Only the currently active page should remain fully active.
 
 When the user navigates away:
 
 ACTIVE PAGE
-→ page becomes inactive
-→ page-specific effects stop
-→ page-specific listeners stop
-→ page-specific timers stop
-→ page-specific React Query observers stop
-→ page-specific background processing stops
-→ UI resources are released
+↓
+becomes inactive
+↓
+page-specific effects stop
+↓
+page-specific listeners stop
+↓
+page-specific timers stop
+↓
+page-specific subscriptions stop
+↓
+page-specific query observers stop
+↓
+unnecessary rendering stops
 
-The page's DATA CACHE must NOT necessarily be deleted.
+The useful DATA CACHE must remain available.
 
-React Query/cache data should remain available according to the existing cache/stale-time strategy.
+IMPORTANT:
 
-Therefore:
+Do not destroy cached data merely because the UI component becomes inactive.
 
-PAGE UI = can be unmounted/suspended
-DATA CACHE = can remain cached
+PAGE UI:
+inactive/unmounted/suspended where safe
 
-This is the key optimization.
-
-==================================================
-3. DATA REFRESH ARCHITECTURE
-==================================================
-
-Do NOT solve this by refetching the entire application whenever the user changes pages.
-
-Use targeted invalidation/refetching.
-
-Example:
-
-POS saves bill
-        ↓
-Backend data changes
-        ↓
-Existing SSE event is received
-        ↓
-Only affected React Query keys become stale
-        ↓
-Inactive pages do NOT immediately refetch
-        ↓
-Current active page refreshes only if required
-        ↓
-User later opens Reports
-        ↓
-Reports reads cached data immediately when valid
-        ↓
-If stale, Reports performs its own required refetch
-        ↓
-Only Reports-required data is requested
-
-Do NOT perform:
-"POS changed → refetch every page → refetch entire database."
+DATA CACHE:
+retained according to existing React Query rules
 
 ==================================================
-4. REQUIRED PAGE LIFECYCLE MODEL
+6. DO NOT BLINDLY REMOVE KEEP-ALIVE
 ==================================================
 
-Implement or adapt the existing page lifecycle system so that:
+Before changing Keep-Alive behavior, inspect why it exists.
 
-ACTIVE PAGE:
-- mounted/active
-- UI effects running
-- required queries active
-- required listeners active
+Determine whether any pages depend on:
 
-INACTIVE PAGE:
-- unmounted or suspended according to the safest existing architecture
-- no unnecessary page-specific timers
-- no unnecessary page-specific subscriptions
-- no unnecessary query observers
-- no repeated background rendering
+- preserved form state
+- unsaved user input
+- modal state
+- navigation state
+- scroll state
+- temporary page state
+- existing component persistence
 
-Do not remove the global SSE connection.
+Do NOT simply remove Keep-Alive globally.
 
-The global SSE connection should remain a single application-level listener because it is responsible for receiving backend changes.
+If complete unmounting is safe:
 
-The optimization must happen at the page level.
+unmount inactive page.
 
-==================================================
-5. REACT QUERY REQUIREMENTS
-==================================================
+If complete unmounting would break required state:
 
-Preserve the existing React Query caching architecture.
+preserve the required state while stopping unnecessary runtime activity.
 
-Use:
-- cache retention
-- staleTime
-- targeted query invalidation
-- refetch only when the relevant page becomes active
+The goal is:
 
-Avoid:
-- global refetchAll
-- invalidating unrelated queries
-- refetching all visited pages simultaneously
-- deleting useful cache unnecessarily
+STOP UNNECESSARY WORK
 
-When an SSE event affects multiple domains, invalidate only the query keys already associated with that event.
+not:
 
-Example:
-
-inventory_changed
-→ inventory-related queries
-
-sale_created
-→ sales/dashboard/report-related queries that genuinely depend on sales
-
-invoice_saved
-→ purchase/inventory/report queries that genuinely depend on the invoice
-
-refill_updated
-→ refill/CRM queries
-
-wa_queue_update / WhatsApp events
-→ WhatsApp-specific state/events
-
-Do not expand the invalidation map unnecessarily.
+DESTROY PAGE STATE WITHOUT ANALYSIS.
 
 ==================================================
-6. WHATSAPP AUTOMATION REQUIREMENT
+7. REACT QUERY CACHE
 ==================================================
 
-WhatsApp automation must continue working even when the user changes pages.
+Retain useful cached data.
 
-Changing pages must NOT:
-- stop WhatsApp automation
-- stop the WhatsApp queue worker
-- stop message delivery
-- stop refill automation
-- stop scheduled automation
-- break SSE
-- require the user to keep the CRM page open
+Do not force a database/API reload every time the user changes pages.
 
-WhatsApp background processing must remain application-level/background functionality.
+The intended flow is:
 
-Only unnecessary PAGE UI listeners/rendering should stop.
+User opens Page A
+↓
+Page A loads data
+↓
+User opens Page B
+↓
+Page A UI becomes inactive
+↓
+Page A cache remains
+↓
+User returns to Page A
+↓
+Valid cache appears immediately
+↓
+If stale, only Page A's required data refreshes
 
-The WhatsApp Automation Hub UI should not remain actively rendering when it is not visible.
+Do not introduce:
+
+refetchAll()
+
+or equivalent global refetch behavior.
 
 ==================================================
-7. POS / BILL SAVE REQUIREMENT
+8. STALE DATA BEHAVIOR
 ==================================================
 
-The existing POS Save Bill behavior must remain fast.
+The application must still show current data.
 
-After saving a bill:
+Use the existing React Query/SSE architecture.
 
-Do NOT reload the entire application.
+When data changes:
 
-Only update/invalidate the relevant data.
+Backend
+↓
+SSE event
+↓
+affected query marked stale
+↓
+inactive page remains inactive
+↓
+user opens affected page
+↓
+page checks cache freshness
+↓
+stale required query refreshes
 
-For example:
+Do NOT reload the complete application.
+
+==================================================
+9. GLOBAL SSE
+==================================================
+
+Keep ONE global SSE connection.
+
+Do NOT create page-specific duplicate SSE connections.
+
+Do NOT disable SSE.
+
+Do NOT move critical background automation into page components.
+
+The existing global SSE listener should continue receiving backend events.
+
+The important optimization is:
+
+SSE EVENT
+↓
+identify affected query
+↓
+mark affected data stale
+↓
+do not activate inactive pages
+↓
+do not force unnecessary background rendering
+
+Where the current architecture already uses:
+
+refetchType: 'none'
+
+preserve the intended deferred invalidation behavior unless inspection proves a correction is required.
+
+==================================================
+10. PAGE QUERY TRACKING
+==================================================
+
+PageQueryTracker must correctly understand which queries belong to which route/page.
+
+When a page becomes inactive:
+
+- it should not continue unnecessary query observation
+- it should not continuously refetch in the background
+
+When the page becomes active:
+
+- restore/use its required queries
+- reuse valid cached data
+- silently refresh stale owned queries where appropriate
+
+Do not refetch unrelated queries.
+
+==================================================
+11. POS SAVE BILL
+==================================================
+
+POS Save Bill behavior must remain unchanged.
+
+Expected:
 
 Save Bill
-→ backend saves sale
-→ SSE/event is generated
-→ relevant cache keys become stale
-→ active pages that need the information update
-→ inactive pages remain dormant
-→ when user opens them, their required data is refreshed if stale
+↓
+backend saves bill
+↓
+existing events/SSE
+↓
+affected query caches become stale
+↓
+relevant active pages update
+↓
+inactive pages remain inactive
 
-The user must not experience a full application refresh.
+DO NOT:
+
+Save Bill
+→ reload entire application
+
+DO NOT:
+
+Save Bill
+→ refetch every page
+
+DO NOT:
+
+Save Bill
+→ destroy all React Query cache.
 
 ==================================================
-8. REPORTS REQUIREMENT
+12. INVENTORY
 ==================================================
+
+When POS, Purchase, Return, or another existing workflow changes inventory:
+
+Inventory changes
+↓
+existing backend event
+↓
+Inventory-related cache marked stale
+↓
+active Inventory UI updates where required
+↓
+inactive Inventory UI remains dormant
+↓
+when opened, stale Inventory data refreshes
+
+Do not modify Inventory business logic.
+
+==================================================
+13. REPORTS
+==================================================
+
+When a sale/purchase/inventory event affects Reports:
+
+Reports-related query becomes stale.
+
+If Reports is inactive:
+
+DO NOT force Reports UI to render/refetch continuously.
 
 When user opens Reports:
 
-- Reports should activate normally.
-- Existing cached data should be reused where valid.
-- Stale Reports data should refetch.
-- Only Reports-required queries should execute.
-- Other inactive pages must remain inactive.
-- Do not refetch Inventory + POS + CRM + Purchase History + all other pages merely because Reports opened.
+- use valid cache immediately
+- refresh stale Reports queries
+- update the page with current data
+
+Do not refetch unrelated pages.
 
 ==================================================
-9. PURCHASE HISTORY REQUIREMENT
+14. PURCHASE HISTORY
 ==================================================
 
-When user opens Purchase History:
+When a purchase changes:
 
-- Activate Purchase History.
-- Use existing cache when valid.
-- Refetch only required stale Purchase History queries.
-- Do not reload unrelated application data.
-- Do not activate previously visited pages.
+Purchase History-related data can become stale.
 
-==================================================
-10. CRM / REFILL REQUIREMENT
-==================================================
+If Purchase History is inactive:
 
-CRM/refill automation must continue independently of the CRM page UI.
+- no unnecessary UI rendering
+- no unnecessary query observer work
 
-If a refill is generated:
+When opened:
 
-Backend
-→ event/SSE
-→ refill-related cache becomes stale
-→ CRM page updates when active
-→ if CRM is inactive, do not force its entire UI to render/refetch continuously
-→ when CRM becomes active, it reads/refetches the required current data.
+- valid cache can display immediately
+- stale data refreshes
+- only Purchase History-related queries execute
 
 ==================================================
-11. MEMORY / CPU REQUIREMENT
+15. CRM / REFILL
 ==================================================
 
-The implementation must reduce unnecessary browser workload.
+CRM UI lifecycle must NOT control the actual refill automation.
 
-Target:
+Refill automation must continue even when CRM is not open.
 
-Before:
-Multiple visited pages remain active
-→ multiple effects/listeners/query observers
-→ background rendering
-→ more CPU/RAM
-→ occasional UI lag
+Expected:
 
-After:
-Only active page remains fully active
-→ inactive page resources released
-→ cached data retained
-→ targeted refresh
-→ lower CPU/RAM
-→ smoother navigation
-→ faster UI response
+CRM inactive
+↓
+refill automation continues
+↓
+backend update
+↓
+SSE event
+↓
+CRM data marked stale
+↓
+CRM UI remains inactive
+↓
+user opens CRM
+↓
+current data is available/refreshed
 
-Do not sacrifice correctness merely to reduce memory.
-
-==================================================
-12. FILE SCOPE CONTROL
-==================================================
-
-Before implementation:
-
-1. Identify the exact existing files responsible for:
-   - Keep-Alive/page lifecycle
-   - page activation/deactivation
-   - React Query page tracking
-   - global SSE invalidation
-   - related lifecycle hooks
-
-2. Create a small list of ONLY those files.
-
-3. Modify ONLY those files.
-
-4. If a new helper is genuinely required, create it only inside the existing appropriate feature/module location.
-
-5. Do not modify:
-   - unrelated pages
-   - UI components
-   - CSS
-   - database files
-   - API business logic
-   - WhatsApp worker logic
-   - POS business logic
-   - CRM business logic
-   - Reports business logic
-   - Inventory business logic
-
-unless direct lifecycle integration requires a specific change.
-
-Do not perform broad refactoring.
+Do not change refill business logic.
 
 ==================================================
-13. UI PRESERVATION
+16. WHATSAPP AUTOMATION
 ==================================================
 
-The visual UI must remain unchanged.
+WhatsApp automation is critical.
 
-Do NOT change:
-- layout
-- colors
-- fonts
-- spacing
-- buttons
-- navigation
-- cards
-- modals
-- animations visible to the user
-- page design
+Changing pages must NOT stop:
 
-This is a performance/lifecycle optimization only.
+- WhatsApp queue
+- message sending
+- scheduled automation
+- refill automation
+- background worker
+- server-side processing
+- SSE
 
-==================================================
-14. SAFETY REQUIREMENTS
-==================================================
+Only the WhatsApp page UI/runtime work should become inactive when its UI is not visible.
 
-Before changing code:
+Expected:
 
-- Inspect the current lifecycle architecture.
-- Identify how Keep-Alive works.
-- Identify how PageQueryTracker works.
-- Identify how global SSE invalidation works.
-- Identify which queries are page-specific.
-- Identify which listeners belong to individual pages.
-- Identify which processes must remain global.
+WhatsApp automation
+↓
+continues independently
 
-Do not assume architecture.
+User leaves WhatsApp page
+↓
+WhatsApp processing continues
 
-Use the existing implementation.
-
-Preserve current functionality.
+User returns
+↓
+current status/data is displayed
 
 ==================================================
-15. CROSS-PAGE TESTING
+17. AUTOMATION HUB TIMER / UI WORK
 ==================================================
 
-After implementation, verify at minimum:
+Inspect WhatsApp Automation Hub specifically for:
 
-TEST 1
-Open POS
-→ save bill
-→ navigate to Inventory
-→ verify inventory updates correctly.
+- timers
+- progress intervals
+- event subscriptions
+- state updates
+- loadData()
+- queue events
+- automation events
+- message progress events
 
-TEST 2
-Open POS
-→ save bill
-→ navigate to Reports
-→ verify correct updated report data.
+If these are UI-specific:
 
-TEST 3
-Open POS
-→ create purchase
-→ open Purchase History
-→ verify latest purchase appears.
+They must not continue consuming resources while the Hub UI is inactive.
 
-TEST 4
-Open CRM
-→ trigger refill-related activity
-→ navigate elsewhere
+However:
+
+DO NOT stop the actual WhatsApp sending process.
+
+Separate:
+
+BACKGROUND AUTOMATION
+
+from
+
+UI PRESENTATION.
+
+==================================================
+18. PERFORMANCE ARCHITECTURE
+==================================================
+
+Target architecture:
+
+GLOBAL APPLICATION
+│
+├── Global SSE
+│
+├── WhatsApp background processing
+│
+├── Refill/background processing
+│
+└── React Query cache
+       │
+       ├── ACTIVE PAGE
+       │    ├── UI active
+       │    ├── effects active
+       │    ├── required listeners active
+       │    └── required queries active
+       │
+       └── INACTIVE PAGE
+            ├── UI inactive
+            ├── effects stopped
+            ├── listeners stopped
+            ├── timers stopped
+            └── query observers stopped
+                 │
+                 └── cache retained
+
+==================================================
+19. BEFORE EDITING EACH FILE
+==================================================
+
+For every file selected for modification, inspect its complete relevant implementation.
+
+Document internally:
+
+FILE:
+<exact path>
+
+CURRENT RESPONSIBILITY:
+<what it does>
+
+DEPENDENCIES:
+<what depends on it>
+
+CURRENT BEHAVIOR:
+<exact behavior>
+
+PROBLEM:
+<exact issue>
+
+REQUIRED CHANGE:
+<smallest change required>
+
+EXPECTED RESULT:
+<result>
+
+REGRESSION RISK:
+<possible impact>
+
+Only after this analysis may the file be edited.
+
+==================================================
+20. AFTER EDITING EACH FILE
+==================================================
+
+Immediately inspect the changed file again.
+
+Verify:
+
+- imports
+- exports
+- hooks
+- cleanup
+- listeners
+- timers
+- subscriptions
+- query behavior
+- cache behavior
+- lifecycle behavior
+- TypeScript correctness
+
+Confirm no unrelated code was changed.
+
+==================================================
+21. CROSS-FILE DEPENDENCY CHECK
+==================================================
+
+After all changes, trace the complete chain:
+
+ROUTER
+↓
+KeepAliveOutlet
+↓
+PAGE ACTIVATION
+↓
+PageQueryTracker
+↓
+React Query
+↓
+CACHE
+↓
+GLOBAL SSE
+↓
+EVENT INVALIDATION
+↓
+ACTIVE PAGE
+↓
+POS / INVENTORY / PURCHASE / REPORTS / CRM / WHATSAPP
+
+Confirm the modified files work together.
+
+Do not evaluate files individually only.
+
+The complete flow must remain correct.
+
+==================================================
+22. CROSS-FEATURE TESTING
+==================================================
+
+TEST A:
+POS Save Bill
+→ Inventory
+→ verify correct update.
+
+TEST B:
+POS Save Bill
+→ Reports
+→ verify correct update.
+
+TEST C:
+Create Purchase
+→ Purchase History
+→ verify current data.
+
+TEST D:
+Change Inventory
+→ navigate between pages
+→ verify no full application reload.
+
+TEST E:
+CRM/refill
+→ leave CRM
 → verify automation continues.
 
-TEST 5
-Trigger WhatsApp automation
-→ navigate between multiple pages
-→ verify WhatsApp processing continues.
+TEST F:
+WhatsApp automation
+→ leave WhatsApp page
+→ verify processing continues.
 
-TEST 6
-Visit 5–10 different pages
-→ return to first page
-→ verify navigation remains responsive.
+TEST G:
+Return to WhatsApp Hub
+→ verify current status is correct.
 
-TEST 7
-Generate multiple SSE/backend events
-→ verify only affected queries refresh.
+TEST H:
+Open many pages
+→ navigate repeatedly
+→ verify UI remains responsive.
 
-TEST 8
-Verify no full-page reload occurs during normal navigation.
+TEST I:
+Generate multiple SSE events
+→ verify no unnecessary full-app refetch.
 
-TEST 9
-Verify inactive pages do not continue unnecessary timers/listeners/query observers.
-
-==================================================
-16. PERFORMANCE VALIDATION
-==================================================
-
-Compare before vs after:
-
-- Page switching responsiveness
-- Click response
-- CPU usage
-- RAM usage
-- Number of active React effects
-- Number of active page listeners
-- Number of React Query observers
-- Number of API requests
-- SSE event handling
-- Time required to display cached page data
-- Time required to refresh stale page data
-
-The objective is:
-
-FAST ACTIVE PAGE
-+
-DORMANT INACTIVE PAGES
-+
-RETAINED CACHE
-+
-TARGETED REFRESH
-+
-GLOBAL BACKGROUND AUTOMATION
+TEST J:
+Return to previously visited pages
+→ verify cache-first behavior
+→ verify stale data refreshes when required.
 
 ==================================================
-17. DO NOT OVER-OPTIMIZE
+23. UI REGRESSION CHECK
 ==================================================
 
-Do NOT:
-- remove caching
-- disable SSE
-- disable WhatsApp automation
-- disable refill automation
-- remove required background workers
-- globally stop application events
-- refetch everything on every navigation
-- delete all cache on page change
-- introduce unnecessary polling
-- introduce new timers
+Compare before and after.
 
-The solution must be based on lifecycle management and targeted data refresh.
+Confirm:
 
-==================================================
-18. FINAL CODE REVIEW REQUIREMENT
-==================================================
+- same layout
+- same navigation
+- same colors
+- same buttons
+- same cards
+- same forms
+- same tables
+- same modal behavior
+- same animations
+- same page structure
 
-After implementation, perform a strict self-review.
+If UI changes are detected:
 
-For every modified file, answer:
-
-1. Why was this file modified?
-2. Is this file directly related to page lifecycle/data refresh?
-3. What exact behavior changed?
-4. What existing behavior was preserved?
-5. Could this change affect another feature?
-6. Could this cause unnecessary refetching?
-7. Could this stop WhatsApp/refill automation?
-8. Could this cause stale data?
-9. Does the frontend UI remain unchanged?
-
-If any modified file is not directly necessary, revert that unrelated modification.
+REVERT THE UI CHANGE.
 
 ==================================================
-19. REQUIRED FINAL REPORT
+24. PERFORMANCE CHECK
 ==================================================
 
-After completing the code, provide a SHORT comparison:
+Compare old and new runtime behavior.
+
+OLD:
+
+Multiple visited pages
+→ mounted UI trees
+→ effects
+→ listeners
+→ timers
+→ query observers
+→ background work
+→ higher CPU/RAM
+→ occasional lag
+
+NEW:
+
+Only active page
+→ normal runtime activity
+
+Inactive pages
+→ minimal/no unnecessary runtime activity
+
+Cache
+→ retained
+
+SSE
+→ global
+
+Data refresh
+→ targeted
+
+Expected result:
+
+Lower unnecessary CPU usage
+Lower unnecessary RAM usage
+Fewer unnecessary renders
+Fewer unnecessary query operations
+Smoother navigation
+Faster UI response
+
+==================================================
+25. FULL GIT DIFF AUDIT
+==================================================
+
+Before completion, inspect the COMPLETE git diff.
+
+For EVERY modified file:
+
+1. Why was this file changed?
+2. Which exact requirement required it?
+3. Is every changed line necessary?
+4. Is any unrelated code changed?
+5. Is UI changed?
+6. Is business logic changed?
+7. Is database behavior changed?
+8. Is WhatsApp automation affected?
+9. Is POS affected?
+10. Is Inventory affected?
+11. Is Reports affected?
+12. Is Purchase History affected?
+13. Is CRM/refill affected?
+14. Is SSE affected?
+15. Is cache behavior affected?
+
+If any modification is unnecessary:
+
+REMOVE/REVERT IT.
+
+==================================================
+26. FINAL FILE AUDIT
+==================================================
+
+Produce a final list:
+
+MODIFIED FILE:
+<exact path>
+WHY:
+<exact reason>
+
+MODIFIED FILE:
+<exact path>
+WHY:
+<exact reason>
+
+CREATED FILES:
+None
+OR
+<exact file + exact reason>
+
+UNRELATED FILES:
+Confirm they were not modified.
+
+==================================================
+27. BUILD / VALIDATION
+==================================================
+
+Run the repository's existing validation/build commands where available.
+
+At minimum, verify:
+
+- client build
+- TypeScript
+- existing guardrails
+- existing tests
+- lint/type validation if already configured
+
+Do NOT add new validation dependencies just for this task.
+
+Do NOT modify build configuration simply to make validation pass.
+
+If validation fails:
+
+DO NOT claim completion.
+
+Identify the exact failure and correct only the relevant code.
+
+==================================================
+28. NO FALSE CLAIMS
+==================================================
+
+Do not state:
+
+"100% fixed"
+
+unless the actual behavior has been verified.
+
+A successful build proves compilation.
+
+It does NOT automatically prove that intermittent UI lag has disappeared.
+
+Clearly distinguish:
+
+CODE VERIFICATION
+from
+REAL RUNTIME PERFORMANCE VERIFICATION.
+
+==================================================
+29. FINAL REQUIRED RESPONSE
+==================================================
+
+After implementation, provide a SHORT comparison.
 
 OLD BEHAVIOR:
-- Previously visited pages remained active.
-- Their effects/listeners/query observers could continue running.
-- SSE updates could create additional background work.
-- CPU/RAM usage could increase.
-- UI could occasionally feel slow/frozen.
+- Inactive pages could remain active.
+- Background effects/listeners/query observers could continue running.
+- SSE activity could create additional frontend workload.
+- CPU/RAM could increase.
+- UI could intermittently feel slow.
 
 NEW BEHAVIOR:
-- Only the active page remains fully active.
-- Inactive page UI resources are released.
-- React Query cache remains available.
+- Active page remains fully active.
+- Inactive page runtime work is suspended/stopped where safe.
+- Useful React Query cache is retained.
 - SSE remains global.
-- Only affected data becomes stale/refetches.
-- POS, Reports, Inventory, Purchase History, CRM and WhatsApp continue working.
-- WhatsApp/refill automation remains independent of page visibility.
-- No frontend UI changes.
+- Only affected data becomes stale.
+- Stale data refreshes when the relevant page becomes active.
+- POS remains fast.
+- Inventory remains accurate.
+- Reports remain accurate.
+- Purchase History remains accurate.
+- CRM/refill automation continues.
+- WhatsApp automation continues independently.
+- Frontend UI remains unchanged.
 
 FILES MODIFIED:
-List ONLY the exact files actually modified.
+<exact list>
+
+FILES CREATED:
+<exact list or NONE>
 
 FILES NOT MODIFIED:
-Confirm that unrelated files were not touched.
+Confirm unrelated files were untouched.
 
-FINAL VERIFICATION:
-Confirm that cross-page data updates, POS bill saving, Reports, Purchase History, Inventory, CRM/refill automation, WhatsApp automation, SSE updates, caching, and navigation were checked.
+VALIDATION:
+<build/test/guardrail results>
 
-MOST IMPORTANT RULE:
-DO NOT MODIFY ANY FILE SIMPLY TO "IMPROVE PERFORMANCE."
-ONLY MODIFY FILES THAT ARE DIRECTLY REQUIRED FOR THIS PAGE LIFECYCLE + TARGETED REFRESH OPTIMIZATION.
-DO NOT CHANGE THE FRONTEND UI.
-DO NOT CHANGE BUSINESS LOGIC.
-DO NOT CHANGE DATABASE STRUCTURE.
-DO NOT CHANGE EXISTING USER WORKFLOWS.
+PERFORMANCE:
+<what was verified and what remains to be verified>
+
+==================================================
+30. FINAL NON-NEGOTIABLE EXECUTION ORDER
+==================================================
+
+The coding agent MUST follow this exact order:
+
+1. INSPECT THE ENTIRE RELEVANT ARCHITECTURE.
+2. IDENTIFY THE CURRENT ROOT CAUSE.
+3. TRACE ALL DEPENDENCIES.
+4. IDENTIFY EXACT RELATED FILES.
+5. DO NOT TOUCH UNRELATED FILES.
+6. INSPECT EACH TARGET FILE BEFORE EDITING.
+7. DEFINE THE SMALLEST REQUIRED CHANGE.
+8. MODIFY ONLY REQUIRED CODE.
+9. PRESERVE THE EXISTING UI.
+10. PRESERVE BUSINESS LOGIC.
+11. PRESERVE DATABASE BEHAVIOR.
+12. PRESERVE WHATSAPP AUTOMATION.
+13. PRESERVE REFILL AUTOMATION.
+14. PRESERVE GLOBAL SSE.
+15. PRESERVE REACT QUERY CACHE.
+16. PREVENT INACTIVE PAGE BACKGROUND WORK.
+17. IMPLEMENT TARGETED REFRESH ONLY.
+18. TEST CROSS-PAGE DATA FLOWS.
+19. TEST POS → INVENTORY → REPORTS.
+20. TEST PURCHASE → PURCHASE HISTORY.
+21. TEST CRM → REFILL.
+22. TEST WHATSAPP → BACKGROUND PROCESSING.
+23. REVIEW EVERY MODIFIED FILE.
+24. REVIEW THE COMPLETE GIT DIFF.
+25. REVERT EVERY UNRELATED CHANGE.
+26. RUN EXISTING BUILD/VALIDATION.
+27. CONFIRM UI IS UNCHANGED.
+28. CONFIRM DATA IS CORRECT.
+29. CONFIRM BACKGROUND AUTOMATION CONTINUES.
+30. ONLY THEN REPORT COMPLETION.
+
+FINAL OBJECTIVE:
+
+DO NOT MAKE THE APPLICATION LOOK DIFFERENT.
+
+MAKE THE APPLICATION DO LESS UNNECESSARY WORK.
+
+ACTIVE PAGE:
+FAST + RESPONSIVE
+
+INACTIVE PAGE:
+NO UNNECESSARY RUNTIME WORK
+
+CACHE:
+RETAINED
+
+SSE:
+GLOBAL
+
+DATA:
+CURRENT
+
+AUTOMATION:
+CONTINUES
+
+UI:
+UNCHANGED
+
+BUSINESS LOGIC:
+UNCHANGED
+
+DATABASE:
+UNCHANGED
+
+UNRELATED FILES:
+UNTOUCHED
+
+PERFORMANCE:
+IMPROVED WITHOUT SACRIFICING FUNCTIONALITY
