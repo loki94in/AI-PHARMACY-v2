@@ -879,6 +879,9 @@ const POS = () => {
   const [posShopDetails, setPosShopDetails] = useState<{ name: string; phone: string; drugLicense?: string; gstin?: string; address?: string }>({ name: '', phone: '' });
 
   useEffect(() => {
+    // Proactive WhatsApp pre-warm so billing send is 0-second instant
+    api.prewarmWhatsAppQueue();
+
     api.getSettings().then((s: any) => {
       if (s) {
         setPosShopDetails({

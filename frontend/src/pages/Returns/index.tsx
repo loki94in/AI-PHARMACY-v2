@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useOnClickOutside } from '../../hooks/useOnClickOutside';
 import { useLocation } from 'react-router-dom';
 import { api } from '../../services/api';
+import { toastEvent } from '../../services/events';
 import { RotateCcw, Plus, Trash2, Search, FileText, Camera, X, Loader2, Edit, Wand2, ChevronDown, ChevronUp, Building2, Layers } from 'lucide-react';
 import AICamera from '../../components/AICamera';
 import { useApiQuery } from '../../hooks/useApiQuery';

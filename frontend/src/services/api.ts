@@ -1540,6 +1540,7 @@ export const api = {
   updateWhatsAppQueueItem: (data: { id: number; number: string; message?: string }) => apiClient.put<{ success: boolean; message: string }>('/whatsapp/queue/update-item', data).then(res => res.data),
   deleteWhatsAppQueueItem: (id: number) => apiClient.delete<{ success: boolean; deleted: boolean; message: string }>(`/whatsapp/queue/item/${id}`).then(res => res.data),
   clearFailedWhatsAppQueue: () => apiClient.post<{ success: boolean; clearedCount: number; message: string }>('/whatsapp/queue/clear-failed').then(res => res.data),
+  prewarmWhatsAppQueue: () => apiClient.post<{ success: boolean; prewarmed: boolean }>('/whatsapp/queue/prewarm').then(res => res.data).catch(() => ({ success: false, prewarmed: false })),
 
   // Upcoming Automations & Triggers API
   getUpcomingTriggers: (lookahead = 5) => apiClient.get<{ success: boolean; upcoming: Array<{ id: string; name: string; category: string; secondsUntilRun: number; nextRunIso: string; isSnoozed: boolean; description: string }> }>('/triggers/upcoming', { params: { lookahead } }).then(res => res.data),

@@ -191,12 +191,12 @@ async function auditSales(db: Db): Promise<CategoryResult> {
         evidenceCount: badPrice.c,
       }));
     }
-    const badQty = await db.get('SELECT COUNT(*) c FROM sale_items WHERE quantity <= 0');
+    const badQty = await db.get('SELECT COUNT(*) c FROM sale_items WHERE quantity <= 0 AND (loose_qty IS NULL OR loose_qty <= 0)');
     if (badQty.c > 0) {
       findings.push(finding({
         id: 'SALES-ZERO-QTY', category: 'Sales', severity: 'HIGH',
-        summary: `${badQty.c} sale line item(s) recorded a zero or negative quantity.`,
-        where: 'sale_items.quantity',
+        summary: `${badQty.c} sale line item(s) recorded zero total quantity (neither strips nor loose units).`,
+        where: 'sale_items.quantity & loose_qty',
         codeFixAvailable: false, userActionRequired: true,
         exactAction: 'Review and correct the flagged sale line items — a sale must always move a real, positive quantity of stock.',
         evidenceCount: badQty.c,

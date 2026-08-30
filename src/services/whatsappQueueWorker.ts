@@ -367,13 +367,43 @@ class WhatsAppQueueWorker {
     if (scheduledAt <= now) {
       this.triggerProcessing();
     } else {
+      // 2-MINUTE PRE-WAKE: If WhatsApp is sleeping, pre-warm it 2 minutes prior to scheduled dispatch
+      const wakeDelay = Math.max(0, scheduledAt - now - 120_000);
+      if (wakeDelay < (scheduledAt - now)) {
+        setTimeout(async () => {
+          try {
+            const { hasSavedSession, getWhatsAppStatus, initClient } = await import('../whatsappClient.js');
+            const status = await getWhatsAppStatus();
+            if (hasSavedSession() && (status.sleeping || !status.isReady) && !status.initializing) {
+              console.log('[WhatsApp Pre-Wake] 2-minute lead time triggered: silently warming up WhatsApp client...');
+              initClient().catch(() => {});
+            }
+          } catch (_) {}
+        }, wakeDelay);
+      }
+
       const delay = Math.min(scheduledAt - now, 2147483647);
       setTimeout(() => this.triggerProcessing(), delay);
     }
     return lastId;
   }
 
-  /** Purge sent items older than 24 hours and recover any interrupted items from app restarts */
+  /** Proactive pre-warm when user enters POS / Special Orders / Dispatch */
+  public async prewarm(): Promise<boolean> {
+    try {
+      const { hasSavedSession, getWhatsAppStatus, initClient, isWhatsAppExplicitlyDisabled } = await import('../whatsappClient.js');
+      if (await isWhatsAppExplicitlyDisabled()) return false;
+      const status = await getWhatsAppStatus();
+      if (hasSavedSession() && (status.sleeping || !status.isReady) && !status.initializing) {
+        console.log('[WhatsApp Pre-Warm] Proactive user action pre-warm triggered');
+        initClient().catch(() => {});
+        return true;
+      }
+    } catch (_) {}
+    return false;
+  }
+
+  /** Purge sent items older than 24 hours, discard stale legacy backlog, and recover any interrupted items from app restarts */
   public async cleanupOldSentItems(): Promise<number> {
     try {
       const db = await dbManager.getConnection();
@@ -389,6 +419,19 @@ class WhatsAppQueueWorker {
             await db.run("UPDATE whatsapp_send_queue SET status = 'review_required', error_message = 'App restarted during send — review before dispatching' WHERE id = ?", [item.id]);
           }
         }
+      } catch (_) {}
+
+      // STALE BACKLOG SAFETY: If pending/queued messages were created > 24 hours ago (e.g. from imported DB or old app session),
+      // do not blast out old messages when the user installs or reboots the app. Mark them skipped_offline.
+      try {
+        const staleCutoff = Date.now() - (24 * 60 * 60 * 1000);
+        await db.run(
+          "UPDATE whatsapp_send_queue SET status = 'skipped_offline', error_message = 'Stale backlog (>24h old) — skipped on startup' WHERE status IN ('pending', 'failed_offline') AND created_at < ?",
+          [staleCutoff]
+        );
+        await db.run(
+          "UPDATE automation_notifications SET status = 'skipped_offline', error_message = 'Stale backlog (>24h old) — skipped on startup' WHERE status IN ('pending', 'queued') AND datetime(created_at) < datetime('now', '-1 day')"
+        );
       } catch (_) {}
 
       const oneDayAgo = Date.now() - (24 * 60 * 60 * 1000);

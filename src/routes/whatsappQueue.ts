@@ -545,4 +545,14 @@ router.post('/clear-failed', async (_req, res) => {
   }
 });
 
+// POST trigger proactive pre-warm of WhatsApp client
+router.post('/prewarm', async (_req, res) => {
+  try {
+    const started = await whatsappQueueWorker.prewarm();
+    res.json({ success: true, prewarmed: started });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || 'Failed to pre-warm WhatsApp' });
+  }
+});
+
 export default router;

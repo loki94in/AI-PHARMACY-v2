@@ -72,18 +72,30 @@ export function usePersistedDateRange({
           };
         }
 
-        // 6. If parsed.to >= parsed.savedOn (window reached "today" when saved) and parsed.to < today -> roll to = today
+        // 6. If parsed.to >= parsed.savedOn (window reached "today" when saved) and parsed.to < today -> roll to = today and slide from
         if (parsed.savedOn && parsed.to && parsed.to >= parsed.savedOn && parsed.to < today) {
+          // If from was saved relative to savedOn, calculate the offset to maintain the rolling window length
+          let rollingFrom = defaultFrom;
+          if (parsed.from) {
+            const savedFromTime = new Date(parsed.from).getTime();
+            const savedOnTime = new Date(parsed.savedOn).getTime();
+            if (!isNaN(savedFromTime) && !isNaN(savedOnTime) && savedOnTime >= savedFromTime) {
+              const diffDays = Math.round((savedOnTime - savedFromTime) / (1000 * 60 * 60 * 24));
+              const newFromDate = new Date();
+              newFromDate.setDate(newFromDate.getDate() - diffDays);
+              rollingFrom = getLocalDateString(newFromDate);
+            }
+          }
           return {
-            dateRange: { from: parsed.from ?? defaultFrom, to: today },
+            dateRange: { from: rollingFrom, to: today },
             manualTo: false,
           };
         }
 
-        // 7. Legacy migration (no savedOn field) -> roll if to < today
+        // 7. Legacy migration (no savedOn field) -> roll to today and reset from to defaultFrom
         if (!parsed.savedOn && parsed.to && parsed.to < today) {
           return {
-            dateRange: { from: parsed.from ?? defaultFrom, to: today },
+            dateRange: { from: defaultFrom, to: today },
             manualTo: false,
           };
         }
