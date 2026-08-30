@@ -140,9 +140,9 @@ router.post('/batch', async (req, res) => {
       
       let itemsListStr = '';
       if (insertedOrders.length === 1) {
-        itemsListStr = `${insertedOrders[0].product} (Qty: ${insertedOrders[0].qty})`;
+        itemsListStr = `${insertedOrders[0].product}`;
       } else {
-        itemsListStr = '\n' + insertedOrders.map((o, idx) => `${idx + 1}. ${o.product} × ${o.qty}`).join('\n');
+        itemsListStr = '\n' + insertedOrders.map((o, idx) => `${idx + 1}. ${o.product}`).join('\n');
       }
 
       let msg = '';
@@ -422,11 +422,11 @@ router.post('/:id/resend-booking', async (req, res) => {
     
     let msg = '';
     if (lang === 'hi') {
-      msg = `नमस्ते ${cleanReqName}, ${medicalName} पर आपकी ${order.product} (मात्रा: ${order.qty})${order.advance_payment && Number(order.advance_payment) > 0 ? ` (अग्रिम राशि: ₹${Number(order.advance_payment).toFixed(2)})` : ''} का ऑर्डर बुक कर लिया गया है। दवाई आने पर हम आपको सूचित करेंगे।`;
+      msg = `नमस्ते ${cleanReqName}, ${medicalName} पर आपकी ${order.product}${order.advance_payment && Number(order.advance_payment) > 0 ? ` (अग्रिम राशि: ₹${Number(order.advance_payment).toFixed(2)})` : ''} का ऑर्डर बुक कर लिया गया है। दवाई आने पर हम आपको सूचित करेंगे।`;
     } else if (lang === 'mr') {
-      msg = `नमस्कार ${cleanReqName}, ${medicalName} येथे आपली ${order.product} (प्रमाण: ${order.qty})${order.advance_payment && Number(order.advance_payment) > 0 ? ` (अगाऊ रक्कम: ₹${Number(order.advance_payment).toFixed(2)})` : ''} ची ऑर्डर बुक करण्यात आली आहे. औषध आल्यावर आम्ही आपल्याला कळवू.`;
+      msg = `नमस्कार ${cleanReqName}, ${medicalName} येथे आपली ${order.product}${order.advance_payment && Number(order.advance_payment) > 0 ? ` (अगाऊ रक्कम: ₹${Number(order.advance_payment).toFixed(2)})` : ''} ची ऑर्डर बुक करण्यात आली आहे. औषध आल्यावर आम्ही आपल्याला कळवू.`;
     } else {
-      msg = `Hi ${cleanReqName}, your order for ${order.product} (Qty: ${order.qty})${advMsg} has been booked at ${medicalName}. We will notify you when it arrives.`;
+      msg = `Hi ${cleanReqName}, your order for ${order.product}${advMsg} has been booked at ${medicalName}. We will notify you when it arrives.`;
     }
 
     await whatsappQueueWorker.enqueue(formattedPhone, msg, 'special_order', order.requester || 'Customer', undefined, undefined, undefined, { skipDedupe: true });
