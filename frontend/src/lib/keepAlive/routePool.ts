@@ -1,23 +1,22 @@
-/**
- * Route pool + idle pre-warm registry, split out of KeepAliveOutlet so that
- * file stays a components-only module (react-refresh/only-export-components).
- */
+import { pageImports } from '../pageImports';
 
-// ponytail: pool is bounded by the fixed route table (~23 entries); lists inside
-// pages are virtualized/capped, so no LRU eviction needed.
+/**
+ * Route pool + idle pre-warm registry.
+ */
 export const visitedPaths: string[] = [];
 
 const prewarmListeners = new Set<() => void>();
 
 /**
- * Idle warm-up: pre-mounts a route hidden so its FIRST user switch renders
- * instantly (same as POS, which mounts at boot as the landing page). The
- * mounted-hidden page fetches nothing that its own usePageActive()/useFetchMode
- * gates don't already allow — this only moves render cost off the click.
+ * Idle warm-up: prefetches the code chunk for a route during idle periods so its
+ * FIRST user navigation loads and renders instantly without network bundle latency.
  */
 export function prewarmRoute(path: string): boolean {
   if (visitedPaths.includes(path)) return false;
   visitedPaths.push(path);
+  if (pageImports[path]) {
+    pageImports[path]().catch(() => {});
+  }
   prewarmListeners.forEach(l => l());
   return true;
 }
@@ -26,3 +25,4 @@ export function addPrewarmListener(listener: () => void): () => void {
   prewarmListeners.add(listener);
   return () => { prewarmListeners.delete(listener); };
 }
+
