@@ -760,6 +760,8 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
   const productInputRef = useRef<HTMLInputElement>(null);
   const qtyInputRef = useRef<HTMLInputElement>(null);
   const ignoreNextSearchRef = useRef(false);
+  const isSelectingRef = useRef(false);
+  const lastToastedQueryRef = useRef<string>('');
   const searchAbortControllerRef = useRef<AbortController | null>(null);
 
   // Find the minimum effective rate among all suggestions to identify the best rate option
@@ -929,15 +931,15 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
 
   // Live Query autocomplete with instant memory cache & request aborting
   useEffect(() => {
-    if (ignoreNextSearchRef.current) {
+    if (isSelectingRef.current || ignoreNextSearchRef.current) {
       ignoreNextSearchRef.current = false;
       return;
     }
 
     const cleanQuery = product.replace(/\s*\([^)]*\)$/, '').trim();
 
-    if (cleanQuery.length < 2) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- gating rule: clear dropdown below the 2-char threshold
+    if (cleanQuery.length < 3) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- autocomplete <3-char gating reset (AGENTS.md)
       setSuggestions([]);
       setShowSuggestions(false);
       return;
@@ -952,6 +954,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
     }
 
     const delayDebounce = setTimeout(async () => {
+      if (isSelectingRef.current) return;
       if (searchAbortControllerRef.current) {
         searchAbortControllerRef.current.abort();
       }
@@ -964,8 +967,6 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
 
       try {
         // Search Pharmarack catalog only (no local inventory cross-check).
-        // AbortController is actually wired now — superseded keystrokes cancel
-        // their in-flight request instead of racing the latest one.
         const prData = await api.searchPharmarack(cleanQuery, undefined, undefined, controller.signal).catch((err: unknown): LocalPrSearchOutcome | null => {
           if (controller.signal.aborted) return null; // superseded — discard silently
           const apiErr = err as LocalApiError;
@@ -974,11 +975,19 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
         }) as LocalPrSearchOutcome | null;
 
         // Stale-response guard: a newer keystroke already owns the dropdown.
-        if (searchAbortControllerRef.current !== controller || controller.signal.aborted) return;
+        if (searchAbortControllerRef.current !== controller || controller.signal.aborted || isSelectingRef.current) return;
 
         const mergedList: SuggestionMedicine[] = [];
 
         if (prData && !(prData as LocalPrSearchFallback).isError && Array.isArray(prData) && prData.length > 0) {
+          const hasMapped = prData.some((item: LocalPharmarackSearchItem) => item.mapped);
+          if (prData.length === 0 || !hasMapped) {
+            if (cleanQuery.length >= 3 && cleanQuery !== lastToastedQueryRef.current) {
+              toastEvent.trigger('No mapped distributor has product', 'info');
+              lastToastedQueryRef.current = cleanQuery;
+            }
+          }
+
           prData.forEach((item) => {
             const displayName = item.shortName || item.name;
             mergedList.push({
@@ -1028,11 +1037,10 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
             isErrorMessage: true
           });
         } else {
-          mergedList.push({
-            medicine_name: `No distributor matches found for "${cleanQuery}"`,
-            isPharmarack: true,
-            isErrorMessage: true
-          });
+          if (cleanQuery.length >= 3 && cleanQuery !== lastToastedQueryRef.current) {
+            toastEvent.trigger('No mapped distributor has product', 'info');
+            lastToastedQueryRef.current = cleanQuery;
+          }
         }
 
         // Cache valid response in client-side memory
@@ -1044,6 +1052,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
           clientSearchCache.set(cacheKey, mergedList);
         }
 
+        if (isSelectingRef.current) return;
         setSuggestions(mergedList);
         setShowSuggestions(mergedList.length > 0);
         setActiveSuggestionIndex(-1);
@@ -1063,8 +1072,9 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
   }, [product, lastAddedDistributor]);
 
   const handleProductChange = (val: string) => {
+    isSelectingRef.current = false;
     setProduct(val);
-    if (selectedProductId) {
+    if (selectedProductId || selectedDistributor) {
       setSelectedDistributor('');
       setSelectedRate('');
       setSelectedMrp('');
@@ -1081,9 +1091,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
 
   const selectSuggestion = (med: SuggestionMedicine) => {
     if (med.isErrorMessage) return;
-    // Kill any in-flight keystroke search: after a selection no newer
-    // controller exists, so its late response would pass the stale-guard and
-    // repaint the just-closed dropdown ~100-200ms later.
+    isSelectingRef.current = true;
     if (searchAbortControllerRef.current) {
       searchAbortControllerRef.current.abort();
     }
@@ -1105,6 +1113,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
     setSelectedPackaging(med.packaging || '');
     setSelectedMedicineName(med.medicine_name || '');
 
+    setSuggestions([]);
     setShowSuggestions(false);
     setActiveSuggestionIndex(-1);
 
@@ -1133,7 +1142,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
       }
     }
 
-    if (e.key === 'Enter') {
+    if (e.key === 'Enter' || (e.key === 'Tab' && showSuggestions && activeSuggestionIndex >= 0)) {
       e.preventDefault();
       if (showSuggestions && activeSuggestionIndex >= 0 && activeSuggestionIndex < suggestions.length) {
         selectSuggestion(suggestions[activeSuggestionIndex]);
@@ -2243,29 +2252,6 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
                                     <Package size={10} /> {med.stock}
                                   </span>
                                 )}
-                              </div>
-                            )}
-
-                            {/* Special Order Action when no distributor matches are available */}
-                            {med.isErrorMessage && product.trim().length >= 2 && (
-                              <div className="mt-2 pt-1.5 border-t border-red-500/20">
-                                <button
-                                  type="button"
-                                  onMouseDown={(e) => {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                    const cleanName = product.replace(/\s*\([^)]*\)$/, '').trim();
-                                    setNewReqProduct(cleanName);
-                                    setNewReqQty(qty || 1);
-                                    setShowNewRequestForm(true);
-                                    setShowSuggestions(false);
-                                    toastEvent.trigger(`Pre-filled "${cleanName}" in Special Request form`, 'info');
-                                  }}
-                                  className="w-full py-1.5 px-3 rounded-xl bg-bg2 hover:bg-bg3 text-text border border-border text-[11px] font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-sm active:scale-95"
-                                >
-                                  <Sparkles size={11} className="text-muted" />
-                                  <span>✨ Create Special Request for &quot;{product.replace(/\s*\([^)]*\)$/, '').trim()}&quot;</span>
-                                </button>
                               </div>
                             )}
                           </div>
