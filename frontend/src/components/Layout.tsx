@@ -2650,7 +2650,7 @@ const QuickAssistSidebar = memo(({
 
         <div
           style={{ writingMode: 'vertical-rl' }}
-          className="flex items-center gap-1.5 text-[10px] font-black uppercase text-muted tracking-widest my-auto"
+          className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-purple-600 dark:text-purple-400 my-auto"
         >
           <ActivityIcon size={12} className="rotate-90 shrink-0 text-purple-500" />
           <span>Quick Assist</span>
