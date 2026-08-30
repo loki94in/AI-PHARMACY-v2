@@ -1074,6 +1074,9 @@ export class EmailService {
   private imapConfig: EmailOptions;
   private smtpTransporter: Transporter | null = null;
   private pollInterval: NodeJS.Timeout | null = null;
+  private bootTimeout: NodeJS.Timeout | null = null;
+  private backoffUntil: number = 0;
+  private activeConnection: any = null;
   private isPolling: boolean = false;
   private isSyncing: boolean = false;
   private lastUnconfiguredLogTime: number = 0;
@@ -1226,10 +1229,14 @@ export class EmailService {
    * Starts the email polling interval
    */
   public async startPolling(intervalInMinutes: number = 5): Promise<void> {
-    // Clear any existing interval
+    // Clear any existing interval & boot delay timer
     if (this.pollInterval) {
       clearInterval(this.pollInterval);
       this.pollInterval = null;
+    }
+    if (this.bootTimeout) {
+      clearTimeout(this.bootTimeout);
+      this.bootTimeout = null;
     }
 
     const { isConfigured } = await this.buildImapConfig();
@@ -1238,25 +1245,45 @@ export class EmailService {
       return;
     }
 
-    // Immediate first run
-    this.pollInbox();
+    // 45s boot delay on server startup to allow lingering IMAP sockets to close cleanly
+    console.log(`[Mail] Server boot delay: First IMAP email poll scheduled in 45s (interval: ${intervalInMinutes}m)...`);
+    this.bootTimeout = setTimeout(() => {
+      this.bootTimeout = null;
+      this.pollInbox();
+    }, 45000);
 
     // Set up recurring interval
     this.pollInterval = setInterval(() => {
       this.pollInbox();
     }, intervalInMinutes * 60 * 1000);
-
-    console.log(`Email polling started with ${intervalInMinutes} minute interval`);
   }
 
   /**
    * Stops the email polling
    */
   public stopPolling(): void {
+    if (this.bootTimeout) {
+      clearTimeout(this.bootTimeout);
+      this.bootTimeout = null;
+    }
     if (this.pollInterval) {
       clearInterval(this.pollInterval);
       this.pollInterval = null;
       console.log('Email polling stopped');
+    }
+  }
+
+  /**
+   * Gracefully close active IMAP sockets and cancel pending timers on process exit
+   */
+  public async gracefulShutdown(): Promise<void> {
+    this.stopPolling();
+    if (this.activeConnection) {
+      try {
+        console.log('[Mail] Gracefully closing active IMAP connection on exit...');
+        await this.activeConnection.end();
+      } catch (_) {}
+      this.activeConnection = null;
     }
   }
 
@@ -3240,6 +3267,12 @@ export class EmailService {
       return 0;
     }
 
+    if (Date.now() < this.backoffUntil) {
+      const remainingSec = Math.ceil((this.backoffUntil - Date.now()) / 1000);
+      console.log(`[Sync] IMAP in backoff mode (Too many simultaneous connections). Resuming in ${remainingSec}s...`);
+      return 0;
+    }
+
     const { imapConfig, isConfigured } = await this.buildImapConfig();
     if (!isConfigured) {
       console.log('[Sync] IMAP not configured, skipping sync.');
@@ -3261,6 +3294,7 @@ export class EmailService {
       console.log(`[Sync] Last stored UID: ${lastStoredUid}. Connecting to IMAP for delta sync...`);
 
       connection = await imap.connect({ imap: imapConfig });
+      this.activeConnection = connection;
       await connection.openBox('INBOX');
 
       // Build search criteria: if we have stored emails, only fetch UID > lastStoredUid
@@ -3469,7 +3503,16 @@ export class EmailService {
       }
     } catch (err: any) {
       const errMsg = err.message || String(err) || 'Unknown IMAP error';
-      const isAuthError = errMsg.includes('AUTHENTICATIONFAILED') || errMsg.includes('Invalid credentials') || errMsg.includes('login') || errMsg.includes('auth');
+      const isSimultaneousLimit = errMsg.includes('Too many simultaneous connections') ||
+        errMsg.includes('simultaneous') ||
+        (err && err.textCode === 'ALERT' && err.source === 'authentication');
+
+      if (isSimultaneousLimit) {
+        this.backoffUntil = Date.now() + 120_000;
+        console.warn(`[Sync] IMAP connection limit reached ("Too many simultaneous connections"). Backing off for 120s.`);
+      }
+
+      const isAuthError = !isSimultaneousLimit && (errMsg.includes('AUTHENTICATIONFAILED') || errMsg.includes('Invalid credentials') || errMsg.includes('login') || errMsg.includes('auth'));
       if (isAuthError) {
         eventService.broadcast('auth_failure', {
           message: 'Gmail authentication failed. Please update your credentials in Settings.',
@@ -3493,6 +3536,7 @@ export class EmailService {
       console.error('[Sync] syncNewEmailsFromIMAP error:', err);
     } finally {
       this.isSyncing = false;
+      this.activeConnection = null;
       if (connection) {
         try { await connection.end(); } catch (e) { }
       }
@@ -3689,6 +3733,15 @@ export class EmailService {
 // Export singleton instance
 export const emailService = new EmailService();
 export default emailService;
+
+// Register process exit listeners for graceful IMAP connection shutdown
+if (typeof process !== 'undefined') {
+  const onExit = () => {
+    emailService.gracefulShutdown().catch(() => {});
+  };
+  process.once('SIGINT', onExit);
+  process.once('SIGTERM', onExit);
+}
 
 /**
  * Helper to sanitize raw medicine name extracted from invoice/email text or attachments.

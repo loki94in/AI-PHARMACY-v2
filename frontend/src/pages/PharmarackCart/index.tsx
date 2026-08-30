@@ -2279,40 +2279,27 @@ export default function PharmarackCart() {
       return updated;
     });
 
-    const itemKey = item.productCode || String(item.productId || item.productName);
-    setUpdatingItemId(itemKey);
-    toastEvent.trigger(`Removing "${item.productName}"...`, 'info');
+    toastEvent.trigger(`Removing "${item.productName}" in background...`, 'info');
 
-    // 2. Silent Background Live Cart Deletion
-    try {
-      const storeName = distributors.find(d => d.storeId === item.storeId)?.storeName || '';
-      const res = await api.deletePharmarackCartItem({
-        storeId: item.storeId,
-        productId: item.productId,
-        productCode: item.productCode,
-        productName: item.productName,
-        company: item.company,
-        packaging: item.packaging,
-        ptr: item.ptr,
-        mrp: item.mrp,
-        storeName: storeName
-      });
-
+    // 2. Silent Asynchronous Background Live Cart Deletion (non-blocking)
+    const storeName = distributors.find(d => d.storeId === item.storeId)?.storeName || '';
+    api.deletePharmarackCartItem({
+      storeId: item.storeId,
+      productId: item.productId,
+      productCode: item.productCode,
+      productName: item.productName,
+      company: item.company,
+      packaging: item.packaging,
+      ptr: item.ptr,
+      mrp: item.mrp,
+      storeName: storeName
+    }).then((res) => {
       if (res && res.success) {
         toastEvent.trigger(`Removed "${item.productName}" from live cart`, 'success');
-        scheduleCartSync(1500);
-      } else {
-        toastEvent.trigger(res?.error || 'Failed to delete item from live cart', 'error');
-        scheduleCartSync(500);
       }
-    } catch (err: unknown) {
-      const apiErr = err as LocalApiError;
-      console.error('Failed to delete Pharmarack cart item:', err);
-      toastEvent.trigger(apiErr?.response?.data?.error || 'Failed to delete item from live cart', 'error');
-      scheduleCartSync(500);
-    } finally {
-      setUpdatingItemId(null);
-    }
+    }).catch((err: unknown) => {
+      console.warn('Background delete cart item warning:', err);
+    });
   };
 
   const handleReaddSingleSentItem = async (item: LocalSentOrderItem, storeId?: number, storeName?: string) => {

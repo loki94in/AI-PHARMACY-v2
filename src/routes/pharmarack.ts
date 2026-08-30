@@ -1296,16 +1296,28 @@ router.post('/cart/add', async (req, res) => {
   }
 });
 
-// Delete product directly from Pharmarack live cart
-router.post('/delete-cart-item', async (req, res) => {
-  const { storeId, productId, productCode, productName, company, packaging, ptr, mrp, storeName } = req.body;
-  if (!storeId || (!productId && !productCode && !productName)) {
-    return res.status(400).json({ error: 'Missing required item details for cart deletion' });
-  }
+// In-memory sequential queue for silent background cart item deletions
+interface PharmarackDeleteQueueItem {
+  storeId: number;
+  productId?: number | string | null;
+  productCode?: string;
+  productName?: string;
+  company?: string;
+  packaging?: string;
+  ptr?: number;
+  mrp?: number;
+  storeName?: string;
+}
 
+const pharmarackDeleteQueue: PharmarackDeleteQueueItem[] = [];
+let isProcessingPharmarackDeleteQueue = false;
+
+async function executeSingleItemDelete(item: PharmarackDeleteQueueItem): Promise<boolean> {
+  const { storeId, productId, productCode, productName, company, packaging, ptr, mrp, storeName } = item;
   try {
     const settings = await getPharmarackSettings();
     let token = settings['pharmarack_session_token'] || '';
+    if (!token) return false;
 
     let deleteSuccess = false;
     let lastError = '';
@@ -1323,7 +1335,7 @@ router.post('/delete-cart-item', async (req, res) => {
     let resolvedPtr = Number(ptr || 0);
     let resolvedMrp = Number(mrp || 0);
 
-    // Step A: Search enrichment if ProductId or ProductCode is missing/0
+    // Step A: Search enrichment if ProductId or ProductCode is missing/0 (+1s adaptive timeout buffer for slow internet)
     if ((!resolvedProductId || !resolvedProductCode) && token) {
       try {
         let cleanKeyword = (productName || '').trim().replace(/\s*\([^)]*\)\s*$/, '').trim();
@@ -1343,7 +1355,7 @@ router.post('/delete-cart-item', async (req, res) => {
           const searchRes = await fetchPharmarack('https://pharmretail-elasticsearch.pharmarack.com/open-search/api/v2/search', {
             method: 'POST',
             body: JSON.stringify(searchPayload),
-            signal: AbortSignal.timeout(3500)
+            signal: AbortSignal.timeout(6000) // Increased buffer for slow connections
           });
           if (searchRes.ok) {
             const searchData: any = await searchRes.json().catch(() => null);
@@ -1360,12 +1372,55 @@ router.post('/delete-cart-item', async (req, res) => {
           }
         }
       } catch (e) {
-        console.warn('[Pharmarack Delete] Search enrichment warning:', e);
+        console.warn('[Pharmarack Delete Worker] Search enrichment warning:', e);
       }
     }
 
-    // Step B: Direct 76-field Official Payload API Deletion
-    if (token) {
+    // Step B: Direct API Deletion via official endpoints with generous timeout (+3s buffer for slow connections)
+    const secEndpoints = [
+      'https://pharmretail-api.pharmarack.com/cart/api/v1/DeleteCartProductDetail',
+      'https://pharmretail-api.pharmarack.com/cart/api/v1/DeleteUserProductCartDetail',
+      'https://pharmretail-api.pharmarack.com/cart/api/v1/DeleteCartDetail'
+    ];
+
+    for (const ep of secEndpoints) {
+      try {
+        const secRes = await fetchPharmarack(ep, {
+          method: 'POST',
+          body: JSON.stringify({
+            StoreId: Number(storeId),
+            ProductId: resolvedProductId,
+            PrProductId: resolvedProductId,
+            ProductCode: resolvedProductCode || '',
+            ProductName: productName || '',
+            CartSource: 'MOVP'
+          }),
+          signal: AbortSignal.timeout(8000) // 8s timeout buffer for slow internet
+        });
+        if (secRes.ok) {
+          const secJson = await secRes.json().catch(() => ({}));
+          const isSecOk = secJson && (
+            secJson.StatusCode === 200 || 
+            secJson.statusCode === 200 || 
+            String(secJson.StatusCode) === '200' || 
+            secJson.status === 200 || 
+            secJson.status === 'success' || 
+            secJson.success === true ||
+            (secJson.Message && String(secJson.Message).toLowerCase().includes('success')) ||
+            (secJson.message && String(secJson.message).toLowerCase().includes('success'))
+          );
+          if (isSecOk || secRes.status === 200) {
+            deleteSuccess = true;
+            break;
+          }
+        }
+      } catch (err: any) {
+        lastError = err.message;
+      }
+    }
+
+    // Step C: Fallback payload if secondary endpoints failed
+    if (!deleteSuccess) {
       try {
         const fullDeletePayload = {
           StoreId: Number(storeId) || 0,
@@ -1448,7 +1503,7 @@ router.post('/delete-cart-item', async (req, res) => {
         const response = await fetchPharmarack('https://pharmretail-api.pharmarack.com/cart/api/v1/AddUserProductCartDetail', {
           method: 'POST',
           body: JSON.stringify(fullDeletePayload),
-          signal: AbortSignal.timeout(6000)
+          signal: AbortSignal.timeout(8000)
         });
 
         if (response.ok) {
@@ -1463,63 +1518,79 @@ router.post('/delete-cart-item', async (req, res) => {
             (resJson.Message && String(resJson.Message).toLowerCase().includes('success')) ||
             (resJson.message && String(resJson.message).toLowerCase().includes('success'))
           );
-
-          if (isOk) {
-            deleteSuccess = true;
-          } else {
-            lastError = `AddUserProductCartDetail response: ${resJson.message || resJson.Message || JSON.stringify(resJson)}`;
-          }
-        } else {
-          const errText = await response.text().catch(() => '');
-          lastError = `AddUserProductCartDetail status: ${response.status}. Details: ${errText}`;
-        }
-
-        // Secondary endpoint tries: DeleteCartProductDetail & DeleteUserProductCartDetail
-        if (!deleteSuccess) {
-          const secEndpoints = [
-            'https://pharmretail-api.pharmarack.com/cart/api/v1/DeleteCartProductDetail',
-            'https://pharmretail-api.pharmarack.com/cart/api/v1/DeleteUserProductCartDetail',
-            'https://pharmretail-api.pharmarack.com/cart/api/v1/DeleteCartDetail'
-          ];
-          for (const ep of secEndpoints) {
-            try {
-              const secRes = await fetchPharmarack(ep, {
-                method: 'POST',
-                body: JSON.stringify({
-                  StoreId: Number(storeId),
-                  ProductId: resolvedProductId,
-                  ProductCode: resolvedProductCode || '',
-                  CartSource: 'MOVP'
-                }),
-                signal: AbortSignal.timeout(4000)
-              });
-              if (secRes.ok) {
-                deleteSuccess = true;
-                break;
-              }
-            } catch (_) {}
-          }
+          if (isOk) deleteSuccess = true;
         }
       } catch (err: any) {
         lastError = err.message;
       }
     }
 
-    if (!deleteSuccess) {
-      console.warn('[Pharmarack Delete] Direct cart deletion endpoints did not succeed:', lastError);
-    }
-
     if (deleteSuccess) {
       invalidatePharmarackCartCache();
-      eventService.broadcast('pharmarack_cart_changed', { action: 'remove', at: Date.now() });
-      return res.json({ success: true, message: 'Successfully removed item from Pharmarack live cart!' });
+      eventService.broadcast('pharmarack_cart_changed', { action: 'remove', at: Date.now(), productName: productName || '' });
+      console.log(`[Pharmarack Delete Worker] Successfully removed "${productName || resolvedProductCode}" from live cart in background.`);
+      return true;
     } else {
-      return res.status(500).json({ error: 'Failed to delete item from Pharmarack live cart', details: lastError });
+      console.warn(`[Pharmarack Delete Worker] Direct cart deletion did not succeed for "${productName || resolvedProductCode}":`, lastError);
+      return false;
     }
   } catch (err: any) {
-    console.error('Error in /api/pharmarack/delete-cart-item:', err);
-    res.status(500).json({ error: 'Failed to delete cart item: ' + err.message });
+    console.error(`[Pharmarack Delete Worker] Fatal error deleting "${productName}":`, err);
+    return false;
   }
+}
+
+async function processPharmarackDeleteQueue() {
+  if (isProcessingPharmarackDeleteQueue) return;
+  isProcessingPharmarackDeleteQueue = true;
+
+  try {
+    while (pharmarackDeleteQueue.length > 0) {
+      const item = pharmarackDeleteQueue.shift();
+      if (!item) continue;
+
+      try {
+        await executeSingleItemDelete(item);
+      } catch (err) {
+        console.warn('[Pharmarack Delete Worker] Error during item deletion:', err);
+      }
+
+      // Safe pacing delay (2500ms) to let Pharmarack calculation settle before starting next item
+      if (pharmarackDeleteQueue.length > 0) {
+        await new Promise(resolve => setTimeout(resolve, 2500));
+      }
+    }
+  } finally {
+    isProcessingPharmarackDeleteQueue = false;
+  }
+}
+
+// Delete product directly from Pharmarack live cart (Queued & Silent Background Processing)
+router.post('/delete-cart-item', async (req, res) => {
+  const { storeId, productId, productCode, productName, company, packaging, ptr, mrp, storeName } = req.body;
+  if (!storeId || (!productId && !productCode && !productName)) {
+    return res.status(400).json({ error: 'Missing required item details for cart deletion' });
+  }
+
+  // Enqueue item into background worker
+  pharmarackDeleteQueue.push({
+    storeId: Number(storeId),
+    productId,
+    productCode,
+    productName,
+    company,
+    packaging,
+    ptr,
+    mrp,
+    storeName
+  });
+
+  // Trigger background runner without blocking HTTP response
+  processPharmarackDeleteQueue().catch(err => {
+    console.error('[Pharmarack Delete Worker] Runner error:', err);
+  });
+
+  return res.json({ success: true, queued: true, message: 'Item queued for silent live cart deletion' });
 });
 
 
