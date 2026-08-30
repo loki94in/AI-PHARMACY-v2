@@ -876,6 +876,22 @@ const POS = () => {
   const navigate = useNavigate();
   const location = useLocation();
 
+  const [posShopDetails, setPosShopDetails] = useState<{ name: string; phone: string; drugLicense?: string; gstin?: string; address?: string }>({ name: '', phone: '' });
+
+  useEffect(() => {
+    api.getSettings().then((s: any) => {
+      if (s) {
+        setPosShopDetails({
+          name: s.pharmacy_name || s.shop_name || s.store_name || '',
+          phone: s.phone || s.shop_phone || s.pharmacy_phone || '',
+          drugLicense: s.drug_license || s.shop_licence || s.license_number || s.dl_number || s.drug_licence_no || '',
+          gstin: s.gstin || '',
+          address: s.address || s.shop_address || '',
+        });
+      }
+    }).catch(() => {});
+  }, []);
+
   const locState = location.state as PosLocationState;
   const editSaleFromState = locState?.editSale || null;
 
@@ -5746,10 +5762,20 @@ const POS = () => {
       {/* Hidden printable bill container for window.print() */}
       {showBarcodeModal && createPortal(
         <div id="printable-bill" data-print-root className="hidden">
-          <div style={{ textAlign: 'center', marginBottom: '15px' }}>
-            <h2 style={{ fontSize: '18px', fontWeight: 'bold', margin: '0 0 4px 0', color: '#000' }}>AI PHARMACY OS</h2>
-            <p style={{ fontSize: '12px', color: '#555', margin: '0' }}>Tax Invoice / Retail Counter Receipt</p>
-            <div style={{ borderBottom: '1px solid #ddd', margin: '10px 0' }}></div>
+          <div style={{ textAlign: 'center', marginBottom: '12px' }}>
+            <h2 style={{ fontSize: '18px', fontWeight: 'bold', margin: '0 0 2px 0', color: '#000' }}>
+              {posShopDetails.name || 'AI PHARMACY OS'}
+            </h2>
+            {posShopDetails.address && <p style={{ fontSize: '10px', color: '#555', margin: '0' }}>{posShopDetails.address}</p>}
+            <p style={{ fontSize: '11px', color: '#444', margin: '2px 0' }}>
+              {[
+                posShopDetails.phone ? `Ph: ${posShopDetails.phone}` : '',
+                posShopDetails.drugLicense ? `D.L. No: ${posShopDetails.drugLicense}` : '',
+                posShopDetails.gstin ? `GSTIN: ${posShopDetails.gstin}` : ''
+              ].filter(Boolean).join(' | ')}
+            </p>
+            <p style={{ fontSize: '12px', color: '#555', margin: '2px 0', fontWeight: 'bold' }}>Tax Invoice / Retail Counter Receipt</p>
+            <div style={{ borderBottom: '1px solid #ddd', margin: '8px 0' }}></div>
           </div>
           <div style={{ fontSize: '12px', marginBottom: '12px', display: 'flex', justifyContent: 'space-between', color: '#000' }}>
             <div>
@@ -5890,13 +5916,13 @@ const POS = () => {
                       );
                       if (res && res.success !== false) {
                         setLastSavedWasWhatsAppSent(true);
-                        alert('SMS/WhatsApp message sent successfully!');
+                        toastEvent.trigger('WhatsApp message sent successfully!', 'success');
                       } else {
-                        alert('Failed to send SMS message.');
+                        toastEvent.trigger('Failed to send message.', 'error');
                       }
                     } catch (err) {
                       console.error(err);
-                      alert('Error sending SMS message');
+                      toastEvent.trigger('Error sending message', 'error');
                     }
                   }}
                   className="px-2.5 py-1.5 rounded-lg text-[10px] font-extrabold uppercase bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 transition-all shrink-0"

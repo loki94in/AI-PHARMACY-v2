@@ -46,10 +46,11 @@ export class PdfInvoiceService {
     );
 
     
-    const shopName = settings.shop_name || 'PHARMACY INVOICE';
-    const shopAddress = settings.shop_address || '';
-    const shopPhone = settings.shop_phone || '';
-    const shopLicence = settings.shop_licence || '';
+    const shopName = settings.pharmacy_name || settings.shop_name || settings.store_name || 'PHARMACY INVOICE';
+    const shopAddress = settings.address || settings.shop_address || '';
+    const shopPhone = settings.phone || settings.shop_phone || settings.pharmacy_phone || '';
+    const shopLicence = settings.drug_license || settings.shop_licence || settings.license_number || settings.dl_number || settings.drug_licence_no || '';
+    const shopGstin = settings.gstin || '';
 
     const barcodeData = await generateInvoiceBarcodeData(invoice.invoice_no, invoice.date);
 
@@ -68,7 +69,8 @@ export class PdfInvoiceService {
         }
         const contactParts = [];
         if (shopPhone) contactParts.push(`Phone: ${shopPhone}`);
-        if (shopLicence) contactParts.push(`Licence: ${shopLicence}`);
+        if (shopLicence) contactParts.push(`D.L. No: ${shopLicence}`);
+        if (shopGstin) contactParts.push(`GSTIN: ${shopGstin}`);
         if (contactParts.length > 0) {
           doc.font('Helvetica').fontSize(9).fillColor('#64748b').text(contactParts.join(' | '), { align: 'center' });
         }
@@ -176,61 +178,90 @@ export class PdfInvoiceService {
         doc.fillColor('#0f172a').text(`₹${tax.toFixed(2)}`, 480, doc.y - 9, { width: 70, align: 'right' });
         
         doc.moveDown(0.8);
+        const grandTotalY = doc.y;
         doc.fontSize(12).fillColor('#0f172a').font('Helvetica-Bold');
-        doc.text('Grand Total:', 360, doc.y, { width: 100, align: 'right' });
-        doc.text(`₹${total.toFixed(2)}`, 480, doc.y - 12, { width: 70, align: 'right' });
+        doc.text('Grand Total:', 360, grandTotalY, { width: 100, align: 'right' });
+        doc.text(`₹${total.toFixed(2)}`, 480, grandTotalY, { width: 70, align: 'right' });
 
-        // Draw Scannable Invoice Barcode (QR + Code128)
+        // Draw Scannable Invoice Barcode (QR + Code128) - Left Side (no overlap with stamp)
+        const barcodeY = Math.max(doc.y + 25, 625);
         try {
-          const barcodeY = Math.max(doc.y - 50, 620);
-          doc.image(barcodeData.qrBuffer, 40, barcodeY, { width: 55, height: 55 });
-          doc.image(barcodeData.code128Buffer, 102, barcodeY + 5, { width: 140, height: 45 });
-          doc.fontSize(7).font('Helvetica').fillColor('#64748b').text(`Scannable Bill Barcode: ${barcodeData.barcodeText}`, 40, barcodeY + 57);
+          doc.image(barcodeData.qrBuffer, 40, barcodeY, { width: 52, height: 52 });
+          doc.image(barcodeData.code128Buffer, 102, barcodeY + 4, { width: 140, height: 44 });
+          doc.fontSize(7).font('Helvetica').fillColor('#64748b').text(`Scannable Bill Barcode: ${barcodeData.barcodeText}`, 40, barcodeY + 56);
         } catch (bcErr) {
           console.warn('[PdfInvoice] Failed to embed barcode image in PDF:', bcErr);
         }
 
-        // Check if custom stamp/signature files exist (only draw if includeStampAndSig is true)
+        // Custom stamp & signature files
         const uploadsDir = path.resolve(getAppDataDir(), 'uploads');
         const customStampPath = path.join(uploadsDir, 'custom_stamp.png');
         const customSigPath = path.join(uploadsDir, 'custom_signature.png');
 
         if (includeStampAndSig) {
+          // Dynamic Placement Coordinates (Configurable via Stamp Studio)
+          const defaultStampX = 410;
+          const defaultStampY = Math.max(grandTotalY - 10, 520) - 32;
+          const stampX = settings.stamp_pos_x ? Math.max(30, Math.min(500, parseFloat(settings.stamp_pos_x))) : defaultStampX;
+          const stampY = settings.stamp_pos_y ? Math.max(300, Math.min(700, parseFloat(settings.stamp_pos_y))) : defaultStampY;
+          const stampScale = settings.stamp_scale ? parseFloat(settings.stamp_scale) : 100;
+          const stampWidth = Math.round(85 * (stampScale / 100));
+          const stampRot = settings.stamp_rotation !== undefined ? parseFloat(settings.stamp_rotation) : -12;
+
           if (fs.existsSync(customStampPath)) {
-            doc.image(customStampPath, 140, doc.y - 20, { width: 80 });
-          } else {
-            // DRAW DIGITAL PHARMACY STAMP
+            // Render custom uploaded transparent stamp with configured position, rotation and scale
             doc.save();
-            doc.translate(140, doc.y - 10);
-            doc.rotate(-12);
+            if (stampRot !== 0) {
+              doc.rotate(stampRot, { origin: [stampX + stampWidth / 2, stampY + stampWidth / 2] });
+            }
+            doc.image(customStampPath, stampX, stampY, { width: stampWidth });
+            doc.restore();
+          } else {
+            // DRAW DIGITAL PHARMACY STAMP at configured position
+            doc.save();
+            doc.translate(stampX + stampWidth / 2, stampY + stampWidth / 2);
+            doc.rotate(stampRot);
             
+            const radiusOuter = Math.round(36 * (stampScale / 100));
+            const radiusInner = Math.round(32 * (stampScale / 100));
             const stampColor = invoice.payment_status === 'UNPAID' ? '#f59e0b' : '#10b981';
-            doc.strokeColor(stampColor).lineWidth(2);
-            doc.circle(0, 0, 42).stroke();
-            doc.circle(0, 0, 38).stroke();
+            doc.strokeColor(stampColor).lineWidth(1.8);
+            doc.circle(0, 0, radiusOuter).stroke();
+            doc.circle(0, 0, radiusInner).stroke();
             
-            doc.fillColor(stampColor).fontSize(7).font('Helvetica');
-            doc.text(shopName, -35, -20, { width: 70, align: 'center' });
+            doc.fillColor(stampColor).fontSize(6.5 * (stampScale / 100)).font('Helvetica');
+            doc.text(shopName, -30 * (stampScale / 100), -18 * (stampScale / 100), { width: 60 * (stampScale / 100), align: 'center' });
             
-            doc.fontSize(8);
+            doc.fontSize(7.5 * (stampScale / 100));
             if (invoice.payment_status === 'UNPAID') {
-              doc.font('Helvetica-Bold').text('CREDIT ACCOUNT', -35, -3, { width: 70, align: 'center' });
-              doc.font('Helvetica').fontSize(7).text('PAYMENT PENDING', -35, 12, { width: 70, align: 'center' });
+              doc.font('Helvetica-Bold').text('CREDIT ACCOUNT', -30 * (stampScale / 100), -3 * (stampScale / 100), { width: 60 * (stampScale / 100), align: 'center' });
+              doc.font('Helvetica').fontSize(6.5 * (stampScale / 100)).text('PAYMENT PENDING', -30 * (stampScale / 100), 10 * (stampScale / 100), { width: 60 * (stampScale / 100), align: 'center' });
             } else {
-              doc.font('Helvetica-Bold').text('PAID & VERIFIED', -35, -3, { width: 70, align: 'center' });
-              doc.font('Helvetica').fontSize(7).text('THANK YOU', -35, 12, { width: 70, align: 'center' });
+              doc.font('Helvetica-Bold').text('PAID & VERIFIED', -30 * (stampScale / 100), -3 * (stampScale / 100), { width: 60 * (stampScale / 100), align: 'center' });
+              doc.font('Helvetica').fontSize(6.5 * (stampScale / 100)).text('THANK YOU', -30 * (stampScale / 100), 10 * (stampScale / 100), { width: 60 * (stampScale / 100), align: 'center' });
             }
             
             doc.restore();
           }
 
-          // Render signature if it exists
+          // Render Signature with configured position & scale
+          const defaultSigX = 415;
+          const defaultSigY = barcodeY - 12;
+          const sigX = settings.sig_pos_x ? Math.max(30, Math.min(500, parseFloat(settings.sig_pos_x))) : defaultSigX;
+          const sigY = settings.sig_pos_y ? Math.max(300, Math.min(710, parseFloat(settings.sig_pos_y))) : defaultSigY;
+          const sigScale = settings.sig_scale ? parseFloat(settings.sig_scale) : 100;
+          const sigWidth = Math.round(80 * (sigScale / 100));
+
           if (fs.existsSync(customSigPath)) {
-            doc.image(customSigPath, 380, doc.y - 30, { width: 80 });
+            doc.image(customSigPath, sigX, sigY, { width: sigWidth });
           }
+          doc.moveTo(sigX - 10, sigY + 52).lineTo(sigX + sigWidth + 10, sigY + 52).strokeColor('#cbd5e1').lineWidth(0.5).stroke();
+          doc.fontSize(8).font('Helvetica-Bold').fillColor('#475569').text('Authorized Signatory', sigX - 10, sigY + 56, { width: sigWidth + 20, align: 'center' });
           
           doc.fontSize(8).fillColor('#94a3b8').text('This is a computer generated document. Stamped digitally.', 40, 750, { align: 'center' });
         } else {
+          doc.moveTo(405, barcodeY + 40).lineTo(515, barcodeY + 40).strokeColor('#cbd5e1').lineWidth(0.5).stroke();
+          doc.fontSize(8).font('Helvetica-Bold').fillColor('#475569').text('Authorized Signatory', 405, barcodeY + 44, { width: 110, align: 'center' });
           doc.fontSize(8).fillColor('#94a3b8').text('This is a physical document. Signed and stamped manually.', 40, 750, { align: 'center' });
         }
 
@@ -263,9 +294,11 @@ export class PdfInvoiceService {
       [customerId]
     );
 
-    const shopName = settings.shop_name || 'PHARMACY CREDIT LEDGER';
-    const shopAddress = settings.shop_address || '';
-    const shopPhone = settings.shop_phone || '';
+    const shopName = settings.pharmacy_name || settings.shop_name || settings.store_name || 'PHARMACY CREDIT LEDGER';
+    const shopAddress = settings.address || settings.shop_address || '';
+    const shopPhone = settings.phone || settings.shop_phone || settings.pharmacy_phone || '';
+    const shopLicence = settings.drug_license || settings.shop_licence || settings.license_number || settings.dl_number || settings.drug_licence_no || '';
+    const shopGstin = settings.gstin || '';
 
     return new Promise((resolve, reject) => {
       try {
@@ -280,8 +313,12 @@ export class PdfInvoiceService {
         if (shopAddress) {
           doc.font('Helvetica').fontSize(9).fillColor('#64748b').text(shopAddress, { align: 'center' });
         }
-        if (shopPhone) {
-          doc.font('Helvetica').fontSize(9).fillColor('#64748b').text(`Phone: ${shopPhone}`, { align: 'center' });
+        const contactParts = [];
+        if (shopPhone) contactParts.push(`Phone: ${shopPhone}`);
+        if (shopLicence) contactParts.push(`D.L. No: ${shopLicence}`);
+        if (shopGstin) contactParts.push(`GSTIN: ${shopGstin}`);
+        if (contactParts.length > 0) {
+          doc.font('Helvetica').fontSize(9).fillColor('#64748b').text(contactParts.join(' | '), { align: 'center' });
         }
         doc.moveDown(1);
         doc.moveTo(40, doc.y).lineTo(550, doc.y).strokeColor('#e2e8f0').lineWidth(1).stroke();
@@ -346,9 +383,9 @@ export class PdfInvoiceService {
         doc.text('Total Outstanding Payable:', 250, doc.y, { width: 180, align: 'right' });
         doc.fillColor('#e11d48').text(`₹${finalTotal.toFixed(2)}`, 440, doc.y - 12, { width: 110, align: 'right' });
 
-        // Digital stamp
+        // Digital stamp placed on bottom right over total area
         doc.save();
-        doc.translate(140, doc.y + 10);
+        doc.translate(450, doc.y + 20);
         doc.rotate(-10);
         doc.strokeColor('#f59e0b').lineWidth(2);
         doc.circle(0, 0, 36).stroke();
@@ -387,9 +424,11 @@ export class PdfInvoiceService {
       throw new Error(`Refill record ID ${refillId} not found`);
     }
 
-    const shopName = settings.shop_name || 'AI PHARMACY CARE';
-    const shopAddress = settings.shop_address || '';
-    const shopPhone = settings.shop_phone || '';
+    const shopName = settings.pharmacy_name || settings.shop_name || settings.store_name || 'AI PHARMACY CARE';
+    const shopAddress = settings.address || settings.shop_address || '';
+    const shopPhone = settings.phone || settings.shop_phone || settings.pharmacy_phone || '';
+    const shopLicence = settings.drug_license || settings.shop_licence || settings.license_number || settings.dl_number || settings.drug_licence_no || '';
+    const shopGstin = settings.gstin || '';
 
     return new Promise((resolve, reject) => {
       try {
@@ -404,8 +443,12 @@ export class PdfInvoiceService {
         if (shopAddress) {
           doc.font('Helvetica').fontSize(9).fillColor('#64748b').text(shopAddress, { align: 'center' });
         }
-        if (shopPhone) {
-          doc.font('Helvetica').fontSize(9).fillColor('#64748b').text(`Helpline: ${shopPhone}`, { align: 'center' });
+        const contactParts = [];
+        if (shopPhone) contactParts.push(`Helpline: ${shopPhone}`);
+        if (shopLicence) contactParts.push(`D.L. No: ${shopLicence}`);
+        if (shopGstin) contactParts.push(`GSTIN: ${shopGstin}`);
+        if (contactParts.length > 0) {
+          doc.font('Helvetica').fontSize(9).fillColor('#64748b').text(contactParts.join(' | '), { align: 'center' });
         }
         doc.moveDown(1);
         doc.moveTo(40, doc.y).lineTo(550, doc.y).strokeColor('#e2e8f0').lineWidth(1).stroke();
@@ -475,9 +518,11 @@ export class PdfInvoiceService {
       throw new Error(`Special Order ID ${orderId} not found`);
     }
 
-    const shopName = settings.shop_name || 'AI PHARMACY';
-    const shopAddress = settings.shop_address || '';
-    const shopPhone = settings.shop_phone || '';
+    const shopName = settings.pharmacy_name || settings.shop_name || settings.store_name || 'AI PHARMACY';
+    const shopAddress = settings.address || settings.shop_address || '';
+    const shopPhone = settings.phone || settings.shop_phone || settings.pharmacy_phone || '';
+    const shopLicence = settings.drug_license || settings.shop_licence || settings.license_number || settings.dl_number || settings.drug_licence_no || '';
+    const shopGstin = settings.gstin || '';
 
     return new Promise((resolve, reject) => {
       try {
@@ -492,8 +537,12 @@ export class PdfInvoiceService {
         if (shopAddress) {
           doc.font('Helvetica').fontSize(9).fillColor('#64748b').text(shopAddress, { align: 'center' });
         }
-        if (shopPhone) {
-          doc.font('Helvetica').fontSize(9).fillColor('#64748b').text(`Phone: ${shopPhone}`, { align: 'center' });
+        const contactParts = [];
+        if (shopPhone) contactParts.push(`Phone: ${shopPhone}`);
+        if (shopLicence) contactParts.push(`D.L. No: ${shopLicence}`);
+        if (shopGstin) contactParts.push(`GSTIN: ${shopGstin}`);
+        if (contactParts.length > 0) {
+          doc.font('Helvetica').fontSize(9).fillColor('#64748b').text(contactParts.join(' | '), { align: 'center' });
         }
         doc.moveDown(1);
         doc.moveTo(40, doc.y).lineTo(550, doc.y).strokeColor('#e2e8f0').lineWidth(1).stroke();

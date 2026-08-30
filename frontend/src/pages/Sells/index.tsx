@@ -59,7 +59,7 @@ type LocalSaleItemRow = SaleItem & { batch_no?: string; batch?: string; qty?: nu
 
 // Shop header for the printed sell bill — fetched once per session, cached module-level
 let sellBillShopCache: Record<string, string> | null = null;
-const loadSellBillShopDetails = async (): Promise<{ name: string; phone: string }> => {
+const loadSellBillShopDetails = async (): Promise<{ name: string; phone: string; drugLicense: string; gstin: string; address: string }> => {
   if (!sellBillShopCache) {
     try {
       sellBillShopCache = ((await api.getSettings()) || {}) as Record<string, string>;
@@ -70,7 +70,10 @@ const loadSellBillShopDetails = async (): Promise<{ name: string; phone: string 
   const s = sellBillShopCache;
   return {
     name: s.pharmacy_name || s.shop_name || s.store_name || '',
-    phone: s.phone || s.shop_phone || '',
+    phone: s.phone || s.shop_phone || s.pharmacy_phone || '',
+    drugLicense: s.drug_license || s.shop_licence || s.license_number || s.dl_number || s.drug_licence_no || '',
+    gstin: s.gstin || '',
+    address: s.address || s.shop_address || '',
   };
 };
 
@@ -172,7 +175,11 @@ const Sells = () => {
   const [barcodeModalInvoice, setBarcodeModalInvoice] = useState<string | null>(null);
   const [barcodeData, setBarcodeData] = useState<{ invoiceNo: string; qrDataUrl: string; code128DataUrl: string; pdfUrl: string; barcodeText: string } | null>(null);
   const [loadingBarcode, setLoadingBarcode] = useState(false);
-  const [shopDetails, setShopDetails] = useState<{ name: string; phone: string }>({ name: '', phone: '' });
+  const [shopDetails, setShopDetails] = useState<{ name: string; phone: string; drugLicense?: string; gstin?: string; address?: string }>({ name: '', phone: '' });
+
+  useEffect(() => {
+    loadSellBillShopDetails().then(setShopDetails).catch(() => {});
+  }, []);
 
   const handleOpenBarcode = async (invoiceNo: string) => {
     setBarcodeModalInvoice(invoiceNo);
@@ -1548,8 +1555,15 @@ const Sells = () => {
         <div id="printable-sell-bill" data-print-root className="hidden">
           <div style={{ textAlign: 'center', marginBottom: '12px' }}>
             {shopDetails.name && <h2 style={{ fontSize: '18px', fontWeight: 'bold', margin: '0 0 2px 0', color: '#000' }}>{shopDetails.name}</h2>}
-            {shopDetails.phone && <p style={{ fontSize: '11px', color: '#444', margin: '0' }}>Ph: {shopDetails.phone}</p>}
-            <p style={{ fontSize: '12px', color: '#555', margin: '2px 0' }}>Tax Invoice / Retail Counter Receipt</p>
+            {shopDetails.address && <p style={{ fontSize: '10px', color: '#555', margin: '0' }}>{shopDetails.address}</p>}
+            <p style={{ fontSize: '11px', color: '#444', margin: '2px 0' }}>
+              {[
+                shopDetails.phone ? `Ph: ${shopDetails.phone}` : '',
+                shopDetails.drugLicense ? `D.L. No: ${shopDetails.drugLicense}` : '',
+                shopDetails.gstin ? `GSTIN: ${shopDetails.gstin}` : ''
+              ].filter(Boolean).join(' | ')}
+            </p>
+            <p style={{ fontSize: '12px', color: '#555', margin: '2px 0', fontWeight: 'bold' }}>Tax Invoice / Retail Counter Receipt</p>
             <div style={{ borderBottom: '1px solid #ddd', margin: '8px 0' }} />
           </div>
 

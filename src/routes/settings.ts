@@ -86,6 +86,14 @@ router.post('/', async (req, res) => {
       }
     }
 
+    // Synchronize drug licence alias keys
+    const licenceKeys = ['drug_license', 'shop_licence', 'license_number', 'dl_number', 'drug_licence_no'];
+    if (licenceKeys.includes(key) && saveValue) {
+      for (const lk of licenceKeys) {
+        await db.run('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)', [lk, saveValue]);
+      }
+    }
+
     res.json({ success: true, key, value: saveValue });
   } catch (error) {
     console.error('Settings save error:', error);
@@ -124,6 +132,13 @@ router.post('/save-single', async (req, res) => {
     if (phoneKeys.includes(key) && saveValue) {
       for (const pk of phoneKeys) {
         await db.run('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)', [pk, saveValue]);
+      }
+    }
+
+    const licenceKeys = ['drug_license', 'shop_licence', 'license_number', 'dl_number', 'drug_licence_no'];
+    if (licenceKeys.includes(key) && saveValue) {
+      for (const lk of licenceKeys) {
+        await db.run('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)', [lk, saveValue]);
       }
     }
 
@@ -200,6 +215,15 @@ router.post('/save', async (req, res) => {
             await upsertStmt.run(['phone', val]);
           }
         }
+
+        // Synchronize drug licence aliases if any drug licence key was provided
+        const licenceVal = payload['drug_license'] || payload['shop_licence'] || payload['license_number'] || payload['dl_number'] || payload['drug_licence_no'];
+        if (licenceVal !== undefined) {
+          const val = String(licenceVal).trim();
+          for (const lk of ['drug_license', 'shop_licence', 'license_number', 'dl_number', 'drug_licence_no']) {
+            await upsertStmt.run([lk, val]);
+          }
+        }
       } finally {
         await upsertStmt.finalize();
         await checkProtectedStmt.finalize();
@@ -258,8 +282,6 @@ router.post('/save', async (req, res) => {
 
       // A2: Upsert the owner contact atomically within the same transaction, mirroring the
       // upsert semantics of POST /api/contacts (src/routes/contacts.ts) for type='owner' —
-      // dedupe by phone+type first, then name+type; only overwrite fields with non-empty values.
-      // This replaces the frontend's separate api.saveContact(...) HTTP call.
       const ownerPhoneRaw = payload['owner_whatsapp_number'] || payload['phone'];
       if (ownerPhoneRaw !== undefined && String(ownerPhoneRaw).trim() !== '') {
         const ownerName = String(
@@ -376,6 +398,21 @@ router.post('/save', async (req, res) => {
   }
 });
 
+// Get stamp status & preview
+router.get('/stamp', async (_req, res) => {
+  try {
+    const stampPath = path.join(UPLOADS_DIR, 'custom_stamp.png');
+    if (fs.existsSync(stampPath)) {
+      const data = fs.readFileSync(stampPath);
+      const base64 = `data:image/png;base64,${data.toString('base64')}`;
+      return res.json({ exists: true, dataUrl: base64 });
+    }
+    res.json({ exists: false });
+  } catch (err: any) {
+    res.status(500).json({ error: 'Failed to read stamp status' });
+  }
+});
+
 // Upload custom stamp (base64 transparent PNG)
 router.post('/upload-stamp', async (req, res) => {
   try {
@@ -383,7 +420,7 @@ router.post('/upload-stamp', async (req, res) => {
     if (!image) return res.status(400).json({ error: 'Image data required' });
 
     // Clean base64 header
-    const base64Data = image.replace(/^data:image\/png;base64,/, "");
+    const base64Data = image.replace(/^data:image\/[a-zA-Z]+;base64,/, "");
     const buffer = Buffer.from(base64Data, 'base64');
 
     if (!fs.existsSync(UPLOADS_DIR)) {
@@ -403,6 +440,36 @@ router.post('/upload-stamp', async (req, res) => {
   }
 });
 
+// Delete custom stamp
+router.delete('/stamp', async (_req, res) => {
+  try {
+    const stampPath = path.join(UPLOADS_DIR, 'custom_stamp.png');
+    if (fs.existsSync(stampPath)) {
+      fs.unlinkSync(stampPath);
+    }
+    const db = await dbManager.getConnection();
+    await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('use_custom_stamp', 'false')");
+    res.json({ success: true, message: 'Custom stamp removed' });
+  } catch (err: any) {
+    res.status(500).json({ error: 'Failed to delete stamp' });
+  }
+});
+
+// Get signature status & preview
+router.get('/signature', async (_req, res) => {
+  try {
+    const sigPath = path.join(UPLOADS_DIR, 'custom_signature.png');
+    if (fs.existsSync(sigPath)) {
+      const data = fs.readFileSync(sigPath);
+      const base64 = `data:image/png;base64,${data.toString('base64')}`;
+      return res.json({ exists: true, dataUrl: base64 });
+    }
+    res.json({ exists: false });
+  } catch (err: any) {
+    res.status(500).json({ error: 'Failed to read signature status' });
+  }
+});
+
 // Upload custom signature (base64 transparent PNG)
 router.post('/upload-signature', async (req, res) => {
   try {
@@ -410,7 +477,7 @@ router.post('/upload-signature', async (req, res) => {
     if (!image) return res.status(400).json({ error: 'Image data required' });
 
     // Clean base64 header
-    const base64Data = image.replace(/^data:image\/png;base64,/, "");
+    const base64Data = image.replace(/^data:image\/[a-zA-Z]+;base64,/, "");
     const buffer = Buffer.from(base64Data, 'base64');
 
     if (!fs.existsSync(UPLOADS_DIR)) {
@@ -427,6 +494,21 @@ router.post('/upload-signature', async (req, res) => {
   } catch (err: any) {
     console.error('Upload signature error:', err);
     res.status(500).json({ error: 'Failed to upload signature' });
+  }
+});
+
+// Delete custom signature
+router.delete('/signature', async (_req, res) => {
+  try {
+    const sigPath = path.join(UPLOADS_DIR, 'custom_signature.png');
+    if (fs.existsSync(sigPath)) {
+      fs.unlinkSync(sigPath);
+    }
+    const db = await dbManager.getConnection();
+    await db.run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('use_custom_signature', 'false')");
+    res.json({ success: true, message: 'Custom signature removed' });
+  } catch (err: any) {
+    res.status(500).json({ error: 'Failed to delete signature' });
   }
 });
 
@@ -842,6 +924,100 @@ router.delete('/storage-locations/:id', async (req, res) => {
   } catch (error) {
     console.error('Failed to delete storage location:', error);
     res.status(500).json({ error: 'Failed to delete storage location' });
+  }
+});
+
+// Custom Stamp Endpoints
+router.get('/stamp', async (_req, res) => {
+  try {
+    const stampPath = path.join(UPLOADS_DIR, 'custom_stamp.png');
+    if (fs.existsSync(stampPath)) {
+      const buffer = fs.readFileSync(stampPath);
+      const dataUrl = `data:image/png;base64,${buffer.toString('base64')}`;
+      return res.json({ exists: true, dataUrl });
+    }
+    res.json({ exists: false, dataUrl: null });
+  } catch (error) {
+    console.error('Failed to get stamp:', error);
+    res.status(500).json({ error: 'Failed to retrieve stamp' });
+  }
+});
+
+router.post('/upload-stamp', async (req, res) => {
+  try {
+    const { image } = req.body;
+    if (!image) return res.status(400).json({ error: 'Image data required' });
+    if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+
+    const base64Data = image.replace(/^data:image\/\w+;base64,/, '');
+    const buffer = Buffer.from(base64Data, 'base64');
+    const stampPath = path.join(UPLOADS_DIR, 'custom_stamp.png');
+    fs.writeFileSync(stampPath, buffer);
+
+    res.json({ success: true, message: 'Stamp uploaded successfully' });
+  } catch (error) {
+    console.error('Failed to upload stamp:', error);
+    res.status(500).json({ error: 'Failed to save stamp image' });
+  }
+});
+
+router.delete('/stamp', async (_req, res) => {
+  try {
+    const stampPath = path.join(UPLOADS_DIR, 'custom_stamp.png');
+    if (fs.existsSync(stampPath)) {
+      fs.unlinkSync(stampPath);
+    }
+    res.json({ success: true, message: 'Stamp deleted successfully' });
+  } catch (error) {
+    console.error('Failed to delete stamp:', error);
+    res.status(500).json({ error: 'Failed to delete stamp' });
+  }
+});
+
+// Custom Signature Endpoints
+router.get('/signature', async (_req, res) => {
+  try {
+    const sigPath = path.join(UPLOADS_DIR, 'custom_signature.png');
+    if (fs.existsSync(sigPath)) {
+      const buffer = fs.readFileSync(sigPath);
+      const dataUrl = `data:image/png;base64,${buffer.toString('base64')}`;
+      return res.json({ exists: true, dataUrl });
+    }
+    res.json({ exists: false, dataUrl: null });
+  } catch (error) {
+    console.error('Failed to get signature:', error);
+    res.status(500).json({ error: 'Failed to retrieve signature' });
+  }
+});
+
+router.post('/upload-signature', async (req, res) => {
+  try {
+    const { image } = req.body;
+    if (!image) return res.status(400).json({ error: 'Image data required' });
+    if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+
+    const base64Data = image.replace(/^data:image\/\w+;base64,/, '');
+    const buffer = Buffer.from(base64Data, 'base64');
+    const sigPath = path.join(UPLOADS_DIR, 'custom_signature.png');
+    fs.writeFileSync(sigPath, buffer);
+
+    res.json({ success: true, message: 'Signature uploaded successfully' });
+  } catch (error) {
+    console.error('Failed to upload signature:', error);
+    res.status(500).json({ error: 'Failed to save signature image' });
+  }
+});
+
+router.delete('/signature', async (_req, res) => {
+  try {
+    const sigPath = path.join(UPLOADS_DIR, 'custom_signature.png');
+    if (fs.existsSync(sigPath)) {
+      fs.unlinkSync(sigPath);
+    }
+    res.json({ success: true, message: 'Signature deleted successfully' });
+  } catch (error) {
+    console.error('Failed to delete signature:', error);
+    res.status(500).json({ error: 'Failed to delete signature' });
   }
 });
 
