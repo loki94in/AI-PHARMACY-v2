@@ -65,10 +65,40 @@ export class WhatsappInvoiceService {
       let caption = `Dear ${invoice.customer_name || 'Customer'},\n\n`;
       if (invoice.payment_medium === 'CREDIT' || invoice.payment_status === 'UNPAID') {
         const totalDues = Number(invoice.credit_balance !== undefined && invoice.credit_balance !== null ? invoice.credit_balance : (invoice.total_amount || 0));
+        
+        let recentBillsText = '';
+        if (invoice.customer_id) {
+          try {
+            const creditRows = await db.all(
+              `SELECT id, invoice_no, date, total_amount 
+               FROM sales_invoices 
+               WHERE customer_id = ? AND (payment_medium = 'CREDIT' OR payment_status IN ('UNPAID', 'PENDING'))
+               ORDER BY id DESC LIMIT 4`,
+              [invoice.customer_id]
+            );
+            if (creditRows && creditRows.length > 0) {
+              recentBillsText += `📜 *Recent Credit Bills (Last ${creditRows.length}):*\n`;
+              creditRows.forEach((r: any, idx: number) => {
+                const rDate = formatDate(r.date);
+                const isCurrent = r.id === invoiceId || r.invoice_no === invoice.invoice_no;
+                recentBillsText += `${idx + 1}. *#${r.invoice_no}* (${rDate}) — ₹${Number(r.total_amount || 0).toFixed(2)}${isCurrent ? ' [Current]' : ''}\n`;
+              });
+              recentBillsText += `\n`;
+            }
+          } catch (histErr) {
+            console.warn('[WhatsappInvoiceService] Could not fetch recent credit bills history:', histErr);
+          }
+        }
+
         caption += `📌 *Credit Purchase Bill & Account Summary*\n\n`;
         caption += `🧾 *Current Bill (#${invoice.invoice_no})*\n`;
         caption += `• Date: *${formattedDate}*\n`;
+        caption += `• Bill Amount: *₹${Number(invoice.total_amount || 0).toFixed(2)}*\n\n`;
+        if (recentBillsText) {
+          caption += recentBillsText;
+        }
         caption += `💰 *Total Outstanding Balance: ₹${totalDues.toFixed(2)}*\n\n`;
+        caption += `📎 Detailed medicine invoice is attached in the PDF above.\n`;
         caption += `This bill has been posted to your credit ledger account.\n`;
       } else {
         caption += `📄 *Sale Invoice: #${invoice.invoice_no}*\n`;

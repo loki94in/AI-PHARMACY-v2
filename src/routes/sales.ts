@@ -695,14 +695,41 @@ router.post('/', async (req, res) => {
 
               const todayStr = formatDate(invoiceDateValue);
 
+              // Retrieve recent credit bills history (last 4 credit invoices)
+              let recentBillsText = '';
+              try {
+                let creditRows: any[] = [];
+                if (customerId) {
+                  creditRows = await db.all(
+                    `SELECT id, invoice_no, date, total_amount 
+                     FROM sales_invoices 
+                     WHERE customer_id = ? AND (payment_medium = 'CREDIT' OR payment_status IN ('UNPAID', 'PENDING'))
+                     ORDER BY id DESC LIMIT 4`,
+                    [customerId]
+                  );
+                }
+                if (creditRows && creditRows.length > 0) {
+                  recentBillsText += `📜 *Recent Credit Bills (Last ${creditRows.length}):*\n`;
+                  creditRows.forEach((r: any, idx: number) => {
+                    const rDate = formatDate(r.date);
+                    const isCurrent = r.id === invoiceId || r.invoice_no === invoice_no;
+                    recentBillsText += `${idx + 1}. *#${r.invoice_no}* (${rDate}) — ₹${Number(r.total_amount || 0).toFixed(2)}${isCurrent ? ' [Current]' : ''}\n`;
+                  });
+                  recentBillsText += `\n`;
+                }
+              } catch (histErr) {
+                console.warn('[POS WhatsApp] Could not fetch recent credit bills history:', histErr);
+              }
+
               waMsg += `📌 *Credit Purchase Bill & Account Summary*\n\n`;
               waMsg += `🧾 *Current Bill (#${invoice_no})*\n`;
               waMsg += `• Date: *${todayStr}*\n`;
-              if (itemLines) {
-                waMsg += `\n${itemLines}`;
+              waMsg += `• Bill Amount: *₹${Number(total).toFixed(2)}*\n\n`;
+              if (recentBillsText) {
+                waMsg += recentBillsText;
               }
-              waMsg += `• Bill Amount: *₹${Number(total).toFixed(2)}*\n`;
               waMsg += `💰 *Total Outstanding Balance: ₹${finalOutstanding.toFixed(2)}*\n\n`;
+              waMsg += `📎 Detailed medicine invoice is attached in the PDF above.\n`;
               waMsg += `This bill has been posted to your credit ledger account.\n`;
             } else {
               waMsg += `🧾 *Sale Invoice: #${invoice_no}*\n`;
