@@ -1,4 +1,5 @@
 import { dbManager } from '../database/connection.js';
+import { formatCustomerName } from '../utils/nameFormatter.js';
 
 /**
  * Resolves the user-configured pharmacy name from app_settings.
@@ -247,7 +248,7 @@ export async function buildOrderReadyNotificationMessage(
 ): Promise<string> {
   const storeName = await getStoreMedicalName(dbInstance);
   const storePhone = await getStorePhone(dbInstance);
-  const name = (requesterName || 'Customer').trim();
+  const name = formatCustomerName(requesterName);
   const phone = storePhone ? storePhone.trim() : '';
 
   if (lang === 'hi') {

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { X, QrCode, RefreshCw, AlertCircle, Copy, Check, Smartphone, Edit2, Save, Wifi, WifiOff, Download } from 'lucide-react';
 import { api } from '../services/api';
+import { useModalEscape } from '../services/keyboardShortcuts';
 
 interface DeviceItem {
   token: string;
@@ -73,15 +74,8 @@ export const MobileConnectionModal: React.FC<Props> = ({ onClose }) => {
     return () => clearInterval(interval);
   }, []);
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
+  // Universal Escape key dismissal
+  useModalEscape(true, onClose);
 
   const copyToClipboard = (url: string) => {
     navigator.clipboard.writeText(url);

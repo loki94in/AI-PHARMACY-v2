@@ -1,6 +1,7 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
 import { X, ShieldCheck, AlertTriangle, Sparkles, SearchCheck, CheckCircle2 } from 'lucide-react';
+import { useModalEscape } from '../services/keyboardShortcuts';
 
 export interface SaveVerificationData {
   distributor: string;
@@ -22,6 +23,7 @@ interface Props {
 }
 
 export const PurchaseSaveVerificationModal: React.FC<Props> = ({ data, saving, onConfirm, onClose }) => {
+  useModalEscape(true, onClose);
   const hasIssues = data.unresolved.length > 0;
 
   return createPortal(

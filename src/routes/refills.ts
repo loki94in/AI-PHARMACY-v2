@@ -11,6 +11,7 @@ import { getMessage } from '../i18n/getMessage.js';
 import { getConfiguredPharmacyName } from '../services/storeSettingsService.js';
 import { eventService } from '../services/eventService.js';
 import { getAppDataDir } from '../config/index.js';
+import { formatCustomerName } from '../utils/nameFormatter.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -73,7 +74,7 @@ export function buildRefillReminderMessage(
   lang: string = 'en',
   dueDateStr?: string
 ): string {
-  const pName = (patientName || 'Customer').trim();
+  const pName = formatCustomerName(patientName);
   const cleanLang = (lang || 'en').toLowerCase();
 
   if (cleanLang === 'hi') {
@@ -116,7 +117,7 @@ router.post('/', async (req, res) => {
 
     // Resolve or auto-create customer profile in customers table
     const cleanPhone = (patient_phone || '').trim();
-    const cleanName = (patient_name || 'Customer').trim();
+    const cleanName = formatCustomerName(patient_name);
     const cleanLang = (language || 'en').trim();
     let customerId = req.body.customer_id || null;
     if (!customerId && (cleanPhone || cleanName)) {

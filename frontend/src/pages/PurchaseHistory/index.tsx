@@ -13,6 +13,7 @@ import { VirtualRow } from '../../components/VirtualRow';
 import { InfiniteScrollStatus } from '../../components/InfiniteScrollStatus';
 import { exportToCSV, exportToPDF } from '../../utils/export';
 import { toastEvent } from '../../services/events';
+import { useModalEscape } from '../../services/keyboardShortcuts';
 
 interface LocalPurchaseItem {
   medicine_id?: number | null;
@@ -199,6 +200,10 @@ const PurchaseHistory = () => {
   const [selectedOrder, setSelectedOrder] = useState<LocalReconRow | null>(null);
   const [reissuingUid, setReissuingUid] = useState<number | null>(null);
   const [viewPurchase, setViewPurchase] = useState<LocalViewedPurchase | null>(null);
+
+  // Universal Escape key dismissal for Purchase History modals
+  useModalEscape(!!selectedOrder, () => setSelectedOrder(null));
+  useModalEscape(!!viewPurchase, () => setViewPurchase(null));
   const [generatingBarcodeId, setGeneratingBarcodeId] = useState<number | null>(null);
   const [generatingItemIndex, setGeneratingItemIndex] = useState<number | null>(null);
   const [billBarcode, setBillBarcode] = useState<{ billNo: string; barcodeText: string; qrDataUrl: string; code128DataUrl: string; pdfUrl: string } | null>(null);

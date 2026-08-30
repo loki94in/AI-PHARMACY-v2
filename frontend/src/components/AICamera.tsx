@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Camera, X, ScanLine, Loader2 } from 'lucide-react';
 import { apiClient } from '../services/api';
+import { useModalEscape } from '../services/keyboardShortcuts';
 
 interface LocalScanMedicineInfo {
   potentialName?: string;
@@ -31,6 +32,7 @@ interface AICameraProps {
 }
 
 const AICamera: React.FC<AICameraProps> = ({ onScanResult, onClose }) => {
+  useModalEscape(true, onClose);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [, setStream] = useState<MediaStream | null>(null);

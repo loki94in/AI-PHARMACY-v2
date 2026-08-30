@@ -19,6 +19,7 @@ import { api } from '../../services/api';
 import { useQueryClient } from '@tanstack/react-query';
 import { useApiQuery } from '../../hooks/useApiQuery';
 import { invalidateAfterStockWrite } from '../../utils/cacheInvalidation';
+import { useModalEscape } from '../../services/keyboardShortcuts';
 
 interface LocalExpiryAuditRow {
   id: number;
@@ -109,6 +110,12 @@ export const ExpiryReturnReview: React.FC<{ onPendingCountChange?: (count: numbe
   const [showBulkApproveModal, setShowBulkApproveModal] = useState(false);
   const [bulkLossPercentage, setBulkLossPercentage] = useState<string>('0');
   const [bulkError, setBulkError] = useState('');
+
+  // Universal Escape key dismissal for Expiry Return Review modals
+  useModalEscape(!!approvingItem, () => setApprovingItem(null));
+  useModalEscape(showBulkApproveModal, () => setShowBulkApproveModal(false));
+  useModalEscape(!!rejectingItem, () => setRejectingItem(null));
+  useModalEscape(showAuditModal, () => setShowAuditModal(false));
 
   // Filtered reviews via react-query (canonical 'expiry-reviews' SSE key).
   // Module caches seed/absorb data so remounts paint instantly.

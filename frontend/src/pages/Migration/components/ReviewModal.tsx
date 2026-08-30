@@ -7,6 +7,7 @@ import { ModuleSection } from './ModuleSection';
 import { api } from '../../../services/api';
 import { invalidateAfterStockWrite } from '../../../utils/cacheInvalidation';
 import { toDateInputValue } from '../../../utils/date';
+import { useModalEscape } from '../../../services/keyboardShortcuts';
 
 interface FileEntry {
   uploadedFileName: string;
@@ -94,6 +95,7 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
   fileEntry,
   onUpdateFile
 }) => {
+  useModalEscape(isOpen, onClose);
   const queryClient = useQueryClient();
   const [phase, setPhase] = useState<ModalPhase>('review');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);

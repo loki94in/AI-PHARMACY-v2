@@ -8,6 +8,7 @@ import {
 import { api, apiClient, peekWhatsAppQueueStatusCache, type WhatsAppQueueItem, type WhatsAppQueueStatus } from '../services/api';
 import { toastEvent, whatsappQueueEvent, messageSendEvent, automationHubEvent } from '../services/events';
 import { getFormattedFailureReason } from '../utils/whatsappFailureReason';
+import { useModalEscape } from '../services/keyboardShortcuts';
 
 type QueueItem = WhatsAppQueueItem;
 
@@ -45,6 +46,7 @@ let cachedDelayDistributor = 0;
 let cachedDelayDeliveryBoy = 0;
 
 export const WhatsAppQueuePopover: React.FC<WhatsAppQueuePopoverProps> = ({ onClose }) => {
+  useModalEscape(true, onClose);
   const [queueState, setQueueState] = useState<LocalQueueState | null>(() => cachedQueueState);
   const [loading, setLoading] = useState(() => !cachedQueueState);
   const [activeTab, setActiveTab] = useState<TabType>('all');

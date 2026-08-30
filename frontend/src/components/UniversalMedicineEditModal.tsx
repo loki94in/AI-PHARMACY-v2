@@ -9,6 +9,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { invalidateAfterStockWrite } from '../utils/cacheInvalidation';
 import { toastEvent } from '../services/events';
 import { parsePackSizeFromPackaging } from '../utils/packagingMatcher';
+import { useModalEscape } from '../services/keyboardShortcuts';
 
 const splitMedicineName = (name: string, packaging: string) => {
   const trimmedName = name.trim();
@@ -488,15 +489,8 @@ const UniversalMedicineEditModalInner: React.FC<UniversalMedicineEditModalProps>
   // eslint-disable-next-line react-hooks/exhaustive-deps -- hydrate once per medicine; initialData/ocrData would restart mid-edit
   }, [medicineId, isCreateMode]);
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
+  // Universal Escape key dismissal
+  useModalEscape(true, onClose);
 
   useEffect(() => {
     if (loading) return;

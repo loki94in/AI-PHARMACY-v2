@@ -26,7 +26,7 @@ import {
 import { api, apiClient, type PharmarackSentOrder } from '../../services/api';
 import type { Doctor } from '../../types/api';
 import { toastEvent } from '../../services/events';
-import {} from '../../services/keyboardShortcuts';
+import { useModalEscape } from '../../services/keyboardShortcuts';
 import { useApiQuery } from '../../hooks/useApiQuery';
 import { formatDisplayDate } from '../../utils/date';
 import { useQueryClient } from '@tanstack/react-query';
@@ -173,6 +173,12 @@ const Learning: React.FC = () => {
   } | null>(null);
   const [isSavingDoctor, setIsSavingDoctor] = useState(false);
   const [shakeEditDoctorPhone, setShakeEditDoctorPhone] = useState(false);
+
+  // Universal Escape key dismissal for Learning modals
+  useModalEscape(showAddDistributorModal, () => setShowAddDistributorModal(false));
+  useModalEscape(showMergeModal, () => setShowMergeModal(false));
+  useModalEscape(!!editingDistributor, () => setEditingDistributor(null));
+  useModalEscape(!!editingDoctor, () => setEditingDoctor(null));
 
   const handleOpenEditDistributor = async (p: LearningProfileSummary) => {
     let mappingStr = '{}';

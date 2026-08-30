@@ -17,6 +17,7 @@ import { VirtualRow } from '../../components/VirtualRow';
 import { InfiniteScrollStatus } from '../../components/InfiniteScrollStatus';
 import { exportToCSV, exportToPDF } from '../../utils/export';
 import { printCurrentBill } from '../../utils/printBill';
+import { useModalEscape } from '../../services/keyboardShortcuts';
 
 interface SaleItem {
   id: number;
@@ -173,6 +174,12 @@ const Sells = () => {
 
   // Barcode state (invoice-level only — product labels belong to Purchase History)
   const [barcodeModalInvoice, setBarcodeModalInvoice] = useState<string | null>(null);
+
+  // Universal Escape key dismissal for Sells modals
+  useModalEscape(!!editInvoice, () => setEditInvoice(null));
+  useModalEscape(!!viewInvoice, () => setViewInvoice(null));
+  useModalEscape(!!barcodeModalInvoice, () => setBarcodeModalInvoice(null));
+  useModalEscape(panelOpen, () => setPanelOpen(false));
   const [barcodeData, setBarcodeData] = useState<{ invoiceNo: string; qrDataUrl: string; code128DataUrl: string; pdfUrl: string; barcodeText: string } | null>(null);
   const [loadingBarcode, setLoadingBarcode] = useState(false);
   const [shopDetails, setShopDetails] = useState<{ name: string; phone: string; drugLicense?: string; gstin?: string; address?: string }>({ name: '', phone: '' });

@@ -17,6 +17,7 @@ import {
   } from 'lucide-react';
 import { apiClient } from '../services/api';
 import { toastEvent } from '../services/events';
+import { useModalEscape } from '../services/keyboardShortcuts';
 
 interface LocalApiErrorShape {
   response?: { data?: { error?: string } };
@@ -526,16 +527,8 @@ const BackupCenterModal: React.FC<BackupCenterModalProps> = ({
   onClose,
   isStartupMode = false,
 }) => {
-  useEffect(() => {
-    if (!isOpen) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
+  // Universal Escape key dismissal
+  useModalEscape(isOpen, onClose);
 
   if (!isOpen) return null;
 

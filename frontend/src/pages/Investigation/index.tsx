@@ -37,6 +37,7 @@ import { InfiniteTable } from '../../components/InfiniteTable';
 import { VirtualRow } from '../../components/VirtualRow';
 import { InfiniteScrollStatus } from '../../components/InfiniteScrollStatus';
 import { exportToCSV, exportToPDF } from '../../utils/export';
+import { useModalEscape } from '../../services/keyboardShortcuts';
 
 interface SelectedDetails {
   inventory: {
@@ -279,6 +280,9 @@ const InvestigationCenter = () => {
     confirmText?: string;
     onConfirm: () => void | Promise<void>;
   } | null>(null);
+
+  // Universal Escape key dismissal for Investigation modal
+  useModalEscape(!!(confirmModal && confirmModal.show), () => setConfirmModal(null));
 
   const [isSaving, setIsSaving] = useState(false);
 

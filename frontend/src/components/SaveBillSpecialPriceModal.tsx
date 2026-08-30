@@ -5,6 +5,7 @@ import { Tag, X, Percent, TrendingUp, Sparkles, Check } from 'lucide-react';
 import { api } from '../services/api';
 import { invalidateAfterPriceWrite } from '../utils/cacheInvalidation';
 import { toastEvent } from '../services/events';
+import { useModalEscape } from '../services/keyboardShortcuts';
 
 export interface BillItemForPriceConfig {
   medicine_id?: number | null;
@@ -76,6 +77,7 @@ export const SaveBillSpecialPriceModal: React.FC<SaveBillSpecialPriceModalProps>
   items,
   onSaveComplete
 }) => {
+  useModalEscape(isOpen, onClose);
   const queryClient = useQueryClient();
   const [rows, setRows] = useState<PriceRow[]>([]);
   const [batchDiscount, setBatchDiscount] = useState<string>('10');

@@ -46,7 +46,7 @@ import {
   MessageSquareText,
   Zap,
 } from 'lucide-react';
-import { shortcutEvent, SHORTCUT_DIRECTORY } from '../services/keyboardShortcuts';
+import { shortcutEvent, SHORTCUT_DIRECTORY, modalManager, useModalEscape } from '../services/keyboardShortcuts';
 import {
   ChevronLeft as ChevronLeftIcon,
   ChevronRight as ChevronRightIcon,
@@ -1505,10 +1505,23 @@ const Topbar = memo(({
 
       // 2. Intercept Escape globally
       if (e.key === 'Escape') {
+        // Priority 1: Dismiss topmost open modal or popup
+        if (modalManager.handleEscape()) {
+          e.preventDefault();
+          e.stopPropagation();
+          e.stopImmediatePropagation();
+          return;
+        }
+
+        // Priority 2: Dismiss shortcuts cheat sheet
         if (showShortcutHelp) {
+          e.preventDefault();
+          e.stopPropagation();
           setShowShortcutHelp(false);
           return;
         }
+
+        // Priority 3: Dismiss popovers and activity panel
         setShowPanel(false);
         setShowDevicesPopover(false);
         shortcutEvent.triggerCloseModal();
@@ -3711,6 +3724,7 @@ const KeyboardShortcutsModal = ({
   isOpen: boolean;
   onClose: () => void;
 }) => {
+  useModalEscape(isOpen, onClose, 10);
   const [filterCategory, setFilterCategory] = useState<string>('All');
   if (!isOpen) return null;
 

@@ -9,6 +9,7 @@ import { whatsappQueueWorker } from '../services/whatsappQueueWorker.js';
 import { pdfInvoiceService } from '../services/pdfInvoiceService.js';
 import { eventService } from '../services/eventService.js';
 import { getAppDataDir } from '../config/index.js';
+import { formatCustomerName } from '../utils/nameFormatter.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -77,7 +78,7 @@ router.post('/batch', async (req, res) => {
     await initOrdersTable(db);
     
     const cleanPhone = phone ? String(phone).replace(/\D/g, '') : '';
-    const cleanReqName = (requester || 'Customer').trim();
+    const cleanReqName = formatCustomerName(requester);
     const todayStr = new Date().toISOString();
     const insertedOrders: Array<{ id: number; product: string; qty: number }> = [];
 
@@ -252,16 +253,28 @@ router.post('/', async (req, res) => {
       const formattedPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
       const medicalName = await getStoreMedicalNameAndPhone(db);
       const advMsg = advance_payment && Number(advance_payment) > 0 ? ` (Advance Paid: ₹${Number(advance_payment).toFixed(2)})` : '';
-      const msg = `Hi ${requester.trim()}, your order for ${medName} (Qty: ${qty})${advMsg} has been booked at ${medicalName}. We will notify you when it arrives.`;
+      const cleanReqName = formatCustomerName(requester);
+      
+      const custRow = await db.get('SELECT language FROM customers WHERE phone = ? LIMIT 1', [cleanPhone]);
+      const lang = req.body.language || custRow?.language || 'en';
+
+      let msg = '';
+      if (lang === 'hi') {
+        msg = `नमस्ते ${cleanReqName}, ${medicalName} पर आपकी ${medName}${advMsg} का ऑर्डर बुक कर लिया गया है। दवाई आने पर हम आपको सूचित करेंगे।`;
+      } else if (lang === 'mr') {
+        msg = `नमस्कार ${cleanReqName}, ${medicalName} येथे आपली ${medName}${advMsg} ची ऑर्डर बुक करण्यात आली आहे. औषध आल्यावर आम्ही आपल्याला कळवू.`;
+      } else {
+        msg = `Hi ${cleanReqName}, your order for ${medName}${advMsg} has been booked at ${medicalName}. We will notify you when it arrives.`;
+      }
       
       try {
-        await whatsappQueueWorker.enqueue(formattedPhone, msg, 'special_order', requester.trim());
-        console.log(`Special order confirmation WhatsApp queued for ${requester}`);
+        await whatsappQueueWorker.enqueue(formattedPhone, msg, 'special_order', cleanReqName);
+        console.log(`Special order confirmation WhatsApp queued for ${cleanReqName}`);
         
         await db.run(
           `INSERT INTO automation_notifications (type, recipient_name, recipient_phone, message, status, reference_id)
            VALUES (?, ?, ?, ?, ?, ?)`,
-          ['quick_order', requester.trim(), formattedPhone, msg, 'queued', String(result.lastID)]
+          ['quick_order', cleanReqName, formattedPhone, msg, 'queued', String(result.lastID)]
         );
       } catch (waErr: any) {
         console.error('Failed to queue special order confirmation WhatsApp:', waErr);
@@ -417,7 +430,7 @@ router.post('/:id/resend-booking', async (req, res) => {
     const custRow = await db.get('SELECT language FROM customers WHERE phone = ? LIMIT 1', [cleanPhone]);
     const lang = order.language || custRow?.language || 'en';
     const medicalName = await getStoreMedicalNameAndPhone(db);
-    const cleanReqName = (order.requester || '').trim();
+    const cleanReqName = formatCustomerName(order.requester);
     const advMsg = order.advance_payment && Number(order.advance_payment) > 0 ? ` (Advance Paid: ₹${Number(order.advance_payment).toFixed(2)})` : '';
     
     let msg = '';

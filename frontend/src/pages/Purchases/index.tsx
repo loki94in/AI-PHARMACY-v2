@@ -20,6 +20,7 @@ import { PhoneInputWithBadge } from '../../components/PhoneInputWithBadge';
 import { SaveBillSpecialPriceModal } from '../../components/SaveBillSpecialPriceModal';
 import { isValidDistributorName } from '../../utils/distributorValidator';
 import { rankAndSortMedicines } from '../../utils/searchRanker';
+import { useModalEscape } from '../../services/keyboardShortcuts';
 
 /* eslint-disable react-hooks/refs -- conditional JSX ref assignment is standard React pattern */
 
@@ -1292,6 +1293,10 @@ const Purchases: React.FC = () => {
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [schemeMatchStatus, setSchemeMatchStatus] = useState<{ [key: string]: string }>({});
   const [showDistributorModal, setShowDistributorModal] = useState(false);
+
+  // Universal Escape key dismissal for Purchases modals
+  useModalEscape(showUploadModal, () => setShowUploadModal(false));
+  useModalEscape(showDistributorModal, () => setShowDistributorModal(false));
   const [editDistributorId, setEditDistributorId] = useState<number | null>(null);
   const [newDistributor, setNewDistributor] = useState({
     name: '',

@@ -11,6 +11,7 @@ import CatalogUpload from '../CatalogUpload';
 import { formatDisplayDate } from '../../utils/date';
 import { invalidateAfterStockWrite } from '../../utils/cacheInvalidation';
 import { toastEvent } from '../../services/events';
+import { useModalEscape } from '../../services/keyboardShortcuts';
 
 interface MedicineRow {
   id: number;
@@ -176,6 +177,10 @@ const DatabasePage = () => {
   const [priceHistory, setPriceHistory] = useState<LocalPriceHistoryRow[]>([]);
   const [priceHistoryMedicine, setPriceHistoryMedicine] = useState('');
   const [loadingHistory, setLoadingHistory] = useState(false);
+
+  // Universal Escape key dismissal for Database modals
+  useModalEscape(showPriceHistoryModal, () => setShowPriceHistoryModal(false));
+  useModalEscape(showBulkAddModal, () => setShowBulkAddModal(false));
 
   const handleSellMedicine = async (item: MedicineRow) => {
     try {

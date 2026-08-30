@@ -123,12 +123,13 @@ export const PhoneInputWithBadge: React.FC<PhoneInputWithBadgeProps> = ({
           className={`
             w-full bg-bg border rounded-xl px-3.5 py-2.5 text-xs text-text placeholder:text-muted/60
             focus:outline-none transition-all duration-200
+            ${!label ? 'pr-28' : ''}
             ${borderClass}
             ${disabled ? 'opacity-50 cursor-not-allowed' : ''}
           `}
         />
         {!label && (
-          <span className={`absolute right-2 text-[10px] px-2 py-0.5 rounded-md border transition-all ${badgeColor}`}>
+          <span className={`absolute right-2 text-[10px] px-2 py-0.5 rounded-md border pointer-events-none select-none transition-all ${badgeColor}`}>
             {badgeText}
           </span>
         )}

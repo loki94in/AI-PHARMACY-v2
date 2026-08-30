@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { X, Search, Plus, Minus, Sparkles, Loader2, ShoppingCart, RefreshCw, AlertCircle, EyeOff, Ban, Package, CheckCircle2, RotateCcw, Store, Tag, Zap } from 'lucide-react';
 import { api, type SpecialOrder, type Refill } from '../services/api';
 import { toastEvent } from '../services/events';
+import { useModalEscape } from '../services/keyboardShortcuts';
 
 import { findBestCartMatchForOrder } from '../utils/orderFuzzyMatcher';
 
@@ -953,17 +954,8 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
     return () => clearTimeout(timer);
   }, []);
 
-  // Listen to Escape key to close
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isOpen) {
-        handleClose();
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
+  // Universal Escape key dismissal
+  useModalEscape(isOpen, handleClose);
 
   // Handle clicking outside to dismiss search results
   useEffect(() => {

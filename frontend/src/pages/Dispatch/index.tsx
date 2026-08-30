@@ -41,6 +41,7 @@ import { broadcastContactDataChanged } from '../../utils/settingsSync';
 import { usePageActive } from '../../lib/keepAlive/PageActiveContext';
 import { sanitizePhoneInput } from '../../utils/phone';
 import { toDateInputValue } from '../../utils/date';
+import { useModalEscape } from '../../services/keyboardShortcuts';
 
 interface DispatchOrder {
   id: number;
@@ -159,6 +160,12 @@ const Dispatch = () => {
   const [manualDistributorPhone, setManualDistributorPhone] = useState('');
   const [manualDeliveryBoyId, setManualDeliveryBoyId] = useState<number | null>(null);
   const [savingManualOrder, setSavingManualOrder] = useState(false);
+
+  // Universal Escape key dismissal for Dispatch modals
+  useModalEscape(showModal, () => setShowModal(false));
+  useModalEscape(showBoysModal, () => setShowBoysModal(false));
+  useModalEscape(showTemplateModal, () => setShowTemplateModal(false));
+  useModalEscape(showManualOrderModal, () => setShowManualOrderModal(false));
 
   const handleCreateManualOrder = async () => {
     if (!manualDistributorName.trim()) {

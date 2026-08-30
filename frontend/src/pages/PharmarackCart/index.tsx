@@ -12,6 +12,7 @@ import { PharmarackCartCalendar } from '../../components/PharmarackCartCalendar'
 import { usePageActive } from '../../lib/keepAlive/PageActiveContext';
 import { broadcastContactDataChanged } from '../../utils/settingsSync';
 import { formatPackagingAndUnit } from '../../utils/packagingMatcher';
+import { useModalEscape } from '../../services/keyboardShortcuts';
 
 interface CartLineItem {
   productId: number | null;
@@ -1046,16 +1047,11 @@ export default function PharmarackCart() {
     return hasActiveBoys || hasSettingsBoys;
   };
 
-  useEffect(() => {
-    if (!editingDistributor) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setEditingDistributor(null);
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [editingDistributor]);
+  // Universal Escape key dismissal for Pharmarack Cart modals
+  useModalEscape(!!editingDistributor, () => setEditingDistributor(null));
+  useModalEscape(!!switchModalTarget, () => setSwitchModalTarget(null));
+  useModalEscape(!!reorderSameModalTarget, () => setReorderSameModalTarget(null));
+  useModalEscape(!!purchaseHistoryModalTarget, () => setPurchaseHistoryModalTarget(null));
 
   const normalizeDistName = (rawName: string): string => {
     if (!rawName) return '';

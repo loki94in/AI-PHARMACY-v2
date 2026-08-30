@@ -12,6 +12,8 @@ import { usePageActive } from '../../lib/keepAlive/PageActiveContext';
 import { useOnClickOutside } from '../../hooks/useOnClickOutside';
 import { getTodayString, getNDaysAgoString, toDateInputValue } from '../../utils/date';
 import { PhoneInputWithBadge } from '../../components/PhoneInputWithBadge';
+import { SalutationNameInput, combineSalutationAndName, parseSalutationAndName } from '../../components/SalutationNameInput';
+import { useModalEscape } from '../../services/keyboardShortcuts';
 
 // ─── Module-level Cache (SPA Performance Contract) ──────────────────────
 let cachedRefillsData: RefillPatient[] = [];
@@ -250,6 +252,8 @@ const RefillsSection: React.FC = () => {
   // ── Add / Edit Refill modal state ──────────────────────────────────────────
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingPatient, setEditingPatient] = useState<RefillPatient | null>(null);
+  const [refillSalutation, setRefillSalutation] = useState('Mr.');
+  const [refillCustomSalutation, setRefillCustomSalutation] = useState('');
   const [addPatientName, setAddPatientName] = useState('');
   const [addPatientPhone, setAddPatientPhone] = useState('');
   const [addLanguage, setAddLanguage] = useState<'en' | 'hi' | 'mr'>('en');
@@ -306,7 +310,10 @@ const RefillsSection: React.FC = () => {
   const handleOpenAddModal = (existingPat?: RefillPatient) => {
     if (existingPat) {
       setEditingPatient(existingPat);
-      setAddPatientName(existingPat.patient_name);
+      const parsed = parseSalutationAndName(existingPat.patient_name);
+      setRefillSalutation(parsed.salutation);
+      setRefillCustomSalutation(parsed.customSalutation);
+      setAddPatientName(parsed.name);
       setAddPatientPhone(existingPat.patient_phone);
       setAddLanguage((existingPat.language as RefillLanguage) || 'en');
       const interval = existingPat.medicines[0]?.refill_interval_days || 30;
@@ -323,6 +330,8 @@ const RefillsSection: React.FC = () => {
       })));
     } else {
       setEditingPatient(null);
+      setRefillSalutation('Mr.');
+      setRefillCustomSalutation('');
       setAddPatientName('');
       setAddPatientPhone('');
       setAddLanguage('en');
@@ -339,7 +348,10 @@ const RefillsSection: React.FC = () => {
       return;
     }
     setEditingPatient(selectedPatient);
-    setAddPatientName(selectedPatient.patient_name);
+    const parsed = parseSalutationAndName(selectedPatient.patient_name);
+    setRefillSalutation(parsed.salutation);
+    setRefillCustomSalutation(parsed.customSalutation);
+    setAddPatientName(parsed.name);
     setAddPatientPhone(selectedPatient.patient_phone);
     setAddLanguage((selectedPatient.language as RefillLanguage) || 'en');
     const interval = selectedPatient.medicines[0]?.refill_interval_days || 30;
@@ -579,18 +591,10 @@ const RefillsSection: React.FC = () => {
     };
   }, [load]);
 
-  useEffect(() => {
-    if (!showAddModal && !editingRefill && !viewInvoice) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setShowAddModal(false);
-        setEditingRefill(null);
-        setViewInvoice(null);
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [showAddModal, editingRefill, viewInvoice]);
+  // Universal Escape key dismissal for Refill modals
+  useModalEscape(showAddModal, () => setShowAddModal(false));
+  useModalEscape(!!editingRefill, () => setEditingRefill(null));
+  useModalEscape(!!viewInvoice, () => setViewInvoice(null));
 
   const handleCheck = async () => {
     setRunningCheck(true);
@@ -835,7 +839,8 @@ const RefillsSection: React.FC = () => {
   // ── Submit Add / Edit Refill ──────────────────────────────────────────────
   const handleSaveRefill = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!addPatientName.trim() || !addPatientPhone.trim()) {
+    const fullPatientName = combineSalutationAndName(refillSalutation, refillCustomSalutation, addPatientName);
+    if (!fullPatientName || !addPatientPhone.trim()) {
       toastEvent.trigger('Patient name and phone are required', 'error');
       return;
     }
@@ -851,7 +856,7 @@ const RefillsSection: React.FC = () => {
         await apiClient.put('/refills/patient-medicines', {
           customer_id: editingPatient.customer_id,
           original_phone: editingPatient.patient_phone,
-          patient_name: addPatientName.trim(),
+          patient_name: fullPatientName,
           patient_phone: addPatientPhone.trim(),
           language: addLanguage,
           refill_interval_days: intervalDays,
@@ -861,12 +866,12 @@ const RefillsSection: React.FC = () => {
             quantity_needed: row.quantity_needed || 3
           }))
         });
-        toastEvent.trigger(`Refill updated for ${addPatientName} (${validRows.length} medicine${validRows.length > 1 ? 's' : ''}, every ${intervalDays} days)`, 'success', '/crm');
+        toastEvent.trigger(`Refill updated for ${fullPatientName} (${validRows.length} medicine${validRows.length > 1 ? 's' : ''}, every ${intervalDays} days)`, 'success', '/crm');
       } else {
         await Promise.all(
           validRows.map(row =>
             apiClient.post('/refills', {
-              patient_name: addPatientName.trim(),
+              patient_name: fullPatientName,
               patient_phone: addPatientPhone.trim(),
               medicine_id: row.medicineId,
               language: addLanguage,
@@ -875,10 +880,12 @@ const RefillsSection: React.FC = () => {
             })
           )
         );
-        toastEvent.trigger(`Refill registered for ${addPatientName} (${validRows.length} medicine${validRows.length > 1 ? 's' : ''}, every ${intervalDays} days)`, 'success', '/crm');
+        toastEvent.trigger(`Refill registered for ${fullPatientName} (${validRows.length} medicine${validRows.length > 1 ? 's' : ''}, every ${intervalDays} days)`, 'success', '/crm');
       }
       setShowAddModal(false);
       setEditingPatient(null);
+      setRefillSalutation('Mr.');
+      setRefillCustomSalutation('');
       setAddPatientName('');
       setAddPatientPhone('');
       setAddInterval(30);
@@ -1735,20 +1742,24 @@ const RefillsSection: React.FC = () => {
                 </label>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <input
-                      type="text"
-                      value={addPatientName}
-                      onChange={e => setAddPatientName(e.target.value)}
+                    <SalutationNameInput
+                      salutation={refillSalutation}
+                      customSalutation={refillCustomSalutation}
+                      name={addPatientName}
+                      onSalutationChange={(sal, custom) => {
+                        setRefillSalutation(sal);
+                        if (custom !== undefined) setRefillCustomSalutation(custom);
+                      }}
+                      onNameChange={(val) => setAddPatientName(val)}
                       placeholder="Patient Full Name *"
-                      required
-                      className="w-full px-3.5 py-2.5 bg-bg border border-border rounded-xl text-xs text-text focus:outline-none focus:border-primary transition-all"
+                      required={true}
                     />
                   </div>
                   <div>
                     <PhoneInputWithBadge
                       value={addPatientPhone}
                       onChange={val => setAddPatientPhone(val)}
-                      placeholder="Phone / WhatsApp (10 digits) *"
+                      placeholder="10-digit WhatsApp phone"
                       required={true}
                       allowEmpty={false}
                     />
@@ -2841,19 +2852,12 @@ function isSameChat(chat: WaChatItem, targetChatId: string, resolvedNum?: string
     };
   }, [loadChats]);
 
-  // Handle ESC key to close modals
-  useEffect(() => {
-    if (!showManageModal && !showNewChatModal) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setShowManageModal(false);
-        setShowNewChatModal(false);
-        setNewChatNumber('');
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [showManageModal, showNewChatModal]);
+  // Universal Escape key dismissal for WhatsApp modals
+  useModalEscape(showManageModal, () => setShowManageModal(false));
+  useModalEscape(showNewChatModal, () => {
+    setShowNewChatModal(false);
+    setNewChatNumber('');
+  });
 
   // Handle Send Message
   const handleSendMessage = async (e?: React.FormEvent) => {
@@ -3781,6 +3785,8 @@ const SpecialOrdersSection: React.FC = () => {
 
   // New Request Form State
   const [product, setProduct] = useState('');
+  const [orderSalutation, setOrderSalutation] = useState('Mr.');
+  const [orderCustomSalutation, setOrderCustomSalutation] = useState('');
   const [requester, setRequester] = useState('');
   const [phone, setPhone] = useState('');
   const [qty, setQty] = useState<number | ''>(1);
@@ -3794,6 +3800,8 @@ const SpecialOrdersSection: React.FC = () => {
   const [editingOrder, setEditingOrder] = useState<SpecialOrderItem | null>(null);
   const [showEditModal, setShowEditModal] = useState(false);
   const [editProduct, setEditProduct] = useState('');
+  const [editSalutation, setEditSalutation] = useState('Mr.');
+  const [editCustomSalutation, setEditCustomSalutation] = useState('');
   const [editRequester, setEditRequester] = useState('');
   const [editPhone, setEditPhone] = useState('');
   const [shakePhone, setShakePhone] = useState(false);
@@ -3832,6 +3840,13 @@ const SpecialOrdersSection: React.FC = () => {
   const [selectedPackaging, setSelectedPackaging] = useState('');
 
   const isSelectingPrRef = useRef(false);
+
+  // Universal Escape key dismissal for Special Order modals
+  useModalEscape(showAddModal, () => setShowAddModal(false));
+  useModalEscape(showEditModal, () => {
+    setShowEditModal(false);
+    setEditingOrder(null);
+  });
 
   useEffect(() => {
     if (!manualToDate) {
@@ -4084,7 +4099,7 @@ const SpecialOrdersSection: React.FC = () => {
 
   const handleCreateRequest = async (e: React.FormEvent) => {
     e.preventDefault();
-    const customerName = requester.trim();
+    const customerName = combineSalutationAndName(orderSalutation, orderCustomSalutation, requester);
     const customerPhone = phone.replace(/\D/g, '');
 
     if (!product.trim()) {
@@ -4151,6 +4166,8 @@ const SpecialOrdersSection: React.FC = () => {
       toastEvent.trigger(`Special order for "${product}" logged & synced!`, 'success', '/crm');
       setShowAddModal(false);
       setProduct('');
+      setOrderSalutation('Mr.');
+      setOrderCustomSalutation('');
       setRequester('');
       setPhone('');
       setQty(1);
@@ -4181,7 +4198,10 @@ const SpecialOrdersSection: React.FC = () => {
   const handleOpenEditModal = (order: SpecialOrderItem) => {
     setEditingOrder(order);
     setEditProduct(order.product || '');
-    setEditRequester(order.requester || '');
+    const parsed = parseSalutationAndName(order.requester || '');
+    setEditSalutation(parsed.salutation);
+    setEditCustomSalutation(parsed.customSalutation);
+    setEditRequester(parsed.name);
     setEditPhone(order.phone || '');
     setEditQty(order.qty || 1);
     setEditAdvancePayment(order.advance_payment !== undefined && order.advance_payment !== null ? Number(order.advance_payment) : '');
@@ -4199,7 +4219,7 @@ const SpecialOrdersSection: React.FC = () => {
     e.preventDefault();
     if (!editingOrder) return;
 
-    const customerName = editRequester.trim();
+    const customerName = combineSalutationAndName(editSalutation, editCustomSalutation, editRequester);
     const customerPhone = editPhone.replace(/\D/g, '');
 
     if (!editProduct.trim()) {
@@ -4914,14 +4934,18 @@ const SpecialOrdersSection: React.FC = () => {
               {/* Customer Name & Phone */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-semibold text-text mb-1">Customer Name *</label>
-                  <input
-                    type="text"
-                    required
+                  <SalutationNameInput
+                    label="Customer Name"
+                    required={true}
+                    salutation={orderSalutation}
+                    customSalutation={orderCustomSalutation}
+                    name={requester}
+                    onSalutationChange={(sal, custom) => {
+                      setOrderSalutation(sal);
+                      if (custom !== undefined) setOrderCustomSalutation(custom);
+                    }}
+                    onNameChange={(val) => setRequester(val)}
                     placeholder="Customer Name"
-                    value={requester}
-                    onChange={e => setRequester(e.target.value)}
-                    className="w-full px-3 py-2 bg-bg border border-border rounded-xl font-medium focus:outline-none focus:border-primary"
                   />
                 </div>
                 <div>
@@ -5055,14 +5079,18 @@ const SpecialOrdersSection: React.FC = () => {
               {/* Customer Name & Phone */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-semibold text-text mb-1">Customer Name *</label>
-                  <input
-                    type="text"
-                    required
+                  <SalutationNameInput
+                    label="Customer Name"
+                    required={true}
+                    salutation={editSalutation}
+                    customSalutation={editCustomSalutation}
+                    name={editRequester}
+                    onSalutationChange={(sal, custom) => {
+                      setEditSalutation(sal);
+                      if (custom !== undefined) setEditCustomSalutation(custom);
+                    }}
+                    onNameChange={(val) => setEditRequester(val)}
                     placeholder="Customer Name"
-                    value={editRequester}
-                    onChange={e => setEditRequester(e.target.value)}
-                    className="w-full px-3 py-2 bg-bg border border-border rounded-xl font-medium focus:outline-none focus:border-primary"
                   />
                 </div>
                 <div>
@@ -5243,15 +5271,8 @@ const CustomerCreditSection: React.FC = () => {
     viewInvoiceRef.current = viewInvoice;
   }, [viewInvoice]);
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && viewInvoiceRef.current) {
-        setViewInvoice(null);
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  // Universal Escape key dismissal for Credit Ledger viewInvoice modal
+  useModalEscape(!!viewInvoice, () => setViewInvoice(null));
 
   const selectedCustomerIdRef = useRef<number | null>(null);
   useEffect(() => {

@@ -19,6 +19,8 @@ import { isExpiredDate, toDateInputValue } from '../../utils/date';
 import { printCurrentBill } from '../../utils/printBill';
 import { useDraftStore } from '../../lib/cache/useDraftStore';
 import { rankAndSortMedicines } from '../../utils/searchRanker';
+import { combineSalutationAndName, parseSalutationAndName } from '../../components/SalutationNameInput';
+import { useModalEscape } from '../../services/keyboardShortcuts';
 
 const getLocalDateString = (d: Date = new Date()) => {
   const yyyy = d.getFullYear();
@@ -164,6 +166,8 @@ interface POSTab {
   id: string;
   title?: string;
   name?: string;
+  patientSalutation?: string;
+  patientCustomSalutation?: string;
   patientName?: string;
   patientPhone?: string;
   selectedCustomerId?: number | null;
@@ -929,7 +933,18 @@ const POS = () => {
   const [searchTerm, setSearchTerm] = useDraftStore('pos_search_term', '');
   const [showCamera, setShowCamera] = useState(false);
   const [zoomedImage, setZoomedImage] = useState<string | null>(null);
-  const [patientName, setPatientName] = useState(() => editSaleFromState?.customer_name || initialActiveTab.patientName || '');
+  const [patientSalutation, setPatientSalutation] = useState<string>(() => {
+    const initName = editSaleFromState?.customer_name || initialActiveTab.patientName || '';
+    return parseSalutationAndName(initName).salutation;
+  });
+  const [patientCustomSalutation, setPatientCustomSalutation] = useState<string>(() => {
+    const initName = editSaleFromState?.customer_name || initialActiveTab.patientName || '';
+    return parseSalutationAndName(initName).customSalutation;
+  });
+  const [patientName, setPatientName] = useState(() => {
+    const initName = editSaleFromState?.customer_name || initialActiveTab.patientName || '';
+    return parseSalutationAndName(initName).name;
+  });
   const [patientPhone, setPatientPhone] = useState(() => editSaleFromState?.customer_phone || initialActiveTab.patientPhone || '');
   const [selectedCustomerId, setSelectedCustomerId] = useState<number | null>(initialActiveTab.selectedCustomerId || null);
   const [patientId] = useState(generatePatientDisplayId());
@@ -1154,7 +1169,12 @@ const POS = () => {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- edit-bill hydration loads invoice
       setEditingInvoiceId(Number(editSale.id) || null);
       setEditingInvoiceNo((editSale.invoice_no || editSale.id || null) as string | null);
-      if (editSale.customer_name) setPatientName(editSale.customer_name);
+      if (editSale.customer_name) {
+        const parsed = parseSalutationAndName(editSale.customer_name);
+        setPatientSalutation(parsed.salutation);
+        setPatientCustomSalutation(parsed.customSalutation);
+        setPatientName(parsed.name);
+      }
       if (editSale.customer_phone) setPatientPhone(editSale.customer_phone);
       if (editSale.doctor_name) setDoctor(editSale.doctor_name);
       if (editSale.discount !== undefined) setDiscount(Number(editSale.discount || 0));
@@ -1180,7 +1200,12 @@ const POS = () => {
       if (Array.isArray(prefill.refillIds) && prefill.refillIds.length > 0) {
         pendingRefillIdsRef.current = prefill.refillIds.map(Number).filter(Boolean);
       }
-      if (name) setPatientName(name);
+      if (name) {
+        const parsed = parseSalutationAndName(name);
+        setPatientSalutation(parsed.salutation);
+        setPatientCustomSalutation(parsed.customSalutation);
+        setPatientName(parsed.name);
+      }
       if (phone) {
         setPatientPhone(phone);
         setSendWhatsApp(true); // Auto-enable WhatsApp toggle when prefilled for customer
@@ -1392,6 +1417,8 @@ const POS = () => {
       const t = prev[idx];
       if (
         t.items !== cart ||
+        t.patientSalutation !== patientSalutation ||
+        t.patientCustomSalutation !== patientCustomSalutation ||
         t.patientName !== patientName ||
         t.patientPhone !== patientPhone ||
         t.refillEnabled !== refillEnabled ||
@@ -1407,6 +1434,8 @@ const POS = () => {
         next[idx] = {
           ...t,
           items: cart,
+          patientSalutation,
+          patientCustomSalutation,
           patientName,
           patientPhone,
           refillEnabled,
@@ -1422,7 +1451,7 @@ const POS = () => {
       }
       return prev;
     });
-  }, [cart, patientName, patientPhone, refillEnabled, refillDays, doctor, isManualDoctor, discount, sendWhatsApp, paymentMedium, selectedDoctorId, activeTabId]);
+  }, [cart, patientSalutation, patientCustomSalutation, patientName, patientPhone, refillEnabled, refillDays, doctor, isManualDoctor, discount, sendWhatsApp, paymentMedium, selectedDoctorId, activeTabId]);
 
   // Save tabs and activeTabId to localStorage whenever they change
   useEffect(() => {
@@ -1491,6 +1520,8 @@ const POS = () => {
     const target = tabs.find(t => t.id === newTabId);
     if (target) {
       setCart(target.items || []);
+      setPatientSalutation(target.patientSalutation || 'Mr.');
+      setPatientCustomSalutation(target.patientCustomSalutation || '');
       setPatientName(target.patientName || '');
       setPatientPhone(target.patientPhone || '');
       setRefillEnabled(target.refillEnabled || false);
@@ -1514,6 +1545,8 @@ const POS = () => {
       id: newId,
       name: `Cart ${nextNum}`,
       items: [],
+      patientSalutation: 'Mr.',
+      patientCustomSalutation: '',
       patientName: '',
       patientPhone: '',
       refillEnabled: false,
@@ -1527,6 +1560,8 @@ const POS = () => {
     };
 
     setCart([]);
+    setPatientSalutation('Mr.');
+    setPatientCustomSalutation('');
     setPatientName('');
     setPatientPhone('');
     setRefillEnabled(false);
@@ -1587,7 +1622,14 @@ const POS = () => {
   };
 
   const updatePatientName = (name: string) => {
-    setPatientName(name);
+    const parsed = parseSalutationAndName(name);
+    if (name.match(/^(Mr\.|Mrs\.|Miss|Ms\.|Dr\.|Shri|Smt\.)\s+/i)) {
+      setPatientSalutation(parsed.salutation);
+      setPatientCustomSalutation(parsed.customSalutation);
+      setPatientName(parsed.name);
+    } else {
+      setPatientName(name.toUpperCase());
+    }
   };
   
   const { data: doctorsList } = useApiQuery<DoctorSuggestion[]>(
@@ -3050,6 +3092,14 @@ const POS = () => {
   const [promptPhoneValue, setPromptPhoneValue] = useState('');
   const [shakePromptPhone, setShakePromptPhone] = useState(false);
 
+  // Universal Escape key dismissal for POS modals
+  useModalEscape(showPatientModal, () => setShowPatientModal(false));
+  useModalEscape(showPhonePromptModal, () => setShowPhonePromptModal(false));
+  useModalEscape(showDoctorModal, () => setShowDoctorModal(false));
+  useModalEscape(!!zoomedImage, () => setZoomedImage(null));
+  useModalEscape(showCamera, () => setShowCamera(false));
+  useModalEscape(!!editMedicineId, () => setEditMedicineId(null));
+
   const handleCompleteSale = async (overridePhone?: string, isDirectSave: boolean = false) => {
     if (!hasValidItems) {
       alert('⚠️ CANNOT SAVE BILL:\n\nPlease add at least one valid medicine to the cart before saving the bill.');
@@ -3167,11 +3217,15 @@ const POS = () => {
         };
       });
 
+      const fullPatientName = patientName.trim()
+        ? combineSalutationAndName(patientSalutation, patientCustomSalutation, patientName)
+        : 'Walk-in Customer';
+
       const payload = {
         items: salesItems,
         discount: discountAmount,
         patient_id: selectedCustomerId || undefined,
-        patient_name: patientName || 'Walk-in Customer',
+        patient_name: fullPatientName,
         patient_phone: finalPhone,
         doctor_name: doctor || undefined,
         total_amount: grandTotal,
@@ -3626,13 +3680,48 @@ const POS = () => {
               {/* Patient Name (Span 4) */}
               <div ref={patientSectionRef} className="md:col-span-4 relative z-20">
                 <div className="flex gap-1 items-center relative">
+                  {/* Title / Salutation Selector */}
+                  <select
+                    id="pos-patient-salutation-select"
+                    value={['Mr.', 'Mrs.', 'Miss', 'Dr.'].includes(patientSalutation) ? patientSalutation : 'Other'}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setPatientSalutation(val);
+                      if (val !== 'Other') setPatientCustomSalutation('');
+                    }}
+                    className="px-2 py-1.5 h-9 text-xs font-bold rounded-xl bg-bg2/60 border border-border/70 text-text focus:outline-none focus:border-primary cursor-pointer shrink-0 transition-colors shadow-sm"
+                    title="Title / Salutation (Mr / Mrs / Miss / Dr / Other)"
+                  >
+                    <option value="Mr.">Mr.</option>
+                    <option value="Mrs.">Mrs.</option>
+                    <option value="Miss">Miss</option>
+                    <option value="Dr.">Dr.</option>
+                    <option value="Other">Other</option>
+                  </select>
+
+                  {/* Custom Title Input if Other selected */}
+                  {(patientSalutation === 'Other' || (!['Mr.', 'Mrs.', 'Miss', 'Dr.'].includes(patientSalutation) && Boolean(patientSalutation))) && (
+                    <input
+                      type="text"
+                      value={patientCustomSalutation || (!['Mr.', 'Mrs.', 'Miss', 'Dr.'].includes(patientSalutation) ? patientSalutation : '')}
+                      onChange={(e) => {
+                        setPatientSalutation('Other');
+                        setPatientCustomSalutation(e.target.value.toUpperCase());
+                      }}
+                      placeholder="TITLE"
+                      className="w-16 uppercase px-2 py-1.5 h-9 text-xs font-bold rounded-xl bg-bg2/60 border border-border/70 text-text focus:outline-none focus:border-primary shrink-0 transition-colors shadow-sm"
+                      maxLength={10}
+                      title="Custom Title"
+                    />
+                  )}
+
                   <input
                     id="patient-name-input"
                     name="patient_name"
                     type="text"
                     autoComplete="off"
-                    className="premium-input text-sm font-semibold h-9 px-3 flex-1 w-full bg-bg2/60 border-border/70 rounded-xl placeholder:text-muted/40"
-                    placeholder="Walk-in Customer"
+                    className="premium-input uppercase text-sm font-semibold h-9 px-3 flex-1 w-full bg-bg2/60 border-border/70 rounded-xl placeholder:text-muted/40"
+                    placeholder="WALK-IN CUSTOMER"
                     value={patientName}
                     onChange={e => {
                       writeRef(justSelectedPatientRef, false);
@@ -5529,8 +5618,8 @@ const POS = () => {
                   name="modal_patient_name"
                   type="text" 
                   autoComplete="off"
-                  className="premium-input w-full text-sm py-2 px-3 bg-bg2/50 border-border/80 rounded-xl" 
-                  placeholder="Enter full name" 
+                  className="premium-input uppercase w-full text-sm py-2 px-3 bg-bg2/50 border-border/80 rounded-xl" 
+                  placeholder="ENTER FULL NAME" 
                   value={patientName}
                   onChange={e => updatePatientName(e.target.value)}
                 />

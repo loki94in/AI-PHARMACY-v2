@@ -4,6 +4,7 @@ import { api } from '../services/api';
 import { getFormattedFailureReason } from '../utils/whatsappFailureReason';
 import { whatsappQueueEvent, automationHubEvent, messageSendEvent } from '../services/events';
 import type { AutomationHubActivityItem } from '../types/api';
+import { useModalEscape } from '../services/keyboardShortcuts';
 
 interface CatalogEntry {
   id: string;
@@ -17,6 +18,7 @@ interface AutomationHubPopoverProps {
 }
 
 export default function AutomationHubPopover({ onClose }: AutomationHubPopoverProps) {
+  useModalEscape(true, onClose);
   const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
   const [activity, setActivity] = useState<AutomationHubActivityItem[]>([]);
   const [unresolvedCount, setUnresolvedCount] = useState(0);

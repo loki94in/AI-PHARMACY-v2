@@ -27,6 +27,8 @@ import {
 } from 'lucide-react';
 import { api } from '../services/api';
 import { toastEvent, specialOrdersEvent } from '../services/events';
+import { SalutationNameInput, combineSalutationAndName } from './SalutationNameInput';
+import { useModalEscape } from '../services/keyboardShortcuts';
 import {} from '../hooks/useApiQuery';
 
 interface SuggestionMedicine {
@@ -126,6 +128,8 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
 
   // Form State
   const [product, setProduct] = useState('');
+  const [salutation, setSalutation] = useState('Mr.');
+  const [customSalutation, setCustomSalutation] = useState('');
   const [requester, setRequester] = useState('');
   const [phone, setPhone] = useState('');
   const [qty, setQty] = useState(1);
@@ -350,17 +354,8 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
     return () => window.removeEventListener('pharmarack-auth-changed', handleAuthChange);
   }, [isOpen, checkSession]);
 
-  // Listen to Escape key to close
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isOpen) {
-        handleClose();
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose, handleClose]);
+  // Universal Escape key dismissal
+  useModalEscape(isOpen, handleClose);
 
   // Handle outside clicks for autocomplete
   useEffect(() => {
@@ -627,7 +622,8 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
     }
 
     // Capture customer & priority details (Customer details optional / store default)
-    const customerName = requester.trim() || 'Store Inventory';
+    const combinedName = combineSalutationAndName(salutation, customSalutation, requester);
+    const customerName = combinedName || 'Store Inventory';
     const customerPhone = phone.replace(/\D/g, '') || '';
     const orderPriority = priority;
     const advanceAmt = advancePayment !== '' ? Number(advancePayment) : 0;
@@ -635,6 +631,8 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
     // Reset state and close modal immediately
     setCart([]);
     setProduct('');
+    setSalutation('Mr.');
+    setCustomSalutation('');
     setRequester('');
     setPhone('');
     setQty(1);
@@ -996,18 +994,19 @@ export const QuickOrderModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
               {/* Customer Details Inputs (No label headers) */}
               <div className="p-4 bg-bg2/50 border border-glass-border rounded-3xl shadow-sm space-y-3">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-                  {/* Customer Name */}
-                  <div className="relative">
-                    <User size={14} className="absolute left-3.5 top-3 text-muted pointer-events-none" />
-                    <input
-                      type="text"
-                      value={requester}
-                      onChange={(e) => setRequester(e.target.value)}
-                      className="w-full premium-input pl-10 pr-3 py-2.5 text-xs font-semibold rounded-2xl bg-bg3/40 border-glass-border"
-                      placeholder="Customer Name (Optional)"
-                      autoComplete="off"
-                    />
-                  </div>
+                  {/* Customer Name with Salutation */}
+                  <SalutationNameInput
+                    salutation={salutation}
+                    customSalutation={customSalutation}
+                    name={requester}
+                    onSalutationChange={(sal, custom) => {
+                      setSalutation(sal);
+                      if (custom !== undefined) setCustomSalutation(custom);
+                    }}
+                    onNameChange={(val) => setRequester(val)}
+                    placeholder="Customer Name (Optional)"
+                    inputClassName="rounded-2xl bg-bg3/40 border-glass-border font-semibold text-xs py-2.5"
+                  />
 
                   {/* Phone Number */}
                   <div className="relative">

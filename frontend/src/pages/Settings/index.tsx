@@ -10,6 +10,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { usePageActive } from '../../lib/keepAlive/PageActiveContext';
 import { broadcastContactDataChanged, updateSettingsCache } from '../../utils/settingsSync';
 import { invalidateAfterStockWrite } from '../../utils/cacheInvalidation';
+import { useModalEscape } from '../../services/keyboardShortcuts';
 import {
   Settings as SettingsIcon,
   Building2,
@@ -200,6 +201,7 @@ function StoreProfileTab({ rawSettings, refetchSettings }: { rawSettings: Record
 
   // Studio Modal State & Coordinates
   const [showStudioModal, setShowStudioModal] = useState(false);
+  useModalEscape(showStudioModal, () => setShowStudioModal(false));
   const [stampColorPreset, setStampColorPreset] = useState<'original' | 'blue' | 'violet' | 'red' | 'green'>('original');
   const [shadowThreshold, setShadowThreshold] = useState(218);
   const [stampPosX, setStampPosX] = useState(parseFloat(rawSettings.stamp_pos_x || '410'));
@@ -2111,6 +2113,10 @@ function DataBackupsTab({ rawSettings, refetchSettings }: { rawSettings: Record<
   const [resetModalInitialMode, setResetModalInitialMode] = useState<'data' | 'factory'>('data');
   const queryClient = useQueryClient();
 
+  // Universal Escape key dismissal for Backup & Reset modals
+  useModalEscape(showBackupModal, () => setShowBackupModal(false));
+  useModalEscape(showSystemResetModal, () => setShowSystemResetModal(false));
+
   const handleSaveBackupSchedule = async () => {
     setSavingFreq(true);
     try {
@@ -2282,6 +2288,7 @@ interface ResetDataModalProps {
 }
 
 function ResetDataModal({ initialMode = 'data', onClose, refetchSettings }: ResetDataModalProps) {
+  useModalEscape(true, onClose);
   const [resetType, setResetType] = useState<'data' | 'factory'>(initialMode);
   const [dataCounts, setDataCounts] = useState<{ medicines: number; inventory: number; bills: number; purchases: number; customers: number } | null>(null);
   const [loadingCounts, setLoadingCounts] = useState(true);

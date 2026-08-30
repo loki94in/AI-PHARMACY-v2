@@ -6,6 +6,7 @@ import { api } from '../services/api';
 import { stagedQueueService } from '../services/stagedQueueService';
 import { isValidDistributorName } from '../utils/distributorValidator';
 import { UniversalMedicineEditModal, type UniversalMedicineEditModalProps } from './UniversalMedicineEditModal';
+import { useModalEscape } from '../services/keyboardShortcuts';
 
 interface Props {
   onClose: () => void;
@@ -131,15 +132,8 @@ export const StagedReviewModal: React.FC<Props> = ({ onClose, onActionComplete }
     loadStagedData();
   }, []);
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
+  // Universal Escape key dismissal
+  useModalEscape(true, onClose);
 
   const handleSelectTx = (tx: LocalStagedTx, type: 'sales' | 'purchases') => {
     setSelectedTx({ ...tx, type });
