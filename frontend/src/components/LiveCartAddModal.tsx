@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Search, Plus, Minus, Sparkles, Loader2, ShoppingCart, RefreshCw, AlertCircle, EyeOff, Ban, Package, CheckCircle2, RotateCcw } from 'lucide-react';
+import { X, Search, Plus, Minus, Sparkles, Loader2, ShoppingCart, RefreshCw, AlertCircle, EyeOff, Ban, Package, CheckCircle2, RotateCcw, Store, Tag, Zap } from 'lucide-react';
 import { api, type SpecialOrder, type Refill } from '../services/api';
 import { toastEvent } from '../services/events';
 
@@ -22,6 +22,7 @@ interface SuggestionMedicine {
   storeId?: string | number;
   productCode?: string;
   company?: string;
+  manufacturer?: string;
   mrp?: number | null;
 }
 
@@ -2145,7 +2146,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
                 <div className="relative z-50 animate-in fade-in duration-200" ref={autocompleteRef}>
                   <label className="block text-[11px] font-bold text-muted uppercase tracking-wider mb-1.5">Medicine Search</label>
                   <div className="relative">
-                    <span className="absolute left-3 top-[11.5px] text-muted">
+                    <span className="absolute left-3.5 top-[13px] text-muted">
                       {searchLoading ? <Loader2 size={16} className="animate-spin text-primary" /> : <Search size={16} />}
                     </span>
                     <input
@@ -2155,19 +2156,22 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
                       onChange={(e) => handleProductChange(e.target.value)}
                       onKeyDown={handleProductKeyDown}
                       onFocus={() => api.warmupPharmarackSession()}
-                      className="w-full premium-input pl-9 pr-4 py-2 text-sm font-medium"
-                      placeholder="Search Pharmarack catalog..."
+                      className="w-full premium-input pl-11 pr-5 py-3 text-sm font-semibold rounded-2xl"
+                      placeholder="Search or enter medicine name..."
                       autoComplete="off"
                     />
                   </div>
                   
                   {showSuggestions && suggestions.length > 0 && (
-                    <ul className="absolute z-[9999] left-0 right-0 mt-1 max-h-[400px] overflow-y-auto bg-bg2 border-2 border-primary/40 backdrop-blur-2xl rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.8)] divide-y divide-border/30 py-1 scrollbar-thin">
+                    <ul className="absolute z-[9999] left-0 right-0 mt-1.5 max-h-[380px] overflow-y-auto bg-bg2 border-2 border-primary/40 backdrop-blur-2xl rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.8)] divide-y divide-border/30 py-1 scrollbar-thin">
                       {suggestions.map((med, index) => (
                         <li
                           key={index}
-                          onClick={() => selectSuggestion(med)}
-                          className={`px-3.5 py-2 text-xs cursor-pointer flex justify-between items-center transition-all ${
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            selectSuggestion(med);
+                          }}
+                          className={`px-3.5 py-2.5 text-xs cursor-pointer flex justify-between items-center transition-all ${
                             med.isErrorMessage
                               ? 'bg-red-500/10 text-red border-l-2 border-red cursor-default'
                               : index === activeSuggestionIndex 
@@ -2176,42 +2180,42 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
                           }`}
                         >
                           <div className="flex-1 min-w-0 pr-2">
-                            {/* Line 1: Exact Raw Product Title + Scheme & Best Rate Badges */}
+                            {/* Line 1: Product name + scheme badge + Best Rate badge */}
                             <div className="flex items-center gap-1.5 flex-wrap">
                               <span className="font-bold text-text truncate text-sm">
                                 {med.medicine_name}
                               </span>
                               {med.scheme && !med.isErrorMessage && (
-                                <span className="text-[10px] bg-bg3 text-muted border border-border px-1.5 py-0.5 rounded font-bold uppercase shrink-0">
-                                  {med.scheme}
+                                <span className="text-[10px] bg-amber-500/15 text-amber-400 border border-amber-500/30 px-1.5 py-0.5 rounded-md font-bold uppercase shrink-0 flex items-center gap-1">
+                                  <Tag size={10} /> {med.scheme}
                                 </span>
                               )}
                               {med.rate !== undefined && med.rate !== null && !med.isErrorMessage && getEffectiveRate(med.rate, med.scheme, qty) === minEffectiveRate && (
-                                <span className="text-[9px] bg-bg3 text-text border border-border px-1.5 py-0.5 rounded font-bold uppercase flex items-center gap-0.5 shrink-0 select-none">
-                                  <Sparkles size={8} className="text-text animate-pulse" /> Best Rate
+                                <span className="text-[9px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-1.5 py-0.5 rounded-md font-bold uppercase flex items-center gap-0.5 shrink-0 select-none">
+                                  <Sparkles size={9} className="text-emerald-400 animate-pulse" /> Best Rate
                                 </span>
                               )}
                             </div>
 
-                            {/* Line 2: Exact Raw Distributor Name & Company Name */}
+                            {/* Line 2: Distributor name + company */}
                             {!med.isErrorMessage && (
-                              <div className="flex items-center gap-2 flex-wrap mt-0.5 text-xs">
-                                <span className={`font-semibold text-text px-1.5 py-0.5 rounded bg-bg2 border border-border border-l-2 ${getDistributorColor(med.distributor)} inline-block`}>
-                                  {med.distributor || 'No Distributor'}
+                              <div className="flex items-center gap-2 flex-wrap mt-1 text-xs">
+                                <span className={`font-semibold flex items-center gap-1 ${ med.isPharmarack ? (med.mapped ? 'text-sky-400' : 'text-purple-400') : 'text-muted' }`}>
+                                  <Store size={11} /> {med.isPharmarack ? (med.distributor || 'No Distributor') : 'Local Inventory'}
                                 </span>
-                                {med.company && (
+                                {(med.company || med.manufacturer) && (
                                   <span className="text-[10px] text-muted/70 font-semibold uppercase tracking-wider">
-                                    {med.company}
+                                    • {med.company || med.manufacturer}
                                   </span>
                                 )}
                               </div>
                             )}
 
-                            {/* Line 3: PTR, MRP, Packaging & Stock (Official Site Icon Layout) */}
+                            {/* Line 3: PTR, MRP, packaging & stock pill */}
                             {!med.isErrorMessage && (
-                              <div className="flex items-center gap-2.5 text-[11px] mt-0.5 flex-wrap">
+                              <div className="flex items-center gap-2.5 text-[11px] mt-1 flex-wrap">
                                 {med.rate !== undefined && med.rate !== null && (
-                                  <span className="font-bold text-text font-mono">PTR: ₹{med.rate}</span>
+                                  <span className="font-bold text-emerald-400 font-mono">PTR: ₹{med.rate}</span>
                                 )}
                                 {med.mrp !== undefined && med.mrp !== null && (
                                   <span className="text-muted font-mono">MRP: ₹{med.mrp}</span>
@@ -2220,7 +2224,13 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
                                   <span className="text-muted font-mono font-semibold">{med.packaging}</span>
                                 )}
                                 {med.stock !== undefined && (
-                                  <span className="font-bold font-mono px-1.5 py-0.5 rounded text-[10px] flex items-center gap-1 bg-bg3 text-muted border border-border">
+                                  <span className={`font-bold font-mono px-1.5 py-0.5 rounded-md text-[10px] flex items-center gap-1 ${
+                                    (med.stock.toLowerCase() === 'high' || parseInt(med.stock) >= 15)
+                                      ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                                      : (med.stock.toLowerCase() === 'low' || parseInt(med.stock) > 0)
+                                      ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                                      : 'bg-red-500/10 text-red border border-red-500/20'
+                                  }`}>
                                     <Package size={10} /> {med.stock}
                                   </span>
                                 )}
@@ -2232,7 +2242,8 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
                               <div className="mt-2 pt-1.5 border-t border-red-500/20">
                                 <button
                                   type="button"
-                                  onClick={(e) => {
+                                  onMouseDown={(e) => {
+                                    e.preventDefault();
                                     e.stopPropagation();
                                     const cleanName = product.replace(/\s*\([^)]*\)$/, '').trim();
                                     setNewReqProduct(cleanName);
@@ -2241,7 +2252,7 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
                                     setShowSuggestions(false);
                                     toastEvent.trigger(`Pre-filled "${cleanName}" in Special Request form`, 'info');
                                   }}
-                                  className="w-full py-1 px-2 rounded-lg bg-bg2 hover:bg-bg3 text-text border border-border text-[11px] font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-sm active:scale-95"
+                                  className="w-full py-1.5 px-3 rounded-xl bg-bg2 hover:bg-bg3 text-text border border-border text-[11px] font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-sm active:scale-95"
                                 >
                                   <Sparkles size={11} className="text-muted" />
                                   <span>✨ Create Special Request for &quot;{product.replace(/\s*\([^)]*\)$/, '').trim()}&quot;</span>
@@ -2255,31 +2266,39 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
                   )}
                 </div>
 
-                {/* Selected Pharmarack preview */}
+                {/* Selected Pharmarack item details preview */}
                 {selectedDistributor && (
-                  <div className={`p-3 rounded-xl bg-bg3 border border-border border-l-4 ${getDistributorColor(selectedDistributor)} text-xs text-text flex items-center justify-between shadow-sm animate-in fade-in slide-in-from-top-2 duration-200`}>
+                  <div className="mt-3 p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/25 text-xs text-text flex items-center justify-between shadow-sm animate-in fade-in slide-in-from-top-2 duration-200">
                     <div className="truncate pr-2">
-                      <div className="font-bold text-muted text-[9px] uppercase tracking-wider mb-1">Distributor / Supplier</div>
+                      <div className="font-bold text-emerald-400 text-[10px] uppercase tracking-wider mb-1 flex items-center gap-1">
+                        <Zap size={12} className="text-emerald-400" /> Pharmarack Match
+                      </div>
                       <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className="text-text font-bold truncate text-sm">{selectedDistributor}</span>
-                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-bg2 text-muted border border-border">
+                        <span className="text-text font-semibold truncate flex items-center gap-1">
+                          <Store size={12} className="text-emerald-400 shrink-0" /> {selectedDistributor}
+                        </span>
+                        <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md ${
+                          selectedMapped 
+                            ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' 
+                            : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                        }`}>
                           {selectedMapped ? 'Mapped' : 'Non-mapped'}
                         </span>
                         {selectedCompany && (
-                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-bg2 text-muted border border-border uppercase tracking-wide">
+                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-bg2 text-muted border border-border uppercase tracking-wide">
                             {selectedCompany}
                           </span>
                         )}
                         {selectedScheme && (
-                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-bg2 text-muted border border-border uppercase">
-                            {selectedScheme}
+                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-purple-500/20 text-purple-300 border border-purple-500/30 uppercase flex items-center gap-0.5">
+                            <Tag size={9} /> {selectedScheme}
                           </span>
                         )}
                       </div>
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
-                      <div className="font-mono font-bold whitespace-nowrap flex flex-col items-end gap-0.5 text-right shrink-0">
-                        {selectedRate !== '' && <span className="text-text text-sm font-bold">PTR: ₹{selectedRate}</span>}
+                      <div className="font-mono font-extrabold whitespace-nowrap flex flex-col items-end gap-0.5 text-right shrink-0">
+                        {selectedRate !== '' && <span className="text-emerald-400 text-sm">PTR: ₹{selectedRate}</span>}
                         {selectedMrp !== '' && <span className="text-muted text-[10px]">MRP: ₹{selectedMrp}</span>}
                       </div>
                       <button
@@ -2299,10 +2318,10 @@ export const LiveCartAddModal: React.FC<LiveCartAddModalProps> = ({
                           setSelectedMedicineName('');
                           setTimeout(() => productInputRef.current?.focus(), 50);
                         }}
-                        className="p-1.5 text-muted hover:text-red hover:bg-bg2 rounded-xl transition-all ml-2"
+                        className="p-1.5 text-muted hover:text-red-400 hover:bg-red-500/10 rounded-xl transition-all ml-1.5"
                         title="Cancel distributor selection"
                       >
-                        <X size={16} />
+                        <X size={14} />
                       </button>
                     </div>
                   </div>
