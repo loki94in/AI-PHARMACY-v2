@@ -49,8 +49,8 @@ router.post('/enqueue-distributor-collection', async (req, res) => {
 
     // Format B2B collection message for each order
     for (const order of orders) {
-      const msg = 
-`📦 *DISTRIBUTOR STOCK COLLECTION DISPATCH*
+      const msg =
+        `📦 *DISTRIBUTOR STOCK COLLECTION DISPATCH*
 ──────────────
 *Delivery Person:* ${deliveryBoyName || order.delivery_boy_name || 'Delivery Staff'}
 *Distributor Ref/Invoice:* ${order.invoice_no || `DISP-#${order.id}`}
@@ -412,7 +412,7 @@ router.post('/items/:id/resend', async (req, res) => {
       targetName = source.target_name || targetName;
       mediaUrl = source.media_url || undefined;
       if (source.file_json) {
-        try { fileObj = JSON.parse(source.file_json); } catch (_) {}
+        try { fileObj = JSON.parse(source.file_json); } catch (_) { }
       }
     } else {
       const notifRow = await db.get(
@@ -486,12 +486,12 @@ router.all('/pacing', async (req, res) => {
     if (preset === 'safe') {
       const result = await whatsappQueueWorker.setPacingPreset(preset);
       const state = await whatsappQueueWorker.getWorkerState();
-      return res.json({ success: true, ...result, message: `Pacing set to ${preset} mode (${result.minMs/1000}s-${result.maxMs/1000}s)`, state });
+      return res.json({ success: true, ...result, message: `Pacing set to ${preset} mode (${result.minMs / 1000}s-${result.maxMs / 1000}s)`, state });
     }
     if (typeof minSec === 'number' && typeof maxSec === 'number') {
       await whatsappQueueWorker.setPacingConfig(minSec, maxSec);
       const state = await whatsappQueueWorker.getWorkerState();
-      return res.json({ success: true, minSec, maxSec, message: `Pacing updated to ${state.currentPacingMinMs/1000}s - ${state.currentPacingMaxMs/1000}s`, state });
+      return res.json({ success: true, minSec, maxSec, message: `Pacing updated to ${state.currentPacingMinMs / 1000}s - ${state.currentPacingMaxMs / 1000}s`, state });
     }
     return res.status(400).json({ error: 'Either preset ("safe") or minSec & maxSec required' });
   } catch (err: any) {
