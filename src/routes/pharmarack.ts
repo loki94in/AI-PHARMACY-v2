@@ -2280,6 +2280,10 @@ router.post('/log-placed-order', async (req, res) => {
       syncTodayActiveDistributors().catch(err => console.warn('Background sync reminders error on placed order:', err));
     } catch (_) {}
 
+    // Broadcast SSE update so Dispatch, CRM, and Cart update across kept-alive pages
+    eventService.broadcast('dispatch_updated', { at: Date.now(), source: 'log_placed_order', store_name });
+    eventService.broadcast('pharmarack_cart_changed', { at: Date.now() });
+
     res.json({ success: true });
   } catch (err: any) {
     console.error('Error logging placed order:', err);

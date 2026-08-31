@@ -72,6 +72,9 @@ router.get('/timeline', async (req, res) => {
         sinv.id AS invoice_id,
         sinv.invoice_no AS reference,
         sinv.date AS date,
+        sinv.discount AS discount,
+        sinv.total_amount AS total_amount,
+        sinv.subtotal AS subtotal,
         c.name AS customer_name,
         si.quantity AS quantity,
         si.loose_qty AS loose_quantity,
@@ -1070,13 +1073,15 @@ router.put('/sales/:invoiceId', async (req, res) => {
     // Recalculate totals
     const taxRate = 0.05;
     const tax = subtotal * taxRate;
-    const total = Math.round(subtotal + tax - Number(discount || 0));
+    const rawTotal = subtotal + tax - Number(discount || 0);
+    const total = Math.round(rawTotal);
+    const roundOff = Number((total - rawTotal).toFixed(2));
 
     await db.run(
       `UPDATE sales_invoices
-       SET total_amount = ?, tax_amount = ?, discount = ?, subtotal = ?
+       SET total_amount = ?, tax_amount = ?, discount = ?, subtotal = ?, round_off = ?
        WHERE id = ?`,
-      [total, tax, Number(discount || 0), subtotal, invoiceId]
+      [total, tax, Number(discount || 0), subtotal, roundOff, invoiceId]
     );
 
     // Recalculate customer credit balance if customer exists

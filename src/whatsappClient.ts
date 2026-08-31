@@ -31,10 +31,44 @@ export function hasSavedSession(): boolean {
   const sessionPath = path.join(WWEBJS_AUTH_DIR, 'session');
   if (!fs.existsSync(sessionPath)) return false;
   try {
-    const files = fs.readdirSync(sessionPath);
-    return files.length > 0;
+    const defaultDir = path.join(sessionPath, 'Default');
+    const targetDir = fs.existsSync(defaultDir) ? defaultDir : sessionPath;
+    const files = fs.readdirSync(targetDir);
+    // Ignore transient lock files and devtools port files so partial/cleaned dirs aren't treated as valid sessions
+    const meaningfulFiles = files.filter(
+      f => !/^(devtoolsactiveport|singleton|lock|\.lock|lockfile)$/i.test(f)
+    );
+    return meaningfulFiles.length > 0;
   } catch {
     return false;
+  }
+}
+
+/** Recursively removes a directory with file attribute resets to avoid EPERM on Windows */
+function safeRemoveDirectorySync(dirPath: string): void {
+  if (!fs.existsSync(dirPath)) return;
+  try {
+    fs.rmSync(dirPath, { recursive: true, force: true });
+  } catch (err: any) {
+    try {
+      const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+      for (const entry of entries) {
+        const fullPath = path.join(dirPath, entry.name);
+        try {
+          fs.chmodSync(fullPath, 0o666);
+        } catch {}
+        if (entry.isDirectory()) {
+          safeRemoveDirectorySync(fullPath);
+        } else {
+          try {
+            fs.unlinkSync(fullPath);
+          } catch {}
+        }
+      }
+      try {
+        fs.rmdirSync(dirPath);
+      } catch {}
+    } catch {}
   }
 }
 
@@ -81,6 +115,15 @@ let initPromise: Promise<WAClient | null> | null = null; // Single-flight mutex
 let initializing = false;
 let isSyncing = false;
 let qrTimeout: NodeJS.Timeout | null = null;
+let isLoginWindowActive = false; // Mutex flag: true when Chrome login popup is open
+
+export function setLoginWindowActive(active: boolean): void {
+  isLoginWindowActive = active;
+}
+
+export function isWhatsAppLoginWindowActive(): boolean {
+  return isLoginWindowActive;
+}
 // Timestamp (ms) of the last getChats() failure — suppresses retries for 30 s
 let lastSyncFailureAt: number = 0;
 const SYNC_RETRY_COOLDOWN_MS = 30_000;
@@ -827,6 +870,12 @@ export async function initClient(options: { forceQr?: boolean } = {}): Promise<W
     return initPromise;
   }
 
+  // If Chrome login window popup is currently active, defer background auto-init so they don't contend for profile locks
+  if (isLoginWindowActive) {
+    console.log('[WhatsApp] Auto-init skipped: Chrome login window is currently active.');
+    return null;
+  }
+
   // Check if WhatsApp is disabled in settings
   if (!forceQr && (await isWhatsAppExplicitlyDisabled())) {
     console.log('[WhatsApp] Auto-init skipped: WhatsApp is disabled in Settings.');
@@ -924,33 +973,40 @@ export async function destroyClient(): Promise<void> {
 export async function forceReconnect(): Promise<void> {
   console.log('[WhatsApp] Force reconnect requested. Destroying client and clearing session...');
 
-  isReady = false;
-  currentQr = null;
-  initializing = false;
+  // 1. Fully destroy active client and clear memory state
+  await destroyClient();
   isSleeping = false;
-  if (qrTimeout) clearTimeout(qrTimeout);
 
-  if (activeClient) {
-    try {
-      await Promise.race([
-        activeClient.destroy(),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('client.destroy() timed out')), 15000))
-      ]);
-    } catch (err) {
-      console.error('[WhatsApp] Error destroying client (non-fatal):', err);
-    }
-    activeClient = null;
+  // 2. Terminate any lingering browser processes holding session files and unlink lockfiles
+  await cleanupProfileLocks();
+
+  // 3. Grace delay for Windows kernel to release file handles
+  if (process.platform === 'win32') {
+    await new Promise(resolve => setTimeout(resolve, 800));
   }
-  clientInstance = null;
 
+  // 4. Safely clear session folder with retry backoff for Windows EPERM/EBUSY
   const authPath = WWEBJS_AUTH_DIR;
-  try {
-    if (fs.existsSync(authPath)) {
-      fs.rmSync(authPath, { recursive: true, force: true });
-      console.log('[WhatsApp] Old session data cleared from', authPath);
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      if (fs.existsSync(authPath)) {
+        safeRemoveDirectorySync(authPath);
+        if (!fs.existsSync(authPath) || !hasSavedSession()) {
+          console.log('[WhatsApp] Old session data cleared from', authPath);
+          break;
+        }
+      } else {
+        break;
+      }
+    } catch (err: any) {
+      if (attempt < 3 && (err.code === 'EPERM' || err.code === 'EBUSY' || err.code === 'EACCES')) {
+        console.warn(`[WhatsApp] Deleting session folder returned ${err.code}, retrying (${attempt}/3)...`);
+        await cleanupProfileLocks();
+        await new Promise(r => setTimeout(r, 600));
+      } else {
+        console.error('[WhatsApp] Failed to clear session folder (non-fatal):', err);
+      }
     }
-  } catch (err) {
-    console.error('[WhatsApp] Failed to clear session folder (non-fatal):', err);
   }
 
   try {
@@ -961,7 +1017,7 @@ export async function forceReconnect(): Promise<void> {
     console.error('[WhatsApp] Failed to clear auto-ignored chats from database (non-fatal):', err);
   }
 
-  await new Promise(r => setTimeout(r, 2000));
+  await new Promise(r => setTimeout(r, 1500));
   initClient().catch(err => {
     console.error('[WhatsApp] Re-initialization after reconnect failed (non-fatal):', err.message);
   });

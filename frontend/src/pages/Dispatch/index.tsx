@@ -504,12 +504,16 @@ const Dispatch = () => {
     };
   }, [fetchAll, fetchDistributorReminders, fetchMessageDates]);
 
-  // P1 "events, not timers": reminder list refreshes on SSE push (dispatch/email
-  // changes) and focus — no 45s polling of unchanged data.
+  // P1 "events, not timers": reminder list refreshes on page activation and SSE push (dispatch/email changes)
   const pageActive = usePageActive();
   useEffect(() => {
     if (!pageActive) return;
-    const handleSse = () => fetchDistributorReminders(true);
+    // Silently refresh on tab activation so switching between kept-alive pages has instant fresh data
+    fetchDistributorReminders(true);
+    const handleSse = () => {
+      fetchDistributorReminders(true);
+      fetchAll();
+    };
     window.addEventListener('sse-dispatch-updated', handleSse);
     window.addEventListener('sse-email-new', handleSse);
     window.addEventListener('focus', handleSse);
@@ -518,7 +522,7 @@ const Dispatch = () => {
       window.removeEventListener('sse-email-new', handleSse);
       window.removeEventListener('focus', handleSse);
     };
-  }, [pageActive, fetchDistributorReminders]);
+  }, [pageActive, fetchDistributorReminders, fetchAll]);
 
   useEffect(() => {
     if (!showMessageData) return;

@@ -2,6 +2,7 @@ import express from 'express';
 import { whatsappQueueWorker } from '../services/whatsappQueueWorker.js';
 import { dbManager } from '../database/connection.js';
 import { normalizeWhatsAppPhone } from '../whatsappClient.js';
+import { eventService } from '../services/eventService.js';
 
 const router = express.Router();
 
@@ -212,6 +213,10 @@ router.post('/enqueue-pharmarack-batch', async (req, res) => {
     // Trigger queue processing instantly
     whatsappQueueWorker.triggerProcessing();
 
+    // Broadcast real-time SSE updates to sync Dispatch, Orders, and Cart across all active/kept-alive pages
+    eventService.broadcast('dispatch_updated', { at: Date.now(), source: 'pharmarack_batch', count: orders.length });
+    eventService.broadcast('pharmarack_cart_changed', { at: Date.now() });
+
     res.json({
       success: true,
       enqueuedCount: enqueuedIds.length,
@@ -267,6 +272,10 @@ router.post('/enqueue-single-distributor-order', async (req, res) => {
     }
 
     whatsappQueueWorker.triggerProcessing();
+
+    // Broadcast real-time SSE updates to sync Dispatch, Orders, and Cart across all active/kept-alive pages
+    eventService.broadcast('dispatch_updated', { at: Date.now(), source: 'single_order', storeName });
+    eventService.broadcast('pharmarack_cart_changed', { at: Date.now() });
 
     res.json({
       success: true,

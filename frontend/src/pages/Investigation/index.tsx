@@ -478,12 +478,16 @@ const InvestigationCenter = () => {
   const handleStartSaleBillEdit = (item: LocalLedgerRow) => {
     setEditingBillId(item.invoice_id!);
     setEditingBillNo(item.reference!);
-    setBillDiscount(item.discount || 0);
+    setBillDiscount(Number(item.discount || 0));
 
     setDetailsLoading(true);
     api.getSale(item.invoice_id!)
       .then(invoiceDetails => {
-        const mapped = invoiceDetails.items.map((it: LocalSaleDetailItem) => ({
+        if (invoiceDetails) {
+          const disc = invoiceDetails.discount ?? invoiceDetails.discount_amount ?? invoiceDetails.total_discount ?? item.discount ?? 0;
+          setBillDiscount(Number(disc));
+        }
+        const mapped = ((invoiceDetails && invoiceDetails.items) || []).map((it: LocalSaleDetailItem) => ({
           inventory_id: it.inventory_id,
           medicine_name: it.medicine_name,
           batch_no: it.batch_number,

@@ -1,6 +1,21 @@
 // Messaging Hub API (Agent 2)
 import express from 'express';
-import { initClient, sendMessage, currentQr, isReady, forceReconnect, reconnectClient, destroyClient, shouldRouteToBusiness, isPuppeteerDetachedError, hasSavedSession, getWhatsAppStatus, isWhatsAppExplicitlyDisabled } from '../whatsappClient.js';
+import {
+  initClient,
+  sendMessage,
+  currentQr,
+  isReady,
+  forceReconnect,
+  reconnectClient,
+  destroyClient,
+  shouldRouteToBusiness,
+  isPuppeteerDetachedError,
+  hasSavedSession,
+  getWhatsAppStatus,
+  isWhatsAppExplicitlyDisabled,
+  setLoginWindowActive,
+  isWhatsAppLoginWindowActive
+} from '../whatsappClient.js';
 import QRCode from 'qrcode';
 import { dbManager } from '../database/connection.js';
 import { eventService } from '../services/eventService.js';
@@ -10,14 +25,9 @@ import fs from 'fs';
 import path from 'path';
 import { getPuppeteer } from '../utils/lazyPuppeteer.js';
 import { getAppDataDir } from '../config/index.js';
-
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+import { cleanProfileLockFiles } from '../services/tokenRefreshScheduler.js';
 
 const router = express.Router();
-let isLoginWindowActive = false;
 
 function findChromePath() {
   const paths = [
@@ -41,7 +51,7 @@ function findChromePath() {
 // Get current WhatsApp authentication status and QR code (read-only)
 router.get('/qr', async (req, res) => {
   try {
-    if (isLoginWindowActive) {
+    if (isWhatsAppLoginWindowActive()) {
       return res.json({ isReady: false, qrUrl: null, initializing: true, message: 'Chrome login window is open. Scan the QR code in Chrome.' });
     }
 
@@ -121,11 +131,11 @@ router.post('/login-window', async (req, res) => {
     return res.status(404).json({ error: 'Google Chrome was not found on your system. Please install Google Chrome to use this feature.' });
   }
 
-  if (isLoginWindowActive) {
+  if (isWhatsAppLoginWindowActive()) {
     return res.json({ success: true, message: 'Chrome login window is already open.' });
   }
 
-  isLoginWindowActive = true;
+  setLoginWindowActive(true);
   res.json({ success: true, message: 'Opening WhatsApp login window...' });
 
   (async () => {
@@ -139,13 +149,7 @@ router.post('/login-window', async (req, res) => {
 
       console.log('[WhatsApp] Launching Chrome for WhatsApp login from:', chromePath);
       const authPath = path.resolve(getAppDataDir(), '.wwebjs_auth', 'session');
-      const lockFiles = ['lockfile', 'SingletonLock', 'DevToolsActivePort'];
-      for (const lf of lockFiles) {
-        const p = path.join(authPath, lf);
-        if (fs.existsSync(p)) {
-          try { fs.unlinkSync(p); } catch (e) {}
-        }
-      }
+      cleanProfileLockFiles(authPath);
 
       const puppeteer = await getPuppeteer();
       browser = await puppeteer.launch({
@@ -304,7 +308,7 @@ router.post('/login-window', async (req, res) => {
         }
       }
     } finally {
-      isLoginWindowActive = false;
+      setLoginWindowActive(false);
       if (browser) {
         try {
           await browser.close();
@@ -312,11 +316,13 @@ router.post('/login-window', async (req, res) => {
           console.error('[WhatsApp] Error closing browser:', err);
         }
       }
-      // Re-initialize the background client now that Chrome is closed
-      console.log('[WhatsApp] Re-initializing background client...');
-      initClient().catch(err => {
-        console.error('[WhatsApp] Re-initialization after popup failed:', err);
-      });
+      // Re-initialize the background client now that Chrome is closed (if session exists)
+      if (hasSavedSession()) {
+        console.log('[WhatsApp] Re-initializing background client...');
+        initClient().catch(err => {
+          console.error('[WhatsApp] Re-initialization after popup failed:', err);
+        });
+      }
     }
   })();
 });

@@ -559,12 +559,27 @@ class TriggerSchedulerService {
     };
   }
 
+  private reloadDebounceTimer: NodeJS.Timeout | null = null;
+
   /**
    * Reload schedules dynamically when user updates settings in the UI
    */
   public async reloadSchedules(db?: any): Promise<void> {
-    console.log('[TriggerScheduler] Settings modified. Reloading trigger schedules...');
-    await this.initSchedules(db);
+    if (this.reloadDebounceTimer) {
+      clearTimeout(this.reloadDebounceTimer);
+    }
+    return new Promise<void>((resolve) => {
+      this.reloadDebounceTimer = setTimeout(async () => {
+        this.reloadDebounceTimer = null;
+        console.log('[TriggerScheduler] Settings modified. Reloading trigger schedules...');
+        try {
+          await this.initSchedules(db);
+        } catch (err) {
+          console.error('[TriggerScheduler] Error reloading schedules:', err);
+        }
+        resolve();
+      }, 500);
+    });
   }
 }
 

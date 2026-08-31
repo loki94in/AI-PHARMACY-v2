@@ -178,10 +178,16 @@ export function getExpiryYearMonth(expiryDateStr: string | null | undefined): st
 }
 
 let activeRebuildPromise: Promise<void> | null = null;
+let lastRebuildTime = 0;
 
-export async function rebuildAllExpiryCaches(): Promise<void> {
+export async function rebuildAllExpiryCaches(force = false): Promise<void> {
   if (activeRebuildPromise) {
     return activeRebuildPromise;
+  }
+
+  const now = Date.now();
+  if (!force && now - lastRebuildTime < 15_000) {
+    return;
   }
 
   activeRebuildPromise = (async () => {
@@ -248,6 +254,7 @@ export async function rebuildAllExpiryCaches(): Promise<void> {
       // Persist initialization manifest marker file
       const manifestPath = path.join(cacheDir, 'manifest.json');
       await fs.promises.writeFile(manifestPath, JSON.stringify({ lastRebuilt: Date.now(), totalMonthFiles: written }), 'utf-8');
+      lastRebuildTime = Date.now();
 
       console.log(`[ExpiryCache] Rebuilt: ${written} month file(s) with stock. Empty months auto-removed.`);
     } catch (err) {
@@ -261,6 +268,8 @@ export async function rebuildAllExpiryCaches(): Promise<void> {
 }
 
 let rebuildTimeout: NodeJS.Timeout | null = null;
+const pendingInventoryIds = new Set<number>();
+let fullExpiryRebuildRequested = false;
 
 /**
  * Surgical per-item cache patch.
@@ -352,16 +361,31 @@ export async function patchExpiryCacheForInventoryItem(inventoryId: number): Pro
  * when IDs are not available (e.g. bulk purchase import).
  */
 export function triggerExpiryCacheRebuildDebounced(inventoryIds?: number[]): void {
+  if (inventoryIds && inventoryIds.length > 0) {
+    for (const id of inventoryIds) {
+      if (typeof id === 'number' && id > 0) {
+        pendingInventoryIds.add(id);
+      }
+    }
+  } else {
+    fullExpiryRebuildRequested = true;
+  }
+
   if (rebuildTimeout) clearTimeout(rebuildTimeout);
 
   rebuildTimeout = setTimeout(async () => {
+    const ids = Array.from(pendingInventoryIds);
+    const needFull = fullExpiryRebuildRequested;
+    pendingInventoryIds.clear();
+    fullExpiryRebuildRequested = false;
     rebuildTimeout = null;
-    if (inventoryIds && inventoryIds.length > 0) {
+
+    if (!needFull && ids.length > 0) {
       // Surgical: only update the affected items' month files
-      for (const id of inventoryIds) {
+      for (const id of ids) {
         await patchExpiryCacheForInventoryItem(id);
       }
-    } else {
+    } else if (needFull) {
       // Full rebuild — used on startup / bulk imports
       await rebuildAllExpiryCaches();
     }

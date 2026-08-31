@@ -1783,6 +1783,7 @@ export default function PharmarackCart() {
         specialOrdersEvent.triggerUpdated();
         whatsappQueueEvent.triggerUpdated();
         window.dispatchEvent(new CustomEvent('refresh-special-orders'));
+        window.dispatchEvent(new CustomEvent('sse-dispatch-updated'));
         await fetchPendingOrders();
         await fetchLatestSentMap();
         await loadSentDates();
@@ -1965,6 +1966,7 @@ export default function PharmarackCart() {
             setSentWaStatusMap(prev => ({ ...prev, [editingDistributor.storeId]: 'queued' }));
             toastEvent.trigger(`⚡ WhatsApp order automatically queued for ${distName}!`, 'success');
             whatsappQueueEvent.triggerUpdated();
+            window.dispatchEvent(new CustomEvent('sse-dispatch-updated'));
           }
         } catch (enqueueErr) {
           console.warn('Auto-enqueue for newly saved distributor failed:', enqueueErr);
